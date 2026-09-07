@@ -31,7 +31,6 @@ pub const CSS_BP_GROUP_SLOT: &str = "bp-group-slot";
 pub const CSS_BP_KEY: &str = "bp-key";
 pub const CSS_BP_KEY_SELECTED: &str = "bp-key-selected";
 pub const CSS_BP_KEY_ACTIVE: &str = "bp-key-active";
-pub const CSS_BP_KEY_DISABLED: &str = "bp-key-disabled";
 pub const CSS_BP_KEY_BADGE: &str = "bp-key-badge";
 pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
 pub const CSS_BP_KEYBOARD: &str = "bp-keyboard";
@@ -484,9 +483,6 @@ fn big_picture_css(s: f64) -> String {
 }}
 .bp-key-active label {{
     color: @theme_fg_color;
-}}
-.bp-key-disabled label {{
-    color: alpha(@theme_fg_color, 0.35);
 }}
 .bp-key-preview, .bp-keyboard label {{
     font-family: "M PLUS 2", sans-serif;

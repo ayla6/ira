@@ -161,6 +161,14 @@ impl GroupsGrid {
         }
         self.clamp_selection(state);
         self.repaint_selection();
+        // The rebuilt children read as unallocated until their first
+        // layout pass; re-anchor the ring once that lands.
+        let anchor_state = state.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(big) = anchor_state.borrow().big_picture.clone() {
+                big.all.groups_grid.position_ring();
+            }
+        });
     }
 
     /// The shared tile shell: square slot over the name, wired with the
@@ -176,6 +184,8 @@ impl GroupsGrid {
         let name = gtk4::Label::new(Some(label));
         name.add_css_class(CSS_BP_PAGE_SUBTITLE);
         name.set_halign(gtk4::Align::Center);
+        name.set_valign(gtk4::Align::Center);
+        name.set_vexpand(true);
         name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         crate::ui::helpers::crisp_label(&name);
         tile_box.append(&name);

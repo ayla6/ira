@@ -16,9 +16,12 @@ use std::time::{Duration, Instant};
 /// stutter the selection.
 const STICK_ENGAGE: f32 = 0.6;
 const STICK_RELEASE: f32 = 0.4;
-/// Hold-repeat pacing, close to the desktop keyboard's feel.
+/// Hold-repeat pacing, close to the desktop keyboard's feel. The engage
+/// delay shrinks with stick deflection, and a held direction ramps to its
+/// top repeat speed over `REPEAT_RAMP_MS`.
 const REPEAT_DELAY_MS: u64 = 450;
 const REPEAT_EVERY_MS: u64 = 140;
+const REPEAT_RAMP_MS: u64 = 1_500;
 /// Per-pad event wait and how often disconnected pads are re-discovered.
 const POLL_MS: u64 = 10;
 const RESCAN_EVERY_MS: u64 = 2_000;
@@ -70,6 +73,10 @@ struct AxisNav {
     dpad: Option<NavCommand>,
     active: Option<NavCommand>,
     next_repeat_ms: u64,
+    held_since_ms: u64,
+    /// Live deflection of the driving source (the dpad presses at full
+    /// pressure); deeper deflection repeats faster.
+    pressure: f32,
 }
 
 impl AxisNav {
@@ -82,17 +89,26 @@ impl AxisNav {
             return None;
         }
         self.active = desired;
-        self.next_repeat_ms = now_ms + REPEAT_DELAY_MS;
+        self.held_since_ms = now_ms;
+        let pressure = ((self.pressure - STICK_ENGAGE) / (1.0 - STICK_ENGAGE)).clamp(0.0, 1.0);
+        self.next_repeat_ms = now_ms + REPEAT_DELAY_MS - (120.0 * pressure) as u64;
         desired
     }
 
-    /// The held command again once its repeat delay has elapsed.
+    /// The held command again once its repeat delay has elapsed. Deep
+    /// deflection and long holds both speed the repeat up: a rim roll
+    /// starts at the gentle pace; a full tilt settles at about twice that.
     fn repeat_due(&mut self, now_ms: u64) -> Option<NavCommand> {
         let cmd = self.active?;
         if now_ms < self.next_repeat_ms {
             return None;
         }
-        self.next_repeat_ms = now_ms + REPEAT_EVERY_MS;
+        let pressure = ((self.pressure - STICK_ENGAGE) / (1.0 - STICK_ENGAGE)).clamp(0.0, 1.0);
+        let hold = (now_ms.saturating_sub(self.held_since_ms) as f32 / REPEAT_RAMP_MS as f32)
+            .min(1.0);
+        let interval =
+            REPEAT_EVERY_MS as f32 * (1.0 + 0.45 * (1.0 - pressure)) * (1.0 - 0.5 * hold);
+        self.next_repeat_ms = now_ms + (interval.max(55.0) as u64);
         Some(cmd)
     }
 
@@ -111,14 +127,21 @@ impl AxisNav {
         } else {
             None
         };
+        self.pressure = self
+            .stick
+            .as_ref()
+            .map(|_| value.abs().clamp(STICK_ENGAGE, 1.0))
+            .unwrap_or(0.0);
     }
 
     /// A dpad button press/release for one of the axis's two directions.
     fn apply_button(&mut self, cmd: NavCommand, pressed: bool) {
         if pressed {
             self.dpad = Some(cmd);
+            self.pressure = 1.0;
         } else if self.dpad == Some(cmd) {
             self.dpad = None;
+            self.pressure = 0.0;
         }
     }
 }
@@ -391,13 +414,40 @@ mod tests {
         let mut nav = NavState::default();
         nav.h.apply_stick(1.0, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(100), Some(NavCommand::Right));
-        assert_eq!(nav.repeat_due(100 + REPEAT_DELAY_MS - 1), None);
-        assert_eq!(nav.repeat_due(100 + REPEAT_DELAY_MS), Some(NavCommand::Right));
-        assert_eq!(nav.repeat_due(100 + REPEAT_DELAY_MS + 1), None);
-        assert_eq!(
-            nav.repeat_due(100 + REPEAT_DELAY_MS + REPEAT_EVERY_MS),
-            Some(NavCommand::Right)
-        );
+        // Full tilt engages sooner (the delay shrinks with pressure).
+        assert_eq!(nav.repeat_due(429), None);
+        assert_eq!(nav.repeat_due(430), Some(NavCommand::Right));
+        assert_eq!(nav.repeat_due(431), None);
+        assert_eq!(nav.repeat_due(560), Some(NavCommand::Right));
+    }
+
+    #[test]
+    fn test_repeat_scales_with_pressure() {
+        let mut full = NavState::default();
+        full.h.apply_stick(1.0, NavCommand::Right, NavCommand::Left);
+        full.update(0);
+        let mut rim = NavState::default();
+        rim.h.apply_stick(0.7, NavCommand::Right, NavCommand::Left);
+        rim.update(0);
+        assert_eq!(full.repeat_due(329), None);
+        assert_eq!(full.repeat_due(330), Some(NavCommand::Right));
+        assert_eq!(rim.repeat_due(330), None, "a rim roll waits longer");
+        assert_eq!(rim.repeat_due(450), Some(NavCommand::Right));
+    }
+
+    #[test]
+    fn test_repeat_speeds_up_the_longer_it_is_held() {
+        let mut nav = NavState::default();
+        nav.h.apply_stick(1.0, NavCommand::Right, NavCommand::Left);
+        nav.update(0);
+        assert_eq!(nav.repeat_due(330), Some(NavCommand::Right));
+        // The interval at first repeat is ~124ms (the hold ramp barely
+        // moved); after 1.5s held it bottoms out at half the base pace.
+        assert_eq!(nav.repeat_due(453), None);
+        assert_eq!(nav.repeat_due(454), Some(NavCommand::Right));
+        assert_eq!(nav.repeat_due(1_800), Some(NavCommand::Right));
+        assert_eq!(nav.repeat_due(1_860), None);
+        assert_eq!(nav.repeat_due(1_870), Some(NavCommand::Right));
     }
 
     #[test]

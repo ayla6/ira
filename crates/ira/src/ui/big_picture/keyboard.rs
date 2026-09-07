@@ -264,7 +264,7 @@ impl Keyboard {
             Key::Page => Some((1, 4, 1, 1)),
             Key::Space => Some((2, 4, 9, 1)),
             Key::Ok if row == 4 => None,
-            Key::Ok => Some((11, 3, 1, 2)),
+            Key::Ok => Some((11, 1, 1, 4)),
             Key::Backspace => Some((11, 0, 1, 1)),
             Key::Char(_) => Some((col as i32, row as i32, 1, 1)),
         }
@@ -376,18 +376,6 @@ impl Keyboard {
             }
             map.push(row_map);
         }
-        // Return is only meaningful for multiline input, which a group
-        // name is not: it sits in its usual spot, greyed out.
-        let return_key = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-        return_key.add_css_class(CSS_BP_KEY);
-        return_key.add_css_class(CSS_BP_KEY_DISABLED);
-        let return_label = gtk4::Label::new(Some(&crate::tr!("Return")));
-        return_label.set_halign(gtk4::Align::Center);
-        return_label.set_valign(gtk4::Align::Center);
-        crate::ui::helpers::crisp_label(&return_label);
-        return_key.append(&return_label);
-        grid.attach(&return_key, 11, 1, 1, 2);
-
         *self.keys.borrow_mut() = map;
         self.panel.append(&grid);
 
@@ -398,12 +386,13 @@ impl Keyboard {
         hints.set_margin_top(8);
         let family = self.family.get();
         for (button, label) in [
+            (ira_input::GamepadButton::LeftShoulder, "\u{2190}".to_string()),
+            (ira_input::GamepadButton::RightShoulder, "\u{2192}".to_string()),
+            (ira_input::GamepadButton::LeftStick, crate::tr!("Shift")),
             (ira_input::GamepadButton::A, crate::tr!("Select")),
             (ira_input::GamepadButton::B, crate::tr!("Delete")),
             (ira_input::GamepadButton::X, crate::tr!("Cancel")),
-            (ira_input::GamepadButton::LeftStick, crate::tr!("Shift")),
         ] {
-            let label = label.as_str();
             let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
             let glyph = gtk4::Image::new();
             glyph.set_pixel_size(28);
@@ -425,7 +414,7 @@ impl Keyboard {
                 ira_input::InputSource::Button(button),
                 family,
             );
-            let text = gtk4::Label::new(Some(label));
+            let text = gtk4::Label::new(Some(&label));
             text.add_css_class(CSS_BP_PROMPT);
             crate::ui::helpers::crisp_label(&text);
             item.append(&text);
@@ -447,7 +436,18 @@ impl Keyboard {
         let rows = self.rows();
         let (row, col) = self.cursor.get();
         if dy != 0 {
-            let row = (row as i64 + dy as i64).clamp(0, rows.len() as i64 - 1) as usize;
+            let mut row = row as i64 + dy as i64;
+            // Riding the action column skips the rows it doesn't cover
+            // (OK spans several): up from OK lands on backspace and back.
+            if col == 11 {
+                while row >= 0
+                    && (row as usize) < rows.len()
+                    && rows[row as usize].len() <= 11
+                {
+                    row += dy as i64;
+                }
+            }
+            let row = row.clamp(0, rows.len() as i64 - 1) as usize;
             let len = rows[row].len();
             let col = if col < len {
                 col

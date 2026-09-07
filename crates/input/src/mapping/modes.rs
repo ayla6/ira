@@ -8,11 +8,11 @@
 //! legacy bindings.
 
 use super::continuous::STICK_MOUSE_COUNTS_PER_SECOND;
-use super::{MappingEngine, OutputEvent, VALUE_EPSILON};
+use super::{MappingEngine, OutputEvent, BUTTON_THRESHOLD, VALUE_EPSILON};
 use crate::profile::{
-    GamepadAxis, GamepadButton, InputSource, JoystickSettings, MouseAxis, OuterRingCommand,
-    OutputAction, ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput, StickOutputAxis,
-    StickProcessing,
+    AxisDirection, GamepadAxis, GamepadButton, InputSource, JoystickSettings, MouseAxis,
+    OuterRingCommand, OutputAction, ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput,
+    StickOutputAxis, StickProcessing,
 };
 
 impl MappingEngine {
@@ -57,9 +57,41 @@ impl MappingEngine {
         // carry the same mode on both axes of a stick, and the pair is one
         // input — it must contribute once, not twice.
         let mut applied_sticks: Vec<(GamepadAxis, GamepadAxis)> = Vec::new();
+        // The d-pad group's Joystick mode contributes once, from whichever
+        // direction carries it.
+        let mut applied_dpad_group = false;
         for (source, mode) in self.mode_inputs() {
             match mode {
                 SourceMode::Joystick(settings) => {
+                    // Dpad-as-joystick: the four d-pad buttons compose into
+                    // stick deflection, for games and menus that only read
+                    // the stick. The directions' own command bindings stay
+                    // live alongside it.
+                    if matches!(source, InputSource::Button(button) if button.is_dpad()) {
+                        if applied_dpad_group {
+                            continue;
+                        }
+                        applied_dpad_group = true;
+                        let JoystickSettings { output, processing } = settings;
+                        let (x, y) = self.dpad_group_deflection();
+                        let (x, y) = apply_stick_processing(
+                            processing,
+                            x,
+                            y,
+                            self.controller_deadzone_for(GamepadAxis::LeftX),
+                        );
+                        let (target_x, target_y) = match output {
+                            StickOutput::Left => (GamepadAxis::LeftX, GamepadAxis::LeftY),
+                            StickOutput::Right => (GamepadAxis::RightX, GamepadAxis::RightY),
+                        };
+                        for (axis, value) in [(target_x, x), (target_y, y)] {
+                            if !totals.contains_key(&axis) {
+                                order.push(axis);
+                            }
+                            *totals.entry(axis).or_insert(0.0) += value;
+                        }
+                        continue;
+                    }
                     let JoystickSettings { output, processing } = settings;
                     let (x_axis, y_axis) = stick_axes(source);
                     if applied_sticks.contains(&(x_axis, y_axis)) {
@@ -196,10 +228,22 @@ impl MappingEngine {
     }
 
     /// Dpad directions from stick deflection; crossings emit press/release.
+    /// Up is the stick's negative Y half, matching the physical pads' evdev
+    /// convention. A direction that carries its own command binding outputs
+    /// that binding instead of the virtual dpad button.
     pub(crate) fn emit_mode_dpad(&mut self, output: &mut Vec<OutputEvent>) {
         let mut pressed: Vec<GamepadButton> = Vec::new();
         let modes = self.mode_inputs();
         for (source, mode) in &modes {
+            // Only sticks digitalize into dpad directions; a Dpad mode on a
+            // d-pad button itself (a hand-edited profile) must not read the
+            // stick axes and press directions out of them.
+            if !matches!(
+                source,
+                InputSource::Axis(_) | InputSource::AxisDirection { .. }
+            ) {
+                continue;
+            }
             let SourceMode::Dpad { threshold } = mode else {
                 continue;
             };
@@ -207,16 +251,16 @@ impl MappingEngine {
             let Some((x, y)) = self.stick_pair(x_axis, y_axis) else {
                 continue;
             };
-            if y > *threshold {
+            if y < -*threshold && !self.direction_bound(y_axis, AxisDirection::Negative) {
                 pressed.push(GamepadButton::DpadUp);
             }
-            if y < -*threshold {
+            if y > *threshold && !self.direction_bound(y_axis, AxisDirection::Positive) {
                 pressed.push(GamepadButton::DpadDown);
             }
-            if x < -*threshold {
+            if x < -*threshold && !self.direction_bound(x_axis, AxisDirection::Negative) {
                 pressed.push(GamepadButton::DpadLeft);
             }
-            if x > *threshold {
+            if x > *threshold && !self.direction_bound(x_axis, AxisDirection::Positive) {
                 pressed.push(GamepadButton::DpadRight);
             }
         }
@@ -242,6 +286,30 @@ impl MappingEngine {
                 }
             }
         }
+    }
+
+    /// The four d-pad buttons composed into a deflection vector: up is the
+    /// stick's negative Y half, matching the physical pads' evdev
+    /// convention.
+    fn dpad_group_deflection(&self) -> (f32, f32) {
+        let pressed = |button: GamepadButton| {
+            if self.source_value(InputSource::Button(button)) > BUTTON_THRESHOLD {
+                1.0
+            } else {
+                0.0
+            }
+        };
+        (
+            pressed(GamepadButton::DpadRight) - pressed(GamepadButton::DpadLeft),
+            pressed(GamepadButton::DpadDown) - pressed(GamepadButton::DpadUp),
+        )
+    }
+
+    /// Whether the axis's direction half carries activators in the active
+    /// set (or an active layer): those bindings own the direction.
+    fn direction_bound(&self, axis: GamepadAxis, direction: AxisDirection) -> bool {
+        self.resolve_mapping(InputSource::AxisDirection { axis, direction })
+            .is_some_and(|mapping| !mapping.activators.is_empty())
     }
 
     fn stick_pair(&self, x_axis: GamepadAxis, y_axis: GamepadAxis) -> Option<(f32, f32)> {
@@ -459,10 +527,11 @@ mod tests {
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 1.0));
         let events = engine.tick(4_000);
+        // Positive Y is down on evdev pads, so down registers.
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadButton {
-                button: GamepadButton::DpadUp,
+                button: GamepadButton::DpadDown,
                 pressed: true
             }
         )));
@@ -477,10 +546,266 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadButton {
-                button: GamepadButton::DpadUp,
+                button: GamepadButton::DpadDown,
                 pressed: false
             }
         )));
+    }
+
+    #[test]
+    fn test_dpad_mode_maps_negative_y_up() {
+        // Up is the stick's negative half, matching physical pads: pushing
+        // up must press DpadUp, not DpadDown.
+        let profile = mode_profile(SourceMode::Dpad { threshold: 0.5 });
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), -1.0));
+        let events = engine.tick(4_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadButton {
+                button: GamepadButton::DpadUp,
+                pressed: true
+            }
+        )));
+        assert!(events.iter().all(|event| !matches!(
+            event,
+            OutputEvent::GamepadButton {
+                button: GamepadButton::DpadDown,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn test_axis_direction_binding_fires_on_its_half() {
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping::simple(
+                    InputSource::AxisDirection {
+                        axis: GamepadAxis::LeftY,
+                        direction: crate::profile::AxisDirection::Negative,
+                    },
+                    OutputAction::Keyboard { keycode: 17 },
+                )],
+            }],
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        // Push up (negative half): the direction's command presses, right
+        // with the axis event.
+        assert_eq!(
+            engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), -0.9)),
+            vec![OutputEvent::Key {
+                keycode: 17,
+                pressed: true
+            }]
+        );
+        assert_eq!(engine.tick(1_000), Vec::new());
+        // Back through center: it releases.
+        assert_eq!(
+            engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 0.0)),
+            vec![OutputEvent::Key {
+                keycode: 17,
+                pressed: false
+            }]
+        );
+        // Push down: the negative half stays at zero, nothing fires.
+        assert_eq!(
+            engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 0.9)),
+            Vec::new()
+        );
+        assert_eq!(engine.tick(3_000), Vec::new());
+    }
+
+    #[test]
+    fn test_dpad_joystick_mode_deflects_the_stick() {
+        // Steam's dpad-as-joystick: a Joystick mode on a d-pad direction
+        // composes the four buttons into stick deflection, while the
+        // directions' own commands stay live.
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    mode: Some(SourceMode::Joystick(JoystickSettings::new(
+                        crate::profile::StickOutput::Left,
+                    ))),
+                    ..InputMapping::simple(
+                        InputSource::Button(GamepadButton::DpadUp),
+                        OutputAction::GamepadButton(GamepadButton::DpadUp),
+                    )
+                }],
+            }],
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        // The direction's own command fires right with the press.
+        assert!(engine
+            .process(stick(InputSource::Button(GamepadButton::DpadUp), 1.0))
+            .iter()
+            .any(|event| matches!(
+                event,
+                OutputEvent::GamepadButton {
+                    button: GamepadButton::DpadUp,
+                    pressed: true
+                }
+            )));
+        let events = engine.tick(1_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftY,
+                value: -1.0
+            }
+        )));
+        // Left alone composes onto the horizontal axis.
+        engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 0.0));
+        engine.process(stick(InputSource::Button(GamepadButton::DpadLeft), 1.0));
+        let events = engine.tick(2_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftX,
+                value: -1.0
+            }
+        )));
+        // Releasing the last held direction zeroes the deflection.
+        engine.process(stick(InputSource::Button(GamepadButton::DpadLeft), 0.0));
+        let events = engine.tick(3_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftX,
+                value: 0.0
+            }
+        )));
+    }
+
+    #[test]
+    fn test_dpad_joystick_mode_diagonal_normalizes() {
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    mode: Some(SourceMode::Joystick(JoystickSettings::new(
+                        crate::profile::StickOutput::Left,
+                    ))),
+                    ..InputMapping::new(InputSource::Button(GamepadButton::DpadUp))
+                }],
+            }],
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 1.0));
+        engine.process(stick(InputSource::Button(GamepadButton::DpadRight), 1.0));
+        let events = engine.tick(1_000);
+        // The diagonal stays on the unit circle instead of pinning at 1,1.
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftX,
+                value
+            } if (*value - std::f32::consts::FRAC_1_SQRT_2).abs() < 0.001
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftY,
+                value
+            } if (*value + std::f32::consts::FRAC_1_SQRT_2).abs() < 0.001
+        )));
+    }
+
+    #[test]
+    fn test_dpad_joystick_mode_targets_the_chosen_stick() {
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    mode: Some(SourceMode::Joystick(JoystickSettings::new(
+                        crate::profile::StickOutput::Right,
+                    ))),
+                    ..InputMapping::new(InputSource::Button(GamepadButton::DpadDown))
+                }],
+            }],
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.process(stick(InputSource::Button(GamepadButton::DpadDown), 1.0));
+        let events = engine.tick(1_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::RightY,
+                value: 1.0
+            }
+        )));
+        assert!(events
+            .iter()
+            .all(|event| !matches!(event, OutputEvent::GamepadAxis { axis: GamepadAxis::LeftY, .. })));
+    }
+
+    #[test]
+    fn test_dpad_mode_on_a_button_source_stays_inert() {
+        // A hand-edited profile putting a stick-style Dpad mode on a d-pad
+        // button must not synthesize dpad presses out of the stick axes.
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    mode: Some(SourceMode::Dpad { threshold: 0.5 }),
+                    ..InputMapping::new(InputSource::Button(GamepadButton::DpadUp))
+                }],
+            }],
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 1.0));
+        engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 1.0));
+        assert!(engine
+            .tick(1_000)
+            .iter()
+            .all(|event| !matches!(event, OutputEvent::GamepadButton { .. })));
+    }
+
+    #[test]
+    fn test_dpad_mode_bound_direction_outputs_its_command() {
+        // A dpad direction with its own command replaces the virtual dpad
+        // button for that direction, Steam's per-direction binding behavior.
+        let mut profile = mode_profile(SourceMode::Dpad { threshold: 0.5 });
+        profile.action_sets[0].inputs[0].activators.clear();
+        profile.action_sets[0].inputs.push(InputMapping::simple(
+            InputSource::AxisDirection {
+                axis: GamepadAxis::LeftY,
+                direction: crate::profile::AxisDirection::Negative,
+            },
+            OutputAction::Keyboard { keycode: 17 },
+        ));
+        let mut engine = MappingEngine::new(profile).unwrap();
+        assert_eq!(
+            engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), -1.0)),
+            vec![OutputEvent::Key {
+                keycode: 17,
+                pressed: true
+            }]
+        );
+        // The dpad emission stays silent for the bound direction…
+        assert!(engine
+            .tick(4_000)
+            .iter()
+            .all(|event| !matches!(event, OutputEvent::GamepadButton { .. })));
+        // …and the command releases through center.
+        assert_eq!(
+            engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 0.0)),
+            vec![OutputEvent::Key {
+                keycode: 17,
+                pressed: false
+            }]
+        );
+        assert!(engine
+            .tick(8_000)
+            .iter()
+            .all(|event| !matches!(event, OutputEvent::GamepadButton { .. })));
     }
 
     #[test]
@@ -512,7 +837,7 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadButton {
-                button: GamepadButton::DpadUp,
+                button: GamepadButton::DpadDown,
                 pressed: true
             }
         )));
@@ -526,7 +851,7 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadButton {
-                button: GamepadButton::DpadUp,
+                button: GamepadButton::DpadDown,
                 pressed: false
             }
         )));

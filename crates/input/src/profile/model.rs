@@ -52,6 +52,14 @@ impl GamepadButton {
         !self.is_paddle()
     }
 
+    /// The four d-pad directions.
+    pub fn is_dpad(self) -> bool {
+        matches!(
+            self,
+            Self::DpadUp | Self::DpadDown | Self::DpadLeft | Self::DpadRight
+        )
+    }
+
     pub fn is_paddle(self) -> bool {
         matches!(
             self,
@@ -1270,13 +1278,37 @@ impl InputProfile {
         }
     }
 
+    /// Every evdev keycode this profile can emit, sorted and deduplicated.
+    /// The virtual keyboard declares exactly these keys, so any keycode the
+    /// profile can produce must be listed here — activator outputs and outer
+    /// ring commands both — or the kernel silently drops that key's events.
     pub fn keyboard_keycodes(&self) -> Vec<u16> {
-        self.all_activator_outputs()
+        let mut keycodes: Vec<u16> = self
+            .all_activator_outputs()
+            .chain(self.outer_ring_outputs())
             .filter_map(|output| match output {
                 OutputAction::Keyboard { keycode } => Some(*keycode),
                 _ => None,
             })
-            .collect()
+            .collect();
+        keycodes.sort_unstable();
+        keycodes.dedup();
+        keycodes
+    }
+
+    /// The discrete outputs of every stick's Outer Ring Command.
+    fn outer_ring_outputs(&self) -> impl Iterator<Item = &OutputAction> {
+        self.action_sets
+            .iter()
+            .flat_map(|set| set.inputs.iter())
+            .chain(self.action_layers.iter().flat_map(|layer| layer.inputs.iter()))
+            .filter_map(|input| input.mode.as_ref())
+            .filter_map(|mode| match mode {
+                SourceMode::Joystick(settings) => settings.processing.outer_ring.as_ref(),
+                SourceMode::Mouse { stick, .. } => stick.outer_ring.as_ref(),
+                _ => None,
+            })
+            .map(|ring| &ring.output)
     }
 
     pub fn uses_mouse(&self) -> bool {
@@ -2036,6 +2068,43 @@ mod tests {
         };
         assert_eq!(profile.keyboard_keycodes(), vec![42]);
         assert!(!profile.uses_mouse());
+    }
+
+    #[test]
+    fn test_keyboard_keycodes_include_outer_ring_and_deduplicate() {
+        // The virtual keyboard declares exactly the profile's keycodes: a
+        // key reachable only through an outer ring command must be listed,
+        // and the list is a sorted set so hot-apply comparisons are stable.
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![
+                    InputMapping::simple(
+                        InputSource::Button(GamepadButton::A),
+                        OutputAction::Keyboard { keycode: 30 },
+                    ),
+                    InputMapping {
+                        mode: Some(SourceMode::Joystick(JoystickSettings {
+                            processing: StickProcessing {
+                                outer_ring: Some(OuterRingCommand {
+                                    output: OutputAction::Keyboard { keycode: 17 },
+                                    ..OuterRingCommand::default()
+                                }),
+                                ..StickProcessing::default()
+                            },
+                            ..JoystickSettings::new(StickOutput::Left)
+                        })),
+                        ..InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))
+                    },
+                    InputMapping::simple(
+                        InputSource::Button(GamepadButton::B),
+                        OutputAction::Keyboard { keycode: 17 },
+                    ),
+                ],
+            }],
+            ..InputProfile::default()
+        };
+        assert_eq!(profile.keyboard_keycodes(), vec![17, 30]);
     }
 
     #[test]

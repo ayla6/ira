@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use crate::gyro::GyroRates;
 use crate::profile::{
-    Activation, ChordMode, GamepadAxis, GamepadButton, GyroActivation, InputProfile, InputSource,
-    MouseButton, OutputAction,
+    Activation, AxisDirection, ChordMode, GamepadAxis, GamepadButton, GyroActivation, InputProfile,
+    InputSource, MouseButton, OutputAction,
 };
 use activators::ActivatorStates;
 
@@ -172,7 +172,31 @@ impl MappingEngine {
         self.refresh_gyro_effective(0.0);
         let mut output = Vec::new();
         output.extend(self.run_activators(event.source, event.value, event.timestamp_us));
+        output.extend(self.axis_direction_activators(&event));
         output.extend(self.take_pending_releases());
+        output
+    }
+
+    /// Direction halves of an axis event: a binding on an `AxisDirection`
+    /// source runs its activators from the axis's signed half, so a dpad
+    /// direction can carry its own command (a key, a button) the way Steam's
+    /// per-direction dpad bindings do. Directions without a binding cost a
+    /// mapping lookup and nothing else.
+    fn axis_direction_activators(&mut self, event: &InputEvent) -> Vec<OutputEvent> {
+        let InputSource::Axis(axis) = event.source else {
+            return Vec::new();
+        };
+        let mut output = Vec::new();
+        for (direction, value) in [
+            (AxisDirection::Positive, event.value.max(0.0)),
+            (AxisDirection::Negative, (-event.value).max(0.0)),
+        ] {
+            let source = InputSource::AxisDirection { axis, direction };
+            if self.resolve_mapping(source).is_none() {
+                continue;
+            }
+            output.extend(self.run_activators(source, value, event.timestamp_us));
+        }
         output
     }
 

@@ -256,10 +256,10 @@ fn route(state: &SharedState, command: NavCommand) {
                 return;
             };
             match command {
-                NavCommand::Up => big.keyboard.move_cursor(state, 0, -1),
-                NavCommand::Down => big.keyboard.move_cursor(state, 0, 1),
-                NavCommand::Left => big.keyboard.move_cursor(state, -1, 0),
-                NavCommand::Right => big.keyboard.move_cursor(state, 1, 0),
+                NavCommand::Up => big.keyboard.move_cursor(0, -1),
+                NavCommand::Down => big.keyboard.move_cursor(0, 1),
+                NavCommand::Left => big.keyboard.move_cursor(-1, 0),
+                NavCommand::Right => big.keyboard.move_cursor(1, 0),
                 NavCommand::Confirm => big.keyboard.press_selected(state),
                 NavCommand::Back => big.keyboard.backspace(),
                 NavCommand::Options => big.keyboard.close(),
@@ -316,17 +316,16 @@ fn route(state: &SharedState, command: NavCommand) {
                 // nothing focused it opens the sort picker.
                 let game = big.all.selected_game();
                 match game {
-                    Some(game) => {
-                        big.game_menu
-                            .open(state, super::game_menu::MenuKind::Groups(game))
-                    }
+                    Some(game) => big
+                        .game_menu
+                        .open(state, super::game_menu::MenuKind::Groups(Box::new(game))),
                     None => big.game_menu.open(state, super::game_menu::MenuKind::Sort),
                 }
             }
-            NavCommand::Left => big.all.move_selection(state, -1, 0),
-            NavCommand::Right => big.all.move_selection(state, 1, 0),
-            NavCommand::Up => big.all.move_selection(state, 0, -1),
-            NavCommand::Down => big.all.move_selection(state, 0, 1),
+            NavCommand::Left => big.all.move_selection(-1, 0),
+            NavCommand::Right => big.all.move_selection(1, 0),
+            NavCommand::Up => big.all.move_selection(0, -1),
+            NavCommand::Down => big.all.move_selection(0, 1),
             NavCommand::Confirm => {
                 let game = big.all.selected_game();
                 if let Some(game) = game {
@@ -389,7 +388,7 @@ pub(super) fn open_all(state: &SharedState) {
     big.page.set(Page::AllSoftware);
     big.stack.set_visible_child(&big.all_page);
     big.all.apply_mode(state);
-    big.all.ensure_opened(state);
+    big.all.ensure_opened();
 }
 
 pub(super) fn show_home(state: &SharedState) {

@@ -29,17 +29,19 @@ const ROWS: &[&[Key]] = &[
     &[Key::Space, Key::Del, Key::Ok, Key::Cancel],
 ];
 
+/// What to do with the finished name.
+type NameCallback = Box<dyn Fn(&SharedState, &str)>;
+
 pub(super) struct Keyboard {
     /// The menu surface: dim layer with the panel floating on top.
     root: gtk4::Overlay,
-    dim: gtk4::Box,
     panel: gtk4::Box,
     /// The text preview the typed characters show up in.
     preview: gtk4::Label,
     /// Key cursor position: (row, column).
     cursor: Cell<(usize, usize)>,
     buffer: RefCell<String>,
-    on_ok: RefCell<Option<Box<dyn Fn(&SharedState, &str)>>>,
+    on_ok: RefCell<Option<NameCallback>>,
 }
 
 impl Keyboard {
@@ -68,7 +70,6 @@ impl Keyboard {
         root.set_visible(false);
         Self {
             root,
-            dim,
             panel,
             preview: gtk4::Label::new(None),
             cursor: Cell::new((1, 0)),
@@ -92,7 +93,7 @@ impl Keyboard {
         state: &SharedState,
         prompt: &str,
         initial: &str,
-        on_ok: Box<dyn Fn(&SharedState, &str)>,
+        on_ok: NameCallback,
     ) {
         *self.buffer.borrow_mut() = initial.to_string();
         *self.on_ok.borrow_mut() = Some(on_ok);
@@ -172,7 +173,7 @@ impl Keyboard {
     }
 
     /// Move the key cursor, clamping each row to its own length.
-    pub(super) fn move_cursor(&self, state: &SharedState, dx: i32, dy: i32) {
+    pub(super) fn move_cursor(&self, dx: i32, dy: i32) {
         let (row, col) = self.cursor.get();
         let row = (row as i64 + dy as i64).clamp(0, ROWS.len() as i64 - 1) as usize;
         let col = (col as i64 + dx as i64).clamp(0, ROWS[row].len() as i64 - 1) as usize;

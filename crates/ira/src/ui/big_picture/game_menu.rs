@@ -15,7 +15,7 @@ use std::cell::{Cell, RefCell};
 pub(super) enum MenuKind {
     /// Toggle the focused game's membership of each group, or file it
     /// into a new one.
-    Groups(crate::Game),
+    Groups(Box<crate::Game>),
     /// Pick the All Software ordering.
     Sort,
 }
@@ -135,7 +135,7 @@ impl GameMenu {
                     return;
                 };
                 self.close();
-                super::view::name_new_group(state, Some(game));
+                super::view::name_new_group(state, Some(*game));
             }
             MenuRow::Sort(mode) => {
                 state.borrow_mut().cfg.sort_mode = mode;

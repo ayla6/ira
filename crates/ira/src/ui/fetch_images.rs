@@ -306,15 +306,22 @@ pub(super) fn import_rom_square(
     native_square(&dir, game, cfg, switch_exe)
 }
 
-/// Write the game's native ROM icon into `dir` as square.webp, replacing
-/// any previous square (SGDB art included). When extraction fails, an
-/// existing square file survives so custom art is never lost.
+/// Write the game's native ROM icon into `dir` as square.webp — but only
+/// into a genuinely empty slot. A square that already exists wins, custom
+/// art included: the native import never replaces it, and a missing
+/// square_small is derived from the existing square by the image loader
+/// instead of any refetch.
 fn native_square(
     dir: &std::path::Path,
     game: &Game,
     cfg: &ira_config::Config,
     switch_exe: &str,
 ) -> String {
+    if let Some(existing) =
+        ira_parser::find_image_file(dir, ira_models::AssetType::Square.file_base())
+    {
+        return existing.to_string_lossy().into_owned();
+    }
     let bytes = super::image_manager_helpers::native_icon_bytes(
         game,
         cfg,

@@ -19,8 +19,6 @@ pub const CSS_BP_PAGE_TITLE: &str = "bp-page-title";
 pub const CSS_BP_PAGE_SUBTITLE: &str = "bp-page-subtitle";
 pub const CSS_BP_TAB: &str = "bp-tab";
 pub const CSS_BP_TAB_ACTIVE: &str = "bp-tab-active";
-pub const CSS_BP_GROUP_ROW: &str = "bp-group-row";
-pub const CSS_BP_GROUP_ROW_SELECTED: &str = "bp-group-row-selected";
 pub const CSS_BP_MENU_DIM: &str = "bp-menu-dim";
 pub const CSS_BP_MENU_PANEL: &str = "bp-menu-panel";
 pub const CSS_BP_MENU_ROW: &str = "bp-menu-row";
@@ -407,11 +405,6 @@ fn big_picture_css(s: f64) -> String {
     color: @theme_fg_color;
     border-bottom: 4px solid @accent_color;
 }}
-.bp-group-row {{
-    padding: {group_row_pad};
-    border-radius: 10px;
-}}
-.bp-group-row-selected {{ background: alpha(@accent_color, 0.22); }}
 .bp-menu-dim {{
     background: alpha(black, 0.6);
 }}

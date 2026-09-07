@@ -217,7 +217,6 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         });
     }
     header.append(&sort_btn);
-    header.append(&sort_btn);
     page.append(&header);
 
     let grid = VirtualGrid::new(240);
@@ -620,7 +619,7 @@ impl AllSoftwareUi {
 
     /// First open: park the selection on the first tile and the scroll at
     /// the top. Later opens keep both.
-    pub(super) fn ensure_opened(&self, state: &SharedState) {
+    pub(super) fn ensure_opened(&self) {
         if self.opened.get() {
             self.scroll_to_selected();
             self.update_tooltip();
@@ -643,7 +642,7 @@ impl AllSoftwareUi {
     /// scrolled the grid by hand, which deselects — the selection comes
     /// back on the first fully visible tile before the move applies, so
     /// navigation never resumes from somewhere off screen.
-    pub(super) fn move_selection(&self, state: &SharedState, dx: i32, dy: i32) {
+    pub(super) fn move_selection(&self, dx: i32, dy: i32) {
         let (cols, _, item_h, sp) = self.grid.current_layout();
         let count = self.games.borrow().len();
         if count == 0 {

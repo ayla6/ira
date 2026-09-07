@@ -1,8 +1,8 @@
-//! The couch's options menus: a centered panel over a dimmed page, in two
-//! flavors — group assignment for a focused game, and the All Software
-//! sort picker. While a menu is open the navigation router feeds it
-//! Up/Down/Confirm/Back; the mouse clicks rows directly, and a click on
-//! the dimmed area closes it.
+//! The big-picture options menus: a full-height panel docked on the right
+//! over a dimmed page, in two flavors — group assignment for a focused
+//! game, and the All Software sort picker. While a menu is open the
+//! navigation router feeds it Up/Down/Confirm/Back; the mouse clicks rows
+//! directly, and a click on the dimmed area closes it.
 
 use crate::ui::css::*;
 use crate::ui::state::SharedState;
@@ -53,11 +53,16 @@ impl GameMenu {
         }
         let panel = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         panel.add_css_class(CSS_BP_MENU_PANEL);
-        panel.set_halign(gtk4::Align::Center);
-        panel.set_valign(gtk4::Align::Center);
-        panel.set_size_request(620, -1);
+        // Docked full-height on the right, Switch-options style.
+        panel.add_css_class(CSS_BP_OPTION_PANEL);
+        panel.set_halign(gtk4::Align::End);
+        panel.set_valign(gtk4::Align::Fill);
+        panel.set_size_request(560, -1);
 
         let root = gtk4::Overlay::new();
+        // The overlay is a sibling of the bp-root Box, so it must carry the
+        // big-picture class itself to inherit its font.
+        root.add_css_class(CSS_BP_ROOT);
         root.set_child(Some(&dim));
         root.add_overlay(&panel);
         root.set_visible(false);
@@ -171,19 +176,20 @@ impl GameMenu {
                     .collect();
                 let header = gtk4::Label::new(Some(&game.name));
                 header.set_xalign(0.0);
-                header.add_css_class(CSS_BP_PAGE_TITLE);
+                header.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                header.add_css_class(CSS_BP_MENU_TITLE);
                 crate::ui::helpers::crisp_label(&header);
                 self.panel.append(&header);
 
                 let mut rows = Vec::new();
                 for group in &groups {
-                    let check = if member_of.contains(&group.id) { "✓" } else { "·" };
+                    let member = member_of.contains(&group.id);
                     let index = rows.len();
-                    self.append_row(state, &format!("{check}  {}", group.name), index);
+                    self.append_row(state, &group.name, index, member);
                     rows.push(MenuRow::Group { id: group.id });
                 }
                 let index = rows.len();
-                self.append_row(state, &crate::tr!("New Group…"), index);
+                self.append_row(state, &crate::tr!("New Group…"), index, false);
                 rows.push(MenuRow::NewGroup);
                 *self.rows.borrow_mut() = rows;
             }
@@ -191,15 +197,14 @@ impl GameMenu {
                 let current = state.borrow().cfg.sort_mode;
                 let header = gtk4::Label::new(Some(&crate::tr!("Sort by")));
                 header.set_xalign(0.0);
-                header.add_css_class(CSS_BP_PAGE_TITLE);
+                header.add_css_class(CSS_BP_MENU_TITLE);
                 crate::ui::helpers::crisp_label(&header);
                 self.panel.append(&header);
 
                 let mut rows = Vec::new();
                 for mode in ira_models::SortMode::ALL {
-                    let check = if *mode == current { "✓" } else { "·" };
                     let index = rows.len();
-                    self.append_row(state, &format!("{check}  {}", mode.display_label()), index);
+                    self.append_row(state, mode.display_label(), index, *mode == current);
                     rows.push(MenuRow::Sort(*mode));
                 }
                 *self.rows.borrow_mut() = rows;
@@ -207,14 +212,20 @@ impl GameMenu {
         }
     }
 
-    fn append_row(&self, state: &SharedState, text: &str, index: usize) {
+    /// One row: the current sort and the groups the game belongs to wear
+    /// the accent instead of a checkmark glyph.
+    fn append_row(&self, state: &SharedState, text: &str, index: usize, active: bool) {
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         row.add_css_class(CSS_BP_MENU_ROW);
+        if active {
+            row.add_css_class(CSS_BP_MENU_ROW_ACTIVE);
+        }
         if self.selection.get() == index {
             row.add_css_class(CSS_BP_MENU_ROW_SELECTED);
         }
         let label = gtk4::Label::new(Some(text));
         label.set_xalign(0.0);
+        label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         crate::ui::helpers::crisp_label(&label);
         row.append(&label);
         let click_state = state.clone();

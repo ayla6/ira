@@ -13,7 +13,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 /// The gamepad or keyboard took over: hide the pointer until the mouse
-/// physically moves again.
+/// physically moves again. The window also wears `bp-cursor-hidden` for
+/// that stretch, so hover styling stops dressing whatever tile the parked
+/// pointer happens to rest on.
 pub(super) fn note_controller_use(state: &SharedState) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
@@ -22,8 +24,10 @@ pub(super) fn note_controller_use(state: &SharedState) {
         return;
     }
     big.cursor_hidden.set(true);
+    let window = state.borrow().window.clone();
+    window.add_css_class(crate::ui::css::CSS_BP_CURSOR_HIDDEN);
     if let Some(cursor) = gdk4::Cursor::from_name("none", None) {
-        state.borrow().window.set_cursor(Some(&cursor));
+        window.set_cursor(Some(&cursor));
     }
 }
 
@@ -71,5 +75,7 @@ fn show_cursor(state: &SharedState) {
     if let Some(big) = state.borrow().big_picture.clone() {
         big.cursor_hidden.set(false);
     }
-    state.borrow().window.set_cursor(None);
+    let window = state.borrow().window.clone();
+    window.remove_css_class(crate::ui::css::CSS_BP_CURSOR_HIDDEN);
+    window.set_cursor(None);
 }

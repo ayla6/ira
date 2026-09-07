@@ -1,22 +1,33 @@
 //! The Groups tab's tile grid: one tile per group — a collage of its
-//! members' covers over the group's name — plus a leading New Group tile.
-//! The selection is ours (the FlowBox's own is off), driven by the same
-//! router that moves the game grid.
+//! members' squares over the group's name — plus a leading New Group
+//! tile. Tiles size with the viewport like the game grid's. The selection
+//! is ours (the FlowBox's own is off), driven by the same router that
+//! moves the game grid.
 
 use crate::ui::css::*;
 use crate::ui::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
 use ira_models::Group;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 /// How many tiles sit in one row, fixed like the game grid's columns.
 pub(super) const COLS: usize = 5;
+
+/// The flow's own edge margins and child spacing; the tile sizing keeps
+/// in step with them.
+const FLOW_MARGIN: i32 = 28;
+const FLOW_SPACING: i32 = 18;
 
 pub(super) struct GroupsGrid {
     scrolled: gtk4::ScrolledWindow,
     flow: gtk4::FlowBox,
     selection: Cell<usize>,
+    /// Current tile edge length (slots are square); 0 until the window
+    /// reports a real size.
+    tile: Cell<i32>,
+    /// Each tile's square slot in tile order, for painting the selection.
+    slots: RefCell<Vec<gtk4::Box>>,
 }
 
 impl GroupsGrid {
@@ -30,12 +41,12 @@ impl GroupsGrid {
         flow.set_min_children_per_line(COLS as u32);
         flow.set_max_children_per_line(COLS as u32);
         flow.set_selection_mode(gtk4::SelectionMode::None);
-        flow.set_row_spacing(18);
-        flow.set_column_spacing(18);
+        flow.set_row_spacing(FLOW_SPACING as u32);
+        flow.set_column_spacing(FLOW_SPACING as u32);
         flow.set_margin_top(12);
         flow.set_margin_bottom(20);
-        flow.set_margin_start(28);
-        flow.set_margin_end(28);
+        flow.set_margin_start(FLOW_MARGIN);
+        flow.set_margin_end(FLOW_MARGIN);
         flow.set_valign(gtk4::Align::Start);
         let scrolled = gtk4::ScrolledWindow::new();
         scrolled.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
@@ -45,9 +56,30 @@ impl GroupsGrid {
             scrolled,
             flow,
             selection: Cell::new(0),
+            tile: Cell::new(0),
+            slots: RefCell::new(Vec::new()),
         };
         grid.reload(state);
         grid
+    }
+
+    /// Track the viewport: slots are square and sized like the game
+    /// grid's tiles (the window width split over the columns). Returns
+    /// true when the size moved and the tiles need a reload.
+    pub(super) fn ensure_sized(&self, state: &SharedState) -> bool {
+        let width = state.borrow().window.width();
+        if width < 600 {
+            return false;
+        }
+        let desired = ((width - 2 * FLOW_MARGIN - (COLS as i32 - 1) * FLOW_SPACING) as f64
+            / COLS as f64)
+            .round() as i32;
+        let desired = desired.clamp(160, 520);
+        if self.tile.get() == desired {
+            return false;
+        }
+        self.tile.set(desired);
+        true
     }
 
     /// Rebuild the tiles: New Group first, then one per group. Counts and
@@ -66,7 +98,9 @@ impl GroupsGrid {
             .cloned()
             .collect();
         crate::ui::helpers::clear_children(&self.flow);
-        self.append_new_group_tile(state);
+        self.slots.borrow_mut().clear();
+        let tile = self.tile.get().max(200);
+        self.append_new_group_tile(state, tile);
         for group in &groups {
             let covers: Vec<&Game> = ira_db::get_game_ids_in_group(&db, group.id)
                 .unwrap_or_default()
@@ -74,125 +108,103 @@ impl GroupsGrid {
                 .filter_map(|id| visible_games.iter().find(|g| g.db_id == *id))
                 .take(4)
                 .collect();
-            self.append_group_tile(state, group, &covers);
+            self.append_group_tile(state, group, &covers, tile);
         }
         self.clamp_selection(state);
         self.repaint_selection();
     }
 
-    fn append_new_group_tile(&self, state: &SharedState) {
-        let tile = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    /// The shared tile shell: square slot over the name, wired with the
+    /// click gesture (first click focuses, a click on the focused tile
+    /// opens) and registered for selection painting. Returns the slot for
+    /// the caller to fill.
+    fn append_tile_shell(&self, state: &SharedState, label: &str, tile: i32) -> gtk4::Box {
+        let tile_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
         let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         slot.add_css_class(CSS_BP_GROUP_SLOT);
-        slot.set_size_request(240, 240);
-        let icon = gtk4::Image::from_icon_name("list-add-symbolic");
-        icon.set_pixel_size(72);
-        icon.set_halign(gtk4::Align::Center);
-        icon.set_valign(gtk4::Align::Center);
-        slot.append(&icon);
-        tile.append(&slot);
-        let name = gtk4::Label::new(Some(&crate::tr!("New Group")));
-        name.add_css_class(CSS_BP_PAGE_SUBTITLE);
-        name.set_halign(gtk4::Align::Center);
-        crate::ui::helpers::crisp_label(&name);
-        tile.append(&name);
-        let child = gtk4::FlowBoxChild::new();
-        child.set_focusable(false);
-        child.set_child(Some(&tile));
-        let click_state = state.clone();
-        let click = gtk4::GestureClick::new();
-        click.connect_pressed(move |_, _, _, _| {
-            if let Some(big) = click_state.borrow().big_picture.clone() {
-                big.all.groups_grid_selected(&click_state, 0);
-            }
-        });
-        child.add_controller(click);
-        self.flow.append(&child);
-    }
-
-    fn append_group_tile(
-        &self,
-        state: &SharedState,
-        group: &Group,
-        covers: &[&Game],
-    ) {
-        let tile = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-        let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-        slot.add_css_class(CSS_BP_GROUP_SLOT);
-        slot.set_size_request(240, 240);
-        // A 2x2 collage of the group's first four covers, or a placeholder
-        // icon for an empty group.
-        if covers.is_empty() {
-            let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
-            icon.set_pixel_size(64);
-            icon.set_halign(gtk4::Align::Center);
-            icon.set_valign(gtk4::Align::Center);
-            slot.append(&icon);
-        } else {
-            let collage = gtk4::Grid::new();
-            collage.set_row_homogeneous(true);
-            collage.set_column_homogeneous(true);
-            for (i, game) in covers.iter().enumerate() {
-                let pic = gtk4::Picture::new();
-                pic.set_content_fit(gtk4::ContentFit::Cover);
-                pic.add_css_class(CSS_GAME_COVER_PIC);
-                let path = if game.square_path.is_empty() {
-                    &game.grid_path
-                } else {
-                    &game.square_path
-                };
-                if !path.is_empty() {
-                    if let Some(texture) = ira_images::cached_texture(path) {
-                        pic.set_paintable(Some(&texture));
-                    } else {
-                        let pic_weak = pic.downgrade();
-                        let path_owned = path.clone();
-                        ira_images::load_texture_async_with_priority(
-                            &path_owned,
-                            glib::Priority::DEFAULT,
-                            move |texture| {
-                                if let (Some(pic), Some(t)) = (pic_weak.upgrade(), texture) {
-                                    pic.set_paintable(Some(&t));
-                                }
-                            },
-                        );
-                    }
-                }
-                collage.attach(&pic, (i % 2) as i32, (i / 2) as i32, 1, 1);
-            }
-            slot.append(&collage);
-        }
-        tile.append(&slot);
-        let name = gtk4::Label::new(Some(&group.name));
+        slot.set_size_request(tile, tile);
+        tile_box.append(&slot);
+        let name = gtk4::Label::new(Some(label));
         name.add_css_class(CSS_BP_PAGE_SUBTITLE);
         name.set_halign(gtk4::Align::Center);
         name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         crate::ui::helpers::crisp_label(&name);
-        tile.append(&name);
+        tile_box.append(&name);
 
-        let child = gtk4::FlowBoxChild::new();
-        child.set_focusable(false);
-        child.set_child(Some(&tile));
+        let index = self.slots.borrow().len();
+        self.slots.borrow_mut().push(slot.clone());
         let click_state = state.clone();
-        let group_index = self.group_index_of(state, group.id);
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |_, _, _, _| {
             if let Some(big) = click_state.borrow().big_picture.clone() {
-                big.all
-                    .groups_grid_selected(&click_state, 1 + group_index);
+                big.all.groups_grid_selected(&click_state, index);
             }
         });
-        child.add_controller(click);
+        tile_box.add_controller(click);
+        let child = gtk4::FlowBoxChild::new();
+        child.set_focusable(false);
+        child.set_child(Some(&tile_box));
         self.flow.append(&child);
+        slot
     }
 
-    fn group_index_of(&self, state: &SharedState, group_id: i64) -> usize {
-        state
-            .borrow()
-            .groups
-            .iter()
-            .position(|g| g.id == group_id)
-            .unwrap_or(0)
+    fn append_new_group_tile(&self, state: &SharedState, tile: i32) {
+        let slot = self.append_tile_shell(state, &crate::tr!("New Group"), tile);
+        let icon = gtk4::Image::from_icon_name("list-add-symbolic");
+        icon.set_pixel_size((tile / 3).max(24));
+        icon.set_halign(gtk4::Align::Center);
+        icon.set_valign(gtk4::Align::Center);
+        slot.append(&icon);
+    }
+
+    fn append_group_tile(&self, state: &SharedState, group: &Group, covers: &[&Game], tile: i32) {
+        let slot = self.append_tile_shell(state, &group.name, tile);
+        // A 2x2 collage of the group's first four squares, or a
+        // placeholder icon for an empty group.
+        if covers.is_empty() {
+            let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
+            icon.set_pixel_size((tile / 3).max(24));
+            icon.set_halign(gtk4::Align::Center);
+            icon.set_valign(gtk4::Align::Center);
+            slot.append(&icon);
+            return;
+        }
+        let collage = gtk4::Grid::new();
+        collage.set_row_homogeneous(true);
+        collage.set_column_homogeneous(true);
+        for (i, game) in covers.iter().enumerate() {
+            let pic = gtk4::Picture::new();
+            pic.set_content_fit(gtk4::ContentFit::Cover);
+            // Each quadrant is pinned to half the slot: left to their
+            // natural sizes, the pictures would stretch the collage out
+            // of square.
+            pic.set_size_request(tile / 2, tile / 2);
+            pic.add_css_class(CSS_GAME_COVER_PIC);
+            let path = if game.square_path.is_empty() {
+                &game.grid_path
+            } else {
+                &game.square_path
+            };
+            if !path.is_empty() {
+                if let Some(texture) = ira_images::cached_texture(path) {
+                    pic.set_paintable(Some(&texture));
+                } else {
+                    let pic_weak = pic.downgrade();
+                    let path_owned = path.clone();
+                    ira_images::load_texture_async_with_priority(
+                        &path_owned,
+                        glib::Priority::DEFAULT,
+                        move |texture| {
+                            if let (Some(pic), Some(t)) = (pic_weak.upgrade(), texture) {
+                                pic.set_paintable(Some(&t));
+                            }
+                        },
+                    );
+                }
+            }
+            collage.attach(&pic, (i % 2) as i32, (i / 2) as i32, 1, 1);
+        }
+        slot.append(&collage);
     }
 
     /// The selected tile's index (0 = New Group).
@@ -234,24 +246,52 @@ impl GroupsGrid {
         }
     }
 
-    /// Paint the selection onto the FlowBox child; focusing it scrolls
-    /// the tile into view.
+    /// Paint the selection onto the selected tile's slot — the outline
+    /// hugs the square, not the label below it — and keep the row on
+    /// screen.
     fn repaint_selection(&self) {
         let selected = self.selection.get();
-        let mut index = 0usize;
-        let mut child = self.flow.first_child();
-        while let Some(node) = child {
-            if let Some(flow_child) = node.downcast_ref::<gtk4::FlowBoxChild>() {
-                if index == selected {
-                    flow_child.add_css_class(CSS_BP_GROUP_TILE_SELECTED);
-                    flow_child.grab_focus();
-                } else {
-                    flow_child.remove_css_class(CSS_BP_GROUP_TILE_SELECTED);
-                }
-                index += 1;
+        for (index, slot) in self.slots.borrow().iter().enumerate() {
+            if index == selected {
+                slot.add_css_class(CSS_BP_GROUP_TILE_SELECTED);
+            } else {
+                slot.remove_css_class(CSS_BP_GROUP_TILE_SELECTED);
             }
-            child = node.next_sibling();
         }
+        self.scroll_selection_into_view();
+    }
+
+    /// Nudge the scroll so the selected row shows. Rows pitch at the
+    /// FlowBoxChild's allocated height (slot plus name label) plus the
+    /// spacing; children are uniform so any child's height serves.
+    fn scroll_selection_into_view(&self) {
+        let adj = self.scrolled.vadjustment();
+        let page = adj.page_size();
+        if page <= 1.0 {
+            return;
+        }
+        let Some(child) = self
+            .flow
+            .first_child()
+            .and_then(|c| c.downcast::<gtk4::FlowBoxChild>().ok())
+        else {
+            return;
+        };
+        let child_h = child.height() as f64;
+        if child_h <= 0.0 {
+            return;
+        }
+        let row_top = self.flow.margin_top() as f64
+            + (self.selection.get() / COLS) as f64 * (child_h + FLOW_SPACING as f64);
+        let row_bottom = row_top + child_h;
+        let target = if row_top < adj.value() {
+            row_top - FLOW_MARGIN as f64
+        } else if row_bottom > adj.value() + page {
+            row_bottom - page + FLOW_MARGIN as f64
+        } else {
+            return;
+        };
+        adj.set_value(target.max(0.0));
     }
 
     /// Keep the selection within the tiles after the groups change.

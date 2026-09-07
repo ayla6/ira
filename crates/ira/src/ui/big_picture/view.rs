@@ -236,6 +236,7 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
         NavMsg::Pads(status) => {
             if let Some(big) = state.borrow().big_picture.clone() {
                 big.bottom.set_pad_status(status.count, status.family);
+                big.all.set_shoulder_family(status.family);
             }
         }
     }
@@ -388,7 +389,7 @@ pub(super) fn open_all(state: &SharedState) {
     big.page.set(Page::AllSoftware);
     big.stack.set_visible_child(&big.all_page);
     big.all.apply_mode(state);
-    big.all.ensure_opened();
+    big.all.ensure_opened(state);
 }
 
 pub(super) fn show_home(state: &SharedState) {
@@ -484,6 +485,7 @@ pub(crate) fn refresh(state: &SharedState) {
         crate::ui::css::init_styles(scale);
         big.status.set_icon_scale(scale);
         big.bottom.set_icon_scale(scale);
+        big.all.set_icon_scale(scale);
         // A pill whose text was set at the old font keeps measuring its
         // stale layout; force a re-measure when the scale actually moved.
         if (big.ui_scale.get() - scale).abs() > 0.001 {

@@ -65,6 +65,9 @@ impl Keyboard {
         panel.set_size_request(720, -1);
 
         let root = gtk4::Overlay::new();
+        // The overlay is a sibling of the bp-root Box, so it must carry the
+        // big-picture class itself to inherit its font.
+        root.add_css_class(CSS_BP_ROOT);
         root.set_child(Some(&dim));
         root.add_overlay(&panel);
         root.set_visible(false);

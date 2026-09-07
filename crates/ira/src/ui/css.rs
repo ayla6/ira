@@ -21,10 +21,13 @@ pub const CSS_BP_TAB: &str = "bp-tab";
 pub const CSS_BP_TAB_ACTIVE: &str = "bp-tab-active";
 pub const CSS_BP_MENU_DIM: &str = "bp-menu-dim";
 pub const CSS_BP_MENU_PANEL: &str = "bp-menu-panel";
+pub const CSS_BP_OPTION_PANEL: &str = "bp-option-panel";
+pub const CSS_BP_MENU_TITLE: &str = "bp-menu-title";
 pub const CSS_BP_MENU_ROW: &str = "bp-menu-row";
 pub const CSS_BP_MENU_ROW_SELECTED: &str = "bp-menu-row-selected";
+pub const CSS_BP_MENU_ROW_ACTIVE: &str = "bp-menu-row-active";
 pub const CSS_BP_SHOULDER: &str = "bp-shoulder";
-pub const CSS_BP_SHOULDER_DIM: &str = "bp-shoulder-dim";
+pub const CSS_BP_CURSOR_HIDDEN: &str = "bp-cursor-hidden";
 pub const CSS_BP_GROUP_SLOT: &str = "bp-group-slot";
 pub const CSS_BP_GROUP_TILE_SELECTED: &str = "bp-group-tile-selected";
 pub const CSS_BP_KEY: &str = "bp-key";
@@ -413,22 +416,44 @@ fn big_picture_css(s: f64) -> String {
     border-radius: 16px;
     padding: {menu_pad};
 }}
+/* The options menu: a full-height panel docked on the right, Switch-style. */
+.bp-option-panel {{
+    border-radius: 0;
+    border-left: 1px solid alpha(white, 0.08);
+}}
+.bp-menu-title {{
+    font-size: {subtitle};
+    color: alpha(@theme_fg_color, 0.55);
+    padding: {menu_pad} {menu_pad} 4px;
+}}
 .bp-menu-row {{
     padding: {group_row_pad};
-    padding-left: 22px;
-    padding-right: 22px;
+    padding-left: {menu_pad};
+    padding-right: {menu_pad};
     border-radius: 10px;
 }}
-.bp-menu-row-selected {{ background: alpha(@accent_color, 0.28); }}
+.bp-menu-row label {{
+    font-size: {subtitle};
+}}
+.bp-menu-row-selected {{ background: alpha(@accent_color, 0.45); }}
+.bp-menu-row-active label {{
+    color: @accent_color;
+    font-weight: 700;
+}}
+/* The pointer is parked (a gamepad or the keyboard is driving): hover must
+   not keep dressing the tile it happened to rest on. */
+.bp-cursor-hidden .cover-item:hover .game-cover-pic {{
+    box-shadow: none;
+    transform: none;
+}}
+.bp-cursor-hidden .cover-item.bp-all:hover .bp-all-tile {{
+    background: alpha(@theme_fg_color, 0.08);
+}}
 .bp-shoulder {{
     padding: 2px 10px;
     border: 2px solid alpha(@theme_fg_color, 0.55);
     border-radius: 8px;
     font-size: {small};
-}}
-.bp-shoulder-dim {{
-    color: alpha(@theme_fg_color, 0.3);
-    border-color: alpha(@theme_fg_color, 0.15);
 }}
 .bp-group-slot {{
     background: alpha(white, 0.06);
@@ -437,7 +462,6 @@ fn big_picture_css(s: f64) -> String {
 .bp-group-tile-selected {{
     outline: 4px solid @accent_color;
     outline-offset: -2px;
-    border-radius: 12px;
 }}
 .bp-key {{
     background: alpha(white, 0.08);

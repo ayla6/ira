@@ -476,15 +476,14 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
         )
     })()
     .unwrap_or(false);
-    if !has_art || !fully_visible {
+    if !fully_visible {
         ui.marquee.set_visible(false);
         ui.ring.set_visible(false);
         return;
     }
-    ui.marquee.set_visible(true);
+    // The ring marks the selection whether or not art has landed; only
+    // the pill needs something to point at.
     ui.ring.set_visible(true);
-    ui.marquee
-        .set_position(center, viewport, content_top - BP_RING_OUTSET, false);
     let ring_scale = viewport / 1920.0;
     // The ring hugs what is visibly selected: the full capsule on a game
     // cover, the centered half-size circle on the All Software tile — a
@@ -497,6 +496,13 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
         ui.ring
             .place(center - w / 2.0, cover_top, w, capsule, ring_scale, false);
     }
+    if !has_art {
+        ui.marquee.set_visible(false);
+        return;
+    }
+    ui.marquee.set_visible(true);
+    ui.marquee
+        .set_position(center, viewport, content_top - BP_RING_OUTSET, false);
 }
 
 /// Smooth-scroll the selected tile to the viewport center; the adjustment's

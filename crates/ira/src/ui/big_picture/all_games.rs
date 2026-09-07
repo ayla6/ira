@@ -89,6 +89,50 @@ pub(super) enum Tab {
     Groups,
 }
 
+/// The L/R shoulder badge beside the tabs: the connected pad's glyph art
+/// when the icon set has one, the letter in a rounded box otherwise.
+struct ShoulderBadge {
+    slot: gtk4::Box,
+    glyph: gtk4::Image,
+    fallback: gtk4::Label,
+}
+
+impl ShoulderBadge {
+    fn new() -> Self {
+        let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        slot.set_valign(gtk4::Align::Center);
+        slot.set_margin_end(12);
+        let glyph = gtk4::Image::new();
+        glyph.set_halign(gtk4::Align::Center);
+        glyph.set_valign(gtk4::Align::Center);
+        let fallback = gtk4::Label::new(None);
+        fallback.add_css_class(CSS_BP_SHOULDER);
+        fallback.set_halign(gtk4::Align::Center);
+        fallback.set_valign(gtk4::Align::Center);
+        slot.append(&glyph);
+        slot.append(&fallback);
+        Self { slot, glyph, fallback }
+    }
+
+    fn refresh(&self, button: ira_input::GamepadButton, family: ira_input::ControllerFamily, scale: f64) {
+        self.slot.set_size_request(
+            (46.0 * scale).round().max(12.0) as i32,
+            (38.0 * scale).round().max(10.0) as i32,
+        );
+        self.glyph.set_pixel_size((34.0 * scale).round().max(8.0) as i32);
+        self.fallback.set_text(&crate::ui::input_profile_assets::source_badge(
+            ira_input::InputSource::Button(button),
+            family,
+        ));
+        crate::ui::input_profile_assets::set_source_asset(
+            &self.glyph,
+            &self.fallback,
+            ira_input::InputSource::Button(button),
+            family,
+        );
+    }
+}
+
 /// Widgets and selection state of the All Software page.
 pub(super) struct AllSoftwareUi {
     page: gtk4::Box,
@@ -116,8 +160,11 @@ pub(super) struct AllSoftwareUi {
     software_tab: gtk4::Label,
     groups_tab: gtk4::Label,
     /// The L/R shoulder badges flanking the tabs.
-    shoulder_l: gtk4::Label,
-    shoulder_r: gtk4::Label,
+    shoulder_l: ShoulderBadge,
+    shoulder_r: ShoulderBadge,
+    /// The connected pad's family, so the badges draw its glyphs.
+    shoulder_family: Cell<ira_input::ControllerFamily>,
+    shoulder_scale: Cell<f64>,
     /// Which tab is showing and, on the Groups tab, which group's games
     /// the grid holds (`None` = the groups tile grid itself).
     tab: Cell<Tab>,
@@ -134,43 +181,25 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     header.set_margin_bottom(6);
     header.set_margin_start(28);
     header.set_margin_end(28);
-    // Controllers back out with B; the mouse needs a visible way home.
-    // It must not take focus: the page switch would otherwise grab it and
-    // paint the button as highlighted the moment the page opens.
-    let back = gtk4::Button::from_icon_name("go-previous-symbolic");
-    back.add_css_class(CSS_FLAT);
-    back.set_focusable(false);
-    back.set_tooltip_text(Some(&crate::tr!("Back")));
-    back.set_valign(gtk4::Align::Center);
-    {
-        let back_state = state.clone();
-        back.connect_clicked(move |_| super::view::show_home(&back_state));
-    }
-    header.append(&back);
     // Centered Software/Groups tabs with the shoulder badges flanking
-    // them, Switch-style: the active tab is bright and underlined, and a
-    // dimmed badge marks the shoulder that would do nothing.
+    // them, Switch-style: the active tab is bright and underlined, and
+    // the badges draw the connected pad's L/R glyph art.
     let lead = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     lead.set_hexpand(true);
     header.append(&lead);
-    let shoulder_l = gtk4::Label::new(Some("L"));
-    let shoulder_r = gtk4::Label::new(Some("R"));
+    let shoulder_l = ShoulderBadge::new();
+    let shoulder_r = ShoulderBadge::new();
     let software_tab = gtk4::Label::new(Some(&crate::tr!("Software")));
     let groups_tab = gtk4::Label::new(Some(&crate::tr!("Groups")));
-    for (badge, tab_label) in [(&shoulder_l, &software_tab), (&shoulder_r, &groups_tab)] {
-        badge.add_css_class(CSS_BP_SHOULDER);
-        badge.set_valign(gtk4::Align::Center);
-        badge.set_margin_end(10);
+    for tab_label in [&software_tab, &groups_tab] {
         tab_label.add_css_class(CSS_BP_TAB);
         crate::ui::helpers::crisp_label(tab_label);
         tab_label.set_valign(gtk4::Align::Center);
     }
-    shoulder_l.add_css_class(CSS_BP_SHOULDER_DIM);
-    header.append(&shoulder_l);
+    header.append(&shoulder_l.slot);
     header.append(&software_tab);
     header.append(&groups_tab);
-    header.append(&shoulder_r);
-    shoulder_r.add_css_class(CSS_BP_SHOULDER_DIM);
+    header.append(&shoulder_r.slot);
     {
         let tab_state = state.clone();
         software_tab.set_cursor_from_name(Some("pointer"));
@@ -330,6 +359,8 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         ordering,
         shoulder_l,
         shoulder_r,
+        shoulder_family: Cell::new(ira_input::ControllerFamily::Xbox),
+        shoulder_scale: Cell::new(0.0),
         software_tab,
         groups_tab,
         tab: Cell::new(Tab::Software),
@@ -364,38 +395,58 @@ impl AllSoftwareUi {
         self.tab.get() == Tab::Groups && self.groups_view.get().is_none()
     }
 
+    /// Scale the header's shoulder badges with the viewport (1.0 = 1920
+    /// wide), like the rails' icons.
+    pub(super) fn set_icon_scale(&self, scale: f64) {
+        self.shoulder_scale.set(scale);
+        self.refresh_shoulders();
+    }
+
+    /// The connected pad's family changed: redraw the badges' glyphs.
+    pub(super) fn set_shoulder_family(&self, family: ira_input::ControllerFamily) {
+        if self.shoulder_family.get() == family {
+            return;
+        }
+        self.shoulder_family.set(family);
+        self.refresh_shoulders();
+    }
+
+    fn refresh_shoulders(&self) {
+        let family = self.shoulder_family.get();
+        let scale = self.shoulder_scale.get().max(1.0);
+        self.shoulder_l
+            .refresh(ira_input::GamepadButton::LeftShoulder, family, scale);
+        self.shoulder_r
+            .refresh(ira_input::GamepadButton::RightShoulder, family, scale);
+    }
+
     /// Switch tabs. The Groups tab reloads its tiles so groups created
-    /// elsewhere show up.
+    /// elsewhere show up; a group's game view never survives the switch —
+    /// the shoulders always land on the tab's own surface.
     pub(super) fn set_tab(&self, state: &SharedState, tab: Tab) {
-        if self.tab.get() == tab {
+        if self.tab.get() == tab && self.groups_view.get().is_none() {
             return;
         }
         self.tab.set(tab);
+        self.groups_view.set(None);
         self.software_tab.remove_css_class(CSS_BP_TAB_ACTIVE);
         self.groups_tab.remove_css_class(CSS_BP_TAB_ACTIVE);
-        let active = match tab {
+        match tab {
             Tab::Software => &self.software_tab,
             Tab::Groups => &self.groups_tab,
-        };
-        active.add_css_class(CSS_BP_TAB_ACTIVE);
-        self.shoulder_l.remove_css_class(CSS_BP_SHOULDER_DIM);
-        self.shoulder_r.remove_css_class(CSS_BP_SHOULDER_DIM);
-        match tab {
-            Tab::Software => self.shoulder_l.add_css_class(CSS_BP_SHOULDER_DIM),
-            Tab::Groups => self.shoulder_r.add_css_class(CSS_BP_SHOULDER_DIM),
         }
+        .add_css_class(CSS_BP_TAB_ACTIVE);
         if tab == Tab::Groups {
             self.groups_grid.reload(state);
         }
         self.apply_mode(state);
     }
 
-    /// Step to the neighbouring tab (the shoulders), Switch-style.
-    pub(super) fn switch_tab(&self, state: &SharedState, delta: i32) {
-        let next = match (self.tab.get(), delta) {
-            (Tab::Software, 1) => Tab::Groups,
-            (Tab::Groups, -1) => Tab::Software,
-            _ => return,
+    /// Step to the other tab (the shoulders), Switch-style.
+    pub(super) fn switch_tab(&self, state: &SharedState, _delta: i32) {
+        let next = match self.tab.get() {
+            Tab::Software => Tab::Groups,
+            Tab::Groups => Tab::Software,
         };
         self.set_tab(state, next);
     }
@@ -496,12 +547,19 @@ impl AllSoftwareUi {
     }
 
     /// Lay out the page for the current tab and view: which surface
-    /// shows, and which button prompts the bottom rail has.
+    /// shows, which button prompts the bottom rail has, and — on the game
+    /// grid — a default selection so a freshly entered surface is never
+    /// highlight-less.
     pub(super) fn apply_mode(&self, state: &SharedState) {
         let tiles = self.in_groups_tiles();
         self.groups_grid.widget().set_visible(tiles);
         self.overlay.set_visible(!tiles);
         self.refresh(state);
+        if tiles {
+            self.groups_grid.repaint(state);
+        } else {
+            self.ensure_default_selection();
+        }
         if let Some(big) = state.borrow().big_picture.clone() {
             let prompts: Vec<(ira_input::GamepadButton, String)> = if tiles {
                 vec![
@@ -523,7 +581,21 @@ impl AllSoftwareUi {
         }
     }
 
+    /// Park the selection on the first tile when the grid has none —
+    /// entering the page, opening a group, or switching tabs must always
+    /// show a highlight. A selection cleared by manual scrolling stays
+    /// cleared; only a surface (re)entry re-parks it.
+    fn ensure_default_selection(&self) {
+        if self.opened.get() && self.selected.get().is_none() && !self.games.borrow().is_empty() {
+            self.select(0);
+        }
+    }
+
     pub(super) fn refresh(&self, state: &SharedState) {
+        if self.groups_grid.ensure_sized(state) {
+            self.groups_grid.reload(state);
+        }
+        let was_empty = self.games.borrow().is_empty();
         let (show_hidden, sort_mode, sort_descending) = {
             let s = state.borrow();
             (
@@ -591,6 +663,11 @@ impl AllSoftwareUi {
             self.selected_key.set(key.unwrap_or((0, 0)));
         }
         self.sync_store(&games);
+        // The library landed while the page was open with nothing selected
+        // (its first open predated the games): park on the first tile.
+        if was_empty && !games.is_empty() && self.opened.get() {
+            self.select(0);
+        }
     }
 
     fn sync_store(&self, games: &[Game]) {
@@ -617,19 +694,29 @@ impl AllSoftwareUi {
         self.update_tooltip();
     }
 
-    /// First open: park the selection on the first tile and the scroll at
-    /// the top. Later opens keep both.
-    pub(super) fn ensure_opened(&self) {
-        if self.opened.get() {
-            self.scroll_to_selected();
-            self.update_tooltip();
-            return;
+    /// Opening the page: park the selection on the first tile when there
+    /// is none and keep the scroll anchored. Later opens keep both.
+    pub(super) fn ensure_opened(&self, state: &SharedState) {
+        if !self.opened.get() {
+            self.opened.set(true);
+            // The pill's text was set while this page sat hidden — possibly
+            // at a different big-picture scale — so its layout may measure
+            // stale.
+            self.tooltip.revalidate_text();
         }
-        self.opened.set(true);
-        // The pill's text was set while this page sat hidden — possibly at
-        // a different big-picture scale — so its layout may measure stale.
-        self.tooltip.revalidate_text();
-        self.select(0);
+        if self.selected.get().is_none() {
+            self.select(0);
+        }
+        self.scroll_to_selected();
+        self.update_tooltip();
+        // The page is mid stack transition here: its first real allocation
+        // still lies ahead, and the floats must re-anchor once it lands.
+        let idle_state = state.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(big) = idle_state.borrow().big_picture.clone() {
+                big.all.update_tooltip();
+            }
+        });
     }
 
     /// Re-measure the pill after the big-picture scale changed (see
@@ -702,8 +789,9 @@ impl AllSoftwareUi {
 
     /// Float the name tooltip over the selected tile — above its top edge
     /// normally, below it when the tile touches the viewport top — riding
-    /// whatever scroll position the grid is at. With no selection the
-    /// floats stay hidden.
+    /// whatever scroll position the grid is at. The ring marks the
+    /// selection whenever it is on screen, art or not (an artless tile
+    /// shows its name label); only the pill needs art to point at.
     fn update_tooltip(&self) {
         let Some(selected) = self.selected.get() else {
             self.tooltip.set_visible(false);
@@ -713,18 +801,7 @@ impl AllSoftwareUi {
         let Some(game) = self.games.borrow().get(selected).cloned() else {
             return;
         };
-        // The pill points at icons: while a tile has no art yet (library
-        // still loading) the tooltip stays hidden instead of floating
-        // over an empty frame.
-        let has_art = !game.square_path.is_empty() || !game.grid_path.is_empty();
-        if !has_art {
-            self.tooltip.set_visible(false);
-            self.ring.set_visible(false);
-            return;
-        };
         let (_, item_w, item_h, _sp) = self.grid.current_layout();
-        self.tooltip.set_max_width(item_w as f64 * 3.0);
-        self.tooltip.set_text(&game.name);
         let Some((x, y)) = self.grid.cell_geometry(selected) else {
             return;
         };
@@ -751,11 +828,24 @@ impl AllSoftwareUi {
         // navigation parks it. Manual scrolling deselects instead of
         // hiding (see `clear_selection`).
         let in_view = tile_top + item_h as f64 > scrolled_top && tile_top < scrolled_bottom;
-        self.tooltip.set_visible(in_view);
+        // The pill points at icons: while the tile has no art yet (library
+        // still loading) it stays hidden instead of floating over an
+        // empty frame; the ring marks the selection regardless.
+        let has_art = !game.square_path.is_empty() || !game.grid_path.is_empty();
         self.ring.set_visible(in_view);
+        self.tooltip.set_visible(in_view && has_art);
         if !in_view {
             return;
         }
+        // The drawn selection ring hugs the tile's edges.
+        let scale = viewport / 1920.0;
+        self.ring
+            .place(x, tile_top, item_w as f64, item_h as f64, scale, false);
+        if !has_art {
+            return;
+        }
+        self.tooltip.set_max_width(item_w as f64 * 3.0);
+        self.tooltip.set_text(&game.name);
         // The tail tip rests just outside the selection ring on whichever
         // side the pill's actual height fits into the scrolled area —
         // above by preference, below near the top edge.
@@ -769,10 +859,6 @@ impl AllSoftwareUi {
         } else {
             self.tooltip.set_position(center, viewport, bottom_tip, true);
         }
-        // The drawn selection ring hugs the tile's edges.
-        let scale = viewport / 1920.0;
-        self.ring
-            .place(x, tile_top, item_w as f64, item_h as f64, scale, false);
     }
 
     /// Focus the clicked game without moving the camera. Returns whether

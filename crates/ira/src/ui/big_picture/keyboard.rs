@@ -18,6 +18,7 @@ pub(super) enum Key {
     Page,
     Space,
     Backspace,
+    Return,
     Ok,
 }
 
@@ -39,12 +40,12 @@ const LETTER_ROWS: &[&[Key]] = &[
     &[
         Key::Char('q'), Key::Char('w'), Key::Char('e'), Key::Char('r'), Key::Char('t'),
         Key::Char('y'), Key::Char('u'), Key::Char('i'), Key::Char('o'), Key::Char('p'),
-        Key::Char('@'),
+        Key::Char('@'), Key::Return,
     ],
     &[
         Key::Char('a'), Key::Char('s'), Key::Char('d'), Key::Char('f'), Key::Char('g'),
         Key::Char('h'), Key::Char('j'), Key::Char('k'), Key::Char('l'), Key::Char(';'),
-        Key::Char('"'),
+        Key::Char('"'), Key::Return,
     ],
     &[
         Key::Char('z'), Key::Char('x'), Key::Char('c'), Key::Char('v'), Key::Char('b'),
@@ -111,6 +112,9 @@ pub(super) struct Keyboard {
     /// The connected pad's family, for the badge and hint glyphs.
     family: Cell<ira_input::ControllerFamily>,
     buffer: RefCell<String>,
+    /// The text caret as a char index into the buffer; the shoulders move
+    /// it, typing and backspace work at it.
+    caret: Cell<usize>,
     on_ok: RefCell<Option<NameCallback>>,
 }
 
@@ -156,6 +160,7 @@ impl Keyboard {
             prompt: RefCell::new(String::new()),
             family: Cell::new(ira_input::ControllerFamily::Xbox),
             buffer: RefCell::new(String::new()),
+            caret: Cell::new(0),
             on_ok: RefCell::new(None),
         }
     }
@@ -178,6 +183,7 @@ impl Keyboard {
         on_ok: NameCallback,
     ) {
         *self.buffer.borrow_mut() = initial.to_string();
+        self.caret.set(initial.chars().count());
         *self.prompt.borrow_mut() = prompt.to_string();
         *self.on_ok.borrow_mut() = Some(on_ok);
         self.cursor.set((1, 0));
@@ -200,6 +206,7 @@ impl Keyboard {
         self.root.set_visible(false);
         *self.on_ok.borrow_mut() = None;
         *self.buffer.borrow_mut() = String::new();
+        self.caret.set(0);
         self.shift.set(false);
         self.once.set(false);
         if let Some(big) = state.borrow().big_picture.clone() {
@@ -240,6 +247,7 @@ impl Keyboard {
             },
             Key::Space => crate::tr!("Space"),
             Key::Backspace => "⌫".to_string(),
+            Key::Return => crate::tr!("Return"),
             Key::Ok => crate::tr!("OK"),
         }
     }
@@ -264,7 +272,11 @@ impl Keyboard {
             Key::Page => Some((1, 4, 1, 1)),
             Key::Space => Some((2, 4, 9, 1)),
             Key::Ok if row == 4 => None,
-            Key::Ok => Some((11, 1, 1, 4)),
+            Key::Ok => Some((11, 3, 1, 2)),
+            Key::Return => match row {
+                1 => Some((11, 1, 1, 2)),
+                _ => None,
+            },
             Key::Backspace => Some((11, 0, 1, 1)),
             Key::Char(_) => Some((col as i32, row as i32, 1, 1)),
         }
@@ -376,6 +388,19 @@ impl Keyboard {
             }
             map.push(row_map);
         }
+        // Return is only meaningful for multiline input, which a group
+        // name is not: it keeps its usual spot, greyed out, unclickable,
+        // and outside the cursor's path.
+        let return_key = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        return_key.add_css_class(CSS_BP_KEY);
+        return_key.add_css_class(CSS_BP_KEY_DISABLED);
+        let return_label = gtk4::Label::new(Some(&crate::tr!("Return")));
+        return_label.set_halign(gtk4::Align::Center);
+        return_label.set_valign(gtk4::Align::Center);
+        crate::ui::helpers::crisp_label(&return_label);
+        return_key.append(&return_label);
+        grid.attach(&return_key, 11, 1, 1, 2);
+
         *self.keys.borrow_mut() = map;
         self.panel.append(&grid);
 
@@ -436,23 +461,15 @@ impl Keyboard {
         let rows = self.rows();
         let (row, col) = self.cursor.get();
         if dy != 0 {
-            let mut row = row as i64 + dy as i64;
-            // Riding the action column skips the rows it doesn't cover
-            // (OK spans several): up from OK lands on backspace and back.
-            if col == 11 {
-                while row >= 0
-                    && (row as usize) < rows.len()
-                    && rows[row as usize].len() <= 11
-                {
-                    row += dy as i64;
-                }
-            }
-            let row = row.clamp(0, rows.len() as i64 - 1) as usize;
+            // The action column exists on every row (Return and OK share
+            // theirs), so a vertical move from it stays on it.
+            let on_action = rows[row][col] == Key::Return || rows[row][col] == Key::Ok;
+            let row = (row as i64 + dy as i64).clamp(0, rows.len() as i64 - 1) as usize;
             let len = rows[row].len();
-            let col = if col < len {
-                col
-            } else if col == 11 && len > 11 {
+            let col = if on_action && len > 11 {
                 11
+            } else if col < len {
+                col
             } else {
                 len - 1
             };
@@ -467,7 +484,29 @@ impl Keyboard {
 
     /// Type a character straight from the physical keyboard.
     pub(super) fn type_char(&self, ch: char) {
-        self.buffer.borrow_mut().push(ch);
+        self.insert(ch);
+        self.refresh_preview();
+    }
+
+    /// Insert a character at the text caret.
+    fn insert(&self, ch: char) {
+        let mut buffer = self.buffer.borrow_mut();
+        let caret = self.caret.get().min(buffer.chars().count());
+        let byte = buffer
+            .char_indices()
+            .nth(caret)
+            .map(|(i, _)| i)
+            .unwrap_or(buffer.len());
+        buffer.insert(byte, ch);
+        drop(buffer);
+        self.caret.set(caret + 1);
+    }
+
+    /// Move the text caret one character left or right (the shoulders).
+    pub(super) fn move_caret(&self, dx: i32) {
+        let count = self.buffer.borrow().chars().count();
+        let caret = (self.caret.get() as i64 + dx as i64).clamp(0, count as i64) as usize;
+        self.caret.set(caret);
         self.refresh_preview();
     }
 
@@ -483,7 +522,7 @@ impl Keyboard {
                 } else {
                     c
                 };
-                self.buffer.borrow_mut().push(c);
+                self.insert(c);
                 if self.once.take() {
                     let cursor = self.cursor.get();
                     self.rebuild(state, &self.prompt.borrow().clone());
@@ -491,7 +530,7 @@ impl Keyboard {
                     self.refresh_cursor();
                 }
             }
-            Key::Space => self.buffer.borrow_mut().push(' '),
+            Key::Space => self.insert(' '),
             Key::Backspace => {
                 self.buffer.borrow_mut().pop();
             }
@@ -520,7 +559,7 @@ impl Keyboard {
                 self.refresh_preview();
                 return;
             }
-            Key::Ok => {
+            Key::Return | Key::Ok => {
                 let text = self.buffer.borrow().trim().to_string();
                 // An unnamed group helps nobody: refuse to commit and let
                 // the name keep being typed.
@@ -552,9 +591,21 @@ impl Keyboard {
         self.refresh_cursor();
     }
 
-    /// Delete the last character (the B button's job on a keyboard).
+    /// Delete the character before the text caret (the B button's job).
     pub(super) fn backspace(&self) {
-        self.buffer.borrow_mut().pop();
+        let mut buffer = self.buffer.borrow_mut();
+        let caret = self.caret.get().min(buffer.chars().count());
+        if caret == 0 {
+            return;
+        }
+        let start = buffer
+            .char_indices()
+            .nth(caret - 1)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        buffer.replace_range(start.., "");
+        drop(buffer);
+        self.caret.set(caret - 1);
         self.refresh_preview();
     }
 
@@ -573,12 +624,17 @@ impl Keyboard {
 
     fn refresh_preview(&self) {
         let text = self.buffer.borrow().clone();
-        let shown = if text.is_empty() {
-            crate::tr!("Type a name…")
-        } else {
-            text
-        };
-        self.preview.set_text(&shown);
+        if text.is_empty() {
+            self.preview.set_text(&crate::tr!("Type a name…"));
+            return;
+        }
+        // The caret rides the text: everything before it, the bar, the
+        // rest — so the shoulders' caret is visible while it moves.
+        let caret = self.caret.get().min(text.chars().count());
+        let before: String = text.chars().take(caret).collect();
+        let after: String = text.chars().skip(caret).collect();
+        self.preview
+            .set_text(&format!("{before}│{after}"));
     }
 
     fn refresh_cursor(&self) {

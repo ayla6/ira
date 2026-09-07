@@ -332,43 +332,33 @@ impl GroupsGrid {
         self.scroll_selection_into_view();
     }
 
-    /// Anchor the ring to the selected slot — computed from the grid's
-    /// own geometry rather than a widget probe, which reads transient
-    /// positions mid-transition and leaves a speck behind.
+    /// Anchor the ring to the selected slot's live position.
     pub(super) fn position_ring(&self) {
-        let flow_w = self.flow.width() as f64;
-        if flow_w <= 1.0 {
+        // An unmapped or unallocated surface produces the speck at the
+        // origin; the hooks that follow layout re-anchor it.
+        if self.overlay.width() <= 1 || self.overlay.height() <= 1 || !self.overlay.is_mapped() {
             self.ring.set_visible(false);
             return;
         }
-        let Some(first) = self
-            .flow
-            .first_child()
-            .and_then(|c| c.downcast::<gtk4::FlowBoxChild>().ok())
+        let Some(slot) = self.slots.borrow().get(self.selection.get()).cloned() else {
+            self.ring.set_visible(false);
+            return;
+        };
+        if !slot.is_mapped() {
+            self.ring.set_visible(false);
+            return;
+        }
+        let Some(point) = slot.compute_point(&self.overlay, &gtk4::graphene::Point::zero())
         else {
             self.ring.set_visible(false);
             return;
         };
-        let child_h = first.height() as f64;
-        if child_h <= 0.0 {
-            self.ring.set_visible(false);
-            return;
-        }
-        let selected = self.selection.get();
-        let cell_w = (flow_w
-            - 2.0 * FLOW_MARGIN as f64
-            - (COLS as f64 - 1.0) * FLOW_SPACING as f64)
-            / COLS as f64;
-        let x = FLOW_MARGIN as f64 + (selected % COLS) as f64 * (cell_w + FLOW_SPACING as f64);
-        let y = self.flow.margin_top() as f64
-            + (selected / COLS) as f64 * (child_h + FLOW_SPACING as f64)
-            - self.scrolled.vadjustment().value();
         self.ring.set_visible(true);
         self.ring.place(
-            x,
-            y,
-            cell_w,
-            self.tile.get() as f64,
+            point.x() as f64,
+            point.y() as f64,
+            slot.width() as f64,
+            slot.height() as f64,
             self.overlay.width() as f64 / 1920.0,
             false,
         );

@@ -281,9 +281,9 @@ fn route(state: &SharedState, command: NavCommand) {
                 NavCommand::Right => big.keyboard.move_cursor(1, 0),
                 NavCommand::Confirm => big.keyboard.press_selected(state),
                 NavCommand::Back => big.keyboard.backspace(),
-                // The shoulders walk the keys themselves here.
-                NavCommand::PrevTab => big.keyboard.move_cursor(-1, 0),
-                NavCommand::NextTab => big.keyboard.move_cursor(1, 0),
+                // The shoulders move the text caret itself.
+                NavCommand::PrevTab => big.keyboard.move_caret(-1),
+                NavCommand::NextTab => big.keyboard.move_caret(1),
                 // Start commits, X cancels, L3 shifts the next letter.
                 NavCommand::Options => big.keyboard.press_ok(state),
                 NavCommand::Secondary => big.keyboard.close(state),

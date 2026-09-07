@@ -693,10 +693,10 @@ impl AllSoftwareUi {
         self.refresh(state);
         if tiles {
             self.groups_grid.repaint(state);
-            // The tiles just became visible; their first allocation lands
-            // after this call, so re-anchor the ring once it does.
+            // The tiles just became visible and a tab slide may be moving
+            // them; re-anchor once it settles.
             let idle_state = state.clone();
-            glib::idle_add_local_once(move || {
+            glib::timeout_add_local_once(std::time::Duration::from_millis(150), move || {
                 if let Some(big) = idle_state.borrow().big_picture.clone() {
                     big.all.groups_grid.position_ring();
                 }

@@ -356,6 +356,12 @@ pub(crate) fn behavior_choices(source: InputSource) -> Vec<OptionChoice> {
                 )),
             },
             OptionChoice {
+                title: crate::tr!("Button Pad"),
+                description: Some(crate::tr!(
+                    "Each direction is its own independent button, with no d-pad semantics"
+                )),
+            },
+            OptionChoice {
                 title: crate::tr!("Joystick"),
                 description: Some(crate::tr!(
                     "The four directions deflect a virtual joystick — for games and menus that only read the stick"

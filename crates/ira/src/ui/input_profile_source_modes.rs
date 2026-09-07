@@ -26,12 +26,12 @@ pub(crate) enum ModeTarget {
 pub(crate) fn modes_for(source: InputSource) -> Vec<Option<SourceMode>> {
     // The d-pad group's behavior, Steam's dpad page, stored on the Up row
     // the way a stick's mode lives on its X axis. "None" rides the stick
-    // Dpad mode: on button sources the engine runs it as fully inert, which
-    // is exactly what the choice means.
+    // Dpad mode: on button sources the engine runs it fully disabled.
     if matches!(source, InputSource::Button(button) if button.is_dpad()) {
         return vec![
             Some(SourceMode::Dpad { threshold: 0.5 }),
             None,
+            Some(SourceMode::ButtonPad),
             Some(SourceMode::Joystick(JoystickSettings::new(StickOutput::Left))),
         ];
     }
@@ -59,6 +59,7 @@ pub(crate) fn mode_label(mode: &Option<SourceMode>, is_trigger: bool) -> String 
         None => crate::tr!("None"),
         Some(SourceMode::Joystick(_)) => crate::tr!("Joystick"),
         Some(SourceMode::Dpad { .. }) => crate::tr!("Directional Pad"),
+        Some(SourceMode::ButtonPad) => crate::tr!("Button Pad"),
         Some(SourceMode::Mouse { .. }) => crate::tr!("Joystick Mouse"),
         Some(SourceMode::Flickstick { .. }) => crate::tr!("Flick Stick"),
         Some(SourceMode::Trigger { .. }) if is_trigger => crate::tr!("Trigger"),
@@ -190,6 +191,9 @@ pub(crate) fn mode_setting_rows(
                     }
                 },
             ));
+        }
+        SourceMode::ButtonPad => {
+            // Four independent buttons: no group settings.
         }
         SourceMode::Trigger { threshold } => {
             rows.push(mode_slider_row(

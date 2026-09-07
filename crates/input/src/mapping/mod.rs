@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::gyro::GyroRates;
 use crate::profile::{
     Activation, AxisDirection, ChordMode, GamepadAxis, GamepadButton, GyroActivation, InputProfile,
-    InputSource, MouseButton, OutputAction,
+    InputSource, MouseButton, OutputAction, SourceMode,
 };
 use activators::ActivatorStates;
 
@@ -171,10 +171,27 @@ impl MappingEngine {
         // only refreshes which rates the output paths see.
         self.refresh_gyro_effective(0.0);
         let mut output = Vec::new();
-        output.extend(self.run_activators(event.source, event.value, event.timestamp_us));
+        // Steam's dpad "None": the group's inert marker silences the four
+        // directions' own bindings entirely.
+        let dpad_disabled = matches!(
+            event.source,
+            InputSource::Button(button) if button.is_dpad()
+        ) && self.dpad_group_disabled();
+        if !dpad_disabled {
+            output.extend(self.run_activators(event.source, event.value, event.timestamp_us));
+        }
         output.extend(self.axis_direction_activators(&event));
         output.extend(self.take_pending_releases());
         output
+    }
+
+    /// Whether the d-pad group carries the inert None marker: the Dpad mode
+    /// on the group's canonical mapping.
+    fn dpad_group_disabled(&self) -> bool {
+        matches!(
+            self.resolve_mapping(InputSource::Button(GamepadButton::DpadUp)),
+            Some(mapping) if matches!(mapping.mode, Some(SourceMode::Dpad { .. }))
+        )
     }
 
     /// Direction halves of an axis event: a binding on an `AxisDirection`

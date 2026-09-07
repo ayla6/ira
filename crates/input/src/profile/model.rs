@@ -718,6 +718,11 @@ pub enum SourceMode {
         #[serde(default = "default_dpad_threshold")]
         threshold: f32,
     },
+    /// The d-pad group's Button Pad behavior on button sources: each
+    /// direction is its own independent button. Direction bindings run
+    /// exactly like a bare mapping — the variant exists so the editor's
+    /// behavior picker can tell it apart from the standard Directional Pad.
+    ButtonPad,
 }
 
 /// Steam's joystick behavior: one stick mapped onto another, with deadzone,

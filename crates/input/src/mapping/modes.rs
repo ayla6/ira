@@ -747,25 +747,63 @@ mod tests {
 
     #[test]
     fn test_dpad_mode_on_a_button_source_stays_inert() {
-        // A hand-edited profile putting a stick-style Dpad mode on a d-pad
-        // button must not synthesize dpad presses out of the stick axes.
+        // Steam's dpad "None": the Dpad mode on the group's canonical
+        // mapping disables its directions — their bindings stop firing
+        // entirely instead of passing through.
         let profile = InputProfile {
             action_sets: vec![ActionSet {
                 name: "Default".to_string(),
                 inputs: vec![InputMapping {
                     mode: Some(SourceMode::Dpad { threshold: 0.5 }),
-                    ..InputMapping::new(InputSource::Button(GamepadButton::DpadUp))
+                    ..InputMapping::simple(
+                        InputSource::Button(GamepadButton::DpadUp),
+                        OutputAction::Keyboard { keycode: 17 },
+                    )
                 }],
             }],
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 1.0));
-        engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 1.0));
         assert!(engine
-            .tick(1_000)
-            .iter()
-            .all(|event| !matches!(event, OutputEvent::GamepadButton { .. })));
+            .process(stick(InputSource::Button(GamepadButton::DpadUp), 1.0))
+            .is_empty());
+        assert!(engine
+            .process(stick(InputSource::Button(GamepadButton::DpadUp), 0.0))
+            .is_empty());
+    }
+
+    #[test]
+    fn test_button_pad_mode_keeps_direction_bindings_live() {
+        // Button Pad is the independent-buttons behavior: the direction
+        // bindings fire like a bare mapping.
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![InputMapping {
+                    mode: Some(SourceMode::ButtonPad),
+                    ..InputMapping::simple(
+                        InputSource::Button(GamepadButton::DpadUp),
+                        OutputAction::Keyboard { keycode: 17 },
+                    )
+                }],
+            }],
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        assert_eq!(
+            engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 1.0)),
+            vec![OutputEvent::Key {
+                keycode: 17,
+                pressed: true
+            }]
+        );
+        assert_eq!(
+            engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 0.0)),
+            vec![OutputEvent::Key {
+                keycode: 17,
+                pressed: false
+            }]
+        );
     }
 
     #[test]

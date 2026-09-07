@@ -81,6 +81,14 @@ fn scroll_target(
     (top_pad + rows * row_h - OUTLINE_ALLOWANCE).max(0.0)
 }
 
+/// Which tab of the All Software page is showing: the game grid or the
+/// groups list.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Tab {
+    Software,
+    Groups,
+}
+
 /// Widgets and selection state of the All Software page.
 pub(super) struct AllSoftwareUi {
     page: gtk4::Box,
@@ -101,6 +109,17 @@ pub(super) struct AllSoftwareUi {
     /// The running scroll glide, so a new press replaces it mid-flight.
     scroll_anim: Rc<RefCell<Option<glib::SourceId>>>,
     opened: Cell<bool>,
+    /// The "sorted by …" label in the header; the sort cycler rewrites it.
+    ordering: gtk4::Label,
+    /// The header's page title; a group view renames it to the group.
+    title: gtk4::Label,
+    software_tab: gtk4::Label,
+    groups_tab: gtk4::Label,
+    /// Which tab is showing and, on the Groups tab, which group's games
+    /// the grid holds (`None` = the group list itself).
+    tab: Cell<Tab>,
+    groups_view: Cell<Option<i64>>,
+    groups: super::groups::GroupsUi,
 }
 
 pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
@@ -131,15 +150,63 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     header.append(&icon);
     let title = gtk4::Label::new(Some(&crate::tr!("All Software")));
     title.set_xalign(0.0);
-    title.set_hexpand(true);
     title.add_css_class(CSS_BP_PAGE_TITLE);
     crate::ui::helpers::crisp_label(&title);
     header.append(&title);
-    let ordering = gtk4::Label::new(Some(&crate::tr!("By name")));
+    // The Software/Groups tabs, Switch-style: the active one is bright and
+    // underlined, and both respond to clicks and to the shoulders.
+    let software_tab = gtk4::Label::new(Some(&crate::tr!("Software")));
+    let groups_tab = gtk4::Label::new(Some(&crate::tr!("Groups")));
+    for tab in [&software_tab, &groups_tab] {
+        tab.add_css_class(CSS_BP_TAB);
+        crate::ui::helpers::crisp_label(tab);
+        tab.set_valign(gtk4::Align::Center);
+    }
+    software_tab.add_css_class(CSS_BP_TAB_ACTIVE);
+    {
+        let tab_state = state.clone();
+        software_tab.set_cursor_from_name(Some("pointer"));
+        let software_click = gtk4::GestureClick::new();
+        software_click.connect_pressed(move |_, _, _, _| {
+            if let Some(big) = tab_state.borrow().big_picture.clone() {
+                big.all.set_tab(&tab_state, Tab::Software);
+            }
+        });
+        software_tab.add_controller(software_click);
+    }
+    {
+        let tab_state = state.clone();
+        groups_tab.set_cursor_from_name(Some("pointer"));
+        let groups_click = gtk4::GestureClick::new();
+        groups_click.connect_pressed(move |_, _, _, _| {
+            if let Some(big) = tab_state.borrow().big_picture.clone() {
+                big.all.set_tab(&tab_state, Tab::Groups);
+            }
+        });
+        groups_tab.add_controller(groups_click);
+    }
+    header.append(&software_tab);
+    header.append(&groups_tab);
+    let ordering = gtk4::Label::new(None);
     ordering.set_valign(gtk4::Align::Center);
     ordering.add_css_class(CSS_BP_PAGE_SUBTITLE);
     crate::ui::helpers::crisp_label(&ordering);
+    ordering.set_hexpand(true);
+    ordering.set_xalign(1.0);
     header.append(&ordering);
+    // The sort cycler: one button, Switch-style — each press moves to the
+    // next ordering, the label names the current one, and the Options key
+    // cycles too for the gamepad.
+    let sort_btn = gtk4::Button::from_icon_name("view-sort-descending-symbolic");
+    sort_btn.add_css_class(CSS_FLAT);
+    sort_btn.set_focusable(false);
+    sort_btn.set_valign(gtk4::Align::Center);
+    sort_btn.set_tooltip_text(Some(&crate::tr!("Change sort order")));
+    {
+        let sort_state = state.clone();
+        sort_btn.connect_clicked(move |_| cycle_sort(&sort_state));
+    }
+    header.append(&sort_btn);
     page.append(&header);
 
     let grid = VirtualGrid::new(240);
@@ -196,6 +263,9 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
     grid_overlay.set_clip_overlay(tooltip.widget(), false);
     page.append(&grid_overlay);
 
+    let groups = super::groups::GroupsUi::build(state);
+    page.append(groups.widget());
+
     let empty = gtk4::Label::new(Some(&crate::tr!("No games yet")));
     empty.add_css_class(CSS_BP_PAGE_SUBTITLE);
     empty.set_vexpand(true);
@@ -230,11 +300,68 @@ pub(super) fn build(state: &SharedState) -> (gtk4::Box, AllSoftwareUi) {
         ring,
         overlay: grid_overlay,
         opened: Cell::new(false),
+        ordering,
+        title,
+        software_tab,
+        groups_tab,
+        tab: Cell::new(Tab::Software),
+        groups_view: Cell::new(None),
+        groups,
     };
+    ui.update_ordering_label(state);
     (ui.page.clone(), ui)
 }
 
+/// Advance the All Software ordering to the next mode and persist it. The
+/// same cycle the sort button and the Options key drive.
+/// Create a group with the first unused "Group N" name. Groups created
+/// here start empty; games join through the assignment flow.
+fn create_group(state: &SharedState) -> Option<ira_models::Group> {
+    let db = state.borrow().db.clone();
+    let existing: Vec<String> = state.borrow().groups.iter().map(|g| g.name.clone()).collect();
+    let mut n = 1;
+    while existing.iter().any(|name| name == &format!("Group {n}")) {
+        n += 1;
+    }
+    let name = format!("Group {n}");
+    let id = ira_db::create_group(&db, &name).ok()?;
+    let group = ira_models::Group { id, name };
+    state.borrow_mut().groups.push(group.clone());
+    Some(group)
+}
+
+pub(super) fn cycle_sort(state: &SharedState) {
+    let next = {
+        let s = state.borrow();
+        let modes = ira_models::SortMode::ALL;
+        let current = modes
+            .iter()
+            .position(|mode| *mode == s.cfg.sort_mode)
+            .unwrap_or(0);
+        modes[(current + 1) % modes.len()]
+    };
+    state.borrow_mut().cfg.sort_mode = next;
+    if let Err(error) = state.borrow().cfg.save() {
+        eprintln!("Failed to save sort order: {error}");
+    }
+    if let Some(big) = state.borrow().big_picture.clone() {
+        big.all.update_ordering_label(state);
+        big.all.refresh(state);
+    }
+}
+
 impl AllSoftwareUi {
+    /// Name the current ordering in the header.
+    fn update_ordering_label(&self, state: &SharedState) {
+        let (mode, descending) = {
+            let s = state.borrow();
+            (s.cfg.sort_mode, s.cfg.sort_descending)
+        };
+        let arrow = if descending { " ↓" } else { "" };
+        self.ordering
+            .set_text(&format!("{}{arrow}", mode.display_label()));
+    }
+
     /// The game the selection currently rests on, if any.
     pub(super) fn selected_game(&self) -> Option<Game> {
         self.games
@@ -243,18 +370,167 @@ impl AllSoftwareUi {
             .cloned()
     }
 
-    /// Swap in the full alphabetized list. Rebuilds the store only when the
-    /// content actually differs; the achievement watcher re-reports often.
+    /// Whether the Groups tab's group list is showing (the grid can also
+    /// show a group's games — that is grid navigation as usual).
+    pub(super) fn in_groups_list(&self) -> bool {
+        self.tab.get() == Tab::Groups && self.groups_view.get().is_none()
+    }
+
+    /// Whether the game grid is the active surface (Software tab, or a
+    /// group's games).
+    pub(super) fn grid_active(&self) -> bool {
+        !self.in_groups_list()
+    }
+
+    /// Switch tabs. The Groups tab reloads its rows so groups created
+    /// elsewhere show up.
+    pub(super) fn set_tab(&self, state: &SharedState, tab: Tab) {
+        if self.tab.get() == tab {
+            return;
+        }
+        self.tab.set(tab);
+        self.software_tab.remove_css_class(CSS_BP_TAB_ACTIVE);
+        self.groups_tab.remove_css_class(CSS_BP_TAB_ACTIVE);
+        let active = match tab {
+            Tab::Software => &self.software_tab,
+            Tab::Groups => &self.groups_tab,
+        };
+        active.add_css_class(CSS_BP_TAB_ACTIVE);
+        if tab == Tab::Groups {
+            self.groups.reload(state);
+        }
+        self.apply_mode(state);
+    }
+
+    /// Step to the neighbouring tab (the shoulders), Switch-style.
+    pub(super) fn switch_tab(&self, state: &SharedState, delta: i32) {
+        let next = match (self.tab.get(), delta) {
+            (Tab::Software, 1) => Tab::Groups,
+            (Tab::Groups, -1) => Tab::Software,
+            _ => return,
+        };
+        self.set_tab(state, next);
+    }
+
+    /// Back out one level on this page: a group's games return to the
+    /// group list. Returns false when the page has nothing to pop and the
+    /// caller should leave for home.
+    pub(super) fn on_back(&self, state: &SharedState) -> bool {
+        if self.tab.get() == Tab::Groups && self.groups_view.get().is_some() {
+            self.groups_view.set(None);
+            self.apply_mode(state);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Open the group the list selection rests on — or create a fresh
+    /// group when the selection rests on New Group.
+    pub(super) fn activate_groups_selection(&self, state: &SharedState) {
+        if self.groups.selection_is_new_group() {
+            let Some(group) = create_group(state) else {
+                return;
+            };
+            self.groups.reload(state);
+            self.groups_view.set(Some(group.id));
+            self.apply_mode(state);
+            return;
+        }
+        if let Some(group) = self.groups.selected_group() {
+            self.groups_view.set(Some(group.id));
+            self.apply_mode(state);
+        }
+    }
+
+    /// Activate a group row by id (the mouse clicked a row).
+    pub(super) fn group_row_activated(state: &SharedState, group_id: i64) {
+        if let Some(big) = state.borrow().big_picture.clone() {
+            if group_id < 0 {
+                big.all.activate_groups_selection(state);
+                return;
+            }
+            big.all.groups_view.set(Some(group_id));
+            big.all.apply_mode(state);
+        }
+    }
+
+    /// Move the group-list selection (Up/Down on the Groups tab).
+    pub(super) fn groups_move(&self, delta: i32) {
+        self.groups.move_selection(delta);
+    }
+
+    /// Lay out the page for the current tab and view: which surface shows,
+    /// what the title says, and which button prompts the bottom rail has.
+    pub(super) fn apply_mode(&self, state: &SharedState) {
+        let show_list = self.in_groups_list();
+        self.groups.widget().set_visible(show_list);
+        self.overlay.set_visible(!show_list);
+        let open_group = self
+            .groups_view
+            .get()
+            .and_then(|id| state.borrow().groups.iter().find(|g| g.id == id).cloned());
+        match open_group {
+            Some(group) => self.title.set_text(&group.name),
+            None => self.title.set_text(&crate::tr!("All Software")),
+        }
+        self.refresh(state);
+        if let Some(big) = state.borrow().big_picture.clone() {
+            let prompts: Vec<(ira_input::GamepadButton, String)> = if show_list {
+                vec![
+                    (ira_input::GamepadButton::B, crate::tr!("Back")),
+                    (ira_input::GamepadButton::A, crate::tr!("Open")),
+                ]
+            } else {
+                vec![
+                    (ira_input::GamepadButton::B, crate::tr!("Back")),
+                    (ira_input::GamepadButton::Start, crate::tr!("Sort")),
+                    (ira_input::GamepadButton::A, crate::tr!("Play")),
+                ]
+            };
+            let prompt_refs: Vec<(ira_input::GamepadButton, &str)> =
+                prompts.iter().map(|(b, l)| (*b, l.as_str())).collect();
+            big.set_prompts(&prompt_refs);
+        }
+    }
+
+    /// Swap in the full game list under the current ordering. On the
+    /// Groups tab with a group open, only that group's members are shown.
+    /// Rebuilds the store only when the content actually differs; the
+    /// achievement watcher re-reports often.
     pub(super) fn refresh(&self, state: &SharedState) {
-        let show_hidden = state.borrow().cfg.show_hidden_games;
+        let (show_hidden, sort_mode, sort_descending) = {
+            let s = state.borrow();
+            (s.cfg.show_hidden_games, s.cfg.sort_mode, s.cfg.sort_descending)
+        };
+        let members: Option<std::collections::HashSet<i64>> =
+            self.groups_view.get().map(|group_id| {
+                let db = state.borrow().db.clone();
+                ira_db::get_game_ids_in_group(&db, group_id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect()
+            });
         let mut games: Vec<Game> = state
             .borrow()
             .games
             .iter()
             .filter(|g| !g.hidden || show_hidden)
+            .filter(|g| {
+                members
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&g.db_id))
+            })
             .cloned()
             .collect();
-        games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()).then_with(|| a.db_id.cmp(&b.db_id)));
+        games.sort_by(|a, b| {
+            let ord = sort_mode.compare(a, b).then_with(|| a.db_id.cmp(&b.db_id));
+            if sort_descending {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
 
         let unchanged = {
             let current = self.games.borrow();

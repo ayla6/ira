@@ -38,6 +38,8 @@ pub struct BigPictureUi {
     pub(super) cursor_hidden: Cell<bool>,
     pub(super) home: HomeUi,
     pub(super) all: AllSoftwareUi,
+    /// The per-game options menu (groups, sorting); topmost when open.
+    pub(super) game_menu: super::game_menu::GameMenu,
 }
 
 /// Build the big-picture window (fullscreen is applied by main.rs) and take over
@@ -142,6 +144,10 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     root.set_valign(gtk4::Align::Fill);
     overlay.add_overlay(&root);
 
+    let game_menu = super::game_menu::GameMenu::new(state);
+    overlay.add_overlay(game_menu.root());
+    overlay.set_measure_overlay(game_menu.root(), false);
+
     let ui = BigPictureUi {
         stack,
         home_page,
@@ -153,8 +159,17 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
         cursor_hidden: Cell::new(false),
         home,
         all,
+        game_menu,
     };
     (overlay, ui)
+}
+
+impl BigPictureUi {
+    /// Swap the bottom rail's button prompts (kept here so page modules
+    /// don't reach into the rail's fields).
+    pub(super) fn set_prompts(&self, items: &[(ira_input::GamepadButton, &str)]) {
+        self.bottom.set_prompts(items);
+    }
 }
 
 fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
@@ -171,7 +186,17 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
                 route(&state, NavCommand::Confirm)
             }
             gdk4::Key::Escape => {
-                if showing_all(&state) {
+                // Escape closes the options menu first, wherever it is.
+                let menu_open = state
+                    .borrow()
+                    .big_picture
+                    .as_ref()
+                    .is_some_and(|big| big.game_menu.is_open());
+                if menu_open {
+                    if let Some(big) = state.borrow().big_picture.clone() {
+                        big.game_menu.close();
+                    }
+                } else if showing_all(&state) {
                     show_home(&state);
                 } else {
                     quit_app(&state);
@@ -202,18 +227,61 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
 
 fn route(state: &SharedState, command: NavCommand) {
     super::mouse::note_controller_use(state);
+    // The options menu swallows navigation while it is open.
+    {
+        let menu_open = state
+            .borrow()
+            .big_picture
+            .as_ref()
+            .is_some_and(|big| big.game_menu.is_open());
+        if menu_open {
+            let Some(big) = state.borrow().big_picture.clone() else {
+                return;
+            };
+            match command {
+                NavCommand::Up => big.game_menu.move_selection(state, -1),
+                NavCommand::Down => big.game_menu.move_selection(state, 1),
+                NavCommand::Confirm => big.game_menu.activate(state),
+                NavCommand::Back | NavCommand::Options => big.game_menu.close(),
+                _ => {}
+            }
+            return;
+        }
+    }
     if showing_all(state) {
+        let Some(big) = state.borrow().big_picture.clone() else {
+            return;
+        };
         match command {
-            NavCommand::Left => grid_move(state, -1, 0),
-            NavCommand::Right => grid_move(state, 1, 0),
-            NavCommand::Up => grid_move(state, 0, -1),
-            NavCommand::Down => grid_move(state, 0, 1),
+            NavCommand::Options => {
+                // Options on a focused game opens its menu; with nothing
+                // focused it falls through to the sort cycler.
+                let game = big.all.selected_game();
+                match game {
+                    Some(game) => big.game_menu.open(state, &game),
+                    None if big.all.grid_active() => super::all_games::cycle_sort(state),
+                    None => {}
+                }
+            }
+            NavCommand::Back => {
+                if !big.all.on_back(state) {
+                    show_home(state);
+                }
+            }
+            NavCommand::PrevTab => big.all.switch_tab(state, -1),
+            NavCommand::NextTab => big.all.switch_tab(state, 1),
+            _ if big.all.in_groups_list() => match command {
+                NavCommand::Up => big.all.groups_move(-1),
+                NavCommand::Down => big.all.groups_move(1),
+                NavCommand::Confirm => big.all.activate_groups_selection(state),
+                _ => {}
+            },
+            NavCommand::Left => big.all.move_selection(-1, 0),
+            NavCommand::Right => big.all.move_selection(1, 0),
+            NavCommand::Up => big.all.move_selection(0, -1),
+            NavCommand::Down => big.all.move_selection(0, 1),
             NavCommand::Confirm => {
-                let game = state
-                    .borrow()
-                    .big_picture
-                    .as_ref()
-                    .and_then(|big| big.all.selected_game());
+                let game = big.all.selected_game();
                 if let Some(game) = game {
                     if let Err(error) =
                         crate::ui::play_button::launch_game(state, game.db_id, game.variant_id)
@@ -226,14 +294,18 @@ fn route(state: &SharedState, command: NavCommand) {
                     }
                 }
             }
-            NavCommand::Back => show_home(state),
         }
     } else {
         match command {
             NavCommand::Left => super::home::move_selection(state, -1),
             NavCommand::Right => super::home::move_selection(state, 1),
             NavCommand::Confirm => confirm(state),
-            NavCommand::Up | NavCommand::Down | NavCommand::Back => {}
+            NavCommand::Up
+            | NavCommand::Down
+            | NavCommand::Back
+            | NavCommand::Options
+            | NavCommand::PrevTab
+            | NavCommand::NextTab => {}
         }
     }
 }
@@ -244,12 +316,6 @@ fn showing_all(state: &SharedState) -> bool {
         .big_picture
         .as_ref()
         .is_some_and(|big| big.page.get() == Page::AllSoftware)
-}
-
-fn grid_move(state: &SharedState, dx: i32, dy: i32) {
-    if let Some(big) = state.borrow().big_picture.clone() {
-        big.all.move_selection(dx, dy);
-    }
 }
 
 /// The home screen's Confirm: launch the selected game, or open All
@@ -273,10 +339,7 @@ pub(super) fn open_all(state: &SharedState) {
     };
     big.page.set(Page::AllSoftware);
     big.stack.set_visible_child(&big.all_page);
-    big.bottom.set_prompts(&[
-        (ira_input::GamepadButton::B, &crate::tr!("Back")),
-        (ira_input::GamepadButton::A, &crate::tr!("Play")),
-    ]);
+    big.all.apply_mode(state);
     big.all.ensure_opened();
 }
 

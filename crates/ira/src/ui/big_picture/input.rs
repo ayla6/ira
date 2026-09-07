@@ -33,6 +33,11 @@ pub(super) enum NavCommand {
     Down,
     Confirm,
     Back,
+    /// The Options/Start key: a page-level action (sorting, grouping).
+    Options,
+    /// The shoulders switch the page's tabs (Software / Groups).
+    PrevTab,
+    NextTab,
 }
 
 /// What the bottom rail shows about connected gamepads: the count for the
@@ -254,6 +259,15 @@ fn fold_event(
         }
         InputSource::Button(GamepadButton::B) if pressed => {
             let _ = tx.send(NavMsg::Nav(NavCommand::Back));
+        }
+        InputSource::Button(GamepadButton::Start) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::Options));
+        }
+        InputSource::Button(GamepadButton::LeftShoulder) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::PrevTab));
+        }
+        InputSource::Button(GamepadButton::RightShoulder) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::NextTab));
         }
         InputSource::Axis(GamepadAxis::LeftX) => {
             nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)

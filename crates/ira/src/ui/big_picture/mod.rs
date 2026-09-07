@@ -4,6 +4,8 @@
 //! agreement; the shell's modules live beside it.
 
 mod all_games;
+mod game_menu;
+mod groups;
 mod home;
 mod input;
 mod marquee;

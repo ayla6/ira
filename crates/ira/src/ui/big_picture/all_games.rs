@@ -156,6 +156,9 @@ pub(super) struct AllSoftwareUi {
     /// The highlighted game as a (db, variant) key, shared with the bind
     /// closure so cells can style themselves without a rebuild.
     selected_key: Rc<Cell<GameKey>>,
+    /// The last selection before the grid lost it (manual scrolling) —
+    /// the arrows re-acquire here, keeping the column in view.
+    last_selected: Cell<Option<usize>>,
     /// The running scroll glide, so a new press replaces it mid-flight.
     scroll_anim: Rc<RefCell<Option<glib::SourceId>>>,
     /// The "sorted by …" label in the header.
@@ -387,6 +390,7 @@ pub(super) fn build(
         games: RefCell::new(Vec::new()),
         selected: Cell::new(None),
         selected_key,
+        last_selected: Cell::new(None),
         scroll_anim: Rc::new(RefCell::new(None)),
         ring,
         overlay: grid_overlay,
@@ -531,6 +535,9 @@ impl AllSoftwareUi {
             Some(id) => {
                 self.groups_view.set(Some(id));
                 self.selected.set(None);
+                // The group starts at its top: jump, don't glide from
+                // wherever the groups tiles were scrolled to.
+                self.scrolled.vadjustment().set_value(0.0);
                 self.apply_mode(state);
             }
             None => super::view::name_new_group(state, None),
@@ -555,18 +562,9 @@ impl AllSoftwareUi {
         let Some(id) = self.groups_grid.selected_group_id(state) else {
             return;
         };
-        let name = state
-            .borrow()
-            .groups
-            .iter()
-            .find(|g| g.id == id)
-            .map(|g| g.name.clone())
-            .unwrap_or_default();
         if let Some(big) = state.borrow().big_picture.clone() {
-            big.game_menu.open(
-                state,
-                super::game_menu::MenuKind::ConfirmDelete { id, name },
-            );
+            big.game_menu
+                .open(state, super::game_menu::MenuKind::ConfirmDelete { id });
         }
     }
 
@@ -813,10 +811,24 @@ impl AllSoftwareUi {
             return;
         }
         if self.selected.get().is_none() {
-            let value = self.scrolled.vadjustment().value();
-            let row = ((value / (item_h + sp) as f64).round().max(0.0) as usize)
-                .min((count - 1) / cols.max(1) as usize);
-            self.select((row * cols.max(1) as usize).min(count - 1));
+            let cols = cols.max(1) as usize;
+            let adj = self.scrolled.vadjustment();
+            let row_h = (item_h + sp) as f64;
+            // The old selection comes back, keeping its column, with the
+            // row clamped into whatever the view currently shows — the
+            // camera never jumps to where the selection used to be.
+            let first_row = (adj.value() / row_h).floor().max(0.0) as usize;
+            let last_row = (((adj.value() + adj.page_size()) / row_h).ceil() as usize)
+                .saturating_sub(1)
+                .min((count - 1) / cols);
+            let index = match self.last_selected.get() {
+                Some(old) if old < count => {
+                    let row = (old / cols).clamp(first_row, last_row);
+                    (row * cols + old % cols).min(count - 1)
+                }
+                _ => (first_row.min(last_row) * cols).min(count - 1),
+            };
+            self.select(index);
         }
         let selected = self.selected.get().unwrap_or(0);
         if let Some(next) = grid_move(selected, count, cols as usize, dx, dy) {
@@ -845,6 +857,7 @@ impl AllSoftwareUi {
             return false;
         };
         self.selected.set(Some(index));
+        self.last_selected.set(Some(index));
         self.selected_key.set(key);
         self.grid.rebind_visible();
         self.tooltip.set_text(&game.name);

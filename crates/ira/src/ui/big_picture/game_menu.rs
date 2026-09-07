@@ -20,8 +20,8 @@ pub(super) enum MenuKind {
     Sort,
     /// Pick the Groups tab's tile ordering.
     GroupOrder,
-    /// Ask before a group is deleted; carries its id and name.
-    ConfirmDelete { id: i64, name: String },
+    /// Ask before a group is deleted; carries its id.
+    ConfirmDelete { id: i64 },
 }
 
 /// One actionable row of the open menu.
@@ -255,7 +255,7 @@ impl GameMenu {
                 }
                 *self.rows.borrow_mut() = rows;
             }
-            MenuKind::ConfirmDelete { id, name } => {
+            MenuKind::ConfirmDelete { id } => {
                 let header = gtk4::Label::new(Some(&crate::tr!("Delete group")));
                 header.set_xalign(0.0);
                 header.add_css_class(CSS_BP_MENU_TITLE);
@@ -264,11 +264,11 @@ impl GameMenu {
 
                 let mut rows = Vec::new();
                 let index = rows.len();
-                self.append_row(state, &crate::tr!("Keep {}").replacen("{}", &name, 1), index, false);
-                rows.push(MenuRow::Cancel);
-                let index = rows.len();
                 self.append_row(state, &crate::tr!("Delete"), index, false);
                 rows.push(MenuRow::DeleteGroup { id });
+                let index = rows.len();
+                self.append_row(state, &crate::tr!("Cancel"), index, false);
+                rows.push(MenuRow::Cancel);
                 *self.rows.borrow_mut() = rows;
             }
         }

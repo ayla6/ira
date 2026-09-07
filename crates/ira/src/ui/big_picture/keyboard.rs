@@ -122,9 +122,11 @@ impl Keyboard {
         }
         let panel = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
         panel.add_css_class(CSS_BP_MENU_PANEL);
-        panel.set_halign(gtk4::Align::Center);
-        panel.set_valign(gtk4::Align::Center);
-        panel.set_size_request(880, -1);
+        panel.add_css_class(CSS_BP_KEYBOARD);
+        // The keyboard takes over the whole horizontal area and sits at
+        // the bottom of the screen.
+        panel.set_halign(gtk4::Align::Fill);
+        panel.set_valign(gtk4::Align::End);
 
         let root = gtk4::Overlay::new();
         // The overlay is a sibling of the bp-root Box, so it must carry the
@@ -168,10 +170,6 @@ impl Keyboard {
         *self.buffer.borrow_mut() = initial.to_string();
         *self.prompt.borrow_mut() = prompt.to_string();
         *self.on_ok.borrow_mut() = Some(on_ok);
-        // The keyboard takes over the screen: the panel spans most of the
-        // window so the keys and the hint row read at TV distance.
-        let width = (state.borrow().window.width() as f64 * 0.82).round() as i32;
-        self.panel.set_size_request(width.max(880), -1);
         self.cursor.set((1, 0));
         self.rebuild(state, prompt);
         self.refresh_preview();

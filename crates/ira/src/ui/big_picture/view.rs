@@ -357,8 +357,6 @@ fn route(state: &SharedState, command: NavCommand) {
             // root tabs show no back affordance at all.
             big.all.on_back(state);
         }
-        NavCommand::PrevTab => big.all.switch_tab(state, -1),
-        NavCommand::NextTab => big.all.switch_tab(state, 1),
         _ if big.all.in_groups_tiles() => match command {
             NavCommand::Secondary => big.all.groups_delete_selected(state),
             NavCommand::Options => big.all.groups_rename_selected(state),

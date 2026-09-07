@@ -33,6 +33,7 @@ pub const CSS_BP_KEY_SELECTED: &str = "bp-key-selected";
 pub const CSS_BP_KEY_ACTIVE: &str = "bp-key-active";
 pub const CSS_BP_KEY_BADGE: &str = "bp-key-badge";
 pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
+pub const CSS_BP_KEYBOARD: &str = "bp-keyboard";
 /// The selection ring reaches this far past a tile's edge (4px gap plus
 /// the 4px frame), and the tooltip's tail tip rests 3px beyond the
 /// frame — 11px from the tile edge in total, on every page.
@@ -399,11 +400,9 @@ fn big_picture_css(s: f64) -> String {
     color: alpha(@theme_fg_color, 0.55);
 }}
 /* The tab picker: libadwaita's toggle group, minus its bold labels. */
-.bp-tabs toggle {{
-    font-weight: normal;
-}}
+.bp-tabs toggle,
 .bp-tabs toggle label {{
-    font-size: {subtitle};
+    font-weight: normal;
 }}
 .bp-menu-dim {{
     background: alpha(black, 0.6);
@@ -472,6 +471,9 @@ fn big_picture_css(s: f64) -> String {
 }}
 .bp-key-active label {{
     color: @accent_color;
+}}
+.bp-keyboard {{
+    border-radius: 16px 16px 0 0;
 }}
 .bp-key-badge {{
     min-width: {badge};

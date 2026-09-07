@@ -40,13 +40,20 @@ pub(super) fn grid_move(current: usize, count: usize, cols: usize, dx: i32, dy: 
     let count = count as i64;
     let col = (current as i64) % cols;
     let row = (current as i64) / cols;
-    let next_col = (col + dx as i64).clamp(0, cols - 1);
     let last_row = (count - 1) / cols;
     let next_row = (row + dy as i64).clamp(0, last_row);
+    // Horizontal moves wrap within the row: the row's right edge comes
+    // around to its own left edge. A short last row wraps within the
+    // cells it actually has.
+    let row_len = (count - row * cols).min(cols);
+    let next_col = if dx != 0 {
+        (col + dx as i64).rem_euclid(row_len)
+    } else {
+        col
+    };
     let next = next_row * cols + next_col;
-    // A short last row has no cell under many columns: a vertical move
-    // onto a missing cell stays put instead of dragging the selection
-    // sideways, and moving past either edge never wraps around.
+    // A vertical move onto a short last row's missing column stays put
+    // instead of dragging the selection sideways.
     (next < count && next != current as i64).then_some(next as usize)
 }
 
@@ -550,7 +557,8 @@ impl AllSoftwareUi {
     pub(super) fn on_back(&self, state: &SharedState) -> bool {
         if self.tab.get() == Tab::Groups && self.groups_view.get().is_some() {
             self.groups_view.set(None);
-            self.apply_mode(state);
+            // Popping the group view is not a category change: no slide.
+            self.without_slide(|s| s.apply_mode(state));
             true
         } else {
             false
@@ -567,10 +575,20 @@ impl AllSoftwareUi {
                 // The group starts at its top: jump, don't glide from
                 // wherever the groups tiles were scrolled to.
                 self.scrolled.vadjustment().set_value(0.0);
-                self.apply_mode(state);
+                // Same surface swap, not a category change: no slide.
+                self.without_slide(|s| s.apply_mode(state));
             }
             None => super::view::name_new_group(state, None),
         }
+    }
+
+    /// Run a surface change with the tab slide suppressed — a group view
+    /// swap is not a category change.
+    fn without_slide(&self, f: impl FnOnce(&Self)) {
+        self.surfaces.set_transition_type(gtk4::StackTransitionType::None);
+        f(self);
+        self.surfaces
+            .set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
     }
 
     /// The mouse clicked a groups tile: first click focuses it, a click
@@ -1270,10 +1288,10 @@ mod tests {
     const COLS: usize = 5;
 
     #[test]
-    fn test_grid_move_horizontally_clamped_to_row() {
+    fn test_grid_move_wraps_within_the_row() {
         assert_eq!(grid_move(0, 10, COLS, 1, 0), Some(1));
-        assert_eq!(grid_move(4, 10, COLS, 1, 0), None, "row edge stays put");
-        assert_eq!(grid_move(5, 10, COLS, -1, 0), None);
+        assert_eq!(grid_move(4, 10, COLS, 1, 0), Some(0), "row edge wraps left");
+        assert_eq!(grid_move(5, 10, COLS, -1, 0), Some(9), "row start wraps right");
         assert_eq!(grid_move(5, 10, COLS, 1, 0), Some(6));
     }
 
@@ -1293,6 +1311,9 @@ mod tests {
         assert_eq!(grid_move(3, 7, COLS, 0, 1), None);
         assert_eq!(grid_move(4, 7, COLS, 0, 1), None);
         assert_eq!(grid_move(6, 7, COLS, 0, 1), None);
+        // The short row wraps within its own two cells.
+        assert_eq!(grid_move(6, 7, COLS, 1, 0), Some(5));
+        assert_eq!(grid_move(5, 7, COLS, -1, 0), Some(6));
     }
 
     #[test]

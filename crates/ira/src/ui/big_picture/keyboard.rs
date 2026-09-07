@@ -19,7 +19,6 @@ pub(super) enum Key {
     Space,
     Backspace,
     Ok,
-    Cancel,
 }
 
 /// Which key table is showing.
@@ -33,9 +32,9 @@ pub(super) enum Page {
 /// action column riding every row's last entry.
 const LETTER_ROWS: &[&[Key]] = &[
     &[
-        Key::Char('#'), Key::Char('['), Key::Char(']'), Key::Char('$'), Key::Char('%'),
-        Key::Char('^'), Key::Char('&'), Key::Char('*'), Key::Char('('), Key::Char(')'),
-        Key::Char('_'), Key::Backspace,
+        Key::Char('1'), Key::Char('2'), Key::Char('3'), Key::Char('4'), Key::Char('5'),
+        Key::Char('6'), Key::Char('7'), Key::Char('8'), Key::Char('9'), Key::Char('0'),
+        Key::Char('-'), Key::Backspace,
     ],
     &[
         Key::Char('q'), Key::Char('w'), Key::Char('e'), Key::Char('r'), Key::Char('t'),
@@ -52,15 +51,15 @@ const LETTER_ROWS: &[&[Key]] = &[
         Key::Char('n'), Key::Char('m'), Key::Char('<'), Key::Char('>'), Key::Char('+'),
         Key::Char('='), Key::Ok,
     ],
-    &[Key::Shift, Key::Page, Key::Space, Key::Cancel, Key::Ok],
+    &[Key::Shift, Key::Page, Key::Space],
 ];
 
 /// The symbol page: digits and punctuation, same shape as the letter page.
 const SYMBOL_ROWS: &[&[Key]] = &[
     &[
-        Key::Char('1'), Key::Char('2'), Key::Char('3'), Key::Char('4'), Key::Char('5'),
-        Key::Char('6'), Key::Char('7'), Key::Char('8'), Key::Char('9'), Key::Char('0'),
-        Key::Char('-'), Key::Backspace,
+        Key::Char('~'), Key::Char('`'), Key::Char('|'), Key::Char('_'), Key::Char('{'),
+        Key::Char('}'), Key::Char('['), Key::Char(']'), Key::Char('\\'), Key::Char('<'),
+        Key::Char('>'), Key::Backspace,
     ],
     &[
         Key::Char('/'), Key::Char(':'), Key::Char(';'), Key::Char('('), Key::Char(')'),
@@ -68,17 +67,25 @@ const SYMBOL_ROWS: &[&[Key]] = &[
         Key::Char('*'),
     ],
     &[
-        Key::Char('+'), Key::Char('='), Key::Char('<'), Key::Char('>'), Key::Char('%'),
-        Key::Char('#'), Key::Char('!'), Key::Char('?'), Key::Char('~'), Key::Char('`'),
-        Key::Char('^'),
+        Key::Char('<'), Key::Char('>'), Key::Char('('), Key::Char(')'), Key::Char('['),
+        Key::Char(']'), Key::Char('{'), Key::Char('}'), Key::Char('+'), Key::Char('='),
+        Key::Char('*'),
     ],
     &[
-        Key::Char(','), Key::Char('.'), Key::Char('\''), Key::Char('"'), Key::Char('_'),
-        Key::Char('|'), Key::Char('\\'), Key::Char('{'), Key::Char('}'), Key::Char('['),
-        Key::Char(']'), Key::Ok,
+        Key::Char('['), Key::Char(']'), Key::Char('{'), Key::Char('}'), Key::Char('('),
+        Key::Char(')'), Key::Char('-'), Key::Char('_'), Key::Char('/'), Key::Char(':'),
+        Key::Char('"'), Key::Ok,
     ],
-    &[Key::Shift, Key::Page, Key::Space, Key::Cancel, Key::Ok],
+    &[Key::Shift, Key::Page, Key::Space],
 ];
+
+/// A letter key's shifted self (the top row's digits become symbols).
+fn shifted(c: char) -> char {
+    match c {
+        '1' => '!', '2' => '@', '3' => '#', '4' => '$', '5' => '%', '6' => '^',
+        '7' => '&', '8' => '*', '9' => '(', '0' => ')', '-' => '_', c => c,
+    }
+}
 
 /// What to do with the finished name.
 type NameCallback = Box<dyn Fn(&SharedState, &str)>;
@@ -93,6 +100,9 @@ pub(super) struct Keyboard {
     cursor: Cell<(usize, usize)>,
     page: Cell<Page>,
     shift: Cell<bool>,
+    /// One-shot shift (L3): the next letter types uppercase, then it
+    /// clears. The Shift key itself is a caps-lock toggle.
+    once: Cell<bool>,
     /// Cursor-addressable key widgets of the showing page, for repaints.
     keys: RefCell<Vec<Vec<gtk4::Widget>>>,
     /// The prompt line the panel was opened with, kept for page/shift
@@ -141,6 +151,7 @@ impl Keyboard {
             cursor: Cell::new((1, 0)),
             page: Cell::new(Page::Letters),
             shift: Cell::new(false),
+            once: Cell::new(false),
             keys: RefCell::new(Vec::new()),
             prompt: RefCell::new(String::new()),
             family: Cell::new(ira_input::ControllerFamily::Xbox),
@@ -189,6 +200,8 @@ impl Keyboard {
         self.root.set_visible(false);
         *self.on_ok.borrow_mut() = None;
         *self.buffer.borrow_mut() = String::new();
+        self.shift.set(false);
+        self.once.set(false);
         if let Some(big) = state.borrow().big_picture.clone() {
             big.all.apply_mode(state);
         }
@@ -201,17 +214,26 @@ impl Keyboard {
         }
     }
 
+    /// Caps lock or the one-shot shift raises the keys.
+    fn shifted_now(&self) -> bool {
+        self.shift.get() || self.once.get()
+    }
+
     fn key_label(&self, key: Key) -> String {
         match key {
             Key::Char(c) => {
-                let c = if self.shift.get() && self.page.get() == Page::Letters {
-                    c.to_ascii_uppercase()
+                if self.shifted_now() && self.page.get() == Page::Letters {
+                    let c = shifted(c);
+                    if c.is_ascii_lowercase() {
+                        c.to_ascii_uppercase().to_string()
+                    } else {
+                        c.to_string()
+                    }
                 } else {
-                    c
-                };
-                c.to_string()
+                    c.to_string()
+                }
             }
-            Key::Shift => crate::tr!("Shift"),
+            Key::Shift => "⬆".to_string(),
             Key::Page => match self.page.get() {
                 Page::Letters => crate::tr!("#+="),
                 Page::Symbols => crate::tr!("ABC"),
@@ -219,7 +241,6 @@ impl Keyboard {
             Key::Space => crate::tr!("Space"),
             Key::Backspace => "⌫".to_string(),
             Key::Ok => crate::tr!("OK"),
-            Key::Cancel => crate::tr!("Cancel"),
         }
     }
 
@@ -228,8 +249,7 @@ impl Keyboard {
     fn badge(key: Key) -> Option<ira_input::GamepadButton> {
         match key {
             Key::Backspace => Some(ira_input::GamepadButton::B),
-            Key::Cancel => Some(ira_input::GamepadButton::X),
-            Key::Ok => Some(ira_input::GamepadButton::A),
+            Key::Ok => Some(ira_input::GamepadButton::Start),
             _ => None,
         }
     }
@@ -242,8 +262,7 @@ impl Keyboard {
         match key {
             Key::Shift => Some((0, 4, 1, 1)),
             Key::Page => Some((1, 4, 1, 1)),
-            Key::Space => Some((2, 4, 8, 1)),
-            Key::Cancel => Some((10, 4, 1, 1)),
+            Key::Space => Some((2, 4, 9, 1)),
             Key::Ok if row == 4 => None,
             Key::Ok => Some((11, 3, 1, 2)),
             Key::Backspace => Some((11, 0, 1, 1)),
@@ -357,13 +376,25 @@ impl Keyboard {
             }
             map.push(row_map);
         }
+        // Return is only meaningful for multiline input, which a group
+        // name is not: it sits in its usual spot, greyed out.
+        let return_key = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        return_key.add_css_class(CSS_BP_KEY);
+        return_key.add_css_class(CSS_BP_KEY_DISABLED);
+        let return_label = gtk4::Label::new(Some(&crate::tr!("Return")));
+        return_label.set_halign(gtk4::Align::Center);
+        return_label.set_valign(gtk4::Align::Center);
+        crate::ui::helpers::crisp_label(&return_label);
+        return_key.append(&return_label);
+        grid.attach(&return_key, 11, 1, 1, 2);
+
         *self.keys.borrow_mut() = map;
         self.panel.append(&grid);
 
         // The shortcut row, Switch-style: every action with its pad
         // button beside it, in the pad's own colors.
         let hints = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
-        hints.set_halign(gtk4::Align::Center);
+        hints.set_halign(gtk4::Align::End);
         hints.set_margin_top(8);
         let family = self.family.get();
         for (button, label) in [
@@ -428,20 +459,24 @@ impl Keyboard {
     pub(super) fn press(&self, state: &SharedState, key: Key) {
         match key {
             Key::Char(c) => {
-                let c = if self.shift.get() && self.page.get() == Page::Letters {
+                let raised = self.shifted_now() && self.page.get() == Page::Letters;
+                let c = shifted(c);
+                let c = if raised && c.is_ascii_lowercase() {
                     c.to_ascii_uppercase()
                 } else {
                     c
                 };
                 self.buffer.borrow_mut().push(c);
+                if self.once.take() {
+                    let cursor = self.cursor.get();
+                    self.rebuild(state, &self.prompt.borrow().clone());
+                    self.cursor.set(cursor);
+                    self.refresh_cursor();
+                }
             }
             Key::Space => self.buffer.borrow_mut().push(' '),
             Key::Backspace => {
                 self.buffer.borrow_mut().pop();
-            }
-            Key::Cancel => {
-                self.close(state);
-                return;
             }
             Key::Page => {
                 self.page
@@ -484,6 +519,20 @@ impl Keyboard {
             }
         }
         self.refresh_preview();
+    }
+
+    /// Start: commit the text, same as the OK key.
+    pub(super) fn press_ok(&self, state: &SharedState) {
+        self.press(state, Key::Ok);
+    }
+
+    /// L3: raise the very next letter only.
+    pub(super) fn bump_shift(&self, state: &SharedState) {
+        self.once.set(!self.once.get());
+        let cursor = self.cursor.get();
+        self.rebuild(state, &self.prompt.borrow().clone());
+        self.cursor.set(cursor);
+        self.refresh_cursor();
     }
 
     /// Delete the last character (the B button's job on a keyboard).

@@ -41,6 +41,8 @@ pub(super) enum NavCommand {
     /// The X button: a secondary action on the focused thing (delete a
     /// group on the Groups tiles).
     Secondary,
+    /// The left stick click (L3): a keyboard modifier (one-shot shift).
+    Tertiary,
 }
 
 /// What the bottom rail shows about connected gamepads: the count for the
@@ -274,6 +276,9 @@ fn fold_event(
         }
         InputSource::Button(GamepadButton::X) if pressed => {
             let _ = tx.send(NavMsg::Nav(NavCommand::Secondary));
+        }
+        InputSource::Button(GamepadButton::LeftStick) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::Tertiary));
         }
         InputSource::Axis(GamepadAxis::LeftX) => {
             nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)

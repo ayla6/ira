@@ -260,7 +260,9 @@ impl GameMenu {
                 *self.rows.borrow_mut() = rows;
             }
             MenuKind::ConfirmDelete { id, name } => {
-                let header = gtk4::Label::new(Some(&crate::tr!("Delete group")));
+                let header = gtk4::Label::new(Some(
+                    &crate::tr!("Delete {}?").replacen("{}", &name, 1),
+                ));
                 header.set_xalign(0.0);
                 header.set_wrap(true);
                 header.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
@@ -270,15 +272,10 @@ impl GameMenu {
 
                 let mut rows = Vec::new();
                 let index = rows.len();
-                self.append_row(
-                    state,
-                    &crate::tr!("Delete {}").replacen("{}", &name, 1),
-                    index,
-                    false,
-                );
+                self.append_row(state, &crate::tr!("Yes"), index, false);
                 rows.push(MenuRow::DeleteGroup { id });
                 let index = rows.len();
-                self.append_row(state, &crate::tr!("Cancel"), index, false);
+                self.append_row(state, &crate::tr!("No"), index, false);
                 rows.push(MenuRow::Cancel);
                 *self.rows.borrow_mut() = rows;
             }

@@ -281,8 +281,13 @@ fn route(state: &SharedState, command: NavCommand) {
                 NavCommand::Right => big.keyboard.move_cursor(1, 0),
                 NavCommand::Confirm => big.keyboard.press_selected(state),
                 NavCommand::Back => big.keyboard.backspace(),
-                NavCommand::Secondary | NavCommand::Options => big.keyboard.close(state),
-                _ => {}
+                // The shoulders walk the keys themselves here.
+                NavCommand::PrevTab => big.keyboard.move_cursor(-1, 0),
+                NavCommand::NextTab => big.keyboard.move_cursor(1, 0),
+                // Start commits, X cancels, L3 shifts the next letter.
+                NavCommand::Options => big.keyboard.press_ok(state),
+                NavCommand::Secondary => big.keyboard.close(state),
+                NavCommand::Tertiary => big.keyboard.bump_shift(state),
             }
             return;
         }
@@ -335,6 +340,7 @@ fn route(state: &SharedState, command: NavCommand) {
             | NavCommand::Back
             | NavCommand::Options
             | NavCommand::Secondary
+            | NavCommand::Tertiary
             | NavCommand::PrevTab
             | NavCommand::NextTab => {}
         }

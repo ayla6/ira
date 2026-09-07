@@ -18,7 +18,6 @@ pub(super) enum Key {
     Page,
     Space,
     Backspace,
-    Return,
     Ok,
     Cancel,
 }
@@ -41,12 +40,12 @@ const LETTER_ROWS: &[&[Key]] = &[
     &[
         Key::Char('q'), Key::Char('w'), Key::Char('e'), Key::Char('r'), Key::Char('t'),
         Key::Char('y'), Key::Char('u'), Key::Char('i'), Key::Char('o'), Key::Char('p'),
-        Key::Char('@'), Key::Return,
+        Key::Char('@'),
     ],
     &[
         Key::Char('a'), Key::Char('s'), Key::Char('d'), Key::Char('f'), Key::Char('g'),
         Key::Char('h'), Key::Char('j'), Key::Char('k'), Key::Char('l'), Key::Char(';'),
-        Key::Char('"'), Key::Return,
+        Key::Char('"'),
     ],
     &[
         Key::Char('z'), Key::Char('x'), Key::Char('c'), Key::Char('v'), Key::Char('b'),
@@ -66,12 +65,12 @@ const SYMBOL_ROWS: &[&[Key]] = &[
     &[
         Key::Char('/'), Key::Char(':'), Key::Char(';'), Key::Char('('), Key::Char(')'),
         Key::Char('$'), Key::Char('&'), Key::Char('@'), Key::Char('"'), Key::Char('\''),
-        Key::Char('*'), Key::Return,
+        Key::Char('*'),
     ],
     &[
         Key::Char('+'), Key::Char('='), Key::Char('<'), Key::Char('>'), Key::Char('%'),
         Key::Char('#'), Key::Char('!'), Key::Char('?'), Key::Char('~'), Key::Char('`'),
-        Key::Char('^'), Key::Return,
+        Key::Char('^'),
     ],
     &[
         Key::Char(','), Key::Char('.'), Key::Char('\''), Key::Char('"'), Key::Char('_'),
@@ -219,7 +218,6 @@ impl Keyboard {
             },
             Key::Space => crate::tr!("Space"),
             Key::Backspace => "⌫".to_string(),
-            Key::Return => crate::tr!("Return"),
             Key::Ok => crate::tr!("OK"),
             Key::Cancel => crate::tr!("Cancel"),
         }
@@ -248,10 +246,6 @@ impl Keyboard {
             Key::Cancel => Some((10, 4, 1, 1)),
             Key::Ok if row == 4 => None,
             Key::Ok => Some((11, 3, 1, 2)),
-            Key::Return => match row {
-                1 => Some((11, 1, 1, 2)),
-                _ => None,
-            },
             Key::Backspace => Some((11, 0, 1, 1)),
             Key::Char(_) => Some((col as i32, row as i32, 1, 1)),
         }
@@ -271,14 +265,16 @@ impl Keyboard {
         if matches!(key, Key::Shift) && self.shift.get() {
             button.add_css_class(CSS_BP_KEY_ACTIVE);
         }
+        // The badge rides an overlay above the label, so its presence
+        // never shifts the letter's centering.
+        let key_surface = gtk4::Overlay::new();
         let label = gtk4::Label::new(Some(&self.key_label(key)));
-        // Expand+center: a Box ignores halign along its own axis, so
-        // without expanding, the letter hugs the key's left edge.
         label.set_hexpand(true);
         label.set_halign(gtk4::Align::Center);
         label.set_valign(gtk4::Align::Center);
         crate::ui::helpers::crisp_label(&label);
-        button.append(&label);
+        key_surface.set_child(Some(&label));
+        button.append(&key_surface);
         // Action keys wear their pad button in the corner, Switch-style.
         if let Some(badge) = Self::badge(key) {
             let badge_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
@@ -307,8 +303,10 @@ impl Keyboard {
                 ira_input::InputSource::Button(badge),
                 self.family.get(),
             );
-            button.append(&badge_box);
+            key_surface.add_overlay(&badge_box);
         }
+        // The keys stretch with the panel and take the entire width.
+        button.set_hexpand(true);
         button.set_size_request(80, 72);
         let click_state = state.clone();
         let click = gtk4::GestureClick::new();
@@ -331,18 +329,22 @@ impl Keyboard {
         crate::ui::helpers::clear_children(&self.panel);
         let title = gtk4::Label::new(Some(prompt));
         title.set_xalign(0.0);
+        title.set_wrap(true);
+        title.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
         title.add_css_class(CSS_BP_PAGE_TITLE);
         crate::ui::helpers::crisp_label(&title);
         self.panel.append(&title);
         self.preview.add_css_class(CSS_BP_KEY_PREVIEW);
         self.preview.set_xalign(0.0);
+        self.preview.set_wrap(true);
+        self.preview.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
         crate::ui::helpers::crisp_label(&self.preview);
         self.panel.append(&self.preview);
 
         let grid = gtk4::Grid::new();
         grid.set_row_spacing(8);
         grid.set_column_spacing(8);
-        grid.set_halign(gtk4::Align::Center);
+        grid.set_hexpand(true);
         let mut map: Vec<Vec<gtk4::Widget>> = Vec::new();
         for (row, keys) in self.rows().iter().enumerate() {
             let mut row_map = Vec::new();
@@ -466,7 +468,7 @@ impl Keyboard {
                 self.refresh_preview();
                 return;
             }
-            Key::Return | Key::Ok => {
+            Key::Ok => {
                 let text = self.buffer.borrow().trim().to_string();
                 // An unnamed group helps nobody: refuse to commit and let
                 // the name keep being typed.

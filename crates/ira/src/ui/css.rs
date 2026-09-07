@@ -404,6 +404,9 @@ fn big_picture_css(s: f64) -> String {
 .bp-tabs toggle label {{
     font-weight: normal;
 }}
+.bp-tabs toggle label {{
+    font-size: {subtitle};
+}}
 .bp-menu-dim {{
     background: alpha(black, 0.6);
 }}

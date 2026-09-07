@@ -324,6 +324,12 @@ impl GroupsGrid {
 
     /// Anchor the ring to the selected slot's live position.
     pub(super) fn position_ring(&self) {
+        // Without a real allocation the anchor math produces the speck at
+        // the surface's origin; wait for the hooks that follow layout.
+        if self.overlay.width() <= 1 || self.overlay.height() <= 1 {
+            self.ring.set_visible(false);
+            return;
+        }
         let Some(slot) = self.slots.borrow().get(self.selection.get()).cloned() else {
             self.ring.set_visible(false);
             return;

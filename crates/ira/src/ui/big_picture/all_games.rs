@@ -50,10 +50,11 @@ pub(super) fn grid_move(current: usize, count: usize, cols: usize, dx: i32, dy: 
     (next < count && next != current as i64).then_some(next as usize)
 }
 
-/// The selection outline pokes this far past a tile's edge; the scroll
-/// rests that much above every row boundary so the top row's outline
-/// stays on screen instead of being shaved at the viewport edge.
-const OUTLINE_ALLOWANCE: f64 = 7.0;
+/// The selection outline pokes this far past a tile's edge (the ring's
+/// 11px outset plus a margin); the scroll rests that much above every row
+/// boundary so the whole ring stays on screen instead of being shaved at
+/// the viewport edge — the top row included.
+const OUTLINE_ALLOWANCE: f64 = 18.0;
 
 /// The vertical scroll that keeps the selected row in view, resting only
 /// on whole-row boundaries (minus the outline's room): the viewport's top
@@ -102,7 +103,6 @@ impl ShoulderBadge {
     fn new() -> Self {
         let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         slot.set_valign(gtk4::Align::Center);
-        slot.set_margin_end(12);
         let glyph = gtk4::Image::new();
         glyph.set_halign(gtk4::Align::Center);
         glyph.set_valign(gtk4::Align::Center);
@@ -170,6 +170,8 @@ pub(super) struct AllSoftwareUi {
     /// The connected pad's family, so the badges draw its glyphs.
     shoulder_family: Cell<ira_input::ControllerFamily>,
     shoulder_scale: Cell<f64>,
+    /// The scale the tab picker's icons were sized at.
+    tab_icon_scale: Cell<f64>,
     /// Which tab is showing and, on the Groups tab, which group's games
     /// the grid holds (`None` = the groups tile grid itself).
     tab: Cell<Tab>,
@@ -219,8 +221,8 @@ pub(super) fn build(
         });
     }
     let start = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
-    start.append(&ordering);
     start.append(&sort_btn);
+    start.append(&ordering);
     header.set_start_widget(Some(&start));
     let shoulder_l = ShoulderBadge::new();
     let shoulder_r = ShoulderBadge::new();
@@ -400,6 +402,7 @@ pub(super) fn build(
         shoulder_r,
         shoulder_family: Cell::new(ira_input::ControllerFamily::Xbox),
         shoulder_scale: Cell::new(0.0),
+        tab_icon_scale: Cell::new(0.0),
         tab: Cell::new(Tab::Recent),
         groups_view: Cell::new(None),
         groups_grid: groups,
@@ -418,6 +421,10 @@ impl AllSoftwareUi {
     /// Name the current ordering in the header: the game sort on
     /// Everything, the tile order on Groups, nothing on Recent.
     pub(super) fn update_ordering_label(&self, state: &SharedState) {
+        if let Some(parent) = self.ordering.parent() {
+            // The sort button rides the same wing; Recent shows neither.
+            parent.set_visible(self.tab.get() != Tab::Recent);
+        }
         match self.tab.get() {
             Tab::Recent => {
                 self.ordering.set_text("");
@@ -458,6 +465,28 @@ impl AllSoftwareUi {
     pub(super) fn set_icon_scale(&self, scale: f64) {
         self.shoulder_scale.set(scale);
         self.refresh_shoulders();
+        self.scale_tab_icons(scale);
+    }
+
+    /// The tab picker's icons default to 16px regardless of the viewport;
+    /// size them with the same scale the rest of the header uses.
+    fn scale_tab_icons(&self, scale: f64) {
+        if (self.tab_icon_scale.get() - scale).abs() < 0.01 {
+            return;
+        }
+        self.tab_icon_scale.set(scale);
+        let pixel = (22.0 * scale).round().max(8.0) as i32;
+        let mut stack = vec![self.tabs.clone().upcast::<gtk4::Widget>()];
+        while let Some(widget) = stack.pop() {
+            if let Some(image) = widget.downcast_ref::<gtk4::Image>() {
+                image.set_pixel_size(pixel);
+            }
+            let mut child = widget.first_child();
+            while let Some(node) = child {
+                stack.push(node.clone());
+                child = node.next_sibling();
+            }
+        }
     }
 
     /// The connected pad's family changed: redraw the badges' glyphs.
@@ -504,14 +533,14 @@ impl AllSoftwareUi {
         self.apply_mode(state);
     }
 
-    /// Step to the neighbouring tab (the shoulders), clamped at the ends.
+    /// Step to the neighbouring tab (the shoulders), wrapping around.
     pub(super) fn switch_tab(&self, state: &SharedState, delta: i32) {
         const ORDER: [Tab; 3] = [Tab::Recent, Tab::Everything, Tab::Groups];
         let current = ORDER
             .iter()
             .position(|t| *t == self.tab.get())
             .unwrap_or(0) as i64;
-        let next = (current + delta as i64).clamp(0, ORDER.len() as i64 - 1) as usize;
+        let next = (current + delta as i64).rem_euclid(ORDER.len() as i64) as usize;
         self.set_tab(state, ORDER[next]);
     }
 
@@ -562,9 +591,18 @@ impl AllSoftwareUi {
         let Some(id) = self.groups_grid.selected_group_id(state) else {
             return;
         };
+        let name = state
+            .borrow()
+            .groups
+            .iter()
+            .find(|g| g.id == id)
+            .map(|g| g.name.clone())
+            .unwrap_or_default();
         if let Some(big) = state.borrow().big_picture.clone() {
-            big.game_menu
-                .open(state, super::game_menu::MenuKind::ConfirmDelete { id });
+            big.game_menu.open(
+                state,
+                super::game_menu::MenuKind::ConfirmDelete { id, name },
+            );
         }
     }
 
@@ -605,16 +643,16 @@ impl AllSoftwareUi {
         state.borrow_mut().groups = ira_db::get_all_groups(&db).unwrap_or_default();
     }
 
-    /// After a create or rename: sync the tiles, land the selection on
-    /// the touched group, and open its game view.
+    /// After a create, rename, or delete: sync the tiles and land the
+    /// selection on the touched group — without opening it.
     pub(super) fn sync_and_focus_group(&self, state: &SharedState, group_id: i64) {
         self.sync_groups(state);
+        self.groups_view.set(None);
         self.groups_grid.reload(state);
         if let Some(index) = state.borrow().groups.iter().position(|g| g.id == group_id) {
             self.groups_grid.select_tile(index + 1);
             self.groups_grid.repaint(state);
         }
-        self.groups_view.set(Some(group_id));
         self.selected.set(None);
         self.apply_mode(state);
     }
@@ -1275,15 +1313,15 @@ mod tests {
         // Row 0 fully visible: no scroll.
         assert_eq!(scroll_target(0, COLS, row_h, top_pad, 0.0, 300.0), 0.0);
         // Row 2 (index 10) pokes 8px past the bottom: the scroll snaps up
-        // a WHOLE row minus the outline's room (101 = row 1's top at 108,
-        // raised 7 so its outline stays on screen).
-        assert_eq!(scroll_target(10, COLS, row_h, top_pad, 0.0, 300.0), 101.0);
+        // a WHOLE row minus the ring's room (90 = row 1's top at 108,
+        // lowered 18 so its whole ring stays on screen).
+        assert_eq!(scroll_target(10, COLS, row_h, top_pad, 0.0, 300.0), 90.0);
         // Row 1 (index 5) visible at that position: no move.
-        assert_eq!(scroll_target(5, COLS, row_h, top_pad, 101.0, 300.0), 101.0);
+        assert_eq!(scroll_target(5, COLS, row_h, top_pad, 90.0, 300.0), 90.0);
         // Scrolling back up to row 0 lands on the first boundary, again
-        // raised by the outline's room (8 - 7).
-        assert_eq!(scroll_target(0, COLS, row_h, top_pad, 101.0, 300.0), 1.0);
+        // lowered by the ring's room, clamped to the top.
+        assert_eq!(scroll_target(0, COLS, row_h, top_pad, 90.0, 300.0), 0.0);
         // Deep rows (row 5 = index 25) scroll to the boundary that fits.
-        assert_eq!(scroll_target(25, COLS, row_h, top_pad, 101.0, 300.0), 401.0);
+        assert_eq!(scroll_target(25, COLS, row_h, top_pad, 90.0, 300.0), 390.0);
     }
 }

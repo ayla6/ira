@@ -20,8 +20,8 @@ pub(super) enum MenuKind {
     Sort,
     /// Pick the Groups tab's tile ordering.
     GroupOrder,
-    /// Ask before a group is deleted; carries its id.
-    ConfirmDelete { id: i64 },
+    /// Ask before a group is deleted; carries its id and name.
+    ConfirmDelete { id: i64, name: String },
 }
 
 /// One actionable row of the open menu.
@@ -123,6 +123,9 @@ impl GameMenu {
             return;
         };
         let db = state.borrow().db.clone();
+        // One clone for every arm: several actions mutate the state, and
+        // an if-let would keep this function's borrow alive across them.
+        let big = state.borrow().big_picture.clone();
         match action {
             MenuRow::Group { id } => {
                 let Some(MenuKind::Groups(game)) = self.kind.borrow().clone() else {
@@ -154,7 +157,7 @@ impl GameMenu {
                 if let Err(e) = state.borrow().cfg.save() {
                     eprintln!("Failed to save sort order: {e}");
                 }
-                if let Some(big) = state.borrow().big_picture.clone() {
+                if let Some(big) = &big {
                     big.all.update_ordering_label(state);
                     big.all.refresh(state);
                 }
@@ -165,7 +168,7 @@ impl GameMenu {
                 if let Err(e) = state.borrow().cfg.save() {
                     eprintln!("Failed to save group order: {e}");
                 }
-                if let Some(big) = state.borrow().big_picture.clone() {
+                if let Some(big) = &big {
                     big.all.update_ordering_label(state);
                     big.all.groups_grid.reload(state);
                 }
@@ -175,7 +178,7 @@ impl GameMenu {
                 if let Err(e) = ira_db::delete_group(&db, id) {
                     eprintln!("Failed to delete group: {e}");
                 }
-                if let Some(big) = state.borrow().big_picture.clone() {
+                if let Some(big) = &big {
                     big.all.group_deleted(state, id);
                 }
                 self.close();
@@ -206,7 +209,8 @@ impl GameMenu {
                     .collect();
                 let header = gtk4::Label::new(Some(&game.name));
                 header.set_xalign(0.0);
-                header.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                header.set_wrap(true);
+                header.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
                 header.add_css_class(CSS_BP_MENU_TITLE);
                 crate::ui::helpers::crisp_label(&header);
                 self.panel.append(&header);
@@ -255,16 +259,23 @@ impl GameMenu {
                 }
                 *self.rows.borrow_mut() = rows;
             }
-            MenuKind::ConfirmDelete { id } => {
+            MenuKind::ConfirmDelete { id, name } => {
                 let header = gtk4::Label::new(Some(&crate::tr!("Delete group")));
                 header.set_xalign(0.0);
+                header.set_wrap(true);
+                header.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
                 header.add_css_class(CSS_BP_MENU_TITLE);
                 crate::ui::helpers::crisp_label(&header);
                 self.panel.append(&header);
 
                 let mut rows = Vec::new();
                 let index = rows.len();
-                self.append_row(state, &crate::tr!("Delete"), index, false);
+                self.append_row(
+                    state,
+                    &crate::tr!("Delete {}").replacen("{}", &name, 1),
+                    index,
+                    false,
+                );
                 rows.push(MenuRow::DeleteGroup { id });
                 let index = rows.len();
                 self.append_row(state, &crate::tr!("Cancel"), index, false);
@@ -287,7 +298,10 @@ impl GameMenu {
         }
         let label = gtk4::Label::new(Some(text));
         label.set_xalign(0.0);
-        label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        // Long group names wrap; they never widen the panel.
+        label.set_wrap(true);
+        label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+        label.set_hexpand(true);
         crate::ui::helpers::crisp_label(&label);
         row.append(&label);
         let click_state = state.clone();

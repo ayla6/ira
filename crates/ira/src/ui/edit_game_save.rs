@@ -559,6 +559,7 @@ fn spawn_image_copy_thread(
     cloud_dir: std::path::PathBuf,
     db_id: i64,
     tx: mpsc::Sender<Vec<String>>,
+    progress: Option<super::fetch_images::SaveProgress>,
 ) {
     std::thread::spawn(move || {
         let _s = tracing::info_span!(
@@ -567,8 +568,9 @@ fn spawn_image_copy_thread(
             count = images.len()
         )
         .entered();
-        let mut pending_images = Vec::new();
-        for (asset, img) in &images {
+        let total = images.len();
+        let mut converted = Vec::new();
+        for (index, (asset, img)) in images.iter().enumerate() {
             let Some(at) = AssetType::from_string(asset) else {
                 continue;
             };
@@ -619,26 +621,28 @@ fn spawn_image_copy_thread(
                 }
             };
             if dest.is_file() {
-                pending_images.push((base_name.to_string(), dest, max_w, max_h));
+                let ext = dest
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if ext != "webp" && ext != "jpg" {
+                    ira_parser::convert_to_lossless_webp(&dest);
+                }
+                let small_base = format!("{}_small", base_name);
+                ira_parser::remove_image_variants(&cloud_dir, &small_base);
+                ira_parser::ensure_small_image(&cloud_dir, base_name, max_w, max_h);
+                converted.push(base_name.to_string());
+            }
+            if let Some(progress) = &progress {
+                progress.update(index + 1, total, base_name);
             }
         }
 
-        for (base_name, dest, max_w, max_h) in &pending_images {
-            let ext = dest
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            if ext != "webp" && ext != "jpg" {
-                ira_parser::convert_to_lossless_webp(dest);
-            }
-            let small_base = format!("{}_small", base_name);
-            ira_parser::remove_image_variants(&cloud_dir, &small_base);
-            ira_parser::ensure_small_image(&cloud_dir, base_name, *max_w, *max_h);
+        if let Some(progress) = &progress {
+            progress.finish();
         }
-
-        let base_names: Vec<String> = pending_images.into_iter().map(|(b, _, _, _)| b).collect();
-        let _ = tx.send(base_names);
+        let _ = tx.send(converted);
     });
 }
 
@@ -648,26 +652,6 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
         return false;
     }
 
-    if let Some(g) = params
-        .state
-        .borrow()
-        .games
-        .iter()
-        .find(|g| g.db_id == params.db_id)
-        .cloned()
-    {
-        for path in [
-            &g.icon_path,
-            &g.hero_image_path,
-            &g.grid_path,
-            &g.header_path,
-            &g.logo_path,
-        ] {
-            if !path.is_empty() {
-                ira_images::invalidate_texture(path);
-            }
-        }
-    }
     let game = params
         .state
         .borrow()
@@ -675,6 +659,19 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
         .iter()
         .find(|g| g.db_id == params.db_id)
         .cloned();
+    for path in game.iter().flat_map(|g| {
+        [
+            &g.icon_path,
+            &g.hero_image_path,
+            &g.grid_path,
+            &g.header_path,
+            &g.logo_path,
+        ]
+    }) {
+        if !path.is_empty() {
+            ira_images::invalidate_texture(path);
+        }
+    }
     let cloud_dir = game
         .as_ref()
         .map(|g| ira_parser::game_data_dir(&params.save_dir, g))
@@ -692,10 +689,13 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
         return false;
     }
 
+    // The strip rides the sidebar while the dialog is already closing:
+    // the save itself is done, only the images are still in flight.
+    let progress =
+        super::fetch_images::begin_image_save(&params.state, &game.map(|g| g.name).unwrap_or_default());
+
     let (tx, rx) = mpsc::channel::<Vec<String>>();
     let state_cb = params.state.clone();
-    let win_cb = params.win.downgrade();
-    let var_widgets_cb = params.var_widgets.clone();
     let db_cb = db.clone();
     let db_id_cb = params.db_id;
     let save_dir_cb = params.save_dir.clone();
@@ -705,12 +705,7 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
         let base_names = match rx.try_recv() {
             Ok(names) => names,
             Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                if let Some(win) = win_cb.upgrade() {
-                    win.close();
-                }
-                return glib::ControlFlow::Break;
-            }
+            Err(mpsc::TryRecvError::Disconnected) => return glib::ControlFlow::Break,
         };
         for base_name in &base_names {
             let webp = cloud_dir_cb.join(format!("{}.webp", base_name));
@@ -746,19 +741,14 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
             super::helpers::replace_grid_game(&state_cb, game);
         }
         refresh_selected_base_game(&state_cb, db_id_cb);
-
-        super::edit_game_variants::save_variants(&db_cb, db_id_cb, &var_widgets_cb);
         let _ = state_cb
             .borrow()
             .sender
             .send(crate::AppMessage::VariantsChanged(db_id_cb));
-        if let Some(win) = win_cb.upgrade() {
-            win.close();
-        }
         glib::ControlFlow::Break
     });
 
-    spawn_image_copy_thread(image_list, cloud_dir, params.db_id, tx);
+    spawn_image_copy_thread(image_list, cloud_dir, params.db_id, tx, progress);
     true
 }
 
@@ -857,8 +847,7 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
         apply_wine_registry(&params.old_wine, &wine);
     }
 
-    let has_images = process_pending_images_background(&params, &db);
-
+    process_pending_images_background(&params, &db);
     handle_unmatch(&db, &params);
     save_logo_settings(&db, &params);
     save_dlc_config(&params);
@@ -889,8 +878,9 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     update_game_state_in_memory(&params, &title, &sort_title, &app_id_result);
     update_game_names(&params.state, &app_id_result, &params.app_id, &title);
 
-    if has_images {
-        return;
-    }
+    // The save itself is complete whether or not images are still
+    // converting: close the dialog and refresh the views now, and let
+    // the conversion watcher refresh the library views again once the
+    // files land, with its progress on the sidebar's strip.
     finish_save(&params, &db);
 }

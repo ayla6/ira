@@ -428,6 +428,116 @@ fn drain_updates(indicator: &FetchIndicator, rx: std::sync::mpsc::Receiver<Fetch
     });
 }
 
+/// Progress updates from an edit-save image conversion, rendered on the
+/// sidebar strip. Clone the handle into the background thread.
+#[derive(Clone)]
+pub struct SaveProgress {
+    tx: std::sync::mpsc::Sender<SaveUpdate>,
+}
+
+#[derive(Clone)]
+struct SaveUpdate {
+    done: usize,
+    total: usize,
+    current: String,
+    finished: bool,
+}
+
+impl SaveProgress {
+    /// One image of the job has landed (copied, converted, thumb built).
+    pub fn update(&self, done: usize, total: usize, current: &str) {
+        let _ = self.tx.send(SaveUpdate {
+            done,
+            total,
+            current: current.to_string(),
+            finished: false,
+        });
+    }
+
+    /// The job is done — everything that will be saved is saved.
+    pub fn finish(&self) {
+        let _ = self.tx.send(SaveUpdate {
+            done: 0,
+            total: 0,
+            current: String::new(),
+            finished: true,
+        });
+    }
+}
+
+/// Reveal the sidebar strip for an edit-save image conversion and start
+/// rendering its progress. Returns None while the strip is busy with
+/// another job — the conversion still runs, it just reports nowhere.
+pub fn begin_image_save(state: &SharedState, title: &str) -> Option<SaveProgress> {
+    let indicator = state.borrow().fetch_progress.borrow().clone()?;
+    if indicator.running.get() {
+        return None;
+    }
+    indicator.running.set(true);
+    indicator.reveal(true);
+    indicator.ring.reset();
+    // A save conversion cannot be canceled: the old art is already being
+    // replaced, so stopping midway would leave mixed assets behind.
+    indicator.close_btn.set_sensitive(false);
+    indicator.close_btn.set_icon_name("document-save-symbolic");
+    indicator.short.set_text(&crate::tr!("Saving images…"));
+    indicator
+        .status
+        .set_text(&crate::tr!("Saving images for {}").replacen("{}", title, 1));
+    indicator.bar.set_fraction(0.0);
+
+    let (tx, rx) = std::sync::mpsc::channel::<SaveUpdate>();
+    let indicator = indicator.clone();
+    glib::timeout_add_local(Duration::from_millis(POLL_MS), move || {
+        let mut last: Option<SaveUpdate> = None;
+        let mut disconnected = false;
+        loop {
+            match rx.try_recv() {
+                Ok(update) => last = Some(update),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
+        if let Some(update) = last {
+            if update.finished {
+                indicator.ring.set_fraction(1.0);
+                indicator.ring.animate_done("object-select-symbolic");
+                indicator.short.set_text(&crate::tr!("Images saved"));
+                indicator
+                    .status
+                    .set_text(&crate::tr!("Edited images saved"));
+                indicator.bar.set_fraction(1.0);
+                let indicator = indicator.clone();
+                glib::timeout_add_local_once(Duration::from_millis(HIDE_AFTER_MS), move || {
+                    indicator.popover.popdown();
+                    indicator.reveal(false);
+                    indicator.close_btn.set_sensitive(true);
+                });
+                return glib::ControlFlow::Break;
+            }
+            let fraction = update.done as f64 / update.total.max(1) as f64;
+            indicator.bar.set_fraction(fraction);
+            indicator.ring.set_fraction(fraction);
+            indicator.details.set_markup(&format!(
+                "<span size='small'>{}</span>",
+                super::helpers::esc(&format!(
+                    "{} / {} · {}",
+                    update.done, update.total, update.current
+                ))
+            ));
+        }
+        if disconnected {
+            indicator.running.set(false);
+            return glib::ControlFlow::Break;
+        }
+        glib::ControlFlow::Continue
+    });
+    Some(SaveProgress { tx })
+}
+
 impl FetchIndicator {
     fn reveal(&self, on: bool) {
         self.toolbar.set_reveal_bottom_bars(on);

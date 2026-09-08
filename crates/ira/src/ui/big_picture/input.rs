@@ -60,7 +60,11 @@ pub(super) struct PadStatus {
 /// Everything the reader thread reports: navigation steps and pad status.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum NavMsg {
-    Nav(NavCommand),
+    /// One navigation step. `engage` marks a fresh press — a direction
+    /// just engaged or a button just pressed — as opposed to a hold
+    /// repeat. Consumers decide what repeats mean: the Recent carousel
+    /// wraps only on engaged steps, the keyboard's backspace takes them.
+    Nav(NavCommand, bool),
     Pads(PadStatus),
 }
 
@@ -146,14 +150,15 @@ impl AxisNav {
     }
 }
 
-/// Both axes of directional navigation, the two shoulders' hold-repeat,
-/// and the moment they last ticked.
+/// Both axes of directional navigation, the two shoulders' and B's
+/// hold-repeat, and the moment they last ticked.
 #[derive(Default)]
 struct NavState {
     h: AxisNav,
     v: AxisNav,
     l: HoldNav,
     r: HoldNav,
+    b: HoldNav,
 }
 
 impl NavState {
@@ -166,6 +171,7 @@ impl NavState {
             .or_else(|| self.v.repeat_due(now_ms))
             .or_else(|| self.l.repeat_due(now_ms).then_some(NavCommand::PrevTab))
             .or_else(|| self.r.repeat_due(now_ms).then_some(NavCommand::NextTab))
+            .or_else(|| self.b.repeat_due(now_ms).then_some(NavCommand::Back))
     }
 }
 
@@ -271,7 +277,7 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
             return;
         }
         if let Some(command) = nav.repeat_due(now_ms) {
-            if tx.send(NavMsg::Nav(command)).is_err() {
+            if tx.send(NavMsg::Nav(command, false)).is_err() {
                 return; // receiver dropped: the app is shutting down
             }
         }
@@ -330,29 +336,31 @@ fn fold_event(
             nav.v.apply_button(NavCommand::Down, pressed)
         }
         InputSource::Button(GamepadButton::A) if pressed => {
-            let _ = tx.send(NavMsg::Nav(NavCommand::Confirm));
+            let _ = tx.send(NavMsg::Nav(NavCommand::Confirm, true));
         }
-        InputSource::Button(GamepadButton::B) if pressed => {
-            let _ = tx.send(NavMsg::Nav(NavCommand::Back));
+        InputSource::Button(GamepadButton::B) => {
+            if nav.b.update(pressed, now_ms) {
+                let _ = tx.send(NavMsg::Nav(NavCommand::Back, true));
+            }
         }
         InputSource::Button(GamepadButton::Start) if pressed => {
-            let _ = tx.send(NavMsg::Nav(NavCommand::Options));
+            let _ = tx.send(NavMsg::Nav(NavCommand::Options, true));
         }
         InputSource::Button(GamepadButton::LeftShoulder) => {
             if nav.l.update(pressed, now_ms) {
-                let _ = tx.send(NavMsg::Nav(NavCommand::PrevTab));
+                let _ = tx.send(NavMsg::Nav(NavCommand::PrevTab, true));
             }
         }
         InputSource::Button(GamepadButton::RightShoulder) => {
             if nav.r.update(pressed, now_ms) {
-                let _ = tx.send(NavMsg::Nav(NavCommand::NextTab));
+                let _ = tx.send(NavMsg::Nav(NavCommand::NextTab, true));
             }
         }
         InputSource::Button(GamepadButton::X) if pressed => {
-            let _ = tx.send(NavMsg::Nav(NavCommand::Secondary));
+            let _ = tx.send(NavMsg::Nav(NavCommand::Secondary, true));
         }
         InputSource::Button(GamepadButton::LeftStick) if pressed => {
-            let _ = tx.send(NavMsg::Nav(NavCommand::Tertiary));
+            let _ = tx.send(NavMsg::Nav(NavCommand::Tertiary, true));
         }
         InputSource::Axis(GamepadAxis::LeftX) => {
             nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)
@@ -370,7 +378,7 @@ fn fold_event(
         _ => {}
     }
     if let Some(command) = nav.update(now_ms) {
-        let _ = tx.send(NavMsg::Nav(command));
+        let _ = tx.send(NavMsg::Nav(command, true));
     }
 }
 

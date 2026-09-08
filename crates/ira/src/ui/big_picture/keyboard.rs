@@ -168,6 +168,11 @@ fn advance_cursor(
 
 /// The caret's blink half-period: visible half, then invisible half.
 const BLINK_EVERY_MS: u64 = 500;
+/// The preview text starts this far into the pill, so the caret bar has
+/// room to sit left of the first glyph instead of covering it.
+const PREVIEW_TEXT_INSET: i32 = 3;
+/// The caret bar's width; the CSS `.bp-key-caret` min-width matches.
+const CARET_WIDTH: i32 = 2;
 
 /// What to do with the finished name.
 type NameCallback = Box<dyn Fn(&SharedState, &str)>;
@@ -242,6 +247,7 @@ impl Keyboard {
         // at the glyph position Pango reports. Moving the caret must
         // never reflow the text — it slides along it.
         let preview_label = gtk4::Label::new(None);
+        preview_label.set_margin_start(PREVIEW_TEXT_INSET);
         preview_label.set_hexpand(true);
         preview_label.set_halign(gtk4::Align::Fill);
         preview_label.set_xalign(0.0);
@@ -378,11 +384,11 @@ impl Keyboard {
                 Page::Symbols => crate::tr!("ABC"),
             },
             Key::Space => crate::tr!("Space"),
-            Key::Backspace => "⌫".to_string(),
             Key::Return => crate::tr!("Return"),
             Key::Ok => crate::tr!("OK"),
-            // Shift renders as an icon (see key_button), never as text.
-            Key::Shift => String::new(),
+            // Shift and Backspace render as icons (see key_button),
+            // never as text.
+            Key::Shift | Key::Backspace => String::new(),
         }
     }
 
@@ -445,14 +451,19 @@ impl Keyboard {
         // The badge rides an overlay above the label, so its presence
         // never shifts the letter's centering.
         let key_surface = gtk4::Overlay::new();
-        if matches!(key, Key::Shift) {
+        let icon_name = match key {
             // Caps lock wears its state: outlined at rest, filled when
-            // raised (the key_label path never sees Shift).
-            let icon = gtk4::Image::from_icon_name(if self.shifted_now() {
+            // raised.
+            Key::Shift => Some(if self.shifted_now() {
                 "shift-filled-symbolic"
             } else {
                 "shift-symbolic"
-            });
+            }),
+            Key::Backspace => Some("entry-clear-symbolic"),
+            _ => None,
+        };
+        if let Some(icon_name) = icon_name {
+            let icon = gtk4::Image::from_icon_name(icon_name);
             icon.set_pixel_size(28);
             icon.set_hexpand(true);
             icon.set_halign(gtk4::Align::Center);
@@ -798,11 +809,13 @@ impl Keyboard {
         self.blink_on.set(true);
         self.preview_caret.set_opacity(1.0);
         if text.is_empty() {
-            // The caret leads the placeholder, like an empty entry.
+            // The caret leads a dimmed placeholder, like an empty entry.
+            self.preview_label.set_opacity(0.45);
             self.preview_label.set_text(&crate::tr!("Type a name…"));
             self.place_caret(0);
             return;
         }
+        self.preview_label.set_opacity(1.0);
         self.preview_label.set_text(&text);
         self.place_caret(self.caret.get().min(text.chars().count()));
     }
@@ -810,7 +823,9 @@ impl Keyboard {
     /// Float the caret over the glyph slot the text caret occupies.
     /// Pango reports the index's rect inside the label's layout, and the
     /// overlay shares the label's coordinate origin, so the rect is the
-    /// floating bar's margin — the text itself never moves.
+    /// floating bar's margin — the text itself never moves. The bar's
+    /// right edge meets the glyph's left edge, so it sits in the space
+    /// before that glyph instead of covering it.
     fn place_caret(&self, caret: usize) {
         let text = self.preview_label.text();
         let byte = text
@@ -821,8 +836,8 @@ impl Keyboard {
         let rect = self.preview_label.layout().index_to_pos(byte as i32);
         let scale = gtk4::pango::SCALE as f64;
         let inset = ((rect.height() as f64 / scale) * 0.14).round() as i32;
-        self.preview_caret
-            .set_margin_start((rect.x() as f64 / scale).round() as i32);
+        let x = PREVIEW_TEXT_INSET + (rect.x() as f64 / scale).round() as i32 - CARET_WIDTH;
+        self.preview_caret.set_margin_start(x.max(0));
         self.preview_caret
             .set_margin_top((rect.y() as f64 / scale).round() as i32 + inset);
         self.preview_caret.set_margin_bottom(inset);

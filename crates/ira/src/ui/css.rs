@@ -439,6 +439,12 @@ fn big_picture_css(s: f64) -> String {
 .bp-tabs buttoncontent > box {{
     border-spacing: {tabs_spacing};
 }}
+.bp-tabs buttoncontent > box > image {{
+    /* AdwButtonContent centers its icon in the line box; at this type
+       size that reads a couple pixels low against the capital band —
+       lift it to the optical center. */
+    margin-bottom: {tabs_icon_lift};
+}}
 .bp-tabs toggle label {{
     font-size: {subtitle};
 }}
@@ -520,7 +526,7 @@ fn big_picture_css(s: f64) -> String {
 }}
 /* The text caret: a thin accent bar that blinks (opacity from code). */
 .bp-key-caret {{
-    min-width: {caret_w};
+    min-width: 2px;
     border-radius: 9999px;
     background: @accent_color;
 }}
@@ -575,7 +581,6 @@ fn big_picture_css(s: f64) -> String {
         subtitle = px(22),
         group_row_pad = px(14),
         menu_pad = px(22),
-        caret_w = px(3),
         tabs_group_pad = px(3),
         tabs_radius = px(9),
         tabs_min_w = px(34),
@@ -583,6 +588,7 @@ fn big_picture_css(s: f64) -> String {
         tabs_toggle_radius = px(6),
         tabs_pad_x = px(8),
         tabs_spacing = px(6),
+        tabs_icon_lift = px(2),
         kbd_pad_top = px(10),
     )
 }

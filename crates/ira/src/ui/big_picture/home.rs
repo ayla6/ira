@@ -324,30 +324,39 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
     }
 }
 
-pub(super) fn move_selection(state: &SharedState, delta: i32) {
+pub(super) fn move_selection(state: &SharedState, delta: i32, engage: bool) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
     };
     let ui = &big.home;
     // One past the last game is the All Software tile.
     let count = ui.games.borrow().len() + 1;
-    let Some(next) = next_selection(*ui.selected.borrow(), count, delta) else {
+    let Some(next) = next_selection(*ui.selected.borrow(), count, delta, engage) else {
         return;
     };
     *ui.selected.borrow_mut() = next;
     apply_selection(&big);
 }
 
-/// `current` stepped by `delta`, wrapping at the row's edges — the wrap
-/// belongs to the edge tile alone: from anywhere else the row moves one
-/// step and the ends stay put until reached. None when there is nothing
-/// to move within.
-fn next_selection(current: usize, count: usize, delta: i32) -> Option<usize> {
+/// `current` stepped by `delta`. A wrap is the edge tile's privilege and
+/// happens once, on a fresh press (`allow_wrap`): from anywhere else the
+/// row moves one step, and a held direction that reaches an end meets a
+/// wall instead of cycling around forever.
+fn next_selection(
+    current: usize,
+    count: usize,
+    delta: i32,
+    allow_wrap: bool,
+) -> Option<usize> {
     if count == 0 {
         return None;
     }
     let next = current as i64 + delta as i64;
-    Some(next.rem_euclid(count as i64) as usize)
+    if allow_wrap {
+        Some(next.rem_euclid(count as i64) as usize)
+    } else {
+        Some(next.clamp(0, count as i64 - 1) as usize)
+    }
 }
 
 /// Launch the selected game through the shared launch path (which already
@@ -615,12 +624,15 @@ mod tests {
     use super::next_selection;
 
     #[test]
-    fn test_next_selection_wraps_from_the_edges() {
-        // Only the edge tiles wrap; steps inside the row just move one.
-        assert_eq!(next_selection(0, 5, -1), Some(4));
-        assert_eq!(next_selection(0, 5, 1), Some(1));
-        assert_eq!(next_selection(4, 5, 1), Some(0));
-        assert_eq!(next_selection(2, 5, 2), Some(4));
-        assert_eq!(next_selection(0, 0, 1), None);
+    fn test_next_selection_wraps_once_from_the_edge_on_a_fresh_press() {
+        // Engaged steps wrap at the edge tiles.
+        assert_eq!(next_selection(0, 5, -1, true), Some(4));
+        assert_eq!(next_selection(4, 5, 1, true), Some(0));
+        // Held repeats meet a wall there; interior steps just move one.
+        assert_eq!(next_selection(0, 5, -1, false), Some(0));
+        assert_eq!(next_selection(4, 5, 1, false), Some(4));
+        assert_eq!(next_selection(0, 5, 1, false), Some(1));
+        assert_eq!(next_selection(2, 5, 2, true), Some(4));
+        assert_eq!(next_selection(0, 0, 1, true), None);
     }
 }

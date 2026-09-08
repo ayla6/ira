@@ -203,12 +203,12 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
             }
         }
         match key {
-            gdk4::Key::Left => route(&state, NavCommand::Left),
-            gdk4::Key::Right => route(&state, NavCommand::Right),
-            gdk4::Key::Up => route(&state, NavCommand::Up),
-            gdk4::Key::Down => route(&state, NavCommand::Down),
+            gdk4::Key::Left => route(&state, NavCommand::Left, true),
+            gdk4::Key::Right => route(&state, NavCommand::Right, true),
+            gdk4::Key::Up => route(&state, NavCommand::Up, true),
+            gdk4::Key::Down => route(&state, NavCommand::Down, true),
             gdk4::Key::Return | gdk4::Key::KP_Enter | gdk4::Key::space => {
-                route(&state, NavCommand::Confirm)
+                route(&state, NavCommand::Confirm, true)
             }
             gdk4::Key::Escape => {
                 // Escape peels overlays first: keyboard, then menu, then
@@ -249,7 +249,7 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
 /// and the pad count for the bottom rail's dots.
 pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
     match msg {
-        NavMsg::Nav(command) => route(state, command),
+        NavMsg::Nav(command, engage) => route(state, command, engage),
         NavMsg::Pads(status) => {
             if let Some(big) = state.borrow().big_picture.clone() {
                 big.bottom.set_pad_status(status.count, status.family);
@@ -260,7 +260,7 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
     }
 }
 
-fn route(state: &SharedState, command: NavCommand) {
+fn route(state: &SharedState, command: NavCommand, engage: bool) {
     let mouse_drove = super::mouse::note_controller_use(state);
     // The virtual keyboard swallows navigation while it is open: arrows
     // walk the keys, Confirm types, B deletes, Options cancels.
@@ -291,6 +291,12 @@ fn route(state: &SharedState, command: NavCommand) {
             }
             return;
         }
+    }
+    // A held B must not pop page after page (or quit the app): only the
+    // keyboard's backspace consumes Back repeats, and that arm has
+    // already returned above.
+    if command == NavCommand::Back && !engage {
+        return;
     }
     // The options menu swallows navigation while it is open.
     {
@@ -324,10 +330,12 @@ fn route(state: &SharedState, command: NavCommand) {
     }
     if big.all.tab() == Tab::Recent {
         // The recent carousel: left/right walk the covers, A plays, and
-        // the arrow tile at the end jumps to the Everything tab.
+        // the arrow tile at the end jumps to the Everything tab. Only a
+        // fresh press on an edge tile wraps around; held repeats hit a
+        // wall there instead of cycling forever.
         match command {
-            NavCommand::Left => super::home::move_selection(state, -1),
-            NavCommand::Right => super::home::move_selection(state, 1),
+            NavCommand::Left => super::home::move_selection(state, -1, engage),
+            NavCommand::Right => super::home::move_selection(state, 1, engage),
             NavCommand::Confirm => {
                 if super::home::selection_is_tile(&big) {
                     big.all.set_tab(state, Tab::Everything);

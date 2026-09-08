@@ -254,6 +254,16 @@ impl Keyboard {
         preview_label.set_single_line_mode(true);
         preview_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         crate::ui::helpers::crisp_label(&preview_label);
+        // The caret bar is measured from the label's layout, which reads
+        // stale geometry until the label has its real allocation and
+        // style. Re-derive it on every map — the first paint after an
+        // open — so it can never park mid-name.
+        let caret_map_state = state.clone();
+        preview_label.connect_map(move |_| {
+            if let Some(big) = caret_map_state.borrow().big_picture.clone() {
+                big.keyboard.reposition_caret();
+            }
+        });
         let preview_caret = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         preview_caret.add_css_class(CSS_BP_KEY_CARET);
         preview_caret.set_halign(gtk4::Align::Start);
@@ -817,6 +827,17 @@ impl Keyboard {
         }
         self.preview_label.set_opacity(1.0);
         self.preview_label.set_text(&text);
+        self.place_caret(self.caret.get().min(text.chars().count()));
+    }
+
+    /// Re-derive the caret bar's position from the current buffer and
+    /// caret index, without changing either (the label-map hook).
+    fn reposition_caret(&self) {
+        let text = self.buffer.borrow().clone();
+        if text.is_empty() {
+            self.place_caret(0);
+            return;
+        }
         self.place_caret(self.caret.get().min(text.chars().count()));
     }
 

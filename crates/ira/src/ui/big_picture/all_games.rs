@@ -13,7 +13,7 @@ use adw::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// The game a big-picture grid action targets: launch uses the same (db, variant)
 /// pair the desktop grid stores on its cells.
@@ -171,7 +171,7 @@ pub(super) struct AllSoftwareUi {
     /// the arrows re-acquire here, keeping the column in view.
     last_selected: Cell<Option<usize>>,
     /// The running scroll glide, so a new press replaces it mid-flight.
-    scroll_anim: Rc<RefCell<Option<glib::SourceId>>>,
+    scroll_anim: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
     /// The "sorted by …" label in the header.
     ordering: gtk4::Label,
     tabs: adw::ToggleGroup,
@@ -186,9 +186,6 @@ pub(super) struct AllSoftwareUi {
     /// Which tab is showing and, on the Groups tab, which group's games
     /// the grid holds (`None` = the groups tile grid itself).
     tab: Cell<Tab>,
-    /// The directional cover-slide between tabs, so `without_slide` can
-    /// restore exactly what a tab switch would show.
-    slide: Cell<gtk4::StackTransitionType>,
     groups_view: Cell<Option<i64>>,
     pub(super) groups_grid: super::groups::GroupsGrid,
 }
@@ -346,13 +343,12 @@ pub(super) fn build(
 
     // The three tab surfaces in one stack: the recent carousel, the game
     // grid, and the groups tiles. A quick directional slide, nothing
-    // showy — and a COVER slide: the incoming page rides over the old
-    // one, which sits still the whole time. A two-page slide would show
-    // the old page's tiles moving and sliced at the screen edge, which
-    // reads as the previous mode's content leaking through.
+    // showy. The stack clips itself: a two-page slide must not paint the
+    // outgoing page's tiles past its own area, into the rails.
     let surfaces = gtk4::Stack::new();
-    surfaces.set_transition_type(gtk4::StackTransitionType::OverLeft);
+    surfaces.set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
     surfaces.set_transition_duration(130);
+    surfaces.set_overflow(gtk4::Overflow::Hidden);
     surfaces.set_vexpand(true);
     surfaces.add_titled(recent_page, Some("recent"), "recent");
     surfaces.add_named(&grid_overlay, Some("everything"));
@@ -411,7 +407,6 @@ pub(super) fn build(
         selected_key,
         last_selected: Cell::new(None),
         scroll_anim: Rc::new(RefCell::new(None)),
-        slide: Cell::new(gtk4::StackTransitionType::OverLeft),
         ring,
         overlay: grid_overlay,
         ordering,
@@ -533,20 +528,8 @@ impl AllSoftwareUi {
         if self.tab.get() == tab && self.groups_view.get().is_none() {
             return;
         }
-        let previous = self.tab.get();
         self.tab.set(tab);
         self.groups_view.set(None);
-        // The incoming page always covers the old one: moving forward it
-        // slides in from the right, backward from the left.
-        let from = TAB_ORDER.iter().position(|t| *t == previous).unwrap_or(0) as i64;
-        let to = TAB_ORDER.iter().position(|t| *t == tab).unwrap_or(0) as i64;
-        let slide = if to >= from {
-            gtk4::StackTransitionType::OverLeft
-        } else {
-            gtk4::StackTransitionType::OverRight
-        };
-        self.slide.set(slide);
-        self.surfaces.set_transition_type(slide);
         // A glide caught mid-flight by the slide shows a half-scrolled
         // tile at the viewport edge; land both surfaces before sliding.
         self.finish_scroll();
@@ -611,10 +594,10 @@ impl AllSoftwareUi {
     /// Run a surface change with the tab slide suppressed — a group view
     /// swap is not a category change.
     fn without_slide(&self, f: impl FnOnce(&Self)) {
-        let slide = self.slide.get();
         self.surfaces.set_transition_type(gtk4::StackTransitionType::None);
         f(self);
-        self.surfaces.set_transition_type(slide);
+        self.surfaces
+            .set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
     }
 
     /// The mouse clicked a groups tile: first click focuses it, a click
@@ -1077,7 +1060,10 @@ impl AllSoftwareUi {
     }
 
     /// Glide to `target` like the home carousel does; a press during the
-    /// glide replaces it from wherever it currently is.
+    /// glide replaces it from wherever it currently is. The glide steps
+    /// on frame-clock ticks — once per displayed frame, in sync with
+    /// vsync — instead of 16ms timers that drift against the frames and
+    /// read as choppy.
     fn animate_scroll_to(&self, target: f64) {
         if let Some(id) = self.scroll_anim.borrow_mut().take() {
             id.remove();
@@ -1089,7 +1075,7 @@ impl AllSoftwareUi {
         let start = adj.value();
         let started = Instant::now();
         let anim = Rc::clone(&self.scroll_anim);
-        let id = glib::timeout_add_local(Duration::from_millis(16), move || {
+        let id = self.scrolled.add_tick_callback(move |_, _| {
             let t = (started.elapsed().as_millis() as f64 / SCROLL_MILLIS as f64).min(1.0);
             let eased = 1.0 - (1.0 - t) * (1.0 - t);
             adj.set_value(start + (target - start) * eased);

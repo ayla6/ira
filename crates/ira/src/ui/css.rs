@@ -390,10 +390,15 @@ fn big_picture_css(s: f64) -> String {
     );
     let status_pad_x = px(24);
     format!(
-        r#".bp-status {{ padding: {status_pad_top} {status_pad_x} {status_pad_bottom} {status_pad_x}; min-height: {status_min_h}; }}
+        r#".bp-status {{
+    background-color: @window_bg_color;
+    padding: {status_pad_top} {status_pad_x} {status_pad_bottom} {status_pad_x};
+    min-height: {status_min_h};
+}}
 .bp-clock {{ font-size: {small}; padding: 2px 0; }}
 .bp-date, .bp-batt, .bp-clock, .bp-prompt {{ font-size: {small}; padding: 2px 0; }}
 .bp-bottom {{
+    background-color: @window_bg_color;
     padding: {pad_v} {pad_h};
     min-height: {min_h};
 }}

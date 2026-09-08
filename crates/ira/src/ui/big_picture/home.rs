@@ -15,7 +15,7 @@ use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 
 /// How many recent games the carousel keeps.
@@ -48,7 +48,7 @@ pub(super) struct HomeUi {
     covers: RefCell<Vec<gtk4::Widget>>,
     games: RefCell<Vec<Game>>,
     selected: RefCell<usize>,
-    scroll_anim: RefCell<Option<glib::SourceId>>,
+    scroll_anim: RefCell<Option<gtk4::TickCallbackId>>,
     /// Games whose SGDB square is already being fetched in the background,
     /// so a refresh while the download runs does not re-queue them.
     square_queued: RefCell<HashSet<i64>>,
@@ -527,7 +527,8 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
 }
 
 /// Smooth-scroll the selected tile to the viewport center; the adjustment's
-/// value_changed signal keeps the floating title glued to it.
+/// value_changed signal keeps the floating title glued to it. Steps on
+/// frame-clock ticks, in sync with vsync, not on drifting timers.
 fn update_scroll(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
     let selected = *ui.selected.borrow();
@@ -547,7 +548,7 @@ fn update_scroll(big: &Rc<BigPictureUi>) {
     let adj = adj.clone();
     let started = Instant::now();
     let ticker_big = Rc::clone(big);
-    let id = glib::timeout_add_local(Duration::from_millis(16), move || {
+    let id = ui.scrolled.add_tick_callback(move |_, _| {
         let t = (started.elapsed().as_millis() as f64 / SCROLL_MILLIS as f64).min(1.0);
         let eased = 1.0 - (1.0 - t) * (1.0 - t);
         adj.set_value(start + (target - start) * eased);

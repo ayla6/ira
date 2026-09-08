@@ -66,8 +66,10 @@ fn save_title_and_sort(
     title_entry: &adw::EntryRow,
     sort_entry: &adw::EntryRow,
 ) {
-    let title = title_entry.text().to_string();
-    let sort_title = sort_entry.text().to_string();
+    // Saved titles never carry leading or trailing whitespace: a stray
+    // space at the entry's end would sort and display as part of the name.
+    let title = title_entry.text().trim().to_string();
+    let sort_title = sort_entry.text().trim().to_string();
     if let Err(e) = ira_db::update_game_title(db, db_id, &title) {
         eprintln!("Failed to update game: {}", e);
     }

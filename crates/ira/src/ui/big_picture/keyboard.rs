@@ -166,6 +166,9 @@ fn advance_cursor(
     }
 }
 
+/// The caret's blink half-period: visible half, then invisible half.
+const BLINK_EVERY_MS: u64 = 500;
+
 /// What to do with the finished name.
 type NameCallback = Box<dyn Fn(&SharedState, &str)>;
 
@@ -173,8 +176,14 @@ pub(super) struct Keyboard {
     /// The menu surface: dim layer with the panel floating on top.
     root: gtk4::Overlay,
     panel: gtk4::Box,
-    /// The text preview the typed characters show up in.
-    preview: gtk4::Label,
+    /// The text preview: the buffer split around a blinking caret
+    /// widget, Switch-style.
+    preview: gtk4::Box,
+    preview_before: gtk4::Label,
+    preview_caret: gtk4::Box,
+    preview_after: gtk4::Label,
+    /// The caret's blink phase; typing pins it visible.
+    blink_on: Cell<bool>,
     /// Key cursor position: (row, column) into the showing page's rows.
     cursor: Cell<(usize, usize)>,
     page: Cell<Page>,
@@ -229,10 +238,35 @@ impl Keyboard {
         root.set_child(Some(&dim));
         root.add_overlay(&panel);
         root.set_visible(false);
-        Self {
+
+        let preview = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        preview.add_css_class(CSS_BP_KEY_PREVIEW);
+        // The buffer split around the caret: the left half hugs the text
+        // up to a cap (then keeps its tail against the caret), the right
+        // half takes the rest of the pill.
+        let preview_before = gtk4::Label::new(None);
+        preview_before.set_ellipsize(gtk4::pango::EllipsizeMode::Start);
+        preview_before.set_max_width_chars(40);
+        crate::ui::helpers::crisp_label(&preview_before);
+        let preview_caret = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        preview_caret.add_css_class(CSS_BP_KEY_CARET);
+        let preview_after = gtk4::Label::new(None);
+        preview_after.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        preview_after.set_hexpand(true);
+        preview_after.set_halign(gtk4::Align::Start);
+        crate::ui::helpers::crisp_label(&preview_after);
+        preview.append(&preview_before);
+        preview.append(&preview_caret);
+        preview.append(&preview_after);
+
+        let keyboard = Self {
             root,
             panel,
-            preview: gtk4::Label::new(None),
+            preview,
+            preview_before,
+            preview_caret,
+            preview_after,
+            blink_on: Cell::new(true),
             cursor: Cell::new((1, 0)),
             page: Cell::new(Page::Letters),
             shift: Cell::new(false),
@@ -244,7 +278,22 @@ impl Keyboard {
             buffer: RefCell::new(String::new()),
             caret: Cell::new(0),
             on_ok: RefCell::new(None),
-        }
+        };
+        // The caret blinks while the keyboard shows; typing re-pins it
+        // visible (see refresh_preview).
+        let blink_state = state.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(BLINK_EVERY_MS), move || {
+            if let Some(big) = blink_state.borrow().big_picture.clone() {
+                let shown = &big.keyboard;
+                if shown.is_open() {
+                    let on = !shown.blink_on.get();
+                    shown.blink_on.set(on);
+                    shown.preview_caret.set_opacity(if on { 1.0 } else { 0.0 });
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+        keyboard
     }
 
     pub(super) fn root(&self) -> &Widget {
@@ -388,6 +437,11 @@ impl Keyboard {
         if dead {
             button.add_css_class(CSS_BP_KEY_DISABLED);
         }
+        // OK is the keyboard's suggested action, wearing libadwaita's
+        // opaque accent the way a suggested-action button does.
+        if matches!(key, Key::Ok) {
+            button.add_css_class(CSS_BP_KEY_OK);
+        }
         // The badge rides an overlay above the label, so its presence
         // never shifts the letter's centering.
         let key_surface = gtk4::Overlay::new();
@@ -459,11 +513,6 @@ impl Keyboard {
         title.add_css_class(CSS_BP_PAGE_TITLE);
         crate::ui::helpers::crisp_label(&title);
         self.panel.append(&title);
-        self.preview.add_css_class(CSS_BP_KEY_PREVIEW);
-        self.preview.set_xalign(0.0);
-        self.preview.set_wrap(true);
-        self.preview.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-        crate::ui::helpers::crisp_label(&self.preview);
         self.panel.append(&self.preview);
 
         let grid = gtk4::Grid::new();
@@ -471,14 +520,30 @@ impl Keyboard {
         grid.set_column_spacing(8);
         grid.set_hexpand(true);
         let mut map: Vec<Vec<gtk4::Widget>> = Vec::new();
+        // place() returns None for a key that continues an earlier row's
+        // widget (Return spans rows 1-2, OK rows 3 and the bottom row).
+        // Those must resolve to the attached widget itself: a fresh
+        // never-attached widget here is an invisible key the cursor can
+        // land on — the ghost "OK" to the right of the space bar.
+        let mut attached: Vec<(Key, gtk4::Widget)> = Vec::new();
         for (row, keys) in self.rows().iter().enumerate() {
             let mut row_map = Vec::new();
             for (col, key) in keys.iter().enumerate() {
-                let widget = self.key_button(state, *key, (row, col));
-                row_map.push(widget.clone());
-                if let Some((left, top, width, height)) = Self::place(row, col, *key) {
-                    grid.attach(&widget, left, top, width, height);
-                }
+                let widget = match Self::place(row, col, *key) {
+                    Some((left, top, width, height)) => {
+                        let widget = self.key_button(state, *key, (row, col));
+                        grid.attach(&widget, left, top, width, height);
+                        attached.push((*key, widget.clone()));
+                        widget
+                    }
+                    None => attached
+                        .iter()
+                        .rev()
+                        .find(|(shared, _)| shared == key)
+                        .map(|(_, widget)| widget.clone())
+                        .expect("shared key's first copy is always attached"),
+                };
+                row_map.push(widget);
             }
             map.push(row_map);
         }
@@ -690,17 +755,18 @@ impl Keyboard {
 
     fn refresh_preview(&self) {
         let text = self.buffer.borrow().clone();
+        // Typing pins the caret visible; the blink resumes from there.
+        self.blink_on.set(true);
+        self.preview_caret.set_opacity(1.0);
         if text.is_empty() {
-            self.preview.set_text(&crate::tr!("Type a name…"));
+            // The caret leads the placeholder, like an empty entry.
+            self.preview_before.set_text("");
+            self.preview_after.set_text(&crate::tr!("Type a name…"));
             return;
         }
-        // The caret rides the text: everything before it, the bar, the
-        // rest — so the shoulders' caret is visible while it moves.
-        let caret = self.caret.get().min(text.chars().count());
-        let before: String = text.chars().take(caret).collect();
-        let after: String = text.chars().skip(caret).collect();
-        self.preview
-            .set_text(&format!("{before}│{after}"));
+        let (before, after) = split_at_caret(&text, self.caret.get());
+        self.preview_before.set_text(&before);
+        self.preview_after.set_text(&after);
     }
 
     fn refresh_cursor(&self) {
@@ -727,6 +793,16 @@ impl Keyboard {
             }
         }
     }
+}
+
+/// The preview's two halves around the text caret (a char index clamped
+/// into the text).
+fn split_at_caret(text: &str, caret: usize) -> (String, String) {
+    let caret = caret.min(text.chars().count());
+    (
+        text.chars().take(caret).collect(),
+        text.chars().skip(caret).collect(),
+    )
 }
 
 #[cfg(test)]
@@ -794,5 +870,26 @@ mod tests {
         // hold there verbatim.
         assert_eq!(advance_cursor(SYMBOL_ROWS, false, (0, 11), 0, 1), (3, 11));
         assert_eq!(advance_cursor(SYMBOL_ROWS, false, (2, 11), 0, -1), (0, 11));
+    }
+
+    #[test]
+    fn test_split_at_caret_end() {
+        assert_eq!(split_at_caret("Visual Novel", 12), ("Visual Novel".into(), "".into()));
+    }
+
+    #[test]
+    fn test_split_at_caret_mid() {
+        assert_eq!(split_at_caret("Visual Novel", 9), ("Visual No".into(), "vel".into()));
+    }
+
+    #[test]
+    fn test_split_at_caret_empty_and_clamped() {
+        assert_eq!(split_at_caret("", 0), ("".into(), "".into()));
+        assert_eq!(split_at_caret("abc", 99), ("abc".into(), "".into()));
+    }
+
+    #[test]
+    fn test_split_at_caret_counts_chars_not_bytes() {
+        assert_eq!(split_at_caret("éa", 1), ("é".into(), "a".into()));
     }
 }

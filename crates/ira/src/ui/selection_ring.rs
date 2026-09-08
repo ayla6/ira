@@ -8,7 +8,7 @@
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 /// Frame thickness, gap to the tile, and the outside corner rounding,
 /// in reference (1080p) pixels; the caller scales them with the viewport.
@@ -40,6 +40,11 @@ mod imp {
         pub scale: Cell<f64>,
         /// Draw a circle instead of a square frame.
         pub round: Cell<bool>,
+        /// Draw-time re-derivation, run at the head of every snapshot:
+        /// the owner refreshes the rect from live geometry so no event
+        /// ordering can leave the frame stale. Returning false skips
+        /// painting this frame (nothing real to draw).
+        pub reposition: RefCell<Option<Box<dyn Fn() -> bool>>>,
     }
 
     #[glib::object_subclass]
@@ -66,6 +71,17 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
+            // The repositioner runs first: whatever it derives is what
+            // this very frame paints. False means the geometry isn't
+            // real yet (page hidden, tile unallocated) — draw nothing.
+            let draw = self
+                .reposition
+                .borrow()
+                .as_ref()
+                .is_none_or(|reposition| reposition());
+            if !draw {
+                return;
+            }
             // Scale 0 means the caller has no viewport yet (page still
             // hidden): painting then would draw a hairline frame in a
             // stale spot — the thing this widget exists to avoid.
@@ -157,10 +173,31 @@ impl SelectionRing {
         this
     }
 
+    /// Install the draw-time re-derivation (see `imp::reposition`).
+    pub fn set_repositioner(&self, reposition: Option<Box<dyn Fn() -> bool>>) {
+        self.imp().reposition.replace(reposition);
+    }
+
+    /// Store the rect and request a redraw, not a relayout: the frame
+    /// never affects layout, and events that move the selection need
+    /// nothing more than a repaint.
+    pub fn set_rect(&self, x: f64, y: f64, w: f64, h: f64, scale: f64, round: bool) {
+        if self.store(x, y, w, h, scale, round) {
+            self.queue_draw();
+        }
+    }
+
     /// Place the frame over a tile: `x`/`y` is the tile's top-left in
     /// the parent's coordinates, `w`/`h` its size. The frame grows
     /// outwards; `round` draws a circle instead of a square frame.
     pub fn place(&self, x: f64, y: f64, w: f64, h: f64, scale: f64, round: bool) {
+        if self.store(x, y, w, h, scale, round) {
+            self.queue_allocate();
+        }
+    }
+
+    /// Write the rect if it moved; reports whether it did.
+    fn store(&self, x: f64, y: f64, w: f64, h: f64, scale: f64, round: bool) -> bool {
         let imp = self.imp();
         let moved = (imp.x.get() - x).abs() > 0.5
             || (imp.y.get() - y).abs() > 0.5
@@ -175,8 +212,8 @@ impl SelectionRing {
             imp.h.set(h);
             imp.scale.set(scale);
             imp.round.set(round);
-            self.queue_allocate();
         }
+        moved
     }
 }
 

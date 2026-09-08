@@ -32,6 +32,8 @@ pub const CSS_BP_KEY: &str = "bp-key";
 pub const CSS_BP_KEY_SELECTED: &str = "bp-key-selected";
 pub const CSS_BP_KEY_ACTIVE: &str = "bp-key-active";
 pub const CSS_BP_KEY_DISABLED: &str = "bp-key-disabled";
+pub const CSS_BP_KEY_OK: &str = "bp-key-ok";
+pub const CSS_BP_KEY_CARET: &str = "bp-key-caret";
 pub const CSS_BP_KEY_BADGE: &str = "bp-key-badge";
 pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
 pub const CSS_BP_KEYBOARD: &str = "bp-keyboard";
@@ -498,6 +500,19 @@ fn big_picture_css(s: f64) -> String {
 /* The cursor rests on a key the way GTK focus rests on a button: the
    ported focus ring, never a fill. */
 .bp-key-selected {{ {ring_on} }}
+/* OK is the suggested action: libadwaita's opaque accent button. */
+.bp-key-ok {{
+    background: @accent_bg_color;
+}}
+.bp-key-ok label {{
+    color: @accent_fg_color;
+}}
+/* The text caret: a thin accent bar that blinks (opacity from code). */
+.bp-key-caret {{
+    min-width: {caret_w};
+    border-radius: 9999px;
+    background: @accent_color;
+}}
 .bp-key-active {{
     background: alpha(@accent_color, 0.45);
 }}
@@ -521,11 +536,13 @@ fn big_picture_css(s: f64) -> String {
     font-size: {key_font};
 }}
 .bp-key-preview {{
-    font-size: {page_title};
     padding: {group_row_pad};
     padding-left: 22px;
     background: alpha(white, 0.05);
     border-radius: 10px;
+}}
+.bp-key-preview label {{
+    font-size: {page_title};
 }}
 "#,
         status_pad_top = px(16),
@@ -546,6 +563,7 @@ fn big_picture_css(s: f64) -> String {
         subtitle = px(22),
         group_row_pad = px(14),
         menu_pad = px(22),
+        caret_w = px(3),
     )
 }
 

@@ -63,6 +63,15 @@ impl GroupsGrid {
         // The selection ring floats over the tiles — the same frame the
         // game grid wears, not a CSS outline.
         let ring = crate::ui::selection_ring::SelectionRing::new();
+        // The ring re-derives its rect from the selected slot's live
+        // geometry every time it is drawn — no event ordering can park it
+        // on a stale rect or a pre-layout placeholder size. False (an
+        // unreal slot or hidden page) paints nothing that frame.
+        let ring_state = state.clone();
+        ring.set_repositioner(Some(Box::new(move || {
+            let big = ring_state.borrow().big_picture.clone();
+            big.is_some_and(|big| big.all.groups_grid.position_ring())
+        })));
         let overlay = gtk4::Overlay::new();
         overlay.set_child(Some(&scrolled));
         overlay.add_overlay(&ring);
@@ -188,16 +197,6 @@ impl GroupsGrid {
 
         let index = self.slots.borrow().len();
         self.slots.borrow_mut().push(slot.clone());
-        // GTK maps a widget inside the allocation pass that first sizes
-        // it, so every map — first layout, a rebuild's fresh tiles, a
-        // tab re-entry's remap — is a moment of real geometry: re-derive
-        // the ring there instead of sampling on timers.
-        let map_state = state.clone();
-        slot.connect_map(move |_| {
-            if let Some(big) = map_state.borrow().big_picture.clone() {
-                big.all.groups_grid.position_ring();
-            }
-        });
         let click_state = state.clone();
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |_, _, _, _| {
@@ -338,31 +337,28 @@ impl GroupsGrid {
         self.scroll_selection_into_view();
     }
 
-    /// Anchor the ring to the selected slot's live position. It draws
-    /// only from real geometry: an unmapped surface or a slot without a
-    /// full-size allocation (pre-layout, mid-rebuild) hides the ring, and
-    /// the allocation hooks re-anchor it the moment reality arrives. A
-    /// zero-size slot sampled here is exactly the tiny square ring.
-    pub(super) fn position_ring(&self) {
+    /// Derive the ring's rect from the selected slot's live position.
+    /// Called both from events (scroll, tab changes) and at draw time
+    /// from the ring's own snapshot — the latter is the guarantee the
+    /// frame is always painted from geometry that exists right now.
+    /// False means there is nothing real to draw: an unmapped surface,
+    /// or a slot without a full-size allocation (a slot mapped before
+    /// its first allocation is exactly the tiny square ring).
+    pub(super) fn position_ring(&self) -> bool {
         if self.overlay.width() <= 1 || self.overlay.height() <= 1 || !self.overlay.is_mapped() {
-            self.ring.set_visible(false);
-            return;
+            return false;
         }
         let Some(slot) = self.slots.borrow().get(self.selection.get()).cloned() else {
-            self.ring.set_visible(false);
-            return;
+            return false;
         };
         if !slot.is_mapped() || slot.width() < MIN_RING_TILE || slot.height() < MIN_RING_TILE {
-            self.ring.set_visible(false);
-            return;
+            return false;
         }
         let Some(point) = slot.compute_point(&self.overlay, &gtk4::graphene::Point::zero())
         else {
-            self.ring.set_visible(false);
-            return;
+            return false;
         };
-        self.ring.set_visible(true);
-        self.ring.place(
+        self.ring.set_rect(
             point.x() as f64,
             point.y() as f64,
             slot.width() as f64,
@@ -370,6 +366,7 @@ impl GroupsGrid {
             self.overlay.width() as f64 / 1920.0,
             false,
         );
+        true
     }
 
     /// Nudge the scroll so the selected row shows. Rows pitch at the

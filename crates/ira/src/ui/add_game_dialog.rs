@@ -281,7 +281,9 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
     add_btn.connect_clicked(move |_| {
         name_entry.remove_css_class(CSS_ERROR);
 
-        let name = name_entry.text().to_string();
+        // A name of only spaces is as good as none; the saved title is
+        // trimmed either way.
+        let name = name_entry.text().trim().to_string();
         if name.is_empty() {
             name_entry.add_css_class(CSS_ERROR);
             return;

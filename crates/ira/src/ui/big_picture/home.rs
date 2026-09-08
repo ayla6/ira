@@ -349,28 +349,11 @@ pub(super) fn finish_scroll(state: &SharedState) {
     if let Some(id) = ui.scroll_anim.borrow_mut().take() {
         id.remove();
     }
-    let selected = *ui.selected.borrow();
-    let Some((x, w)) = ui.row.cover_geometry(selected) else {
-        return;
-    };
     let adj = ui.scrolled.hadjustment();
-    let max = (adj.upper() - adj.page_size()).max(0.0);
-    let target = (x + w / 2.0 - adj.page_size() / 2.0).clamp(0.0, max);
-    // Cover positions repeat at a fixed pitch; round the centered target
-    // down to the boundary at or left of it.
-    let Some((first_x, _)) = ui.row.cover_geometry(0) else {
-        return;
-    };
-    let pitch = match ui.row.cover_geometry(1) {
-        Some((second_x, _)) => second_x - first_x,
-        None => return,
-    };
-    if pitch <= 1.0 {
+    let selected = *ui.selected.borrow();
+    if let Some(target) = whole_cover_target(ui, &adj, selected) {
         adj.set_value(target);
-        return;
     }
-    let snapped = first_x + (((target - first_x) / pitch).floor() * pitch);
-    adj.set_value(snapped.clamp(0.0, max));
 }
 
 /// `current` stepped by `delta`. A wrap is the edge tile's privilege and
@@ -541,18 +524,37 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
     }
 }
 
-/// Smooth-scroll the selected tile to the viewport center; the adjustment's
+/// The scroll value that shows only whole covers. The carousel never
+/// rests with a cover sliced by the viewport edge — a half-visible cover
+/// reads as a broken tile, and a tab slide revealing "the rest of it"
+/// makes it worse — so every landing spot is snapped to a whole-cover
+/// boundary at or left of the selected cover's centered position.
+fn whole_cover_target(ui: &HomeUi, adj: &gtk4::Adjustment, selected: usize) -> Option<f64> {
+    let max = (adj.upper() - adj.page_size()).max(0.0);
+    let (x, w) = ui.row.cover_geometry(selected)?;
+    let centered = (x + w / 2.0 - adj.page_size() / 2.0).clamp(0.0, max);
+    let first_x = ui.row.cover_geometry(0)?.0;
+    let pitch = match ui.row.cover_geometry(1) {
+        Some((second_x, _)) => second_x - first_x,
+        None => return Some(centered),
+    };
+    if pitch <= 1.0 {
+        return Some(centered);
+    }
+    let snapped = first_x + (((centered - first_x) / pitch).floor() * pitch);
+    Some(snapped.clamp(0.0, max))
+}
+
+/// Smooth-scroll the selected tile into the viewport; the adjustment's
 /// value_changed signal keeps the floating title glued to it. Steps on
 /// frame-clock ticks, in sync with vsync, not on drifting timers.
 fn update_scroll(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
     let selected = *ui.selected.borrow();
-    let Some((x, w)) = ui.row.cover_geometry(selected) else {
+    let adj = ui.scrolled.hadjustment();
+    let Some(target) = whole_cover_target(ui, &adj, selected) else {
         return;
     };
-    let adj = ui.scrolled.hadjustment();
-    let max = (adj.upper() - adj.page_size()).max(0.0);
-    let target = (x + w / 2.0 - adj.page_size() / 2.0).clamp(0.0, max);
     if let Some(id) = ui.scroll_anim.borrow_mut().take() {
         id.remove();
     }

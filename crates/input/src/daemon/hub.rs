@@ -26,9 +26,13 @@ const IDLE_POLL: Duration = Duration::from_millis(50);
 /// During a Switch-protocol takeover events arrive on hidraw with no
 /// pollable descriptor, so that mode polls on a tight cadence instead.
 const SWITCH_POLL: Duration = Duration::from_millis(5);
-/// SDL exposes only each sensor's latest sample, so gyro polling must run
-/// near the old tick cadence or rotation between polls is simply lost.
-const SENSOR_POLL: Duration = Duration::from_millis(4);
+/// SDL exposes only each sensor's latest sample and offers no wakeup for
+/// new reports, so the hub must poll. USB controllers stream IMU reports
+/// at up to 1000 Hz and SDL discards everything but the newest, so
+/// polling once per millisecond is what keeps the passthrough from
+/// stepping over (losing) intermediate samples; the timestamp freshness
+/// filter makes the extra polls no-ops when nothing new arrived.
+const SENSOR_POLL: Duration = Duration::from_millis(1);
 /// Reconnect cadence for a pad that vanished, matching the old per-session
 /// reconnect interval.
 const RECONNECT_INTERVAL: Duration = Duration::from_millis(250);

@@ -26,7 +26,7 @@ use loop_io::{
     PROFILE_POLL_INTERVAL,
 };
 use outputs::{emit_outputs, reload_profile, stop_child, LiveOutputs, OutputTargets};
-use sensor::{process_tick, service_twin_events, tick_needed_for};
+use sensor::{forward_samples, process_tick, service_twin_events, tick_needed_for};
 use setup::{setup_session, SessionSetup};
 
 /// Park ceiling when no scheduled work needs a shorter deadline: pad events
@@ -77,10 +77,13 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
     };
     let mut hub_live = false;
     let mut pending: Vec<PadEvent> = Vec::new();
-    // Motion samples queued since the last tick. Every sample must be
+    // Motion samples queued since the last pass. Every sample must be
     // processed: dropping one stretches the next integration window over
     // its time and turns real micro-motion into phantom rotation.
     let mut samples: Vec<crate::SensorSample> = Vec::new();
+    // Whether any sample reached `forward_samples` since the last tick ran;
+    // the tick only refreshes the twins when the sample stream was silent.
+    let mut samples_since_tick = false;
 
     loop {
         let tick_interval = report_rate.interval();
@@ -234,6 +237,20 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                 &mut trace,
             )
             .and_then(|()| {
+                // The passthrough runs per pass, sample-driven; only the
+                // mapping engine's continuous outputs stay on the tick.
+                samples_since_tick |= forward_samples(
+                    &mut pipeline,
+                    &mut mapper,
+                    &OutputTargets {
+                        gamepad: &mut virtual_gamepad,
+                        keyboard: keyboard.as_mut(),
+                        mouse: mouse.as_mut(),
+                        pad: &mut pad_state,
+                    },
+                    &mut trace,
+                    std::mem::take(&mut samples),
+                );
                 process_tick(
                     &mut pipeline,
                     &mut mapper,
@@ -245,8 +262,13 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     },
                     &mut trace,
                     run_tick,
-                    std::mem::take(&mut samples),
+                    samples_since_tick,
                 )
+                .map(|()| {
+                    if run_tick {
+                        samples_since_tick = false;
+                    }
+                })
             })
         };
         trace.flush();

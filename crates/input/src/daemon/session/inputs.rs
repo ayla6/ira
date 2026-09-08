@@ -17,7 +17,10 @@ pub(crate) fn process_pad_events(
 ) -> Result<(), String> {
     // The report rate describes the pad's event cadence: one observation
     // per drained batch, like the direct-read loop this replaced, not one
-    // per buffered event (those share microseconds).
+    // per buffered event (those share microseconds). Motion samples count
+    // as pad traffic too — a gyro-only session would otherwise sit on the
+    // default tick interval forever instead of tightening to the sensor's
+    // own rate.
     let mut observed = false;
     for event in std::mem::take(pending) {
         match event {
@@ -35,7 +38,10 @@ pub(crate) fn process_pad_events(
                     trace,
                 )?;
             }
-            super::super::hub::PadEvent::Sample(sample) => samples.push(sample),
+            super::super::hub::PadEvent::Sample(sample) => {
+                observed = true;
+                samples.push(sample);
+            }
             // Control variants are consumed in the session loop.
             _ => {}
         }

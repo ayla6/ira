@@ -123,6 +123,24 @@ pub(crate) fn open_sensor(device: &crate::DeviceInfo) -> Option<GyroSource> {
             );
         }
     }
+    open_sdl_sensor(device)
+}
+
+/// One-shot sensor probe with none of [`open_sensor`]'s waiting: the hub's
+/// periodic motion retry calls this while a connected pad is still
+/// motion-less, and it must never stall the input loop the way the
+/// connect-time patient probe may.
+pub(crate) fn probe_sensor(device: &crate::DeviceInfo) -> Option<GyroSource> {
+    if device.family() == crate::ControllerFamily::Nintendo {
+        if let Some(imu) = crate::EvdevImu::open(device) {
+            eprintln!("ira-input: motion source: kernel IMU node");
+            return Some(GyroSource::Kernel(imu));
+        }
+    }
+    open_sdl_sensor(device)
+}
+
+fn open_sdl_sensor(device: &crate::DeviceInfo) -> Option<GyroSource> {
     match Sdl3SensorBackend::open(device) {
         Ok(Some(sensor)) => {
             eprintln!("ira-input: motion source: SDL3");

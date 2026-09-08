@@ -12,11 +12,35 @@ use crate::{
 };
 
 use super::devices::{create_keyboard, create_mouse};
-use super::sensor::{open_motion_node, spawn_paired_imu};
+use super::sensor::{open_motion_node, spawn_paired_imu, SensorPipeline};
 
 /// Uniquifier for uhid twins so a mid-session rebuild never collides with
 /// the kernel names of the devices it replaces.
 static TWIN_SERIAL: AtomicU64 = AtomicU64::new(0);
+
+/// Whether the built stack lacks motion outputs the profile wants while
+/// motion is available — the state a session is left in when its stack was
+/// built before the controller appeared, because [`build_virtual_stack`]
+/// gates the motion node and the uhid twins on motion availability.
+pub(crate) fn motion_outputs_missing(
+    pipeline: &SensorPipeline,
+    profile: &InputProfile,
+) -> bool {
+    if profile.native_motion && pipeline.motion_device.is_none() {
+        return true;
+    }
+    // Twins only exist for the native-controller backends, and only when
+    // the profile wants native motion at all.
+    let twin_missing = match profile.backend {
+        VirtualGamepadBackend::DualShock4 => pipeline.ds4_hid.is_none(),
+        VirtualGamepadBackend::SwitchPro => pipeline.switch_pro_hid.is_none(),
+        VirtualGamepadBackend::DualSense => pipeline.dualsense_hid.is_none(),
+        VirtualGamepadBackend::XInput
+        | VirtualGamepadBackend::DirectInput
+        | VirtualGamepadBackend::Dsu => false,
+    };
+    profile.wants_native_controller() && twin_missing
+}
 
 pub(crate) struct VirtualStack {
     pub(crate) gamepad: VirtualGamepad,
@@ -201,7 +225,36 @@ pub(crate) fn build_virtual_stack(
 
 #[cfg(test)]
 mod tests {
+    use super::super::sensor::SensorPipeline;
     use super::*;
+    use crate::{ControllerCalibration, GyroProcessingOptions, GyroProcessor};
+
+    fn bare_pipeline() -> SensorPipeline {
+        SensorPipeline {
+            motion_available: false,
+            gyro_processor: GyroProcessor::new(
+                ControllerCalibration::default(),
+                GyroProcessingOptions::default(),
+            ),
+            last_sensor_us: None,
+            motion: None,
+            motion_device: None,
+            ds4_hid: None,
+            dualsense_hid: None,
+            switch_pro_hid: None,
+            imu_hid: None,
+            ever_had_sensor: false,
+            last_dsu_ts: 0,
+        }
+    }
+
+    fn motion_profile(backend: VirtualGamepadBackend) -> InputProfile {
+        InputProfile {
+            backend,
+            native_motion: true,
+            ..InputProfile::default_gamepad()
+        }
+    }
 
     #[test]
     fn test_reload_needs_full_rebuild_truth_table() {
@@ -212,5 +265,32 @@ mod tests {
         let direct_input = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
         assert!(reload_needs_full_rebuild(&base, &direct_input));
         assert!(reload_needs_full_rebuild(&direct_input, &base));
+    }
+
+    #[test]
+    fn test_motion_outputs_missing_detects_a_late_motion_node() {
+        // A uinput-backed session built before the pad appeared has no
+        // motion node; the profile wants one.
+        let profile = motion_profile(VirtualGamepadBackend::XInput);
+        let pipeline = bare_pipeline();
+        assert!(motion_outputs_missing(&pipeline, &profile));
+        // A profile without native motion never needs one.
+        let plain = InputProfile::default_gamepad();
+        assert!(!motion_outputs_missing(&pipeline, &plain));
+    }
+
+    #[test]
+    fn test_motion_outputs_missing_detects_missing_twins() {
+        // A native-controller profile whose stack was built motion-less
+        // got a plain uinput pad instead of the uhid twin.
+        let profile = motion_profile(VirtualGamepadBackend::DualShock4);
+        let pipeline = bare_pipeline();
+        assert!(motion_outputs_missing(&pipeline, &profile));
+        // Twin backends with motion entirely off want nothing.
+        let plain = InputProfile {
+            backend: VirtualGamepadBackend::DualShock4,
+            ..InputProfile::default_gamepad()
+        };
+        assert!(!motion_outputs_missing(&pipeline, &plain));
     }
 }

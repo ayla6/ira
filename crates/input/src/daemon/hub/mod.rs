@@ -4,21 +4,20 @@
 //! that game's rumble back onto the physical pad. Unfocused sessions stay
 //! subscribed but receive nothing: frozen, not closed.
 
+mod pad;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
-use crate::{
-    InputEvent, PhysicalGamepad, PhysicalRumble, RumbleCommand, SensorSample, SwitchHidrawPad,
-};
+use crate::{InputEvent, PhysicalGamepad, RumbleCommand, SensorSample};
 
-use super::session::{
-    apply_controller_layout, now_us, open_rumble, open_sensor, reconnect_gamepad,
-    resolved_layout_for, GyroSource,
-};
+use super::session::{now_us, open_rumble};
 use super::signals::STOP_REQUESTED;
+
+use pad::{PhysicalPad, RECONNECT_INTERVAL};
 
 /// How often an idle hub (no pad, or a hidraw takeover with no pollable
 /// descriptor) re-checks commands, hotplug, and buffered driver events.
@@ -33,9 +32,6 @@ const SWITCH_POLL: Duration = Duration::from_millis(5);
 /// stepping over (losing) intermediate samples; the timestamp freshness
 /// filter makes the extra polls no-ops when nothing new arrived.
 const SENSOR_POLL: Duration = Duration::from_millis(1);
-/// Reconnect cadence for a pad that vanished, matching the old per-session
-/// reconnect interval.
-const RECONNECT_INTERVAL: Duration = Duration::from_millis(250);
 /// How long a Switch-protocol takeover without any report may last before
 /// the hub abandons it and returns to the evdev input path.
 const SWITCH_DRIVER_SILENCE_LIMIT: Duration = Duration::from_secs(3);
@@ -121,96 +117,6 @@ impl HubHandle {
     }
 }
 
-/// Physical-side state, owned exclusively by the hub thread.
-struct PhysicalPad {
-    gamepad: Option<PhysicalGamepad>,
-    switch_hidraw: Option<SwitchHidrawPad>,
-    sensor: Option<GyroSource>,
-    rumble: Option<PhysicalRumble>,
-    calibration: Option<PathBuf>,
-    device_hint: Option<PathBuf>,
-    reconnect_at: Instant,
-}
-
-impl PhysicalPad {
-    fn new() -> Self {
-        Self {
-            gamepad: None,
-            switch_hidraw: None,
-            sensor: None,
-            rumble: None,
-            calibration: None,
-            device_hint: None,
-            // Try the first open immediately instead of one interval late.
-            reconnect_at: Instant::now()
-                .checked_sub(RECONNECT_INTERVAL)
-                .unwrap_or_else(Instant::now),
-        }
-    }
-
-    fn motion_alive(&self) -> bool {
-        self.sensor.is_some() || self.switch_hidraw.is_some()
-    }
-
-    /// Opens the first pad or reopens the previous one, re-establishing the
-    /// motion source, the Switch-protocol takeover, and rumble.
-    fn try_open(&mut self) -> Option<(String, String, u16, u16)> {
-        match reconnect_gamepad(&mut self.gamepad) {
-            Ok(true) => {}
-            Ok(false) => return None,
-            Err(error) => {
-                eprintln!("hub: controller reconnect failed: {error}");
-                return None;
-            }
-        }
-        if let Err(error) = self.gamepad.as_mut().unwrap().grab() {
-            eprintln!("hub: failed to grab controller: {error}");
-        }
-        apply_controller_layout(&mut self.gamepad, self.calibration.as_deref());
-        self.sensor = self
-            .gamepad
-            .as_ref()
-            .and_then(|gamepad| open_sensor(gamepad.info()));
-        if self.sensor.is_none() {
-            self.switch_hidraw = self
-                .gamepad
-                .as_ref()
-                .and_then(|gamepad| SwitchHidrawPad::open(gamepad.info()));
-            if let (Some(driver), Some(gamepad)) =
-                (self.switch_hidraw.as_mut(), self.gamepad.as_ref())
-            {
-                driver.set_nintendo_layout(resolved_layout_for(
-                    gamepad.info(),
-                    self.calibration.as_deref(),
-                ));
-            }
-        }
-        self.rumble = if self.switch_hidraw.is_some() {
-            None
-        } else {
-            open_rumble(self.gamepad.as_ref(), true)
-        };
-        let info = self.gamepad.as_ref().unwrap().info();
-        eprintln!("hub: controller connected through {}", info.path.display());
-        Some((
-            info.name.clone(),
-            info.path.display().to_string(),
-            info.vendor,
-            info.product,
-        ))
-    }
-
-    fn drop_pad(&mut self) {
-        self.gamepad = None;
-        self.switch_hidraw = None;
-        self.sensor = None;
-        if let Some(rumble) = self.rumble.as_mut() {
-            rumble.stop();
-        }
-        self.reconnect_at = Instant::now();
-    }
-}
-
 /// Starts the hub thread.
 pub(crate) fn spawn(controller_events: Sender<(bool, String, String)>) -> HubHandle {
     let (commands, receiver) = channel();
@@ -267,6 +173,16 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
                 }
                 broadcast_motion(&routes, pad.motion_alive());
             }
+        }
+        // Pad present but still motion-less: probe again on a backing-off
+        // cadence. The connect-time probe races udev and SDL's enumeration,
+        // so a controller switched on after the daemon is ready would
+        // otherwise stay motion-less until it reconnects.
+        if pad.gamepad.is_some()
+            && !pad.motion_alive()
+            && pad.motion_retry_at.elapsed() >= pad.motion_retry_delay
+        {
+            pad.retry_motion(&routes);
         }
         if pad.gamepad.is_some() {
             read_pad(&mut pad, &routes, &routed);

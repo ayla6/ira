@@ -4,8 +4,8 @@ mod output_stack;
 
 // The hub owns the physical side now; these device helpers are its tools.
 pub(crate) use devices::{
-    apply_controller_layout, open_rumble, open_sensor, reconnect_gamepad, resolved_layout_for,
-    GyroSource,
+    apply_controller_layout, open_rumble, open_sensor, probe_sensor, reconnect_gamepad,
+    resolved_layout_for, GyroSource,
 };
 pub(crate) use sensor::now_us;
 mod loop_io;
@@ -25,7 +25,9 @@ use loop_io::{
     floor_poll_timeout, FOCUS_POLL_INTERVAL, LoopActivity, PROCESS_POLL_INTERVAL,
     PROFILE_POLL_INTERVAL,
 };
-use outputs::{emit_outputs, reload_profile, stop_child, LiveOutputs, OutputTargets};
+use outputs::{
+    attach_motion_outputs, emit_outputs, reload_profile, stop_child, LiveOutputs, OutputTargets,
+};
 use sensor::{forward_samples, process_tick, service_twin_events, tick_needed_for};
 use setup::{setup_session, SessionSetup};
 
@@ -163,6 +165,26 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                 PadEvent::Motion(motion) => {
                     pipeline.motion_available = motion;
                     pipeline.ever_had_sensor |= motion;
+                    if motion {
+                        // The pad's motion source can come alive after the
+                        // session (controller switched on late, or the
+                        // hub's sensor probe won only on retry): a stack
+                        // built motion-less carries no motion node, twins,
+                        // or cemuhook stream — attach what the profile
+                        // wants now.
+                        let mut outputs = LiveOutputs {
+                            mapper: &mut mapper,
+                            gamepad: &mut virtual_gamepad,
+                            keyboard: &mut keyboard,
+                            mouse: &mut mouse,
+                            pad: &mut pad_state,
+                            pipeline: &mut pipeline,
+                            motion_enabled,
+                        };
+                        if attach_motion_outputs(&mut outputs, &mut trace) {
+                            eprintln!("ira-input: motion outputs attached");
+                        }
+                    }
                     tick_needed = tick_needed_for(&pipeline, &mapper);
                 }
                 PadEvent::Connected {

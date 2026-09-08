@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use crate::{InputEvent, MappingEngine, OutputEvent, VirtualGamepad, VirtualKeyboard, VirtualMouse};
+use crate::{
+    InputEvent, MappingEngine, OutputEvent, VirtualGamepad, VirtualGamepadBackend,
+    VirtualKeyboard, VirtualMouse,
+};
 
 use super::super::TraceState;
 use super::devices::{create_keyboard, create_mouse, load_profile};
@@ -56,10 +59,22 @@ fn rebuild_output_stack(
     new_mapper: MappingEngine,
     trace: &mut TraceState,
 ) {
+    rebuild_output_devices(outputs, trace);
+    *outputs.mapper = new_mapper;
+    eprintln!(
+        "ira-input: controller kind changed; the game sees a new {:?} controller",
+        outputs.mapper.profile().backend
+    );
+}
+
+/// Rebuilds every virtual output device for the profile now in the mapper,
+/// releasing the outgoing devices' held outputs first. The mapper itself is
+/// untouched.
+fn rebuild_output_devices(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState) {
     let stack = super::output_stack::build_virtual_stack(
         outputs.pipeline.motion_alive(),
         outputs.motion_enabled,
-        new_mapper.profile(),
+        outputs.mapper.profile(),
     );
     emit_outputs(
         outputs.mapper.reset(),
@@ -74,10 +89,6 @@ fn rebuild_output_stack(
     .unwrap_or_else(|error| {
         eprintln!("ira-input: failed to release outputs before the controller swap: {error}")
     });
-    eprintln!(
-        "ira-input: controller kind changed; the game sees a new {:?} controller",
-        new_mapper.profile().backend
-    );
     *outputs.gamepad = stack.gamepad;
     *outputs.keyboard = stack.keyboard;
     *outputs.mouse = stack.mouse;
@@ -87,7 +98,37 @@ fn rebuild_output_stack(
     outputs.pipeline.dualsense_hid = stack.dualsense_hid;
     outputs.pipeline.switch_pro_hid = stack.switch_pro_hid;
     outputs.pipeline.imu_hid = stack.imu_hid;
-    *outputs.mapper = new_mapper;
+}
+
+/// A session whose controller appeared after setup has no motion outputs:
+/// the stack was built against `motion == false`, and a motion-less stack
+/// builds neither the motion node nor the uhid twins. Attaches what the
+/// profile wants now. A uinput-backed session only gains the motion node —
+/// pad, keyboard and mouse stay put, since swapping them makes the game
+/// drop its controller. A native twin-controller profile needs the full
+/// device rebuild, because the pad choice itself depended on motion; like
+/// the reload path, that swap only reaches games that re-open their pad.
+/// Returns whether the stack now carries the wanted motion outputs.
+pub(crate) fn attach_motion_outputs(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState) -> bool {
+    let profile = outputs.mapper.profile();
+    if !super::output_stack::motion_outputs_missing(outputs.pipeline, profile) {
+        return false;
+    }
+    let twin_backend = matches!(
+        profile.backend,
+        VirtualGamepadBackend::DualShock4
+            | VirtualGamepadBackend::SwitchPro
+            | VirtualGamepadBackend::DualSense
+    );
+    if profile.wants_native_controller() && twin_backend {
+        eprintln!("ira-input: motion source appeared; rebuilding the output stack");
+        rebuild_output_devices(outputs, trace);
+        return true;
+    }
+    if profile.native_motion && outputs.pipeline.motion_device.is_none() {
+        outputs.pipeline.motion_device = super::sensor::open_motion_node(profile.backend);
+    }
+    !super::output_stack::motion_outputs_missing(outputs.pipeline, outputs.mapper.profile())
 }
 
 /// Same controller kind: recreate only the devices whose needs changed and

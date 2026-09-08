@@ -13,7 +13,9 @@ while IFS= read -r source; do
     mkdir -p "$(dirname "$destination")"
     perl -pe 's/\b(?:crate|ira_overlay)::tr!/tr!/g' "$source" > "$destination"
     sources+=("$destination")
-done < <(rg --files crates/ira/src crates/overlay/src -g '*.rs')
+# Sorted: rg walks in arbitrary order, and xgettext follows the file
+# order it is handed, so an unsorted list reshuffles the pot every run.
+done < <(rg --files crates/ira/src crates/overlay/src -g '*.rs' | sort)
 
 xgettext \
     --language=Rust \

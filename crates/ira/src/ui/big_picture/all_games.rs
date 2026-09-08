@@ -98,6 +98,10 @@ pub(super) enum Tab {
     Groups,
 }
 
+/// The tabs' order, used for wrapping with the shoulders and for picking
+/// the slide's direction.
+const TAB_ORDER: [Tab; 3] = [Tab::Recent, Tab::Everything, Tab::Groups];
+
 /// The L/R shoulder badge beside the tabs: the connected pad's glyph art
 /// when the icon set has one, the letter in a rounded box otherwise.
 struct ShoulderBadge {
@@ -182,6 +186,9 @@ pub(super) struct AllSoftwareUi {
     /// Which tab is showing and, on the Groups tab, which group's games
     /// the grid holds (`None` = the groups tile grid itself).
     tab: Cell<Tab>,
+    /// The directional cover-slide between tabs, so `without_slide` can
+    /// restore exactly what a tab switch would show.
+    slide: Cell<gtk4::StackTransitionType>,
     groups_view: Cell<Option<i64>>,
     pub(super) groups_grid: super::groups::GroupsGrid,
 }
@@ -339,9 +346,12 @@ pub(super) fn build(
 
     // The three tab surfaces in one stack: the recent carousel, the game
     // grid, and the groups tiles. A quick directional slide, nothing
-    // showy.
+    // showy — and a COVER slide: the incoming page rides over the old
+    // one, which sits still the whole time. A two-page slide would show
+    // the old page's tiles moving and sliced at the screen edge, which
+    // reads as the previous mode's content leaking through.
     let surfaces = gtk4::Stack::new();
-    surfaces.set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
+    surfaces.set_transition_type(gtk4::StackTransitionType::OverLeft);
     surfaces.set_transition_duration(130);
     surfaces.set_vexpand(true);
     surfaces.add_titled(recent_page, Some("recent"), "recent");
@@ -401,6 +411,7 @@ pub(super) fn build(
         selected_key,
         last_selected: Cell::new(None),
         scroll_anim: Rc::new(RefCell::new(None)),
+        slide: Cell::new(gtk4::StackTransitionType::OverLeft),
         ring,
         overlay: grid_overlay,
         ordering,
@@ -522,8 +533,20 @@ impl AllSoftwareUi {
         if self.tab.get() == tab && self.groups_view.get().is_none() {
             return;
         }
+        let previous = self.tab.get();
         self.tab.set(tab);
         self.groups_view.set(None);
+        // The incoming page always covers the old one: moving forward it
+        // slides in from the right, backward from the left.
+        let from = TAB_ORDER.iter().position(|t| *t == previous).unwrap_or(0) as i64;
+        let to = TAB_ORDER.iter().position(|t| *t == tab).unwrap_or(0) as i64;
+        let slide = if to >= from {
+            gtk4::StackTransitionType::OverLeft
+        } else {
+            gtk4::StackTransitionType::OverRight
+        };
+        self.slide.set(slide);
+        self.surfaces.set_transition_type(slide);
         // A glide caught mid-flight by the slide shows a half-scrolled
         // tile at the viewport edge; land both surfaces before sliding.
         self.finish_scroll();
@@ -546,13 +569,12 @@ impl AllSoftwareUi {
 
     /// Step to the neighbouring tab (the shoulders), wrapping around.
     pub(super) fn switch_tab(&self, state: &SharedState, delta: i32) {
-        const ORDER: [Tab; 3] = [Tab::Recent, Tab::Everything, Tab::Groups];
-        let current = ORDER
+        let current = TAB_ORDER
             .iter()
             .position(|t| *t == self.tab.get())
             .unwrap_or(0) as i64;
-        let next = (current + delta as i64).rem_euclid(ORDER.len() as i64) as usize;
-        self.set_tab(state, ORDER[next]);
+        let next = (current + delta as i64).rem_euclid(TAB_ORDER.len() as i64) as usize;
+        self.set_tab(state, TAB_ORDER[next]);
     }
 
     /// Back out one level on this page: a group's games return to the
@@ -589,10 +611,10 @@ impl AllSoftwareUi {
     /// Run a surface change with the tab slide suppressed — a group view
     /// swap is not a category change.
     fn without_slide(&self, f: impl FnOnce(&Self)) {
+        let slide = self.slide.get();
         self.surfaces.set_transition_type(gtk4::StackTransitionType::None);
         f(self);
-        self.surfaces
-            .set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
+        self.surfaces.set_transition_type(slide);
     }
 
     /// The mouse clicked a groups tile: first click focuses it, a click

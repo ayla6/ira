@@ -445,10 +445,12 @@ fn big_picture_css(s: f64) -> String {
     border-spacing: {tabs_spacing};
 }}
 .bp-tabs buttoncontent > box > image {{
-    /* AdwButtonContent centers its icon in the line box; at this type
-       size that reads a couple pixels low against the capital band —
-       lift it to the optical center. */
-    margin-bottom: {tabs_icon_lift};
+    /* Measured against the bundled font at the tab size: its cap-band
+       center sits ~2px below the line box's geometric center (asymmetric
+       ascender/descender), and AdwButtonContent centers the icon on that
+       center — so the text reads low. Nudge the icon down the measured
+       half-margin to meet it. */
+    margin-top: {tabs_icon_drop};
 }}
 .bp-tabs toggle label {{
     font-size: {subtitle};
@@ -593,7 +595,7 @@ fn big_picture_css(s: f64) -> String {
         tabs_toggle_radius = px(6),
         tabs_pad_x = px(8),
         tabs_spacing = px(6),
-        tabs_icon_lift = px(2),
+        tabs_icon_drop = px(4),
         kbd_pad_top = px(10),
     )
 }

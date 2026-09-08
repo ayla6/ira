@@ -338,8 +338,9 @@ pub(super) fn move_selection(state: &SharedState, delta: i32, engage: bool) {
     apply_selection(&big);
 }
 
-/// End the carousel's scroll glide instantly on its target, so a tab
-/// switch never catches a half-scrolled cover at the viewport edge.
+/// End the carousel's scroll glide on a whole-cover boundary, so a tab
+/// slide never shows a half-scrolled cover at the viewport edge: the
+/// incoming page's edge always starts on a full cover.
 pub(super) fn finish_scroll(state: &SharedState) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
@@ -355,7 +356,21 @@ pub(super) fn finish_scroll(state: &SharedState) {
     let adj = ui.scrolled.hadjustment();
     let max = (adj.upper() - adj.page_size()).max(0.0);
     let target = (x + w / 2.0 - adj.page_size() / 2.0).clamp(0.0, max);
-    adj.set_value(target);
+    // Cover positions repeat at a fixed pitch; round the centered target
+    // down to the boundary at or left of it.
+    let Some((first_x, _)) = ui.row.cover_geometry(0) else {
+        return;
+    };
+    let pitch = match ui.row.cover_geometry(1) {
+        Some((second_x, _)) => second_x - first_x,
+        None => return,
+    };
+    if pitch <= 1.0 {
+        adj.set_value(target);
+        return;
+    }
+    let snapped = first_x + (((target - first_x) / pitch).floor() * pitch);
+    adj.set_value(snapped.clamp(0.0, max));
 }
 
 /// `current` stepped by `delta`. A wrap is the edge tile's privilege and

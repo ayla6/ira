@@ -322,10 +322,11 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
     };
-    // The shoulders change tabs from every tab, Recent included.
+    // The shoulders change tabs from every tab, Recent included — on
+    // fresh presses only: a held shoulder sweeping tabs is strobe food.
     match command {
-        NavCommand::PrevTab => big.all.switch_tab(state, -1),
-        NavCommand::NextTab => big.all.switch_tab(state, 1),
+        NavCommand::PrevTab if engage => big.all.switch_tab(state, -1),
+        NavCommand::NextTab if engage => big.all.switch_tab(state, 1),
         _ => {}
     }
     if big.all.tab() == Tab::Recent {

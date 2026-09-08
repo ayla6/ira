@@ -833,7 +833,14 @@ impl Keyboard {
             .nth(caret)
             .map(|(i, _)| i)
             .unwrap_or(text.len());
-        let rect = self.preview_label.layout().index_to_pos(byte as i32);
+        let layout = self.preview_label.layout();
+        // The label's layout is measured at the last allocated width;
+        // right after a rebuild that width is stale or zero, which
+        // ellipsizes the layout and drops the caret somewhere mid-name
+        // instead of after the last letter. A natural-width layout maps
+        // the caret index to its true glyph slot.
+        layout.set_width(-1);
+        let rect = layout.index_to_pos(byte as i32);
         let scale = gtk4::pango::SCALE as f64;
         let inset = ((rect.height() as f64 / scale) * 0.14).round() as i32;
         let x = PREVIEW_TEXT_INSET + (rect.x() as f64 / scale).round() as i32 - CARET_WIDTH;

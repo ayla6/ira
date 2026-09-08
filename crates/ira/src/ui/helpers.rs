@@ -11,42 +11,22 @@ use super::css::*;
 use super::game_item::GameItem;
 use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 
-/// Lock a big-picture label's text rasterization: UNHINTED with
-/// grayscale antialiasing and integer line metrics.
-///
-/// This is not a style preference — it is measured against the bundled
-/// M PLUS 2 variable font. FreeType's light autohinter (what cairo's
-/// HINT_STYLE_SLIGHT requests) shears the curved terminals off glyphs at
-/// UI sizes: at 22px the @ loses its whole bottom tail and `a`/`2` have
-/// their top-left arcs flattened into bars; unhinted rasterization of
-/// the same glyphs is intact. The damage is size-dependent, which is why
-/// only some lines in the UI showed the broken pixels. With hinting off,
-/// GTK's GPU renderer stops snapping glyph origins to whole pixels and
-/// instead positions them at quarter-pixel subpixel buckets
-/// (gskgpunodeprocessor.c), so the unhinted glyphs stay sharp instead of
-/// going soft.
+/// Lock a big-picture label's text rasterization: slight hinting with
+/// whole-pixel glyph positions. Full hinting distorts the outlines at UI
+/// sizes (stems snap into uneven weights); slight keeps the shapes and
+/// rounding the positions still stops stems from falling between pixels.
+/// (Display-level font options from GtkSettings override these per-label
+/// options whenever GTK refreshes a context — the window builder's
+/// hintfull is the setting that actually reaches the renderer.)
 pub fn crisp_label(label: &gtk4::Label) {
     let context = label.pango_context();
-    // Whole-pixel rounding would discard the subpixel positioning the
-    // renderer applies when hinting is off.
-    context.set_round_glyph_positions(false);
+    context.set_round_glyph_positions(true);
     // pango_cairo_context_set_font_options is not bound by pango-rs.
     unsafe {
         let options = gtk4::cairo::ffi::cairo_font_options_create();
         gtk4::cairo::ffi::cairo_font_options_set_hint_style(
             options,
-            gtk4::cairo::ffi::HINT_STYLE_NONE,
-        );
-        // Grayscale, never LCD subpixel coverage: under gamescope no
-        // settings daemon supplies fontconfig defaults, and the GL
-        // renderer cannot blend subpixel masks.
-        gtk4::cairo::ffi::cairo_font_options_set_antialias(
-            options,
-            gtk4::cairo::ffi::ANTIALIAS_GRAY,
-        );
-        gtk4::cairo::ffi::cairo_font_options_set_hint_metrics(
-            options,
-            gtk4::cairo::ffi::HINT_METRICS_ON,
+            gtk4::cairo::ffi::HINT_STYLE_SLIGHT,
         );
         pango_cairo_context_set_font_options(context.to_glib_none().0, options);
         gtk4::cairo::ffi::cairo_font_options_destroy(options);

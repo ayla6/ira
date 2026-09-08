@@ -524,6 +524,10 @@ impl AllSoftwareUi {
         }
         self.tab.set(tab);
         self.groups_view.set(None);
+        // A glide caught mid-flight by the slide shows a half-scrolled
+        // tile at the viewport edge; land both surfaces before sliding.
+        self.finish_scroll();
+        super::home::finish_scroll(state);
         // Keep the toggle group in step; its notify loops back here and
         // early-returns.
         let name = match tab {
@@ -1013,29 +1017,41 @@ impl AllSoftwareUi {
 
     fn scroll_to_selected(&self) {
         let adj = self.scrolled.vadjustment();
-        // Before the first layout the page height reads as zero, which
-        // makes every row look like it pokes out and dives the scroll
-        // deep into the grid — an opening position must simply be zero.
+        self.animate_scroll_to(self.snapped_scroll_target(&adj));
+    }
+
+    /// The scroll value that rests exactly on the selected row — never
+    /// between rows, which is what puts a half-visible tile at the
+    /// viewport edge. Zero before the first layout: the page height then
+    /// reads as zero, which would make every row look like it pokes out
+    /// and dive the scroll deep into the grid.
+    fn snapped_scroll_target(&self, adj: &gtk4::Adjustment) -> f64 {
         if adj.page_size() <= 1.0 {
-            if let Some(id) = self.scroll_anim.borrow_mut().take() {
-                id.remove();
-            }
-            adj.set_value(0.0);
-            return;
+            return 0.0;
         }
         let Some(selected) = self.selected.get() else {
-            return;
+            return adj.value();
         };
         let (cols, _, item_h, sp) = self.grid.current_layout();
-        let target = scroll_target(
+        scroll_target(
             selected,
             cols as usize,
             (item_h + sp) as f64,
             sp as f64,
             adj.value(),
             adj.page_size(),
-        );
-        self.animate_scroll_to(target);
+        )
+    }
+
+    /// End any scroll glide on the exact snapped target. A tab switch
+    /// must not catch the grid mid-glide: the slide would show a
+    /// half-scrolled tile at the viewport edge.
+    pub(super) fn finish_scroll(&self) {
+        if let Some(id) = self.scroll_anim.borrow_mut().take() {
+            id.remove();
+        }
+        let adj = self.scrolled.vadjustment();
+        adj.set_value(self.snapped_scroll_target(&adj));
     }
 
     /// Glide to `target` like the home carousel does; a press during the

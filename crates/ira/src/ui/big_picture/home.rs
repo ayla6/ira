@@ -338,6 +338,26 @@ pub(super) fn move_selection(state: &SharedState, delta: i32, engage: bool) {
     apply_selection(&big);
 }
 
+/// End the carousel's scroll glide instantly on its target, so a tab
+/// switch never catches a half-scrolled cover at the viewport edge.
+pub(super) fn finish_scroll(state: &SharedState) {
+    let Some(big) = state.borrow().big_picture.clone() else {
+        return;
+    };
+    let ui = &big.home;
+    if let Some(id) = ui.scroll_anim.borrow_mut().take() {
+        id.remove();
+    }
+    let selected = *ui.selected.borrow();
+    let Some((x, w)) = ui.row.cover_geometry(selected) else {
+        return;
+    };
+    let adj = ui.scrolled.hadjustment();
+    let max = (adj.upper() - adj.page_size()).max(0.0);
+    let target = (x + w / 2.0 - adj.page_size() / 2.0).clamp(0.0, max);
+    adj.set_value(target);
+}
+
 /// `current` stepped by `delta`. A wrap is the edge tile's privilege and
 /// happens once, on a fresh press (`allow_wrap`): from anywhere else the
 /// row moves one step, and a held direction that reaches an end meets a

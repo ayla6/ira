@@ -195,6 +195,13 @@ pub fn is_retroarch(launch_command: &str) -> bool {
     launch_command.contains("retroarch") || launch_command == "flatpak:org.libretro.RetroArch"
 }
 
+/// True when the launch command targets Dolphin (a native binary or the
+/// flatpak). Dolphin accepts every disc of a game on its command line
+/// and offers in-game disc switching.
+pub fn is_dolphin(launch_command: &str) -> bool {
+    launch_command.to_lowercase().contains("dolphin")
+}
+
 fn ra_core_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Ok(home) = std::env::var("HOME") {
@@ -262,12 +269,19 @@ pub fn build_launch_command(
     fullscreen: bool,
     fullscreen_flag: &str,
 ) -> Vec<String> {
-    build_launch_command_with_filesystem(exe, rom_path, ra_core, fullscreen, fullscreen_flag, None)
+    build_launch_command_with_filesystem(
+        exe,
+        &[rom_path.to_string()],
+        ra_core,
+        fullscreen,
+        fullscreen_flag,
+        None,
+    )
 }
 
 pub fn build_launch_command_with_filesystem(
     exe: &str,
-    rom_path: &str,
+    rom_paths: &[String],
     ra_core: &str,
     fullscreen: bool,
     fullscreen_flag: &str,
@@ -288,11 +302,14 @@ pub fn build_launch_command_with_filesystem(
     if fullscreen && !fullscreen_flag.is_empty() {
         cmd.push(fullscreen_flag.to_string());
     }
-    // An empty ROM path means "open the emulator itself" — installed
-    // titles live in the emulator's own NAND/library and launch from
-    // there, so no file argument is passed.
-    if !rom_path.is_empty() {
-        cmd.push(rom_path.to_string());
+    // Every non-empty path becomes a file argument. Multidisc emulators
+    // (Dolphin) take all of a game's discs at once for in-game switching;
+    // an empty path means "open the emulator itself" — installed titles
+    // live in the emulator's own NAND/library and launch from there.
+    for path in rom_paths {
+        if !path.is_empty() {
+            cmd.push(path.clone());
+        }
     }
     cmd
 }
@@ -338,6 +355,55 @@ mod tests {
     #[test]
     fn test_is_retroarch_native() {
         assert!(is_retroarch("/usr/bin/retroarch"));
+    }
+
+    #[test]
+    fn test_is_dolphin_matches_binaries_and_flatpak() {
+        assert!(is_dolphin("dolphin-emu"));
+        assert!(is_dolphin("dolphin_emulator"));
+        assert!(is_dolphin("/usr/bin/dolphin-emu"));
+        assert!(is_dolphin("flatpak:org.DolphinEmu.dolphin-emu"));
+        assert!(!is_dolphin("retroarch"));
+        assert!(!is_dolphin("flatpak:org.libretro.RetroArch"));
+        assert!(!is_dolphin("/usr/bin/duckstation-qt"));
+    }
+
+    #[test]
+    fn test_build_launch_command_with_filesystem_passes_every_disc() {
+        // Dolphin's ConsoleDef carries no fullscreen flag, so none is
+        // appended; every disc path becomes a file argument in order.
+        let cmd = build_launch_command_with_filesystem(
+            "dolphin-emu",
+            &[
+                "/games/gc/disc1.iso".to_string(),
+                "/games/gc/disc2.iso".to_string(),
+            ],
+            "",
+            true,
+            "",
+            None,
+        );
+        assert_eq!(
+            cmd,
+            vec![
+                "dolphin-emu",
+                "/games/gc/disc1.iso",
+                "/games/gc/disc2.iso",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_launch_command_with_filesystem_skips_empty_paths() {
+        let cmd = build_launch_command_with_filesystem(
+            "dolphin-emu",
+            &[String::new()],
+            "",
+            false,
+            "",
+            None,
+        );
+        assert_eq!(cmd, vec!["dolphin-emu"]);
     }
 
     #[test]
@@ -387,7 +453,7 @@ mod tests {
     fn test_build_launch_command_flatpak_with_filesystem() {
         let cmd = build_launch_command_with_filesystem(
             "flatpak:org.ppsspp.PPSSPP",
-            "/games/rom.bin",
+            &["/games/rom.bin".to_string()],
             "",
             false,
             "--fullscreen",

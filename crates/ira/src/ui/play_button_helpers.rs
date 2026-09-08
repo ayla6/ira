@@ -350,6 +350,36 @@ fn inject_flatpak_overlay_env(cmd: &mut Vec<String>, env: &mut Vec<(String, Stri
     }
 }
 
+/// Every disc path for a multidisc launch: the boot (default) disc
+/// first so the emulator boots it, then the rest in disc-number order,
+/// deduplicated and resolved. Falls back to the game's own path when the
+/// game has no disc rows.
+fn ordered_disc_paths(
+    discs: &[ira_models::GameDisc],
+    default_disc_id: Option<i64>,
+    fallback: &str,
+    resolve: impl Fn(&str) -> String,
+) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::with_capacity(discs.len() + 1);
+    let push = |paths: &mut Vec<String>, raw: &str| {
+        let resolved = resolve(raw);
+        if !resolved.is_empty() && !paths.contains(&resolved) {
+            paths.push(resolved);
+        }
+    };
+    match discs.iter().find(|d| Some(d.id) == default_disc_id) {
+        Some(boot) => push(&mut paths, &boot.rom_path),
+        None => push(&mut paths, fallback),
+    }
+    for disc in discs {
+        push(&mut paths, &disc.rom_path);
+    }
+    if paths.is_empty() {
+        push(&mut paths, fallback);
+    }
+    paths
+}
+
 pub(super) fn launch_retro(
     ctx: &LaunchCtx,
     cfg: &Config,
@@ -384,26 +414,34 @@ pub(super) fn launch_retro(
     let fullscreen_flag = ira_models::find_console(platform_id)
         .map(|d| d.fullscreen_flag)
         .unwrap_or("--fullscreen");
-    let rom_path = {
-        let discs = ira_db::get_discs(ctx.db, ctx.db_id).unwrap_or_default();
-        let default_disc_id = ira_db::get_default_disc(ctx.db, ctx.db_id).ok().flatten();
+    let discs = ira_db::get_discs(ctx.db, ctx.db_id).unwrap_or_default();
+    let default_disc_id = ira_db::get_default_disc(ctx.db, ctx.db_id).ok().flatten();
+    let resolve = |raw: &str| -> String {
+        if raw.is_empty() {
+            String::new()
+        } else {
+            cfg.resolve_rom_path(platform_id, raw)
+                .map(|resolved| resolved.to_string_lossy().into_owned())
+                .unwrap_or_else(|| raw.to_string())
+        }
+    };
+    // Dolphin takes every disc of a game on its command line and offers
+    // in-game disc switching; boot the default disc and hand it the rest.
+    let rom_paths = if discs.len() > 1 && ira_platforms::emulator_detect::is_dolphin(exe) {
+        ordered_disc_paths(&discs, default_disc_id, game_path, resolve)
+    } else {
         let raw = discs
             .iter()
             .find(|d| Some(d.id) == default_disc_id)
             .map(|d| d.rom_path.clone())
             .unwrap_or_else(|| game_path.to_string());
-        if raw.is_empty() {
-            raw
-        } else {
-            cfg.resolve_rom_path(platform_id, &raw)
-                .map(|resolved| resolved.to_string_lossy().into_owned())
-                .unwrap_or(raw)
-        }
+        vec![resolve(&raw)]
     };
+    let rom_path = rom_paths.first().cloned().unwrap_or_default();
     let rom_root = std::path::Path::new(&rom_path).parent();
     let mut cmd = ira_platforms::emulator_detect::build_launch_command_with_filesystem(
         exe,
-        &rom_path,
+        &rom_paths,
         &resolved_core,
         cc.fullscreen,
         fullscreen_flag,
@@ -863,10 +901,62 @@ pub(super) fn update_last_played(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_emulator_gpu_policy, apply_system_defaults, console_input_mode, resolved_input_mode,
+        apply_emulator_gpu_policy, apply_system_defaults, console_input_mode,
+        ordered_disc_paths, resolved_input_mode,
     };
     use ira_config::SystemDefaults;
-    use ira_models::ControllerInputMode;
+    use ira_models::{ControllerInputMode, GameDisc};
+
+    fn disc(id: i64, number: i32, rom_path: &str) -> GameDisc {
+        GameDisc {
+            id,
+            game_id: 1,
+            disc_number: number,
+            rom_path: rom_path.to_string(),
+            label: String::new(),
+        }
+    }
+
+    fn identity(raw: &str) -> String {
+        raw.to_string()
+    }
+
+    #[test]
+    fn test_ordered_disc_paths_boots_default_then_the_rest() {
+        let discs = vec![
+            disc(1, 1, "/games/gc/disc1.iso"),
+            disc(2, 2, "/games/gc/disc2.iso"),
+            disc(3, 3, "/games/gc/disc3.iso"),
+        ];
+        let paths = ordered_disc_paths(&discs, Some(3), "/games/gc/fallback.iso", identity);
+        assert_eq!(
+            paths,
+            vec![
+                "/games/gc/disc3.iso".to_string(),
+                "/games/gc/disc1.iso".to_string(),
+                "/games/gc/disc2.iso".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_ordered_disc_paths_falls_back_without_discs() {
+        assert_eq!(
+            ordered_disc_paths(&[], None, "/games/gc/game.iso", identity),
+            vec!["/games/gc/game.iso".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_ordered_disc_paths_dedupes_and_drops_empty() {
+        let discs = vec![
+            disc(1, 1, "/games/gc/disc1.iso"),
+            disc(2, 2, "/games/gc/disc1.iso"),
+            disc(3, 3, ""),
+        ];
+        let paths = ordered_disc_paths(&discs, None, "/games/gc/disc1.iso", identity);
+        assert_eq!(paths, vec!["/games/gc/disc1.iso".to_string()]);
+    }
 
     #[test]
     fn test_pick_prefers_then_secondary_then_fallback() {

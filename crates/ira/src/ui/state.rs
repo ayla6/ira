@@ -99,6 +99,10 @@ pub struct AppState {
     pub sort_label: gtk4::Label,
     pub collapsed_collections: HashSet<i64>,
     pub multi_selected_ids: HashSet<String>,
+    /// game id → every member id of its playtime link (itself included);
+    /// absent when the game is unlinked. Filled when the game list loads
+    /// and refreshed when the settings change a link.
+    pub playtime_links: HashMap<i64, Vec<i64>>,
     /// The big-picture view's widgets and selection, present only in big-picture
     /// mode (see `big_picture::is_big_picture`). Shared behind an `Rc` so
     /// refreshes and navigation mutate the same selection state.

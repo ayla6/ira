@@ -132,7 +132,11 @@ pub fn init_db(db_path: &str) -> DbConn {
                 group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
                 PRIMARY KEY (game_id, group_id)
             );
-            CREATE INDEX IF NOT EXISTS idx_game_groups_group ON game_groups(group_id);",
+            CREATE INDEX IF NOT EXISTS idx_game_groups_group ON game_groups(group_id);
+            CREATE TABLE IF NOT EXISTS game_playtime_links (
+                game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+                group_id INTEGER NOT NULL
+            );",
         ).expect("failed to create tables");
         // Schema migrations for databases created before a column existed.
         ensure_column(&conn, "games", "rom_hash", "TEXT NOT NULL DEFAULT ''");

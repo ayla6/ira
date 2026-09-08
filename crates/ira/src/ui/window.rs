@@ -105,6 +105,7 @@ pub fn build_ui(
         sort_label: gtk4::Label::new(Some(SortMode::Alphabetical.display_label())),
         collapsed_collections: HashSet::new(),
         multi_selected_ids: HashSet::new(),
+        playtime_links: HashMap::new(),
         big_picture: None,
         fetch_progress: RefCell::new(None),
     }));

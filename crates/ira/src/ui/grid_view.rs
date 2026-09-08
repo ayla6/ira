@@ -77,7 +77,7 @@ pub(super) fn queue_cover_load_priority(
     });
 }
 
-fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
+fn badge_text(game: &Game, mode: SortMode, state: &SharedState) -> Option<String> {
     match mode {
         SortMode::Alphabetical => None,
         SortMode::Completion => {
@@ -88,10 +88,11 @@ fn badge_text(game: &Game, mode: SortMode) -> Option<String> {
             }
         }
         SortMode::HoursPlayed => {
-            if game.playtime <= 0.0 {
+            let playtime = super::helpers::display_playtime(state, game);
+            if playtime <= 0.0 {
                 None
             } else {
-                Some(super::game_display::format_playtime(game.playtime))
+                Some(super::game_display::format_playtime(playtime))
             }
         }
         SortMode::LastPlayed => {
@@ -313,10 +314,12 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
 }
 
 fn make_bind(
+    state: &SharedState,
     item_size: Rc<Cell<(i32, i32)>>,
     sort_mode: SortMode,
     square: bool,
 ) -> BindFn {
+    let state = state.clone();
     Rc::new(move |widget, game| {
         let _span = tracing::info_span!("grid_bind", db_id = game.db_id).entered();
         let (cover_width, cover_height) = item_size.get();
@@ -404,7 +407,7 @@ fn make_bind(
         if let Some(badge) = unsafe { vbox.steal_data::<gtk4::Label>("badge") } {
             overlay.remove_overlay(&badge);
         }
-        if let Some(text) = badge_text(game, sort_mode) {
+        if let Some(text) = badge_text(game, sort_mode, &state) {
             let badge = gtk4::Label::new(Some(&text));
             badge.set_valign(gtk4::Align::End);
             badge.set_halign(gtk4::Align::Center);
@@ -474,7 +477,7 @@ fn build_grid_view(
     let item_size = grid.item_size_cell();
     grid.set_factory(
         make_setup(state, item_size.clone()),
-        make_bind(item_size.clone(), sort_mode, square),
+        make_bind(state, item_size.clone(), sort_mode, square),
         make_unbind(item_size),
     );
 

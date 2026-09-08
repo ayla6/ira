@@ -95,6 +95,7 @@ mod edit_game_dialog;
 mod edit_game_launch;
 mod edit_game_overlay;
 mod edit_game_pages;
+mod edit_game_playtime;
 mod edit_game_save;
 mod edit_game_system;
 mod edit_game_variants;

@@ -327,6 +327,8 @@ fn build_dialog_contents(
         Some("general"),
     );
 
+    super::edit_game_playtime::build_playtime_page(&state, &game, &win, &sidebar, &stack);
+
     let lwa = build_launch_wine_advanced_pages(
         &state,
         &game,

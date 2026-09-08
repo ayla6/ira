@@ -100,7 +100,10 @@ fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::
         "Last played",
         &format_last_played(game.last_played),
     ));
-    let pt_box = stat_label("Play time", &format_playtime(game.playtime));
+    let pt_box = stat_label(
+        "Play time",
+        &format_playtime(super::helpers::display_playtime(state, game)),
+    );
     history_box.append(&pt_box);
     history_box.add_css_class(CSS_CLICKABLE_STAT);
     history_box.set_tooltip_text(Some(&crate::tr!("View play history")));

@@ -847,6 +847,52 @@ fn fitted_height(preferred: i32, available: i32) -> i32 {
     }
 }
 
+/// Re-read the playtime links from the database into the state cache.
+/// Called when the game list loads and when the settings change a link.
+pub fn refresh_playtime_links(state: &SharedState) {
+    let db = state.borrow().db.clone();
+    let links = ira_db::playtime_links(&db).unwrap_or_default();
+    let mut by_group: HashMap<i64, Vec<i64>> = HashMap::new();
+    for (game_id, group) in links {
+        by_group.entry(group).or_default().push(game_id);
+    }
+    let mut by_game: HashMap<i64, Vec<i64>> = HashMap::new();
+    for members in by_group.into_values() {
+        for id in &members {
+            by_game.insert(*id, members.clone());
+        }
+    }
+    state.borrow_mut().playtime_links = by_game;
+}
+
+/// The members of `db_id`'s playtime link, the game itself included;
+/// just `[db_id]` when it is not linked.
+pub fn linked_members(state: &SharedState, db_id: i64) -> Vec<i64> {
+    state
+        .borrow()
+        .playtime_links
+        .get(&db_id)
+        .cloned()
+        .unwrap_or_else(|| vec![db_id])
+}
+
+/// The playtime a game displays: its link group's combined total when
+/// linked, its own otherwise. A read-time view only — session recording
+/// keeps writing each game's own column, so the stored values never
+/// carry another game's hours.
+pub fn display_playtime(state: &SharedState, game: &Game) -> f64 {
+    let s = state.borrow();
+    match s.playtime_links.get(&game.db_id) {
+        Some(members) => s
+            .games
+            .iter()
+            .filter(|g| g.variant_id.is_none() && members.contains(&g.db_id))
+            .map(|g| g.playtime)
+            .sum(),
+        None => game.playtime,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

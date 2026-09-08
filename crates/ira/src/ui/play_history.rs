@@ -112,8 +112,17 @@ pub fn show_play_history_dialog(
         let dialog = dialog.clone();
         let rebuild_handle_c = rebuild_handle.clone();
         let rebuild: RebuildFn = std::rc::Rc::new(move |focus: Option<ChartFocus>| {
-            let sessions = ira_db::get_sessions_for_game(&state.borrow().db, game_id, variant_id)
-                .unwrap_or_default();
+            // Linked entries contribute their sessions here too: the
+            // chart is the history of everything the link counts.
+            let db = state.borrow().db.clone();
+            let mut sessions = Vec::new();
+            for member in super::helpers::linked_members(&state, game_id) {
+                let variant = if member == game_id { variant_id } else { None };
+                sessions.extend(
+                    ira_db::get_sessions_for_game(&db, member, variant).unwrap_or_default(),
+                );
+            }
+            sessions.sort_by_key(|s| std::cmp::Reverse(s.started_at));
             clear_children(&box_);
             let on_delete: super::play_history_chart::DeleteSessionFn = {
                 let state = state.clone();

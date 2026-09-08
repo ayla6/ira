@@ -124,8 +124,27 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
 
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute("DELETE FROM games WHERE id = ?1", params![id])
+    let tx = c.unchecked_transaction().map_err(err)?;
+    tx.execute("DELETE FROM games WHERE id = ?1", params![id])
         .map_err(err)?;
+    // The playtime-link row follows via CASCADE; a link left with a
+    // single member is no longer a link.
+    crate::links::prune_incomplete_groups(&tx)?;
+    tx.commit().map_err(err)?;
+    Ok(())
+}
+
+/// Add playtime earned outside Ira to a game's total — hours imported from
+/// another launcher or a console version of the same game. Unlike session
+/// time this has no session row behind it, so it never appears in the play
+/// history chart; it just raises the total.
+pub fn add_playtime(conn: &DbConn, id: i64, hours: f64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "UPDATE games SET playtime = playtime + ?1 WHERE id = ?2",
+        params![hours, id],
+    )
+    .map_err(err)?;
     Ok(())
 }
 
@@ -218,6 +237,9 @@ pub fn merge_duplicate_games(
             .map_err(err)?;
     }
 
+    // A duplicate carried a playtime link? Its row CASCADEd away with the
+    // deletion; prune whatever link that left incomplete.
+    crate::links::prune_incomplete_groups(&tx)?;
     tx.commit().map_err(err)?;
     Ok(())
 }
@@ -290,6 +312,25 @@ mod tests {
         assert_eq!(game.title, "Test Game");
         assert_eq!(game.steam_id, "12345");
         assert_eq!(game.kind, GameKind::Steam);
+    }
+
+    #[test]
+    fn test_add_playtime_accumulates_on_the_total() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "12345",
+            "",
+            "",
+            "Test Game",
+        )
+        .unwrap();
+        add_playtime(&conn, id, 12.5).unwrap();
+        add_playtime(&conn, id, 1.5).unwrap();
+        let game = find_by_db_id(&conn, id).unwrap().unwrap();
+        assert!((game.playtime - 14.0).abs() < 0.001);
     }
 
     #[test]

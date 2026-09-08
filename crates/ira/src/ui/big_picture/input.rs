@@ -146,11 +146,14 @@ impl AxisNav {
     }
 }
 
-/// Both axes of directional navigation, plus the moment they last ticked.
+/// Both axes of directional navigation, the two shoulders' hold-repeat,
+/// and the moment they last ticked.
 #[derive(Default)]
 struct NavState {
     h: AxisNav,
     v: AxisNav,
+    l: HoldNav,
+    r: HoldNav,
 }
 
 impl NavState {
@@ -159,7 +162,51 @@ impl NavState {
     }
 
     fn repeat_due(&mut self, now_ms: u64) -> Option<NavCommand> {
-        self.h.repeat_due(now_ms).or_else(|| self.v.repeat_due(now_ms))
+        self.h.repeat_due(now_ms)
+            .or_else(|| self.v.repeat_due(now_ms))
+            .or_else(|| self.l.repeat_due(now_ms).then_some(NavCommand::PrevTab))
+            .or_else(|| self.r.repeat_due(now_ms).then_some(NavCommand::NextTab))
+    }
+}
+
+/// Hold-repeat for a shoulder button: fires on the press, then repeats
+/// like a held dpad direction until released — holding L/R sweeps the
+/// keyboard's text caret without tapping.
+#[derive(Default)]
+struct HoldNav {
+    held: bool,
+    held_since_ms: u64,
+    next_repeat_ms: u64,
+}
+
+impl HoldNav {
+    /// A press or release of the button. True when the command should
+    /// fire now — the press itself, never a redundant re-press.
+    fn update(&mut self, pressed: bool, now_ms: u64) -> bool {
+        if !pressed {
+            self.held = false;
+            return false;
+        }
+        if self.held {
+            return false;
+        }
+        self.held = true;
+        self.held_since_ms = now_ms;
+        self.next_repeat_ms = now_ms + REPEAT_DELAY_MS;
+        true
+    }
+
+    /// The held button's repeat once the delay has passed; long holds
+    /// speed up like a held stick at full pressure.
+    fn repeat_due(&mut self, now_ms: u64) -> bool {
+        if !self.held || now_ms < self.next_repeat_ms {
+            return false;
+        }
+        let hold =
+            (now_ms.saturating_sub(self.held_since_ms) as f32 / REPEAT_RAMP_MS as f32).min(1.0);
+        let interval = REPEAT_EVERY_MS as f32 * (1.0 - 0.5 * hold);
+        self.next_repeat_ms = now_ms + (interval.max(55.0) as u64);
+        true
     }
 }
 
@@ -291,11 +338,15 @@ fn fold_event(
         InputSource::Button(GamepadButton::Start) if pressed => {
             let _ = tx.send(NavMsg::Nav(NavCommand::Options));
         }
-        InputSource::Button(GamepadButton::LeftShoulder) if pressed => {
-            let _ = tx.send(NavMsg::Nav(NavCommand::PrevTab));
+        InputSource::Button(GamepadButton::LeftShoulder) => {
+            if nav.l.update(pressed, now_ms) {
+                let _ = tx.send(NavMsg::Nav(NavCommand::PrevTab));
+            }
         }
-        InputSource::Button(GamepadButton::RightShoulder) if pressed => {
-            let _ = tx.send(NavMsg::Nav(NavCommand::NextTab));
+        InputSource::Button(GamepadButton::RightShoulder) => {
+            if nav.r.update(pressed, now_ms) {
+                let _ = tx.send(NavMsg::Nav(NavCommand::NextTab));
+            }
         }
         InputSource::Button(GamepadButton::X) if pressed => {
             let _ = tx.send(NavMsg::Nav(NavCommand::Secondary));
@@ -307,6 +358,13 @@ fn fold_event(
             nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)
         }
         InputSource::Axis(GamepadAxis::LeftY) => {
+            nav.v.apply_stick(event.value, NavCommand::Down, NavCommand::Up)
+        }
+        // The right stick navigates exactly like the left.
+        InputSource::Axis(GamepadAxis::RightX) => {
+            nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)
+        }
+        InputSource::Axis(GamepadAxis::RightY) => {
             nav.v.apply_stick(event.value, NavCommand::Down, NavCommand::Up)
         }
         _ => {}
@@ -465,5 +523,37 @@ mod tests {
         assert_eq!(nav.update(REPEAT_DELAY_MS + 2), None);
         assert_eq!(nav.repeat_due(REPEAT_DELAY_MS + 2), None);
         assert_eq!(nav.v.repeat_due(1 + REPEAT_DELAY_MS + REPEAT_EVERY_MS), Some(NavCommand::Up));
+    }
+
+    #[test]
+    fn test_right_stick_drives_like_the_left() {
+        let mut nav = NavState::default();
+        nav.h.apply_stick(-0.9, NavCommand::Right, NavCommand::Left);
+        assert_eq!(nav.update(0), Some(NavCommand::Left));
+    }
+
+    #[test]
+    fn test_held_shoulder_fires_then_repeats_then_stops() {
+        let mut nav = NavState::default();
+        // The press fires immediately; the hold repeats on the shared
+        // schedule.
+        assert!(nav.l.update(true, 0), "the press itself fires");
+        assert_eq!(nav.repeat_due(REPEAT_DELAY_MS - 1), None);
+        assert_eq!(nav.repeat_due(REPEAT_DELAY_MS), Some(NavCommand::PrevTab));
+        assert_eq!(nav.repeat_due(REPEAT_DELAY_MS + 1), None);
+        assert_eq!(nav.repeat_due(REPEAT_DELAY_MS + 140), Some(NavCommand::PrevTab));
+        // A re-press while still held is noise; a release fires nothing;
+        // after it, a fresh press fires again.
+        assert!(!nav.l.update(true, REPEAT_DELAY_MS + 150));
+        assert!(!nav.l.update(false, REPEAT_DELAY_MS + 160));
+        assert!(nav.l.update(true, REPEAT_DELAY_MS + 170), "re-press after release fires");
+    }
+
+    #[test]
+    fn test_released_shoulder_does_not_repeat() {
+        let mut nav = NavState::default();
+        nav.l.update(true, 0);
+        nav.l.update(false, 10);
+        assert_eq!(nav.repeat_due(5_000), None);
     }
 }

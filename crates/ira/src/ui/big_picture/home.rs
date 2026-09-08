@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 
 /// How many recent games the carousel keeps.
-const RECENT_LIMIT: usize = 16;
+const RECENT_LIMIT: usize = 12;
 /// Selection scroll animation length.
 const SCROLL_MILLIS: u64 = 90;
 /// Layout spacer between the page top and the carousel: keeps the covers
@@ -338,14 +338,16 @@ pub(super) fn move_selection(state: &SharedState, delta: i32) {
     apply_selection(&big);
 }
 
-/// Clamp `current` by `delta` into `0..count`, or None when there is nothing
+/// `current` stepped by `delta`, wrapping at the row's edges — the wrap
+/// belongs to the edge tile alone: from anywhere else the row moves one
+/// step and the ends stay put until reached. None when there is nothing
 /// to move within.
 fn next_selection(current: usize, count: usize, delta: i32) -> Option<usize> {
     if count == 0 {
         return None;
     }
     let next = current as i64 + delta as i64;
-    Some(next.clamp(0, count as i64 - 1) as usize)
+    Some(next.rem_euclid(count as i64) as usize)
 }
 
 /// Launch the selected game through the shared launch path (which already
@@ -613,10 +615,11 @@ mod tests {
     use super::next_selection;
 
     #[test]
-    fn test_next_selection_clamps_at_edges() {
-        assert_eq!(next_selection(0, 5, -1), Some(0));
+    fn test_next_selection_wraps_from_the_edges() {
+        // Only the edge tiles wrap; steps inside the row just move one.
+        assert_eq!(next_selection(0, 5, -1), Some(4));
         assert_eq!(next_selection(0, 5, 1), Some(1));
-        assert_eq!(next_selection(4, 5, 1), Some(4));
+        assert_eq!(next_selection(4, 5, 1), Some(0));
         assert_eq!(next_selection(2, 5, 2), Some(4));
         assert_eq!(next_selection(0, 0, 1), None);
     }

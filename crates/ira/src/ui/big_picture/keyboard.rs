@@ -176,12 +176,11 @@ pub(super) struct Keyboard {
     /// The menu surface: dim layer with the panel floating on top.
     root: gtk4::Overlay,
     panel: gtk4::Box,
-    /// The text preview: the buffer split around a blinking caret
-    /// widget, Switch-style.
+    /// The text preview: the buffer in one static label with the caret
+    /// floating over it, Switch-style.
     preview: gtk4::Box,
-    preview_before: gtk4::Label,
+    preview_label: gtk4::Label,
     preview_caret: gtk4::Box,
-    preview_after: gtk4::Label,
     /// The caret's blink phase; typing pins it visible.
     blink_on: Cell<bool>,
     /// Key cursor position: (row, column) into the showing page's rows.
@@ -239,33 +238,33 @@ impl Keyboard {
         root.add_overlay(&panel);
         root.set_visible(false);
 
-        let preview = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-        preview.add_css_class(CSS_BP_KEY_PREVIEW);
-        // The buffer split around the caret: the left half hugs the text
-        // up to a cap (then keeps its tail against the caret), the right
-        // half takes the rest of the pill.
-        let preview_before = gtk4::Label::new(None);
-        preview_before.set_ellipsize(gtk4::pango::EllipsizeMode::Start);
-        preview_before.set_max_width_chars(40);
-        crate::ui::helpers::crisp_label(&preview_before);
+        // The buffer lives in one static label; the caret floats over it
+        // at the glyph position Pango reports. Moving the caret must
+        // never reflow the text — it slides along it.
+        let preview_label = gtk4::Label::new(None);
+        preview_label.set_hexpand(true);
+        preview_label.set_halign(gtk4::Align::Fill);
+        preview_label.set_xalign(0.0);
+        preview_label.set_single_line_mode(true);
+        preview_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        crate::ui::helpers::crisp_label(&preview_label);
         let preview_caret = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         preview_caret.add_css_class(CSS_BP_KEY_CARET);
-        let preview_after = gtk4::Label::new(None);
-        preview_after.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        preview_after.set_hexpand(true);
-        preview_after.set_halign(gtk4::Align::Start);
-        crate::ui::helpers::crisp_label(&preview_after);
-        preview.append(&preview_before);
-        preview.append(&preview_caret);
-        preview.append(&preview_after);
+        preview_caret.set_halign(gtk4::Align::Start);
+        preview_caret.set_valign(gtk4::Align::Fill);
+        let preview_area = gtk4::Overlay::new();
+        preview_area.set_child(Some(&preview_label));
+        preview_area.add_overlay(&preview_caret);
+        let preview = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        preview.add_css_class(CSS_BP_KEY_PREVIEW);
+        preview.append(&preview_area);
 
         let keyboard = Self {
             root,
             panel,
             preview,
-            preview_before,
+            preview_label,
             preview_caret,
-            preview_after,
             blink_on: Cell::new(true),
             cursor: Cell::new((1, 0)),
             page: Cell::new(Page::Letters),
@@ -374,7 +373,6 @@ impl Keyboard {
                     c.to_string()
                 }
             }
-            Key::Shift => "⬆".to_string(),
             Key::Page => match self.page.get() {
                 Page::Letters => crate::tr!("#+="),
                 Page::Symbols => crate::tr!("ABC"),
@@ -383,6 +381,8 @@ impl Keyboard {
             Key::Backspace => "⌫".to_string(),
             Key::Return => crate::tr!("Return"),
             Key::Ok => crate::tr!("OK"),
+            // Shift renders as an icon (see key_button), never as text.
+            Key::Shift => String::new(),
         }
     }
 
@@ -445,12 +445,27 @@ impl Keyboard {
         // The badge rides an overlay above the label, so its presence
         // never shifts the letter's centering.
         let key_surface = gtk4::Overlay::new();
-        let label = gtk4::Label::new(Some(&self.key_label(key)));
-        label.set_hexpand(true);
-        label.set_halign(gtk4::Align::Center);
-        label.set_valign(gtk4::Align::Center);
-        crate::ui::helpers::crisp_label(&label);
-        key_surface.set_child(Some(&label));
+        if matches!(key, Key::Shift) {
+            // Caps lock wears its state: outlined at rest, filled when
+            // raised (the key_label path never sees Shift).
+            let icon = gtk4::Image::from_icon_name(if self.shifted_now() {
+                "shift-filled-symbolic"
+            } else {
+                "shift-symbolic"
+            });
+            icon.set_pixel_size(28);
+            icon.set_hexpand(true);
+            icon.set_halign(gtk4::Align::Center);
+            icon.set_valign(gtk4::Align::Center);
+            key_surface.set_child(Some(&icon));
+        } else {
+            let label = gtk4::Label::new(Some(&self.key_label(key)));
+            label.set_hexpand(true);
+            label.set_halign(gtk4::Align::Center);
+            label.set_valign(gtk4::Align::Center);
+            crate::ui::helpers::crisp_label(&label);
+            key_surface.set_child(Some(&label));
+        }
         button.append(&key_surface);
         // Action keys wear their pad button in the corner, Switch-style.
         if let Some(badge) = Self::badge(key) {
@@ -551,18 +566,29 @@ impl Keyboard {
         self.panel.append(&grid);
 
         // The shortcut row, Switch-style: every action with its pad
-        // button beside it, in the pad's own colors.
+        // button beside it, in the pad's own colors. The shoulders'
+        // caret move is a directional icon, not a word.
+        enum Hint {
+            Icon(&'static str),
+            Text(String),
+        }
         let hints = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
         hints.set_halign(gtk4::Align::End);
         hints.set_margin_top(8);
         let family = self.family.get();
-        for (button, label) in [
-            (ira_input::GamepadButton::LeftShoulder, "\u{2190}".to_string()),
-            (ira_input::GamepadButton::RightShoulder, "\u{2192}".to_string()),
-            (ira_input::GamepadButton::LeftStick, crate::tr!("Shift")),
-            (ira_input::GamepadButton::A, crate::tr!("Select")),
-            (ira_input::GamepadButton::B, crate::tr!("Delete")),
-            (ira_input::GamepadButton::X, crate::tr!("Cancel")),
+        for (button, hint) in [
+            (
+                ira_input::GamepadButton::LeftShoulder,
+                Hint::Icon("left-large-symbolic"),
+            ),
+            (
+                ira_input::GamepadButton::RightShoulder,
+                Hint::Icon("right-large-symbolic"),
+            ),
+            (ira_input::GamepadButton::LeftStick, Hint::Text(crate::tr!("Shift"))),
+            (ira_input::GamepadButton::A, Hint::Text(crate::tr!("Select"))),
+            (ira_input::GamepadButton::B, Hint::Text(crate::tr!("Delete"))),
+            (ira_input::GamepadButton::X, Hint::Text(crate::tr!("Cancel"))),
         ] {
             let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
             let glyph = gtk4::Image::new();
@@ -585,10 +611,20 @@ impl Keyboard {
                 ira_input::InputSource::Button(button),
                 family,
             );
-            let text = gtk4::Label::new(Some(&label));
-            text.add_css_class(CSS_BP_PROMPT);
-            crate::ui::helpers::crisp_label(&text);
-            item.append(&text);
+            match hint {
+                Hint::Icon(name) => {
+                    let icon = gtk4::Image::from_icon_name(name);
+                    icon.set_pixel_size(22);
+                    icon.add_css_class(CSS_BP_PROMPT);
+                    item.append(&icon);
+                }
+                Hint::Text(label) => {
+                    let text = gtk4::Label::new(Some(&label));
+                    text.add_css_class(CSS_BP_PROMPT);
+                    crate::ui::helpers::crisp_label(&text);
+                    item.append(&text);
+                }
+            }
             hints.append(&item);
         }
         self.panel.append(&hints);
@@ -662,9 +698,7 @@ impl Keyboard {
                 }
             }
             Key::Space => self.insert(' '),
-            Key::Backspace => {
-                self.buffer.borrow_mut().pop();
-            }
+            Key::Backspace => self.backspace(),
             Key::Page => {
                 self.page
                     .set(match self.page.get() {
@@ -734,7 +768,12 @@ impl Keyboard {
             .nth(caret - 1)
             .map(|(i, _)| i)
             .unwrap_or(0);
-        buffer.replace_range(start.., "");
+        let end = buffer
+            .char_indices()
+            .nth(caret)
+            .map(|(i, _)| i)
+            .unwrap_or(buffer.len());
+        buffer.replace_range(start..end, "");
         drop(buffer);
         self.caret.set(caret - 1);
         self.refresh_preview();
@@ -760,13 +799,33 @@ impl Keyboard {
         self.preview_caret.set_opacity(1.0);
         if text.is_empty() {
             // The caret leads the placeholder, like an empty entry.
-            self.preview_before.set_text("");
-            self.preview_after.set_text(&crate::tr!("Type a name…"));
+            self.preview_label.set_text(&crate::tr!("Type a name…"));
+            self.place_caret(0);
             return;
         }
-        let (before, after) = split_at_caret(&text, self.caret.get());
-        self.preview_before.set_text(&before);
-        self.preview_after.set_text(&after);
+        self.preview_label.set_text(&text);
+        self.place_caret(self.caret.get().min(text.chars().count()));
+    }
+
+    /// Float the caret over the glyph slot the text caret occupies.
+    /// Pango reports the index's rect inside the label's layout, and the
+    /// overlay shares the label's coordinate origin, so the rect is the
+    /// floating bar's margin — the text itself never moves.
+    fn place_caret(&self, caret: usize) {
+        let text = self.preview_label.text();
+        let byte = text
+            .char_indices()
+            .nth(caret)
+            .map(|(i, _)| i)
+            .unwrap_or(text.len());
+        let rect = self.preview_label.layout().index_to_pos(byte as i32);
+        let scale = gtk4::pango::SCALE as f64;
+        let inset = ((rect.height() as f64 / scale) * 0.14).round() as i32;
+        self.preview_caret
+            .set_margin_start((rect.x() as f64 / scale).round() as i32);
+        self.preview_caret
+            .set_margin_top((rect.y() as f64 / scale).round() as i32 + inset);
+        self.preview_caret.set_margin_bottom(inset);
     }
 
     fn refresh_cursor(&self) {
@@ -793,16 +852,6 @@ impl Keyboard {
             }
         }
     }
-}
-
-/// The preview's two halves around the text caret (a char index clamped
-/// into the text).
-fn split_at_caret(text: &str, caret: usize) -> (String, String) {
-    let caret = caret.min(text.chars().count());
-    (
-        text.chars().take(caret).collect(),
-        text.chars().skip(caret).collect(),
-    )
 }
 
 #[cfg(test)]
@@ -870,26 +919,5 @@ mod tests {
         // hold there verbatim.
         assert_eq!(advance_cursor(SYMBOL_ROWS, false, (0, 11), 0, 1), (3, 11));
         assert_eq!(advance_cursor(SYMBOL_ROWS, false, (2, 11), 0, -1), (0, 11));
-    }
-
-    #[test]
-    fn test_split_at_caret_end() {
-        assert_eq!(split_at_caret("Visual Novel", 12), ("Visual Novel".into(), "".into()));
-    }
-
-    #[test]
-    fn test_split_at_caret_mid() {
-        assert_eq!(split_at_caret("Visual Novel", 9), ("Visual No".into(), "vel".into()));
-    }
-
-    #[test]
-    fn test_split_at_caret_empty_and_clamped() {
-        assert_eq!(split_at_caret("", 0), ("".into(), "".into()));
-        assert_eq!(split_at_caret("abc", 99), ("abc".into(), "".into()));
-    }
-
-    #[test]
-    fn test_split_at_caret_counts_chars_not_bytes() {
-        assert_eq!(split_at_caret("éa", 1), ("é".into(), "a".into()));
     }
 }

@@ -243,6 +243,11 @@ impl GroupsGrid {
         let collage = gtk4::Grid::new();
         collage.set_row_homogeneous(true);
         collage.set_column_homogeneous(true);
+        // Breathing room between the quarters: the slot's background
+        // reads through the gaps instead of back-to-back art.
+        let gap = (tile as f64 * 0.015).round().max(2.0) as u32;
+        collage.set_row_spacing(gap);
+        collage.set_column_spacing(gap);
         // Always a 2x2: the group's covers take the first cells and the
         // missing ones stay invisible, so a 2-cover group is two quarters
         // in the top row — never two stretched halves.

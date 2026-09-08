@@ -798,8 +798,10 @@ fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
 }
 
 pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
-    let title = params.title_entry.text().to_string();
-    let sort_title = params.sort_entry.text().to_string();
+    // Trimmed like save_title_and_sort: the in-memory copy must match
+    // what lands in the database.
+    let title = params.title_entry.text().trim().to_string();
+    let sort_title = params.sort_entry.text().trim().to_string();
     let db = params.state.borrow().db.clone();
     let target_kind = selected_game_kind(&params);
 

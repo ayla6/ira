@@ -417,16 +417,27 @@ fn big_picture_css(s: f64) -> String {
     font-size: {subtitle};
     color: alpha(@theme_fg_color, 0.55);
 }}
-/* The tab picker: libadwaita's toggle group, minus its bold labels. */
+/* The tab picker: libadwaita's toggle-group metrics, ported from its
+   stylesheet (3px group padding, 9px group radius, 34x28 toggles with
+   8px side padding, 6px icon-label spacing) and scaled to the
+   big-picture type size — minus the bold labels. */
 .bp-tabs toggle,
 .bp-tabs toggle label {{
     font-weight: normal;
 }}
-.bp-tabs > toggle {{
-    padding: 4px 16px;
+.bp-tabs {{
+    padding: {tabs_group_pad};
+    border-radius: {tabs_radius};
 }}
-.bp-tabs buttoncontent > box > image {{
-    margin-top: 3px;
+.bp-tabs > toggle {{
+    min-width: {tabs_min_w};
+    min-height: {tabs_min_h};
+    border-radius: {tabs_toggle_radius};
+    padding-left: {tabs_pad_x};
+    padding-right: {tabs_pad_x};
+}}
+.bp-tabs buttoncontent > box {{
+    border-spacing: {tabs_spacing};
 }}
 .bp-tabs toggle label {{
     font-size: {subtitle};
@@ -527,6 +538,7 @@ fn big_picture_css(s: f64) -> String {
 }}
 .bp-keyboard {{
     border-radius: 16px 16px 0 0;
+    padding-top: {kbd_pad_top};
 }}
 .bp-key-badge {{
     min-width: {badge};
@@ -564,6 +576,14 @@ fn big_picture_css(s: f64) -> String {
         group_row_pad = px(14),
         menu_pad = px(22),
         caret_w = px(3),
+        tabs_group_pad = px(3),
+        tabs_radius = px(9),
+        tabs_min_w = px(34),
+        tabs_min_h = px(28),
+        tabs_toggle_radius = px(6),
+        tabs_pad_x = px(8),
+        tabs_spacing = px(6),
+        kbd_pad_top = px(10),
     )
 }
 

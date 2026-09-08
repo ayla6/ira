@@ -15,6 +15,10 @@ use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 /// whole-pixel glyph positions. Full hinting distorts the outlines at UI
 /// sizes (stems snap into uneven weights); slight keeps the shapes and
 /// rounding the positions still stops stems from falling between pixels.
+/// Antialiasing and metrics are pinned too: under gamescope no desktop
+/// settings daemon feeds fontconfig defaults, and the raw defaults (LCD
+/// subpixel coverage, fractional line metrics) are what sheared pixels
+/// off glyph edges — the broken letters on key borders.
 pub fn crisp_label(label: &gtk4::Label) {
     let context = label.pango_context();
     context.set_round_glyph_positions(true);
@@ -24,6 +28,14 @@ pub fn crisp_label(label: &gtk4::Label) {
         gtk4::cairo::ffi::cairo_font_options_set_hint_style(
             options,
             gtk4::cairo::ffi::HINT_STYLE_SLIGHT,
+        );
+        gtk4::cairo::ffi::cairo_font_options_set_antialias(
+            options,
+            gtk4::cairo::ffi::ANTIALIAS_GRAY,
+        );
+        gtk4::cairo::ffi::cairo_font_options_set_hint_metrics(
+            options,
+            gtk4::cairo::ffi::HINT_METRICS_ON,
         );
         pango_cairo_context_set_font_options(context.to_glib_none().0, options);
         gtk4::cairo::ffi::cairo_font_options_destroy(options);

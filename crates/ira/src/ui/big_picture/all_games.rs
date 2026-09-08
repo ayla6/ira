@@ -261,6 +261,13 @@ pub(super) fn build(
     );
     tabs.add_css_class(CSS_BP_TABS);
     tabs.set_active_name(Some("recent"));
+    // The first paint must already sit centered: the styles the pango
+    // metrics are read from only settle once the page maps.
+    tabs.connect_map(|w| {
+        if let Some(tabs) = w.downcast_ref::<adw::ToggleGroup>() {
+            center_tab_icons(tabs);
+        }
+    });
     let center = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
     center.set_valign(gtk4::Align::Center);
     center.append(&shoulder_l.slot);
@@ -342,11 +349,14 @@ pub(super) fn build(
     let groups = super::groups::GroupsGrid::build(state);
 
     // The three tab surfaces in one stack: the recent carousel, the game
-    // grid, and the groups tiles. A quick directional slide, nothing
-    // showy. The stack clips itself: a two-page slide must not paint the
-    // outgoing page's tiles past its own area, into the rails.
+    // grid, and the groups tiles. The switch is a quick crossfade: the
+    // pages never move, so every viewport keeps clipping exactly like it
+    // does at rest. A slide is what dragged the covers' clipped-off
+    // halves through the visible area — the pages travel beneath the
+    // stack's one stationary edge, so the parts a viewport had cut away
+    // reappear mid-switch, full square icons and all.
     let surfaces = gtk4::Stack::new();
-    surfaces.set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
+    surfaces.set_transition_type(gtk4::StackTransitionType::Crossfade);
     surfaces.set_transition_duration(130);
     surfaces.set_overflow(gtk4::Overflow::Hidden);
     surfaces.set_vexpand(true);
@@ -500,6 +510,7 @@ impl AllSoftwareUi {
                 child = node.next_sibling();
             }
         }
+        center_tab_icons(&self.tabs);
     }
 
     /// The connected pad's family changed: redraw the badges' glyphs.
@@ -591,13 +602,13 @@ impl AllSoftwareUi {
         }
     }
 
-    /// Run a surface change with the tab slide suppressed — a group view
+    /// Run a surface change with the tab fade suppressed — a group view
     /// swap is not a category change.
     fn without_slide(&self, f: impl FnOnce(&Self)) {
         self.surfaces.set_transition_type(gtk4::StackTransitionType::None);
         f(self);
         self.surfaces
-            .set_transition_type(gtk4::StackTransitionType::SlideLeftRight);
+            .set_transition_type(gtk4::StackTransitionType::Crossfade);
     }
 
     /// The mouse clicked a groups tile: first click focuses it, a click
@@ -1299,9 +1310,81 @@ fn launch(state: &SharedState, game: &Game) {
     }
 }
 
+/// Vertically center each tab's icon on its label's capital-letter band.
+/// Plain box centering aligns the icon to the label's line box, and the
+/// bundled font's glyphs sit low in that box (its tall CJK line
+/// metrics), so the icon reads as floating above the text. Measure the
+/// real geometry from pango — the font's baseline and cap height
+/// against the rendered line height — instead of tuning pixels by eye.
+fn center_tab_icons(tabs: &adw::ToggleGroup) {
+    let mut stack = vec![tabs.clone().upcast::<gtk4::Widget>()];
+    while let Some(widget) = stack.pop() {
+        if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
+            center_icon_on_label(label);
+        }
+        let mut child = widget.first_child();
+        while let Some(node) = child {
+            stack.push(node.clone());
+            child = node.next_sibling();
+        }
+    }
+}
+
+/// Drop the icon beside `label` so its center rests on the
+/// capital-letter band (baseline − cap height / 2) — the band the eye
+/// reads as "the text", identical for every word.
+fn center_icon_on_label(label: &gtk4::Label) {
+    let Some(image) = sibling_image(label) else {
+        return;
+    };
+    let layout = label.layout();
+    let (_, logical) = layout.extents();
+    // "X" measures the font's cap band independent of the word: every
+    // tab must agree, whatever the translation's descenders do.
+    let probe = pango::Layout::new(&label.pango_context());
+    probe.set_text("X");
+    let (cap, _) = probe.extents();
+    let Some(drop) = icon_drop_px(layout.baseline(), cap.height(), logical.height()) else {
+        return; // styles not settled yet; the map pass redoes it
+    };
+    // A fill-aligned image paints centered in whatever box it is given,
+    // so a margin moved it by only half; centered, the margin is the
+    // exact distance.
+    image.set_valign(gtk4::Align::Center);
+    if image.margin_top() != drop {
+        image.set_margin_top(drop);
+    }
+}
+
+/// The image sharing `label`'s container — AdwButtonContent's box.
+fn sibling_image(label: &gtk4::Label) -> Option<gtk4::Image> {
+    let parent = label.parent()?.downcast::<gtk4::Box>().ok()?;
+    let mut child = parent.first_child();
+    while let Some(node) = child {
+        if let Some(image) = node.downcast_ref::<gtk4::Image>() {
+            return Some(image.clone());
+        }
+        child = node.next_sibling();
+    }
+    None
+}
+
+/// The margin dropping a centered icon onto the cap band, from pango
+/// extents (PANGO_SCALE units). `None` while the styles have not
+/// settled and the geometry would measure as zero.
+fn icon_drop_px(baseline: i32, cap_height: i32, line_height: i32) -> Option<i32> {
+    if line_height <= 0 || cap_height <= 0 {
+        return None;
+    }
+    let drop = (i64::from(baseline) - i64::from(cap_height) / 2 - i64::from(line_height) / 2)
+        as f64
+        / f64::from(pango::SCALE);
+    Some(drop.round().max(0.0) as i32)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{grid_move, scroll_target};
+    use super::{grid_move, icon_drop_px, scroll_target};
 
     const COLS: usize = 5;
 
@@ -1362,5 +1445,20 @@ mod tests {
         assert_eq!(scroll_target(0, COLS, row_h, top_pad, 90.0, 300.0), 0.0);
         // Deep rows (row 5 = index 25) scroll to the boundary that fits.
         assert_eq!(scroll_target(25, COLS, row_h, top_pad, 90.0, 300.0), 390.0);
+    }
+
+    #[test]
+    fn test_icon_drop_lands_icon_center_on_cap_band() {
+        let k = pango::SCALE;
+        // A 30px line box, baseline at 25px, 15px caps: the cap band
+        // center sits at 25 − 7.5 = 17.5px, the box center at 15px →
+        // 2.5px down.
+        assert_eq!(icon_drop_px(25 * k, 15 * k, 30 * k), Some(3));
+        // Symmetric metrics need no offset.
+        assert_eq!(icon_drop_px(20 * k, 16 * k, 24 * k), Some(0));
+        // A taller line box than the cap band can reach never pushes up.
+        assert_eq!(icon_drop_px(20 * k, 16 * k, 40 * k), Some(0));
+        // Unstyled geometry measures as zero: skip the pass.
+        assert_eq!(icon_drop_px(0, 0, 0), None);
     }
 }

@@ -385,6 +385,12 @@ impl HomeUi {
         let pending = state.clone();
         let id = glib::timeout_add_local(Duration::from_millis(SNAP_AFTER_MS), move || {
             if let Some(big) = pending.borrow().big_picture.clone() {
+                // Returning Break destroys this source, so the stored
+                // handle dies with it — drop it first or the next restart
+                // removes a dead source and glib aborts. It must precede
+                // the snap: a moved adjustment re-queues a fresh source
+                // through the hook, and clearing after would eat that one.
+                big.home.snap_source.borrow_mut().take();
                 snap_to_boundary(&big.home);
             }
             glib::ControlFlow::Break

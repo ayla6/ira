@@ -61,6 +61,17 @@ impl SortMode {
         SortMode::SteamReview,
     ];
 
+    /// The orderings the UI menus offer: `ALL` minus the completion
+    /// percentage, which reads as noise next to dates and scores.
+    pub const ORDERING_CHOICES: &[SortMode] = &[
+        SortMode::Alphabetical,
+        SortMode::HoursPlayed,
+        SortMode::LastPlayed,
+        SortMode::ReleaseDate,
+        SortMode::MetacriticScore,
+        SortMode::SteamReview,
+    ];
+
     pub fn compare(&self, a: &Game, b: &Game) -> Ordering {
         match self {
             SortMode::Alphabetical => a
@@ -141,6 +152,14 @@ mod tests {
             let s = mode.as_str();
             let back = SortMode::parse_sort_mode(s);
             assert_eq!(*mode, back);
+        }
+    }
+
+    #[test]
+    fn test_ordering_choices_drop_completion_but_stay_valid() {
+        assert!(!SortMode::ORDERING_CHOICES.contains(&SortMode::Completion));
+        for mode in SortMode::ORDERING_CHOICES {
+            assert_eq!(*mode, SortMode::parse_sort_mode(mode.as_str()));
         }
     }
 

@@ -15,13 +15,16 @@ use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 
 /// How many recent games the carousel keeps.
 const RECENT_LIMIT: usize = 12;
 /// Selection scroll animation length.
 const SCROLL_MILLIS: u64 = 90;
+/// How long native scrolling must stay quiet before the carousel snaps
+/// to the nearest whole-cover boundary.
+const SNAP_AFTER_MS: u64 = 350;
 /// Layout spacer between the page top and the carousel: keeps the covers
 /// clear of the floating pill (bubble + tail at the big picture title size),
 /// which overlays the page and sizes itself from the cover's position.
@@ -49,6 +52,9 @@ pub(super) struct HomeUi {
     games: RefCell<Vec<Game>>,
     selected: RefCell<usize>,
     scroll_anim: RefCell<Option<gtk4::TickCallbackId>>,
+    /// The pending post-scroll settle snap, restarted on every native
+    /// scroll event.
+    snap_source: RefCell<Option<glib::SourceId>>,
     /// Games whose SGDB square is already being fetched in the background,
     /// so a refresh while the download runs does not re-queue them.
     square_queued: RefCell<HashSet<i64>>,
@@ -114,6 +120,19 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
         };
         adj.connect_value_changed(track.clone());
         adj.connect_changed(track);
+        // Native scrolling (wheel, touchpad pan, kinetic glide) lands
+        // wherever physics leaves it, and a cover sliced by the viewport
+        // edge reads as a broken tile. Once the scrolling settles, snap
+        // to the nearest whole-cover boundary.
+        {
+            let snap_state = state.clone();
+            let snap_adj = scrolled.hadjustment();
+            snap_adj.connect_value_changed(move |_| {
+                if let Some(big) = snap_state.borrow().big_picture.clone() {
+                    big.home.queue_boundary_snap(&snap_state);
+                }
+            });
+        }
     }
     main.append(&scrolled);
 
@@ -151,6 +170,7 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
         games: RefCell::new(Vec::new()),
         selected: RefCell::new(0),
         scroll_anim: RefCell::new(None),
+        snap_source: RefCell::new(None),
         square_queued: RefCell::new(HashSet::new()),
     };
     (page, ui)
@@ -356,6 +376,34 @@ pub(super) fn finish_scroll(state: &SharedState) {
     }
 }
 
+/// Restart the settle timer: native scrolling is still moving.
+impl HomeUi {
+    fn queue_boundary_snap(&self, state: &SharedState) {
+        if let Some(id) = self.snap_source.borrow_mut().take() {
+            id.remove();
+        }
+        let pending = state.clone();
+        let id = glib::timeout_add_local(Duration::from_millis(SNAP_AFTER_MS), move || {
+            if let Some(big) = pending.borrow().big_picture.clone() {
+                snap_to_boundary(&big.home);
+            }
+            glib::ControlFlow::Break
+        });
+        *self.snap_source.borrow_mut() = Some(id);
+    }
+}
+
+/// Jump to the nearest whole-cover boundary (the scroll value
+/// `whole_cover_target` names), so a resting carousel never shows a
+/// cover sliced by the viewport edge.
+fn snap_to_boundary(ui: &HomeUi) {
+    let adj = ui.scrolled.hadjustment();
+    let selected = *ui.selected.borrow();
+    if let Some(target) = whole_cover_target(ui, &adj, selected) {
+        adj.set_value(target);
+    }
+}
+
 /// `current` stepped by `delta`. A wrap is the edge tile's privilege and
 /// happens once, on a fresh press (`allow_wrap`): from anywhere else the
 /// row moves one step, and a held direction that reaches an end meets a
@@ -541,7 +589,7 @@ fn whole_cover_target(ui: &HomeUi, adj: &gtk4::Adjustment, selected: usize) -> O
     if pitch <= 1.0 {
         return Some(centered);
     }
-    let snapped = first_x + (((centered - first_x) / pitch).floor() * pitch);
+    let snapped = first_x + (((centered - first_x) / pitch).round() * pitch);
     Some(snapped.clamp(0.0, max))
 }
 

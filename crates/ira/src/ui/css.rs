@@ -440,17 +440,14 @@ fn big_picture_css(s: f64) -> String {
     border-radius: {tabs_toggle_radius};
     padding-left: {tabs_pad_x};
     padding-right: {tabs_pad_x};
+    /* Measured on a real screenshot: the toggle's content sits ~2.5px
+       below the pill's center (the bundled font's asymmetric metrics put
+       the glyph mass low in its line box). Bottom padding lifts the
+       content to the measured optical center. */
+    padding-bottom: {tabs_pad_bottom};
 }}
 .bp-tabs buttoncontent > box {{
     border-spacing: {tabs_spacing};
-}}
-.bp-tabs buttoncontent > box > image {{
-    /* Measured against the bundled font at the tab size: its cap-band
-       center sits ~2px below the line box's geometric center (asymmetric
-       ascender/descender), and AdwButtonContent centers the icon on that
-       center — so the text reads low. Nudge the icon down the measured
-       half-margin to meet it. */
-    margin-top: {tabs_icon_drop};
 }}
 .bp-tabs toggle label {{
     font-size: {subtitle};
@@ -595,7 +592,7 @@ fn big_picture_css(s: f64) -> String {
         tabs_toggle_radius = px(6),
         tabs_pad_x = px(8),
         tabs_spacing = px(6),
-        tabs_icon_drop = px(4),
+        tabs_pad_bottom = px(5),
         kbd_pad_top = px(10),
     )
 }

@@ -386,7 +386,7 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
     let current_mode = state.borrow().cfg.sort_mode;
     let mut first_btn: Option<gtk4::CheckButton> = None;
 
-    for mode in SortMode::ALL {
+    for mode in SortMode::ORDERING_CHOICES {
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         row.set_size_request(-1, 36);
 

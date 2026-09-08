@@ -236,7 +236,7 @@ impl GameMenu {
                 self.panel.append(&header);
 
                 let mut rows = Vec::new();
-                for mode in ira_models::SortMode::ALL {
+                for mode in ira_models::SortMode::ORDERING_CHOICES {
                     let index = rows.len();
                     self.append_row(state, mode.display_label(), index, *mode == current);
                     rows.push(MenuRow::Sort(*mode));

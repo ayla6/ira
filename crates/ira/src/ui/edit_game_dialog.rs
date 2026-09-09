@@ -86,6 +86,13 @@ fn create_dialog_window(
     )
 }
 
+/// Wine pages only make sense for Wine games: a native Linux game shares
+/// the Launch Config page but has no use for the Wine-specific options
+/// (DXVK, esync/fsync, wine prefix, …).
+fn wine_tabs_allowed(kind: ira_models::GameKind) -> bool {
+    kind == ira_models::GameKind::Wine
+}
+
 fn build_launch_wine_advanced_pages(
     state: &SharedState,
     game: &Game,
@@ -202,8 +209,9 @@ fn build_launch_wine_advanced_pages(
         },
     ));
 
-    // Wine pages — only for Wine games with wine enabled
-    let show_wine_tabs = game.kind.is_managed_pc();
+    // Wine pages — only for Wine games. Flipping the System page's Runtime
+    // combo to Wine picks the tabs up on the next time the dialog opens.
+    let show_wine_tabs = wine_tabs_allowed(game.kind);
     let wine_widgets_opt = if show_wine_tabs {
         let (wine_pages, ww) =
             build_wine_config_pages(saved_wine, Some(app_default_wine), &save_dir);
@@ -697,4 +705,18 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         db_id,
     );
     win_clone.present();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wine_tabs_allowed_only_for_wine_kind() {
+        assert!(wine_tabs_allowed(ira_models::GameKind::Wine));
+        assert!(!wine_tabs_allowed(ira_models::GameKind::Linux));
+        assert!(!wine_tabs_allowed(ira_models::GameKind::Other));
+        assert!(!wine_tabs_allowed(ira_models::GameKind::Steam));
+        assert!(!wine_tabs_allowed(ira_models::GameKind::Retro));
+    }
 }

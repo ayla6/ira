@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-08 21:54-0300\n"
+"POT-Creation-Date: 2026-09-08 22:19-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -199,7 +199,7 @@ msgstr ""
 #: crates/ira/src/ui/context_menu_actions.rs:110
 #: crates/ira/src/ui/context_menu_actions.rs:429
 #: crates/ira/src/ui/edit_game_controller.rs:422
-#: crates/ira/src/ui/edit_game_dialog.rs:432
+#: crates/ira/src/ui/edit_game_dialog.rs:440
 #: crates/ira/src/ui/edit_game_pages.rs:308
 #: crates/ira/src/ui/edit_game_playtime.rs:280
 #: crates/ira/src/ui/edit_game_variants.rs:137
@@ -564,7 +564,7 @@ msgstr ""
 #: crates/ira/src/ui/auto_add_dialog.rs:1697
 #: crates/ira/src/ui/big_picture/all_games.rs:729
 #: crates/ira/src/ui/big_picture/keyboard.rs:398
-#: crates/ira/src/ui/mass_match_dialog.rs:481
+#: crates/ira/src/ui/mass_match_dialog.rs:511
 #: crates/ira/src/ui/message_handler.rs:113
 msgid "OK"
 msgstr ""
@@ -989,31 +989,31 @@ msgstr ""
 msgid "Create new profile…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_dialog.rs:357
+#: crates/ira/src/ui/edit_game_dialog.rs:365
 #: crates/ira/src/ui/image_manager.rs:693
 #: crates/ira/src/ui/image_manager.rs:839
 msgid "Images"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_dialog.rs:473
-#: crates/ira/src/ui/edit_game_dialog.rs:477
+#: crates/ira/src/ui/edit_game_dialog.rs:481
+#: crates/ira/src/ui/edit_game_dialog.rs:485
 msgid "No save paths known"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_dialog.rs:506
+#: crates/ira/src/ui/edit_game_dialog.rs:514
 msgid "Save migration failed"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_dialog.rs:512
+#: crates/ira/src/ui/edit_game_dialog.rs:520
 #, rust-format
 msgid "Migrated {} save folder(s)"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_dialog.rs:518
+#: crates/ira/src/ui/edit_game_dialog.rs:526
 msgid "Already centralized"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_dialog.rs:527
+#: crates/ira/src/ui/edit_game_dialog.rs:535
 #: crates/ira/src/ui/input_profile_editor.rs:140
 #: crates/ira/src/ui/input_profile_editor_save.rs:123
 #: crates/ira/src/ui/profile_dialog.rs:452
@@ -4344,53 +4344,57 @@ msgstr ""
 msgid "Search log…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:127
+#: crates/ira/src/ui/mass_match_dialog.rs:128
 msgid "RA: not matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:134
+#: crates/ira/src/ui/mass_match_dialog.rs:135
 msgid "Search RA…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:152
+#: crates/ira/src/ui/mass_match_dialog.rs:153
 msgid "RA: matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:161
+#: crates/ira/src/ui/mass_match_dialog.rs:162
 msgid "Searching Steam..."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:163
+#: crates/ira/src/ui/mass_match_dialog.rs:164
 msgid "Searching SGDB..."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:174
+#: crates/ira/src/ui/mass_match_dialog.rs:186
+msgid "Searching ScreenScraper..."
+msgstr ""
+
+#: crates/ira/src/ui/mass_match_dialog.rs:193
 msgid "Search SS…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:188
-#: crates/ira/src/ui/mass_match_dialog.rs:452
+#: crates/ira/src/ui/mass_match_dialog.rs:206
+#: crates/ira/src/ui/mass_match_dialog.rs:480
 msgid "SS: matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:459
+#: crates/ira/src/ui/mass_match_dialog.rs:489
 msgid "SS: no match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:476
+#: crates/ira/src/ui/mass_match_dialog.rs:506
 msgid "Nothing to match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:478
+#: crates/ira/src/ui/mass_match_dialog.rs:508
 msgid "Every game already has a trophy source and image assets linked."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:487
+#: crates/ira/src/ui/mass_match_dialog.rs:517
 #: crates/ira/src/ui/window.rs:318
 msgid "Match unmatched games"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:495
+#: crates/ira/src/ui/mass_match_dialog.rs:525
 #, rust-format
 msgid "{} game(s) to match"
 msgstr ""

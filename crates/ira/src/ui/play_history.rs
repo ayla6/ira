@@ -366,12 +366,16 @@ pub fn show_daily_history_dialog(state: &SharedState) {
     let all_sessions =
         ira_db::get_sessions_range(&state.borrow().db, from, now).unwrap_or_default();
 
-    let game_names: HashMap<i64, String> = state
-        .borrow()
-        .games
-        .iter()
-        .map(|g| (g.db_id, g.name.clone()))
-        .collect();
+    // Straight from the database: games that left the library keep their
+    // rows, and their past sessions must still read as themselves.
+    let game_names: HashMap<i64, String> = {
+        let db = state.borrow().db.clone();
+        ira_db::load_all_games(&db)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|entry| (entry.id, entry.title))
+            .collect()
+    };
 
     let empty_hint = all_sessions
         .is_empty()
@@ -466,7 +470,10 @@ fn build_day_data(
     let mut details: Vec<DayDetail> = Vec::new();
     for (gid, total, sessions) in played {
         let color_idx = color_index_for_game(gid);
-        let name = game_names.get(&gid).cloned().unwrap_or_default();
+        let name = game_names
+            .get(&gid)
+            .cloned()
+            .unwrap_or_else(|| crate::tr!("Unknown game"));
         let sub_sessions: Vec<DaySession> = sessions
             .iter()
             .map(|s| DaySession {

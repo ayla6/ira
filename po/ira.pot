@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-08 23:09-0300\n"
+"POT-Creation-Date: 2026-09-08 23:48-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1566,7 +1566,7 @@ msgid "View log"
 msgstr ""
 
 #: crates/ira/src/ui/game_header.rs:337
-#: crates/ira/src/ui/play_button.rs:863
+#: crates/ira/src/ui/play_button.rs:865
 msgid "Open emulator without game"
 msgstr ""
 
@@ -2210,9 +2210,9 @@ msgstr ""
 #: crates/ira/src/ui/input_output_keys.rs:214
 #: crates/ira/src/ui/input_output_keys.rs:353
 #: crates/ira/src/ui/play_button.rs:44
-#: crates/ira/src/ui/play_button.rs:590
-#: crates/ira/src/ui/play_button.rs:647
-#: crates/ira/src/ui/play_button.rs:747
+#: crates/ira/src/ui/play_button.rs:592
+#: crates/ira/src/ui/play_button.rs:649
+#: crates/ira/src/ui/play_button.rs:749
 msgid "Stop"
 msgstr ""
 
@@ -4411,24 +4411,24 @@ msgstr ""
 msgid "No emulator configured"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:411
+#: crates/ira/src/ui/play_button.rs:412
 msgid "Stop the running game before opening its emulator"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:641
+#: crates/ira/src/ui/play_button.rs:643
 msgid "Select disc"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:681
+#: crates/ira/src/ui/play_button.rs:683
 #, rust-format
 msgid "Disc {}"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:741
+#: crates/ira/src/ui/play_button.rs:743
 msgid "Select variant"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:793
+#: crates/ira/src/ui/play_button.rs:795
 msgid "Base game"
 msgstr ""
 
@@ -4461,7 +4461,7 @@ msgid "Play history for"
 msgstr ""
 
 #: crates/ira/src/ui/play_history.rs:145
-#: crates/ira/src/ui/play_history.rs:378
+#: crates/ira/src/ui/play_history.rs:382
 msgid "No play sessions recorded yet"
 msgstr ""
 
@@ -4475,6 +4475,10 @@ msgstr ""
 
 #: crates/ira/src/ui/play_history.rs:349
 msgid "Daily play history"
+msgstr ""
+
+#: crates/ira/src/ui/play_history.rs:476
+msgid "Unknown game"
 msgstr ""
 
 #: crates/ira/src/ui/profile_dialog.rs:22

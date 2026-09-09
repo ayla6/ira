@@ -14,10 +14,13 @@ use ira_overlay_ipc::{
 };
 
 /// Creates the shared memory region and writes game data + achievements.
+/// `playtime_hours` is what the overlay reports — the caller combines
+/// linked entries, matching the game page and the play history.
 /// Returns the SHM name (e.g. `/ira_overlay_123`) to pass as `IRA_OVERLAY_SHM`,
 /// or `None` on failure.
 pub fn write_game_shm(
     game: &Game,
+    playtime_hours: f64,
     settings: &OverlaySettings,
     encoder: Option<u32>,
     recording_quality: Option<u32>,
@@ -32,7 +35,7 @@ pub fn write_game_shm(
         write_str(&mut hdr.cover_image_path, &game.icon_path);
         hdr.total_achievements = game.total_count.min(u32::MAX as usize) as u32;
         hdr.unlocked_achievements = game.earned_count.min(u32::MAX as usize) as u32;
-        hdr.playtime_seconds = (game.playtime * 3600.0) as u64;
+        hdr.playtime_seconds = (playtime_hours * 3600.0) as u64;
 
         hdr.overlay_position = settings.position.as_u32();
         hdr.video_encoder = encoder
@@ -128,7 +131,7 @@ mod tests {
             replay_buffer_seconds: 10 * 60,
             ..Default::default()
         };
-        let path = write_game_shm(&game, &settings, None, None).unwrap();
+        let path = write_game_shm(&game, game.playtime, &settings, None, None).unwrap();
         let shm = MappedShm::open(&path).unwrap();
         assert_eq!(shm.header().replay_buffer_enabled, 1);
         assert_eq!(shm.header().replay_buffer_seconds, 10 * 60);

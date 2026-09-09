@@ -194,6 +194,7 @@ pub fn launch_game(
                 .unwrap_or_default();
             crate::overlay::write_game_shm(
                 game,
+                super::helpers::display_playtime(state, game),
                 &s.cfg.overlay,
                 launch.overlay_encoder,
                 launch.overlay_recording_quality,
@@ -457,6 +458,7 @@ pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), Stri
                 .unwrap_or_default();
             crate::overlay::write_game_shm(
                 game,
+                super::helpers::display_playtime(state, game),
                 &s.cfg.overlay,
                 launch.overlay_encoder,
                 launch.overlay_recording_quality,

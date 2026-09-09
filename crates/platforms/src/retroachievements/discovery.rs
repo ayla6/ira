@@ -213,6 +213,14 @@ fn build_ra_games_for_console(
         .map(|e| (e.rom_path.clone(), e.clone()))
         .collect();
 
+    // Rows whose ROM vanished keep their content hash, so a file that
+    // comes back under a new name or path can be pinned to its old row.
+    let existing_by_hash: HashMap<&str, &ira_models::GameEntry> = existing_entries
+        .iter()
+        .filter(|e| !e.rom_hash.is_empty())
+        .map(|e| (e.rom_hash.as_str(), e))
+        .collect();
+
     // With RA disabled the match index stays empty: ROMs are discovered
     // offline and get matched whenever the integration is turned back on.
     let needs_ra_cache = ra_enabled
@@ -332,14 +340,15 @@ fn build_ra_games_for_console(
 
         let groups = group_multi_disc_roms(db, new_roms);
         let nds_infos = precompute_nds_infos(console, unpack_roms, &groups, &to_relative);
+        let rom_hashes = compute_rom_hashes(&nds_infos, &groups, &to_relative);
         for group in &groups {
             let (rom_name, rom_path, _disc_num) = &group.roms[0];
             let rom_path_str = to_relative(rom_path);
 
             let rom_norm = normalize_name(rom_name);
-            let rom_hash = nds_infos
+            let rom_hash = rom_hashes
                 .get(&rom_path_str)
-                .map(|info| info.rom_hash.as_str())
+                .map(String::as_str)
                 .unwrap_or_default();
             let matched_id = ra_index.find(rom_hash, &rom_norm);
 
@@ -402,7 +411,19 @@ fn build_ra_games_for_console(
                 candidate_ids.dedup();
             }
 
-            let canonical_id = id_from_key.or_else(|| candidate_ids.first().copied());
+            // A matching content hash pins the file to the row it lived on
+            // before its old file vanished — the reattachment path for a
+            // ROM that returns renamed or moved.
+            let id_from_hash = existing_by_hash.get(rom_hash).map(|entry| entry.id);
+            if let Some(id) = id_from_hash {
+                candidate_ids.push(id);
+                candidate_ids.sort_unstable();
+                candidate_ids.dedup();
+            }
+
+            let canonical_id = id_from_key
+                .or(id_from_hash)
+                .or_else(|| candidate_ids.first().copied());
             if let Some(canonical_id) = canonical_id {
                 let duplicate_ids: Vec<i64> = candidate_ids
                     .iter()
@@ -419,12 +440,16 @@ fn build_ra_games_for_console(
 
             let existing_by_id =
                 canonical_id.and_then(|id| ira_db::find_by_db_id(db, id).ok().flatten());
-            let had_hash = existing_by_id
+            let existing_hash = existing_by_id
                 .as_ref()
-                .is_some_and(|e| !e.rom_hash.is_empty());
+                .map(|e| e.rom_hash.clone())
+                .unwrap_or_default();
             // Resolved before the match below: `rom_path_str` is moved into
             // the built game in both branches.
-            let nds_info = if had_hash {
+            let pending_hash = rom_hashes
+                .get(&rom_path_str)
+                .filter(|hash| hash.as_str() != existing_hash);
+            let nds_info = if !existing_hash.is_empty() {
                 None
             } else {
                 nds_infos.get(&rom_path_str)
@@ -492,10 +517,12 @@ fn build_ra_games_for_console(
                 }
             };
 
-            if let Some(info) = nds_info {
-                if let Err(e) = ira_db::set_rom_hash(db, game.db_id, &info.rom_hash) {
-                    eprintln!("Failed to store DS ROM hash: {e}");
+            if let Some(hash) = pending_hash {
+                if let Err(e) = ira_db::set_rom_hash(db, game.db_id, hash) {
+                    eprintln!("Failed to store ROM hash: {e}");
                 }
+            }
+            if let Some(info) = nds_info {
                 write_nds_icon(save_dir, game.db_id, &info.icon);
                 hashed_now.insert(game.db_id);
             }
@@ -594,6 +621,43 @@ fn precompute_nds_infos(
         .zip(infos)
         .filter_map(|(target, info)| info.map(|i| (target.0, i)))
         .collect()
+}
+
+/// Content hash for every new ROM group's first disc, keyed by the path
+/// relative to the console folder. NDS RA hashes (already computed) win;
+/// everything else falls back to a full-file MD5, read once per file on
+/// the scan that first sees it. The hash is what later scans use to
+/// reattach a game whose ROM reappears under a new name or path.
+fn compute_rom_hashes(
+    nds_infos: &HashMap<String, crate::nds::DsRomInfo>,
+    groups: &[DiscGroup],
+    to_relative: &dyn Fn(&std::path::Path) -> String,
+) -> HashMap<String, String> {
+    if groups.is_empty() {
+        return HashMap::new();
+    }
+    use rayon::prelude::*;
+
+    let mut hashes: HashMap<String, String> = nds_infos
+        .iter()
+        .map(|(path, info)| (path.clone(), info.rom_hash.clone()))
+        .collect();
+    let targets: Vec<(String, PathBuf)> = groups
+        .iter()
+        .filter_map(|group| group.roms.first())
+        .map(|(_, path, _)| (to_relative(path), path.clone()))
+        .filter(|(relative, _)| !hashes.contains_key(relative))
+        .collect();
+    let digests: Vec<Option<String>> = targets
+        .par_iter()
+        .map(|(_, abs)| crate::rom_hash::file_md5(abs))
+        .collect();
+    for ((relative, _), digest) in targets.into_iter().zip(digests) {
+        if let Some(digest) = digest {
+            hashes.insert(relative, digest);
+        }
+    }
+    hashes
 }
 
 /// Extracts DS banner icons and RetroAchievements hashes for games that
@@ -945,6 +1009,114 @@ mod tests {
         assert!(super::rom_path_is_present(true, &seen_paths, "game.iso"));
         assert!(!super::rom_path_is_present(true, &seen_paths, "moved.iso"));
         assert!(super::rom_path_is_present(false, &seen_paths, "moved.iso"));
+    }
+
+    fn load_entry_stub(
+        entry: &ira_models::GameEntry,
+        _save_dir: &str,
+    ) -> Result<ira_models::Game, String> {
+        Ok(ira_models::Game {
+            db_id: entry.id,
+            kind: entry.kind,
+            platform_id: entry.platform_id.clone(),
+            name: entry.title.clone(),
+            ..Default::default()
+        })
+    }
+
+    fn gba_console(rom_dir: &std::path::Path) -> super::ActiveConsole {
+        super::ActiveConsole {
+            def: ira_models::find_console("gba").unwrap(),
+            folders: vec![rom_dir.to_path_buf()],
+            executable: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_scan_reattaches_returned_rom_by_content_hash() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rom_dir = tmp.path().join("roms/gba");
+        std::fs::create_dir_all(&rom_dir).unwrap();
+        let rom = rom_dir.join("Same Game (USA).gba");
+        std::fs::write(&rom, b"identical rom bytes").unwrap();
+
+        let db = test_db();
+        // A row whose file vanished: no path, but its content hash stayed.
+        let db_id = ira_db::add_game(
+            &db,
+            ira_models::GameKind::Retro,
+            ira_models::TrophySource::Empty,
+            "",
+            "",
+            "gba",
+            "Old title",
+        )
+        .unwrap();
+        let hash = crate::rom_hash::file_md5(&rom).unwrap();
+        ira_db::set_rom_hash(&db, db_id, &hash).unwrap();
+
+        let save_dir = tmp.path().join("save").to_string_lossy().into_owned();
+        let games = super::build_ra_games_for_console(
+            &db,
+            &save_dir,
+            &gba_console(&rom_dir),
+            false,
+            false,
+            &load_entry_stub,
+            &|_| {},
+        );
+
+        // The returned file was pinned to its old row — no duplicate, and
+        // the metadata survived the vanish.
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].db_id, db_id);
+        assert_eq!(games[0].rom_path, "Same Game (USA).gba");
+        let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
+        assert_eq!(entry.rom_path, "Same Game (USA).gba");
+        assert_eq!(entry.title, "Old title");
+        assert_eq!(entry.rom_hash, hash);
+        assert_eq!(
+            ira_db::find_all_rom_by_platform(&db, "gba").unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_scan_keeps_row_when_rom_file_disappears() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rom_dir = tmp.path().join("roms/gba");
+        std::fs::create_dir_all(&rom_dir).unwrap();
+
+        let db = test_db();
+        let db_id = ira_db::add_game(
+            &db,
+            ira_models::GameKind::Retro,
+            ira_models::TrophySource::Empty,
+            "",
+            "42",
+            "gba",
+            "Gone game",
+        )
+        .unwrap();
+        ira_db::set_rom_path(&db, db_id, "Gone.gba").unwrap();
+
+        let save_dir = tmp.path().join("save").to_string_lossy().into_owned();
+        let games = super::build_ra_games_for_console(
+            &db,
+            &save_dir,
+            &gba_console(&rom_dir),
+            false,
+            false,
+            &load_entry_stub,
+            &|_| {},
+        );
+
+        // The scan finds nothing, so the game leaves the list — but the
+        // row itself (title, ids, play history) stays for a later reattach.
+        assert!(games.is_empty());
+        let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
+        assert!(entry.rom_path.is_empty());
+        assert_eq!(entry.title, "Gone game");
     }
 
     fn test_db() -> ira_db::DbConn {

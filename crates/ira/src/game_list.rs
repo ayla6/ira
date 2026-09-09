@@ -16,8 +16,6 @@ use ira_platforms::vita3k::discover_games_for_executable as discover_vita3k_game
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-const ROM_MIGRATION_THRESHOLD_SECONDS: i64 = 5 * 60;
-
 #[derive(Clone, Debug)]
 pub struct GameListProgress {
     pub status: String,
@@ -507,6 +505,10 @@ enum PendingSource<'scope> {
     Ready(Vec<Game>),
 }
 
+/// A ROM whose file disappeared keeps its row: clearing the path hides the
+/// game from loads, but its title, images, hashes and play history stay so
+/// the ROM scan can reattach the same content when the file comes back —
+/// even renamed or from another folder.
 fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
     let entries = match db::load_all_games(db) {
         Ok(entries) => entries,
@@ -531,38 +533,15 @@ fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
         })
         .filter(|entry| !rom_entry_has_file(db, cfg, entry))
     {
-        if migration_playtime_seconds(db, entry) > ROM_MIGRATION_THRESHOLD_SECONDS {
-            if !entry.rom_path.is_empty() {
-                if let Err(error) = db::set_rom_path(db, entry.id, "") {
-                    eprintln!("Failed to clear stale ROM path {}: {error}", entry.id);
-                }
+        if !entry.rom_path.is_empty() {
+            if let Err(error) = db::set_rom_path(db, entry.id, "") {
+                eprintln!("Failed to clear stale ROM path {}: {error}", entry.id);
             }
-            if let Err(error) = db::delete_discs(db, entry.id) {
-                eprintln!("Failed to clear stale ROM discs {}: {error}", entry.id);
-            }
-        } else if let Err(error) = db::remove_game(db, entry.id) {
-            eprintln!("Failed to remove stale ROM entry {}: {error}", entry.id);
+        }
+        if let Err(error) = db::delete_discs(db, entry.id) {
+            eprintln!("Failed to clear stale ROM discs {}: {error}", entry.id);
         }
     }
-}
-
-fn migration_playtime_seconds(db: &db::DbConn, entry: &GameEntry) -> i64 {
-    let cached_seconds = (entry.playtime.max(0.0) * 3600.0).round() as i64;
-    let sessions_seconds = match db::get_sessions_for_game(db, entry.id, None) {
-        Ok(sessions) => sessions
-            .into_iter()
-            .map(|session| session.duration_seconds.max(0))
-            .sum(),
-        Err(error) => {
-            eprintln!(
-                "Failed to read play history for ROM entry {}: {error}",
-                entry.id
-            );
-            return cached_seconds.max(ROM_MIGRATION_THRESHOLD_SECONDS + 1);
-        }
-    };
-
-    cached_seconds.max(sessions_seconds)
 }
 
 fn rom_entry_has_file(db: &db::DbConn, cfg: &Config, entry: &GameEntry) -> bool {
@@ -1422,7 +1401,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cleanup_stale_rom_entries_removes_missing_file() {
+    fn test_cleanup_stale_rom_entries_keeps_row_for_missing_file() {
         let tmp = tempfile::tempdir().unwrap();
         let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
         let game_id = db::add_game(
@@ -1445,11 +1424,16 @@ mod tests {
 
         cleanup_stale_rom_entries(&db, &cfg);
 
-        assert!(db::find_by_db_id(&db, game_id).unwrap().is_none());
+        // The row survives with its metadata; only the stale path goes, so
+        // the game leaves the list but can be reattached when it returns.
+        let entry = db::find_by_db_id(&db, game_id).unwrap().unwrap();
+        assert!(entry.rom_path.is_empty());
+        assert_eq!(entry.title, "Stale game");
+        assert!(game_loader::load_saved_games(&db, &cfg.save_dir).is_empty());
     }
 
     #[test]
-    fn test_cleanup_stale_rom_entries_preserves_play_history_for_migration() {
+    fn test_cleanup_stale_rom_entries_keeps_play_history() {
         let tmp = tempfile::tempdir().unwrap();
         let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
         let game_id = db::add_game(

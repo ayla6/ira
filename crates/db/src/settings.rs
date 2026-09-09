@@ -59,8 +59,8 @@ pub fn set_rom_path(conn: &DbConn, id: i64, rom_path: &str) -> Result<(), String
     update_field(conn, id, "rom_path", &rom_path)
 }
 
-/// Stores the ROM identification hash RetroAchievements uses for
-/// name-independent matching.
+/// Stores the ROM's content hash, used for name-independent RA matching
+/// and to reattach a game whose ROM reappears under a new name or path.
 pub fn set_rom_hash(conn: &DbConn, id: i64, rom_hash: &str) -> Result<(), String> {
     update_field(conn, id, "rom_hash", &rom_hash)
 }

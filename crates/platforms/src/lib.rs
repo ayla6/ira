@@ -21,6 +21,7 @@ pub mod nds;
 pub mod ps3;
 pub mod ps4;
 pub mod retroachievements;
+pub mod rom_hash;
 pub mod rom_serial;
 pub mod steam;
 pub mod switch;

@@ -877,20 +877,22 @@ pub fn linked_members(state: &SharedState, db_id: i64) -> Vec<i64> {
 }
 
 /// The playtime a game displays: its link group's combined total when
-/// linked, its own otherwise. A read-time view only — session recording
-/// keeps writing each game's own column, so the stored values never
-/// carry another game's hours.
+/// linked, its own otherwise. Members are read from the database, not
+/// the loaded library — a linked entry that left the list (deleted,
+/// hidden, vanished) still owns its hours and must count. A read-time
+/// view only: session recording keeps writing each game's own column,
+/// so no stored value ever carries another game's hours.
 pub fn display_playtime(state: &SharedState, game: &Game) -> f64 {
-    let s = state.borrow();
-    match s.playtime_links.get(&game.db_id) {
-        Some(members) => s
-            .games
-            .iter()
-            .filter(|g| g.variant_id.is_none() && members.contains(&g.db_id))
-            .map(|g| g.playtime)
-            .sum(),
-        None => game.playtime,
+    let members = linked_members(state, game.db_id);
+    if members.len() <= 1 {
+        return game.playtime;
     }
+    let db = state.borrow().db.clone();
+    members
+        .iter()
+        .filter_map(|id| ira_db::find_by_db_id(&db, *id).ok().flatten())
+        .map(|entry| entry.playtime)
+        .sum()
 }
 
 #[cfg(test)]

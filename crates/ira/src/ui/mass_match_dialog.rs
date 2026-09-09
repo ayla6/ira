@@ -441,28 +441,48 @@ fn start_scraper_batch_matching(
     }
 
     let steam = state.borrow().steam.clone();
+    // A credentials rejection fails every request identically: once the
+    // worker sees one, remaining rows report that instead of a misleading
+    // "no match".
+    let rejected = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     run_batch(
         queue,
         50,
         1100,
         {
             let steam = steam.clone();
+            let rejected = std::sync::Arc::clone(&rejected);
             move |item| {
-                steam
-                    .screenscraper_search(&creds, &item.name, &item.platform_id)
-                    .ok()?
-                    .into_iter()
-                    .next()
+                match steam.screenscraper_search(&creds, &item.name, &item.platform_id) {
+                    Ok(games) => games.into_iter().next(),
+                    Err(e) => {
+                        if e.contains("rejected the credentials") {
+                            rejected.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        eprintln!("ScreenScraper batch search failed: {e}");
+                        None
+                    }
+                }
             }
         },
         {
             let state = state.clone();
             let row_boxes = scraper_row_boxes.to_vec();
+            let rejected = std::sync::Arc::clone(&rejected);
             move |hit| {
                 if hit.row_idx >= row_boxes.len() {
                     return;
                 }
                 let row = &row_boxes[hit.row_idx];
+                if rejected.load(std::sync::atomic::Ordering::Relaxed) && hit.matched.is_none()
+                {
+                    clear_children(row);
+                    row.append(&status_label(
+                        &crate::tr!("SS: credentials rejected"),
+                        CSS_DIM_LABEL,
+                    ));
+                    return;
+                }
                 match hit.matched {
                     Some(game) => {
                         let timestamp =
@@ -557,6 +577,8 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
 fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> gtk4::Box {
     let row = adw::ActionRow::new();
+    // Game titles are shown as typed — "Fear & Hunger" is not markup.
+    row.set_use_markup(false);
     row.set_title(name);
     // Long local names wrap to two lines at most, then ellipsize, so the
     // suffix status label and buttons keep a usable share of the row width.

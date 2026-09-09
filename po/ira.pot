@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-08 22:19-0300\n"
+"POT-Creation-Date: 2026-09-08 22:32-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -564,7 +564,7 @@ msgstr ""
 #: crates/ira/src/ui/auto_add_dialog.rs:1697
 #: crates/ira/src/ui/big_picture/all_games.rs:729
 #: crates/ira/src/ui/big_picture/keyboard.rs:398
-#: crates/ira/src/ui/mass_match_dialog.rs:511
+#: crates/ira/src/ui/mass_match_dialog.rs:531
 #: crates/ira/src/ui/message_handler.rs:113
 msgid "OK"
 msgstr ""
@@ -4373,28 +4373,32 @@ msgid "Search SS…"
 msgstr ""
 
 #: crates/ira/src/ui/mass_match_dialog.rs:206
-#: crates/ira/src/ui/mass_match_dialog.rs:480
+#: crates/ira/src/ui/mass_match_dialog.rs:500
 msgid "SS: matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:489
+#: crates/ira/src/ui/mass_match_dialog.rs:481
+msgid "SS: credentials rejected"
+msgstr ""
+
+#: crates/ira/src/ui/mass_match_dialog.rs:509
 msgid "SS: no match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:506
+#: crates/ira/src/ui/mass_match_dialog.rs:526
 msgid "Nothing to match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:508
+#: crates/ira/src/ui/mass_match_dialog.rs:528
 msgid "Every game already has a trophy source and image assets linked."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:517
+#: crates/ira/src/ui/mass_match_dialog.rs:537
 #: crates/ira/src/ui/window.rs:318
 msgid "Match unmatched games"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:525
+#: crates/ira/src/ui/mass_match_dialog.rs:545
 #, rust-format
 msgid "{} game(s) to match"
 msgstr ""

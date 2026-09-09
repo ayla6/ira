@@ -282,9 +282,22 @@ struct SsMedia {
 /// "ZZZ(notgame)" placeholder results, and duplicate game ids that one
 /// multi-system query produces.
 pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
-    // A no-hit exact search answers with plain French text, not XML.
-    if xml.trim_start().starts_with("Erreur :") {
+    // Plain French text answers, not XML. A rom miss is an empty result;
+    // anything else — rejected credentials above all — is a real error
+    // the caller must see instead of "no match".
+    let trimmed = xml.trim_start();
+    if trimmed.starts_with("Erreur : Rom") {
         return Ok(Vec::new());
+    }
+    if trimmed.starts_with("Erreur") {
+        if trimmed.contains("login") || trimmed.contains("identifiants") {
+            return Err(
+                "ScreenScraper rejected the credentials — check your ScreenScraper username and API password in Settings"
+                    .to_string(),
+            );
+        }
+        let excerpt: String = trimmed.chars().take(120).collect();
+        return Err(format!("ScreenScraper error: {excerpt}"));
     }
     let data: SsData = quick_xml::de::from_str(xml)
         .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
@@ -678,6 +691,18 @@ mod tests {
     #[test]
     fn test_parse_games_handles_french_error_text() {
         assert!(parse_games("Erreur : Rom not found").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_games_reports_rejected_credentials() {
+        let err = parse_games(
+            "Erreur de login : Vérifier vos identifiants développeur !",
+        )
+        .unwrap_err();
+        assert!(err.contains("rejected the credentials"), "{err}");
+        // Other API errors surface their text instead of parsing garbage.
+        let err = parse_games("Erreur : le service est indisponible").unwrap_err();
+        assert!(err.contains("indisponible"), "{err}");
     }
 
     #[test]

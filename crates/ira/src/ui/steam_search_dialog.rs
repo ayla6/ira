@@ -325,7 +325,7 @@ pub(crate) fn match_result_row(
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_title(&esc(title));
-    row.set_subtitle(subtitle);
+    row.set_subtitle(&esc(subtitle));
 
     let match_btn = gtk4::Button::with_label(&crate::tr!("Match"));
     match_btn.add_css_class(CSS_SUGGESTED_ACTION);

@@ -12,18 +12,38 @@ const API_URL_BASE: &str = "https://www.screenscraper.fr/api2";
 /// Reported to ScreenScraper so they can attribute the traffic.
 const SOFT_NAME: &str = "ira";
 
-/// ScreenScraper credentials: the user's ScreenScraper id and the API
-/// password generated in their ScreenScraper profile. They double as the
-/// `ssid`/`sspassword` that attribute the request to the account's quota.
+/// ScreenScraper credentials, in the API's own two-pair model: the
+/// per-application developer pair every request must carry, plus the
+/// caller's own ScreenScraper account (`ssid`/`sspassword`), which is
+/// optional and only attributes the request to that account's quota.
 #[derive(Clone, Debug, Default)]
 pub struct ScraperCreds {
+    pub dev_id: String,
+    pub dev_password: String,
     pub user: String,
     pub password: String,
 }
 
 impl ScraperCreds {
     pub fn is_configured(&self) -> bool {
-        !self.user.is_empty() && !self.password.is_empty()
+        !self.dev_id.is_empty() && !self.dev_password.is_empty()
+    }
+
+    /// The `devid`/`devpassword` pair plus the account login when set.
+    fn auth_params(&self) -> String {
+        let mut auth = format!(
+            "devid={}&devpassword={}",
+            urlencode(&self.dev_id),
+            urlencode(&self.dev_password)
+        );
+        if !self.user.is_empty() && !self.password.is_empty() {
+            auth.push_str(&format!(
+                "&ssid={}&sspassword={}",
+                urlencode(&self.user),
+                urlencode(&self.password)
+            ));
+        }
+        auth
     }
 }
 
@@ -83,9 +103,8 @@ pub fn game_info_url(
     md5: Option<(&str, u64)>,
 ) -> String {
     let mut url = format!(
-        "{API_URL_BASE}/jeuInfos.php?devid={}&devpassword={}&softname={}&output=xml&romnom={}",
-        urlencode(&creds.user),
-        urlencode(&creds.password),
+        "{API_URL_BASE}/jeuInfos.php?{}&softname={}&output=xml&romnom={}",
+        creds.auth_params(),
         urlencode(SOFT_NAME),
         urlencode(rom_nom),
     );
@@ -101,9 +120,8 @@ pub fn game_info_url(
 /// The by-id URL: re-fetch one known game without searching.
 pub fn game_info_by_id_url(creds: &ScraperCreds, ss_id: &str) -> String {
     format!(
-        "{API_URL_BASE}/jeuInfos.php?devid={}&devpassword={}&softname={}&output=xml&gameid={}",
-        urlencode(&creds.user),
-        urlencode(&creds.password),
+        "{API_URL_BASE}/jeuInfos.php?{}&softname={}&output=xml&gameid={}",
+        creds.auth_params(),
         urlencode(SOFT_NAME),
         urlencode(ss_id),
     )
@@ -113,9 +131,8 @@ pub fn game_info_by_id_url(creds: &ScraperCreds, ss_id: &str) -> String {
 /// match dialog.
 pub fn search_url(creds: &ScraperCreds, term: &str, platform_id: &str) -> String {
     let mut url = format!(
-        "{API_URL_BASE}/jeuRecherche.php?devid={}&devpassword={}&softname={}&output=xml&recherche={}",
-        urlencode(&creds.user),
-        urlencode(&creds.password),
+        "{API_URL_BASE}/jeuRecherche.php?{}&softname={}&output=xml&recherche={}",
+        creds.auth_params(),
         urlencode(SOFT_NAME),
         urlencode(term),
     );
@@ -292,7 +309,7 @@ pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
     if trimmed.starts_with("Erreur") {
         if trimmed.contains("login") || trimmed.contains("identifiants") {
             return Err(
-                "ScreenScraper rejected the credentials — check your ScreenScraper username and API password in Settings"
+                "ScreenScraper rejected the developer credentials — the per-application id and password from screenscraper.fr, not your account login"
                     .to_string(),
             );
         }
@@ -517,14 +534,34 @@ impl SteamDataClient {
             .get(url)
             .send()
             .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("ScreenScraper request failed: {}", resp.status()));
-        }
+        let status = resp.status();
         let body = resp
             .text()
             .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
+        if !status.is_success() {
+            return Err(status_hint(status.as_u16(), &body));
+        }
         parse_games(&body)
     }
+}
+
+/// The documented failure meanings, so a 429 does not read as a mystery.
+fn status_hint(status: u16, body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.starts_with("Erreur") {
+        return format!("ScreenScraper error: {}", trimmed);
+    }
+    let hint = match status {
+        401 => " — the API is closed to non-members right now (server saturation)",
+        403 => " — the developer credentials were rejected",
+        423 => " — the API is fully closed (server trouble)",
+        426 => " — ScreenScraper blacklisted this software version",
+        429 => " — too many requests: the batch will need to slow down",
+        430 => " — the daily scrape quota is used up, try again tomorrow",
+        431 => " — too many unrecognized files today, try again tomorrow",
+        _ => "",
+    };
+    format!("ScreenScraper request failed: {status}{hint}")
 }
 
 /// Collapse the double spaces the entity replacements leave behind.
@@ -552,26 +589,38 @@ mod tests {
     #[test]
     fn test_game_info_url_carries_credentials_system_and_hash() {
         let creds = ScraperCreds {
+            dev_id: "ira".into(),
+            dev_password: "devkey".into(),
             user: "aya 7".into(),
             password: "s3cret&".into(),
         };
         let url = game_info_url(&creds, "Final Fantasy VII (USA)", "psx", Some(("ABCDEF", 711_000)));
         assert!(url.starts_with("https://www.screenscraper.fr/api2/jeuInfos.php?"));
-        assert!(url.contains("devid=aya%207"));
-        assert!(url.contains("devpassword=s3cret%26"));
+        assert!(url.contains("devid=ira"));
+        assert!(url.contains("devpassword=devkey"));
+        // The account login rides along as quota attribution.
+        assert!(url.contains("ssid=aya%207"));
+        assert!(url.contains("sspassword=s3cret%26"));
         assert!(url.contains("systemeid=57"));
         assert!(url.contains("md5=abcdef"));
         assert!(url.contains("romtaille=711000"));
-        // No system for unmapped platforms.
-        let url = game_info_url(&creds, "Doom", "wine", None);
+        // Without an account set, no ssid pair is sent.
+        let anon = ScraperCreds {
+            dev_id: "ira".into(),
+            dev_password: "devkey".into(),
+            ..Default::default()
+        };
+        let url = game_info_url(&anon, "Doom", "wine", None);
+        assert!(!url.contains("ssid"));
         assert!(!url.contains("systemeid"));
     }
 
     #[test]
     fn test_search_url_targets_jeurecherche() {
         let creds = ScraperCreds {
-            user: "aya".into(),
-            password: "pw".into(),
+            dev_id: "ira".into(),
+            dev_password: "pw".into(),
+            ..Default::default()
         };
         let url = search_url(&creds, "zelda", "snes");
         assert!(url.contains("jeuRecherche.php"));
@@ -699,7 +748,7 @@ mod tests {
             "Erreur de login : Vérifier vos identifiants développeur !",
         )
         .unwrap_err();
-        assert!(err.contains("rejected the credentials"), "{err}");
+        assert!(err.contains("rejected the developer credentials"), "{err}");
         // Other API errors surface their text instead of parsing garbage.
         let err = parse_games("Erreur : le service est indisponible").unwrap_err();
         assert!(err.contains("indisponible"), "{err}");

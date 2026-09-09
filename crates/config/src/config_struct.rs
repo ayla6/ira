@@ -249,6 +249,10 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_web_api_key: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub screenscraper_dev_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub screenscraper_dev_password: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub screenscraper_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub screenscraper_password: String,
@@ -329,6 +333,8 @@ impl Default for Config {
             ra_enabled: false,
             ra_username: String::new(),
             ra_web_api_key: String::new(),
+            screenscraper_dev_id: String::new(),
+            screenscraper_dev_password: String::new(),
             screenscraper_id: String::new(),
             screenscraper_password: String::new(),
             consoles,

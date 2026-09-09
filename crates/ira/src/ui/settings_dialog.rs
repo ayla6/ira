@@ -49,6 +49,8 @@ struct SavedSettingsWidgets {
     ra_enable_row: adw::SwitchRow,
     ra_username_row: adw::EntryRow,
     ra_web_api_key_row: adw::EntryRow,
+    screenscraper_dev_id_row: adw::EntryRow,
+    screenscraper_dev_password_row: adw::EntryRow,
     screenscraper_id_row: adw::EntryRow,
     screenscraper_password_row: adw::EntryRow,
     controller_default_widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
@@ -215,6 +217,8 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         ra_enable_row: pages.ra_enable_row,
         ra_username_row: pages.ra_username_row,
         ra_web_api_key_row: pages.ra_web_api_key_row,
+        screenscraper_dev_id_row: pages.screenscraper_dev_id_row,
+        screenscraper_dev_password_row: pages.screenscraper_dev_password_row,
         screenscraper_id_row: pages.screenscraper_id_row,
         screenscraper_password_row: pages.screenscraper_password_row,
         controller_default_widgets: pages.controller_default_widgets,
@@ -381,6 +385,8 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.ra_enabled = widgets.ra_enable_row.is_active();
     cfg.ra_username = widgets.ra_username_row.text().to_string();
     cfg.ra_web_api_key = widgets.ra_web_api_key_row.text().to_string();
+    cfg.screenscraper_dev_id = widgets.screenscraper_dev_id_row.text().to_string();
+    cfg.screenscraper_dev_password = widgets.screenscraper_dev_password_row.text().to_string();
     cfg.screenscraper_id = widgets.screenscraper_id_row.text().to_string();
     cfg.screenscraper_password = widgets.screenscraper_password_row.text().to_string();
 }

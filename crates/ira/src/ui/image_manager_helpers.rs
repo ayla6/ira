@@ -298,6 +298,8 @@ pub(super) fn scraper_square_bytes(
     ss_id: &str,
 ) -> Option<Vec<u8>> {
     let creds = ira_api::screenscraper::ScraperCreds {
+        dev_id: cfg.screenscraper_dev_id.clone(),
+        dev_password: cfg.screenscraper_dev_password.clone(),
         user: cfg.screenscraper_id.clone(),
         password: cfg.screenscraper_password.clone(),
     };

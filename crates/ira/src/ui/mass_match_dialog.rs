@@ -414,9 +414,14 @@ fn start_scraper_batch_matching(
     scraped_ids: &HashSet<i64>,
     scraper_row_boxes: &[gtk4::Box],
 ) {
-    let creds = ira_api::screenscraper::ScraperCreds {
-        user: state.borrow().cfg.screenscraper_id.clone(),
-        password: state.borrow().cfg.screenscraper_password.clone(),
+    let creds = {
+        let s = state.borrow();
+        ira_api::screenscraper::ScraperCreds {
+            dev_id: s.cfg.screenscraper_dev_id.clone(),
+            dev_password: s.cfg.screenscraper_dev_password.clone(),
+            user: s.cfg.screenscraper_id.clone(),
+            password: s.cfg.screenscraper_password.clone(),
+        }
     };
     if !creds.is_configured() {
         return;

@@ -18,6 +18,8 @@ use ira_api::screenscraper::{ScraperCreds, ScrapedGame};
 fn scraper_creds(state: &SharedState) -> ScraperCreds {
     let s = state.borrow();
     ScraperCreds {
+        dev_id: s.cfg.screenscraper_dev_id.clone(),
+        dev_password: s.cfg.screenscraper_dev_password.clone(),
         user: s.cfg.screenscraper_id.clone(),
         password: s.cfg.screenscraper_password.clone(),
     }

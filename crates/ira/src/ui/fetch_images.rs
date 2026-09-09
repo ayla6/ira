@@ -208,10 +208,45 @@ pub(super) fn ensure_game_square(
         } else {
             square
         }
-    } else if !game.sgdb_id.is_empty() {
-        fetch_sgdb_square(steam, save_dir, db, game.db_id, &game.sgdb_id)
     } else {
-        String::new()
+        let square = if !game.sgdb_id.is_empty() {
+            fetch_sgdb_square(steam, save_dir, db, game.db_id, &game.sgdb_id)
+        } else {
+            String::new()
+        };
+        if !square.is_empty() || game.platform_id != "psx" {
+            return square;
+        }
+        // SGDB has nothing for this PS1 entry: ScreenScraper's box art
+        // fills the square instead — the one art PS1 entries have no
+        // native source for.
+        let ss_id = ira_db::find_by_db_id(db, game.db_id)
+            .ok()
+            .flatten()
+            .map(|entry| entry.screenscraper_id)
+            .unwrap_or_default();
+        let Some(bytes) = super::image_manager_helpers::scraper_square_bytes(
+            steam, cfg, &game.name, &game.platform_id, &ss_id,
+        ) else {
+            return String::new();
+        };
+        if !super::image_manager_helpers::write_native_icon_to_disk(
+            save_dir,
+            game,
+            &bytes,
+            ira_models::AssetType::Square,
+        ) {
+            return String::new();
+        }
+        let Some(entry) = ira_db::find_by_db_id(db, game.db_id).ok().flatten() else {
+            return String::new();
+        };
+        ira_parser::find_image_file(
+            &ira_parser::entry_data_dir(save_dir, &entry),
+            ira_models::AssetType::Square.file_base(),
+        )
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
     }
 }
 

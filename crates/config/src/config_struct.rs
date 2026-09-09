@@ -248,6 +248,10 @@ pub struct Config {
     pub ra_username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_web_api_key: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub screenscraper_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub screenscraper_password: String,
     #[serde(default)]
     pub consoles: HashMap<String, ConsoleConfig>,
     #[serde(default)]
@@ -325,6 +329,8 @@ impl Default for Config {
             ra_enabled: false,
             ra_username: String::new(),
             ra_web_api_key: String::new(),
+            screenscraper_id: String::new(),
+            screenscraper_password: String::new(),
             consoles,
             overlay: OverlaySettings::default(),
             controller_defaults: HashMap::new(),

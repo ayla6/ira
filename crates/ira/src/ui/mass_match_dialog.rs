@@ -1,11 +1,13 @@
 use crate::Game;
 use adw::prelude::*;
+use std::collections::HashSet;
 use std::cell::Cell;
 use std::rc::Rc;
 
 use super::css::*;
 use super::helpers::clear_children;
 use super::ra_match_dialog::show_ra_search_dialog;
+use super::screenscraper_match_dialog::show_screenscraper_search_dialog;
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::state::SharedState;
 use super::steam_search_dialog::{handle_steam_search_result, status_label};
@@ -66,12 +68,33 @@ fn needs_ra_match(g: &Game) -> bool {
         && ira_models::console_has_ra(&g.platform_id)
 }
 
-fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
+/// Games a ScreenScraper match can enrich: everything without one yet —
+/// PC entries included, the metadata source is not console-only.
+fn needs_scraper_match(g: &Game, scraped_ids: &HashSet<i64>) -> bool {
+    !scraped_ids.contains(&g.db_id) && !g.manual_unmatch
+}
+
+/// What the matcher works from: the games needing something, the Steam
+/// app-id name map, and the ids of already-scraped entries.
+type UnmatchedGames = (Vec<Game>, Vec<(String, String, String)>, HashSet<i64>);
+
+fn collect_unmatched_games(state: &SharedState) -> UnmatchedGames {
     let s = state.borrow();
     let games = s.games.clone();
+    let scraped_ids: HashSet<i64> = ira_db::load_all_games(&s.db)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| !entry.screenscraper_id.is_empty())
+        .map(|entry| entry.id)
+        .collect();
     let needs_matching: Vec<Game> = games
         .into_iter()
-        .filter(|g| needs_steam_match(g) || needs_ra_match(g) || needs_sgdb_match(g))
+        .filter(|g| {
+            needs_steam_match(g)
+                || needs_ra_match(g)
+                || needs_sgdb_match(g)
+                || needs_scraper_match(g, &scraped_ids)
+        })
         .collect();
     let save_dir = &s.save_dir;
     let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
@@ -87,7 +110,7 @@ fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, Stri
             }
         }
     }
-    (needs_matching, map)
+    (needs_matching, map, scraped_ids)
 }
 
 fn populate_match_list(
@@ -95,6 +118,7 @@ fn populate_match_list(
     needs_matching: &[Game],
     state: &SharedState,
     dialog: &adw::Dialog,
+    scraped_ids: &HashSet<i64>,
 ) -> Vec<gtk4::Box> {
     let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
 
@@ -140,6 +164,34 @@ fn populate_match_list(
             };
             create_match_row(list, &game.name, &searching_text)
         };
+        if needs_scraper_match(game, scraped_ids) {
+            let inner = action_box.clone();
+            let sc = state.clone();
+            let gn = game.name.clone();
+            let pid = game.platform_id.clone();
+            let did = game.db_id;
+            let dlg = dialog.clone();
+            let ss_btn = gtk4::Button::with_label(&crate::tr!("Search SS…"));
+            ss_btn.add_css_class(CSS_SUGGESTED_ACTION);
+            let inner_c = inner.clone();
+            ss_btn.connect_clicked(move |_| {
+                let inner_update = inner_c.clone();
+                show_screenscraper_search_dialog(
+                    &sc,
+                    did,
+                    &gn,
+                    &pid,
+                    &dlg,
+                    Some(Rc::new(move || {
+                        clear_children(&inner_update);
+                        let label =
+                            status_label(&crate::tr!("SS: matched"), CSS_SUCCESS_LABEL);
+                        inner_update.append(&label);
+                    })),
+                );
+            });
+            inner.append(&ss_btn);
+        }
         row_action_boxes.push(action_box);
     }
 
@@ -152,28 +204,29 @@ struct BatchItem {
     name: String,
     db_id: i64,
     row_idx: usize,
+    platform_id: String,
 }
 
 /// A finished candidate handed from the worker thread back to the UI loop.
-struct BatchHit {
+struct BatchHit<T> {
     row_idx: usize,
     db_id: i64,
     name: String,
-    matched: Option<(String, String)>,
+    matched: Option<T>,
 }
 
 /// Shared shape of both batch passes: one sequential worker thread computes
 /// matches over `queue`, and results are applied on the UI loop every
 /// `interval_ms` until the queue drains. `worker` runs off-thread and must
 /// not touch GTK; `on_result` runs on the main loop.
-fn run_batch(
+fn run_batch<T: Send + 'static>(
     queue: Vec<BatchItem>,
     interval_ms: u64,
-    worker: impl Fn(&BatchItem) -> Option<(String, String)> + Send + 'static,
-    on_result: impl Fn(BatchHit) + 'static,
+    worker: impl Fn(&BatchItem) -> Option<T> + Send + 'static,
+    on_result: impl Fn(BatchHit<T>) + 'static,
 ) {
     let total = queue.len();
-    let (tx, rx) = std::sync::mpsc::channel::<BatchHit>();
+    let (tx, rx) = std::sync::mpsc::channel::<BatchHit<T>>();
     std::thread::spawn(move || {
         for item in &queue {
             let matched = worker(item);
@@ -216,6 +269,7 @@ fn start_steam_batch_matching(
             name: g.name.clone(),
             db_id: g.db_id,
             row_idx: i,
+            platform_id: g.platform_id.clone(),
         })
         .collect();
 
@@ -285,6 +339,7 @@ fn start_sgdb_batch_matching(
             name: g.name.clone(),
             db_id: g.db_id,
             row_idx,
+            platform_id: g.platform_id.clone(),
         })
         .collect();
 
@@ -325,10 +380,96 @@ fn start_sgdb_batch_matching(
     );
 }
 
+/// ScreenScraper's batch pass: search each unmatched entry by name and
+/// take the first hit's metadata. One request a second — the service
+/// rate-limits harder than SGDB.
+fn start_scraper_batch_matching(
+    state: &SharedState,
+    needs_matching: &[Game],
+    scraped_ids: &HashSet<i64>,
+    row_action_boxes: &[gtk4::Box],
+) {
+    let creds = ira_api::screenscraper::ScraperCreds {
+        user: state.borrow().cfg.screenscraper_id.clone(),
+        password: state.borrow().cfg.screenscraper_password.clone(),
+    };
+    if !creds.is_configured() {
+        return;
+    }
+
+    let queue: Vec<BatchItem> = needs_matching
+        .iter()
+        .enumerate()
+        .filter(|(_, g)| needs_scraper_match(g, scraped_ids))
+        .map(|(row_idx, g)| BatchItem {
+            name: g.name.clone(),
+            db_id: g.db_id,
+            row_idx,
+            platform_id: g.platform_id.clone(),
+        })
+        .collect();
+
+    if queue.is_empty() {
+        return;
+    }
+
+    let steam = state.borrow().steam.clone();
+    run_batch(
+        queue,
+        1100,
+        {
+            let steam = steam.clone();
+            move |item| {
+                steam
+                    .screenscraper_search(&creds, &item.name, &item.platform_id)
+                    .ok()?
+                    .into_iter()
+                    .next()
+            }
+        },
+        {
+            let state = state.clone();
+            let row_boxes = row_action_boxes.to_vec();
+            move |hit| {
+                if hit.row_idx >= row_boxes.len() {
+                    return;
+                }
+                let row = &row_boxes[hit.row_idx];
+                match hit.matched {
+                    Some(game) => {
+                        let timestamp =
+                            ira_db::scraper_release_timestamp(&game.release_date);
+                        if let Err(e) = ira_db::store_scraper_metadata(
+                            &state.borrow().db,
+                            hit.db_id,
+                            &game.metadata(timestamp),
+                        ) {
+                            eprintln!("Failed to store ScreenScraper metadata: {e}");
+                            return;
+                        }
+                        clear_children(row);
+                        row.append(&status_label(
+                            &crate::tr!("SS: matched"),
+                            CSS_SUCCESS_LABEL,
+                        ));
+                    }
+                    None => {
+                        clear_children(row);
+                        row.append(&status_label(
+                            &crate::tr!("SS: no match"),
+                            CSS_DIM_LABEL,
+                        ));
+                    }
+                }
+            }
+        },
+    );
+}
+
 pub fn show_mass_match_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
 
-    let (needs_matching, title_map) = collect_unmatched_games(state);
+    let (needs_matching, title_map, scraped_ids) = collect_unmatched_games(state);
 
     if needs_matching.is_empty() {
         let d = adw::AlertDialog::new(
@@ -365,7 +506,8 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     scrolled.set_propagate_natural_height(true);
     scrolled.set_min_content_height(160);
     scrolled.set_max_content_height(500);
-    let row_action_boxes = populate_match_list(&list, &needs_matching, state, &dialog);
+    let row_action_boxes =
+        populate_match_list(&list, &needs_matching, state, &dialog, &scraped_ids);
     content.append(&scrolled);
 
     toolbar.set_content(Some(&content));
@@ -380,6 +522,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         &dialog,
     );
     start_sgdb_batch_matching(state, &needs_matching, &row_action_boxes, &dialog);
+    start_scraper_batch_matching(state, &needs_matching, &scraped_ids, &row_action_boxes);
 }
 
 fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> gtk4::Box {

@@ -15,6 +15,7 @@ pub mod launch_config;
 mod message;
 pub mod session;
 mod group_order;
+mod screenscraper;
 mod sort_mode;
 mod steam_languages;
 pub mod variant;
@@ -33,6 +34,9 @@ pub use launch_config::{ControllerInputMode, GameLaunchConfig, WineConfig, WineP
 pub use message::{AppMessage, AppSender};
 pub use session::PlaySession;
 pub use group_order::GroupOrder;
+pub use screenscraper::{
+    screenscraper_system_id, ScraperClassification, ScraperEntity, ScraperMetadata,
+};
 pub use sort_mode::SortMode;
 pub use steam_languages::{steam_language_name, SteamLanguage, STEAM_LANGUAGES};
 pub use variant::GameVariant;

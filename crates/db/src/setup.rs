@@ -92,7 +92,19 @@ pub fn init_db(db_path: &str) -> DbConn {
                 api_dll_folder TEXT NOT NULL DEFAULT '',
                 saves_centralized INTEGER NOT NULL DEFAULT 0,
                 rom_hash TEXT NOT NULL DEFAULT '',
-                vanished INTEGER NOT NULL DEFAULT 0
+                vanished INTEGER NOT NULL DEFAULT 0,
+                developer TEXT NOT NULL DEFAULT '',
+                publisher TEXT NOT NULL DEFAULT '',
+                genre TEXT NOT NULL DEFAULT '',
+                players TEXT NOT NULL DEFAULT '',
+                synopsis TEXT NOT NULL DEFAULT '',
+                screenscraper_id TEXT NOT NULL DEFAULT '',
+                screenscraper_rating REAL NOT NULL DEFAULT -1,
+                release_dates TEXT NOT NULL DEFAULT '',
+                developer_id TEXT NOT NULL DEFAULT '',
+                publisher_id TEXT NOT NULL DEFAULT '',
+                genre_ids TEXT NOT NULL DEFAULT '',
+                classification_ids TEXT NOT NULL DEFAULT ''
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != '';
@@ -136,11 +148,36 @@ pub fn init_db(db_path: &str) -> DbConn {
             CREATE TABLE IF NOT EXISTS game_playtime_links (
                 game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
                 group_id INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS scraper_companies (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS scraper_genres (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS scraper_classifications (
+                id INTEGER PRIMARY KEY,
+                kind TEXT NOT NULL DEFAULT '',
+                name TEXT NOT NULL DEFAULT ''
             );",
         ).expect("failed to create tables");
         // Schema migrations for databases created before a column existed.
         ensure_column(&conn, "games", "rom_hash", "TEXT NOT NULL DEFAULT ''");
         ensure_column(&conn, "games", "vanished", "INTEGER NOT NULL DEFAULT 0");
+        ensure_column(&conn, "games", "developer", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "publisher", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "genre", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "players", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "synopsis", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "screenscraper_id", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "screenscraper_rating", "REAL NOT NULL DEFAULT -1");
+        ensure_column(&conn, "games", "release_dates", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "developer_id", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "publisher_id", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "genre_ids", "TEXT NOT NULL DEFAULT ''");
+        ensure_column(&conn, "games", "classification_ids", "TEXT NOT NULL DEFAULT ''");
     }
 
     crate::create_variants_table(&pool);

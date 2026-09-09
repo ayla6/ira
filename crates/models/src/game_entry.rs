@@ -51,13 +51,38 @@ pub struct GameEntry {
     pub cached_total_count: i64,
     /// Mtime of achievement files at last cache write (0 = never cached).
     pub cached_achievement_mtime: i64,
-    /// RetroAchievements identification hash (empty = unknown).
+    /// Content hash of the game's ROM: the RetroAchievements hash on NDS,
+    /// a full-file MD5 elsewhere. Lets a scan reattach a game whose file
+    /// reappears under a new name or path (empty = unknown).
     pub rom_hash: String,
     /// The game's files are gone: the source scan that owns this row last
     /// looked and did not find it. The row stays (its playtime and trophies
     /// remain), but game loads must ignore it entirely — even when hidden
     /// games are set to shown.
     pub vanished: bool,
+    /// Player count string from ScreenScraper ("1-4").
+    pub players: String,
+    /// Synopses as a JSON object `{"en": "...", "fr": "..."}`, preferred
+    /// language first (empty = never scraped).
+    pub synopsis: String,
+    /// ScreenScraper game id from the last metadata match (empty = no match).
+    pub screenscraper_id: String,
+    /// ScreenScraper community note 0..20 (-1 = never scraped).
+    pub screenscraper_rating: f64,
+    /// Every dated region as a JSON object `{"us": "1993-12-18", ...}`
+    /// (empty = never scraped or undated).
+    pub release_dates: String,
+    /// The developer's ScreenScraper id — the name lives in the
+    /// `scraper_companies` table (empty = never scraped).
+    pub developer_id: String,
+    /// The publisher's ScreenScraper id, same table.
+    pub publisher_id: String,
+    /// Genre ids as a JSON array of strings, primary first — names live
+    /// in the `scraper_genres` table (empty = never scraped).
+    pub genre_ids: String,
+    /// Classification ids as a JSON array of strings — boards and names
+    /// live in the `scraper_classifications` table (empty = never scraped).
+    pub classification_ids: String,
 }
 
 impl GameEntry {
@@ -102,6 +127,15 @@ impl GameEntry {
             cached_achievement_mtime: 0,
             rom_hash: String::new(),
             vanished: false,
+            players: String::new(),
+            synopsis: String::new(),
+            screenscraper_id: String::new(),
+            screenscraper_rating: -1.0,
+            release_dates: String::new(),
+            developer_id: String::new(),
+            publisher_id: String::new(),
+            genre_ids: String::new(),
+            classification_ids: String::new(),
         }
     }
 
@@ -145,6 +179,15 @@ impl GameEntry {
             cached_achievement_mtime: 0,
             rom_hash: String::new(),
             vanished: false,
+            players: String::new(),
+            synopsis: String::new(),
+            screenscraper_id: String::new(),
+            screenscraper_rating: -1.0,
+            release_dates: String::new(),
+            developer_id: String::new(),
+            publisher_id: String::new(),
+            genre_ids: String::new(),
+            classification_ids: String::new(),
         }
     }
 }

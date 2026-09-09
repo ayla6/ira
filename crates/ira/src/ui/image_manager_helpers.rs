@@ -286,6 +286,34 @@ pub(super) fn write_native_icon_to_disk(
     true
 }
 
+/// ScreenScraper's box art for an entry, as lossless WebP bytes. Known
+/// ids re-fetch the exact game; the rest search by name. `None` when the
+/// credentials are missing, the request fails, or the hit has no box art
+/// — callers treat that as "no art", never as a replacement signal.
+pub(super) fn scraper_square_bytes(
+    steam: &ira_api::SteamDataClient,
+    cfg: &ira_config::Config,
+    name: &str,
+    platform_id: &str,
+    ss_id: &str,
+) -> Option<Vec<u8>> {
+    let creds = ira_api::screenscraper::ScraperCreds {
+        user: cfg.screenscraper_id.clone(),
+        password: cfg.screenscraper_password.clone(),
+    };
+    if !creds.is_configured() {
+        return None;
+    }
+    let candidates = if ss_id.is_empty() {
+        steam.screenscraper_search(&creds, name, platform_id).ok()?
+    } else {
+        steam.screenscraper_game(&creds, ss_id).ok()?
+    };
+    let url = candidates.iter().find_map(|g| g.box2d.clone())?;
+    let bytes = steam.screenscraper_media(&url).ok()?;
+    ira_parser::convert_bytes_to_lossless_webp(&bytes)
+}
+
 /// Decodes an icon file into lossless WebP bytes.
 fn import_image_bytes(source: &std::path::Path) -> Option<Vec<u8>> {
     let data = std::fs::read(source).ok()?;

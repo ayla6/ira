@@ -705,6 +705,29 @@ pub(super) fn build_ra_settings_page(
     (page, enable_row, username_row, web_api_row.upcast())
 }
 
+pub(super) fn build_screenscraper_settings_page(cfg: &Config) -> (gtk4::Box, adw::EntryRow, adw::EntryRow) {
+    let page = settings_page_container();
+
+    let creds_group = adw::PreferencesGroup::new();
+    creds_group.set_title(&crate::tr!("Account"));
+    creds_group.set_description(Some(&crate::tr!(
+        "Scrapes game metadata — developer, publisher, genre, players, synopses — from screenscraper.fr, for console and PC entries alike. Use your ScreenScraper username and the API password from your profile page."
+    )));
+
+    let id_row = adw::EntryRow::new();
+    id_row.set_title(&crate::tr!("ScreenScraper username"));
+    id_row.set_text(&cfg.screenscraper_id);
+    creds_group.add(&id_row);
+
+    let password_row = adw::PasswordEntryRow::new();
+    password_row.set_title(&crate::tr!("ScreenScraper API password"));
+    password_row.set_text(&cfg.screenscraper_password);
+    creds_group.add(&password_row);
+    page.append(&creds_group);
+
+    (page, id_row, password_row.upcast())
+}
+
 pub(super) fn build_api_emulators_page(
     cfg: &Config,
 ) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {

@@ -78,7 +78,6 @@ mod settings_dialog;
 mod settings_dialog_console;
 mod settings_dialog_pages;
 mod settings_pages;
-mod screenscraper_match_dialog;
 mod sgdb_picker;
 mod steam_search;
 pub use image_manager::{build_image_manager_content, build_image_manager_content_with_drafts};

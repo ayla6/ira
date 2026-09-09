@@ -51,11 +51,6 @@ pub(super) struct SettingsPageWidgets {
     pub(super) ra_enable_row: adw::SwitchRow,
     pub(super) ra_username_row: adw::EntryRow,
     pub(super) ra_web_api_key_row: adw::EntryRow,
-    pub(super) screenscraper_dev_id_row: adw::EntryRow,
-    pub(super) screenscraper_dev_password_row: adw::EntryRow,
-    pub(super) screenscraper_id_row: adw::EntryRow,
-    pub(super) screenscraper_password_row: adw::EntryRow,
-    pub(super) screenscraper_page: gtk4::Box,
     pub(super) rom_roots: super::folder_list::FolderListWidgets,
     pub(super) overlay_widgets: OverlayPageWidgets,
     pub(super) system_defaults_widgets: SystemDefaultsWidgets,
@@ -122,13 +117,6 @@ pub(super) fn build_settings_pages(
     let (profiles_page, prefix_base_row, default_version_row, default_version_values) =
         build_profiles_page(state, win);
     let (ra_page, ra_enable_row, ra_username_row, ra_web_api_key_row) = build_ra_settings_page(cfg);
-    let (
-        screenscraper_page,
-        screenscraper_dev_id_row,
-        screenscraper_dev_password_row,
-        screenscraper_id_row,
-        screenscraper_password_row,
-    ) = super::settings_pages::build_screenscraper_settings_page(cfg);
     let (rom_page, rom_roots) = build_rom_settings_page(cfg);
     SettingsPageWidgets {
         general_page,
@@ -165,11 +153,6 @@ pub(super) fn build_settings_pages(
         ra_enable_row,
         ra_username_row,
         ra_web_api_key_row,
-        screenscraper_dev_id_row,
-        screenscraper_dev_password_row,
-        screenscraper_id_row,
-        screenscraper_password_row,
-        screenscraper_page,
         rom_roots,
         overlay_widgets,
         system_defaults_widgets,
@@ -218,14 +201,6 @@ pub(super) fn register_settings_pages(
     sidebar.append(&super::settings_pages::sidebar_section_title(&crate::tr!(
         "Metadata"
     )));
-    register_page(
-        sidebar,
-        stack,
-        &pages.screenscraper_page,
-        "globe-symbolic",
-        &crate::tr!("ScreenScraper"),
-        "screenscraper",
-    );
     register_page(
         sidebar,
         stack,

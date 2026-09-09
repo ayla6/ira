@@ -705,58 +705,6 @@ pub(super) fn build_ra_settings_page(
     (page, enable_row, username_row, web_api_row.upcast())
 }
 
-pub(super) fn build_screenscraper_settings_page(
-    cfg: &Config,
-) -> (gtk4::Box, adw::EntryRow, adw::EntryRow, adw::EntryRow, adw::EntryRow) {
-    let page = settings_page_container();
-
-    // The API's mandatory pair: per-application credentials ScreenScraper
-    // itself issues — contact them (forum or Discord) to register Ira.
-    // An account login does not work here, which is what the 403 means.
-    let dev_group = adw::PreferencesGroup::new();
-    dev_group.set_title(&crate::tr!("Developer credentials"));
-    dev_group.set_description(Some(&crate::tr!(
-        "Required for every request. ScreenScraper issues these per application — contact them on their forum or Discord to get a pair for Ira. Your account login does not work here."
-    )));
-
-    let dev_id_row = adw::EntryRow::new();
-    dev_id_row.set_title(&crate::tr!("Developer id"));
-    dev_id_row.set_text(&cfg.screenscraper_dev_id);
-    dev_group.add(&dev_id_row);
-
-    let dev_password_row = adw::PasswordEntryRow::new();
-    dev_password_row.set_title(&crate::tr!("Developer password"));
-    dev_password_row.set_text(&cfg.screenscraper_dev_password);
-    dev_group.add(&dev_password_row);
-    page.append(&dev_group);
-
-    // The user's own ScreenScraper login: optional, attributes the
-    // requests to the account's quota.
-    let account_group = adw::PreferencesGroup::new();
-    account_group.set_title(&crate::tr!("Your account"));
-    account_group.set_description(Some(&crate::tr!(
-        "Optional. Logging in with your ScreenScraper account applies your own daily quota and contribution level to the requests."
-    )));
-
-    let id_row = adw::EntryRow::new();
-    id_row.set_title(&crate::tr!("ScreenScraper username"));
-    id_row.set_text(&cfg.screenscraper_id);
-    account_group.add(&id_row);
-
-    let password_row = adw::PasswordEntryRow::new();
-    password_row.set_title(&crate::tr!("ScreenScraper password"));
-    password_row.set_text(&cfg.screenscraper_password);
-    account_group.add(&password_row);
-    page.append(&account_group);
-
-    (
-        page,
-        dev_id_row,
-        dev_password_row.upcast(),
-        id_row,
-        password_row.upcast(),
-    )
-}
 
 pub(super) fn build_api_emulators_page(
     cfg: &Config,

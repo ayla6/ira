@@ -466,80 +466,6 @@ fn build_reset_icon_button(
     Some(reset_btn)
 }
 
-/// The Square section's ScreenScraper button for PS1 entries: pulls the
-/// matched entry's box art off screenscraper.fr — the one art PS1 games
-/// have no native source for. The bytes stage like the native icons, so
-/// the Save button still applies them.
-fn build_scraper_square_button(
-    asset_type: &str,
-    game: &Game,
-    state: &SharedState,
-    refresh_images: &Rc<dyn Fn()>,
-    pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
-) -> Option<gtk4::Button> {
-    if AssetType::from_string(asset_type) != Some(AssetType::Square)
-        || game.platform_id != "psx"
-    {
-        return None;
-    }
-    let (steam, cfg, ss_id) = {
-        let s = state.borrow();
-        let ss_id = ira_db::find_by_db_id(&s.db, game.db_id)
-            .ok()
-            .flatten()
-            .map(|entry| entry.screenscraper_id)
-            .unwrap_or_default();
-        (s.steam.clone(), s.cfg.clone(), ss_id)
-    };
-    let btn = gtk4::Button::with_label(&crate::tr!("ScreenScraper"));
-    let gc = game.clone();
-    let refresh = Rc::clone(refresh_images);
-    let pending = pending_copies.clone();
-    let state = state.clone();
-    btn.connect_clicked(move |_| {
-        // Network on a worker thread; a miss changes nothing, so the
-        // page is left alone.
-        let (steam, cfg, gc, refresh, pending, ss_id, state) = (
-            steam.clone(),
-            cfg.clone(),
-            gc.clone(),
-            Rc::clone(&refresh),
-            pending.clone(),
-            ss_id.clone(),
-            state.clone(),
-        );
-        let name = gc.name.clone();
-        let pid = gc.platform_id.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
-        std::thread::spawn(move || {
-            let _ = tx.send(super::image_manager_helpers::scraper_square_bytes(
-                &steam, &cfg, &name, &pid, &ss_id,
-            ));
-        });
-        super::helpers::poll_channel(rx, move |bytes| {
-            let Some(bytes) = bytes else {
-                return;
-            };
-            if let Some(pc) = &pending {
-                pc.borrow_mut().insert(
-                    "square".to_string(),
-                    PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
-                );
-            } else {
-                let save_dir = state.borrow().save_dir.clone();
-                super::image_manager_helpers::write_native_icon_to_disk(
-                    &save_dir,
-                    &gc,
-                    &bytes,
-                    AssetType::Square,
-                );
-            }
-            refresh();
-        });
-    });
-    Some(btn)
-}
-
 fn build_ra_icon_button(
     asset_type: &str,
     game: &Game,
@@ -746,15 +672,6 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         btns.append(&btn);
     }
 
-    if let Some(btn) = build_scraper_square_button(
-        asset_type,
-        game,
-        state,
-        &refresh_images,
-        &pending_copies,
-    ) {
-        btns.append(&btn);
-    }
 
     let sgdb_ctx = SgdbPickerCtx {
         state,

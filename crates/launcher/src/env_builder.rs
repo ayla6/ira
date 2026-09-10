@@ -631,6 +631,17 @@ fn wrap_command_with_input(
 ///
 /// Transforms: `gamescope -- wine ...`
 /// Into:       `gamescope -- sh -c 'ENABLE_GAMESCOPE_WSI=1 ira-overlay-standalone & exec "$@"' -- wine ...`
+/// Splits off the game command so the standalone overlay can re-wrap it.
+/// Gamescope commands carry the game after the `--` separator (everything
+/// before it is gamescope args); a plain command — a launch under an
+/// already-running gamescope session — is the game itself.
+fn split_game_command(command: &mut Vec<String>) -> Vec<String> {
+    match command.iter().position(|a| a == "--") {
+        Some(sep) => command.split_off(sep + 1),
+        None => std::mem::take(command),
+    }
+}
+
 pub fn wrap_with_standalone_overlay(
     command: &mut Vec<String>,
     capture_env: &[(String, String)],
@@ -640,16 +651,10 @@ pub fn wrap_with_standalone_overlay(
         return false;
     };
 
-    // Find the `--` separator in the gamescope command.
-    // Everything before `--` is gamescope args, everything after is the game command.
-    let sep_pos = command.iter().position(|a| a == "--");
-    let Some(sep) = sep_pos else {
-        eprintln!("ira-overlay: no `--` in gamescope command, skipping standalone wrap");
-        return false;
-    };
-
-    let game_cmd: Vec<String> = command.split_off(sep + 1);
-    // `command` now ends with `... -- `
+    // Gamescope commands carry the game after the `--` separator (everything
+    // before it is gamescope args). A plain command — a launch under an
+    // already-running gamescope session — is the game itself.
+    let game_cmd = split_game_command(command);
 
     let quoted_bin = shlex::try_quote(&bin)
         .map(|c| c.into_owned())
@@ -692,6 +697,27 @@ mod tests {
 
     fn command() -> Vec<String> {
         vec!["game".to_string(), "--fullscreen".to_string()]
+    }
+
+    #[test]
+    fn test_split_game_command_separates_gamescope_wrap() {
+        let mut cmd = vec![
+            "gamescope".to_string(),
+            "--fullscreen".to_string(),
+            "--".to_string(),
+            "game".to_string(),
+        ];
+        let game = split_game_command(&mut cmd);
+        assert_eq!(cmd, vec!["gamescope", "--fullscreen", "--"]);
+        assert_eq!(game, vec!["game"]);
+    }
+
+    #[test]
+    fn test_split_game_command_takes_plain_command_whole() {
+        let mut cmd = vec!["rpcs3".to_string(), "--fullscreen".to_string()];
+        let game = split_game_command(&mut cmd);
+        assert!(cmd.is_empty());
+        assert_eq!(game, vec!["rpcs3", "--fullscreen"]);
     }
 
     #[test]

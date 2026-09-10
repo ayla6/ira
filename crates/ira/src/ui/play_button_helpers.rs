@@ -113,7 +113,13 @@ fn apply_system_defaults(launch: &mut ira_models::GameLaunchConfig, defaults: &S
     if launch.mangohud.is_none() {
         launch.mangohud = Some(defaults.mangohud);
     }
-    if launch.gamescope.is_none() {
+    // Inside a gamescope session (big picture is automatic under one, like
+    // SteamOS game mode) the session is already the compositor: never nest a
+    // second gamescope, whatever the settings say. The overlay's standalone
+    // path below keys off the session instead of the wrap.
+    if super::big_picture::running_in_gamescope() {
+        launch.gamescope = Some(false);
+    } else if launch.gamescope.is_none() {
         launch.gamescope = Some(defaults.gamescope);
     }
     if launch.gamescope_flags.is_empty() {
@@ -248,7 +254,12 @@ fn build_emulator_env_and_wrap(
     let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
 
     // Determine overlay mode before applying performance wrappers.
-    let will_use_gamescope = ira_launcher::env_builder::will_use_gamescope(&launch);
+    // Under a gamescope session the game presents through gamescope even
+    // unwrapped, so it needs the same standalone-overlay treatment as a
+    // wrapped launch (in-game VK layers don't composite under gamescope).
+    let in_gamescope_session = super::big_picture::running_in_gamescope();
+    let will_use_gamescope =
+        ira_launcher::env_builder::will_use_gamescope(&launch) || in_gamescope_session;
 
     eprintln!(
         "ira-overlay: overlay_enabled={} will_use_gamescope={} gamescope_cfg={:?}",
@@ -281,7 +292,7 @@ fn build_emulator_env_and_wrap(
 
     ira_launcher::env_builder::apply_performance(cmd, &mut env, &launch, &wine);
 
-    if overlay_enabled && ira_launcher::env_builder::uses_gamescope(cmd) {
+    if overlay_enabled && (ira_launcher::env_builder::uses_gamescope(cmd) || in_gamescope_session) {
         ira_launcher::env_builder::wrap_with_standalone_overlay(cmd, &capture_env);
     }
 

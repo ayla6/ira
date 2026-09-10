@@ -64,7 +64,10 @@ impl GameMenu {
         panel.add_css_class(CSS_BP_OPTION_PANEL);
         panel.set_halign(gtk4::Align::End);
         panel.set_valign(gtk4::Align::Fill);
-        panel.set_size_request(560, -1);
+        // Reference 560px wide, re-scaled at every open so the panel keeps
+        // its proportion of the screen (it reads bp_scale, which the
+        // viewport refresh keeps current).
+        panel.set_size_request((560.0 * crate::ui::css::bp_scale()).round() as i32, -1);
 
         let root = gtk4::Overlay::new();
         // The overlay is a sibling of the bp-root Box, so it must carry the
@@ -94,6 +97,8 @@ impl GameMenu {
     pub(super) fn open(&self, state: &SharedState, kind: MenuKind) {
         *self.kind.borrow_mut() = Some(kind);
         self.selection.set(0);
+        self.panel
+            .set_size_request((560.0 * crate::ui::css::bp_scale()).round() as i32, -1);
         self.rebuild(state);
         self.root.set_visible(true);
     }

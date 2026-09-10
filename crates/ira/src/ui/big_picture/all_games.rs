@@ -4,7 +4,7 @@
 //! recycles cells); A launches, B returns home.
 
 use crate::ui::css::*;
-use super::marquee::{Marquee, TAIL_HEIGHT};
+use super::marquee::Marquee;
 use crate::ui::selection_ring::SelectionRing;
 use crate::ui::state::SharedState;
 use crate::ui::virtual_grid::VirtualGrid;
@@ -98,6 +98,11 @@ pub(super) enum Tab {
     Groups,
 }
 
+/// Reference (1080p) pixels at the current viewport scale, whole-pixel.
+fn scaled_px(px: f64) -> i32 {
+    (px * crate::ui::css::bp_scale()).round() as i32
+}
+
 /// The tabs' order, used for wrapping with the shoulders and for picking
 /// the slide's direction.
 const TAB_ORDER: [Tab; 3] = [Tab::Recent, Tab::Everything, Tab::Groups];
@@ -174,6 +179,11 @@ pub(super) struct AllSoftwareUi {
     scroll_anim: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
     /// The "sorted by …" label in the header.
     ordering: gtk4::Label,
+    /// The header line and its wings; their margins and spacings are
+    /// re-applied with the viewport scale.
+    header: gtk4::CenterBox,
+    header_start: gtk4::Box,
+    header_center: gtk4::Box,
     tabs: adw::ToggleGroup,
     /// The L/R shoulder badges flanking the tabs.
     shoulder_l: ShoulderBadge,
@@ -202,10 +212,10 @@ pub(super) fn build(
     // shoulder glyphs), and nothing on the right — the status rail floats
     // above that empty corner (see `view::build_root`).
     let header = gtk4::CenterBox::new();
-    header.set_margin_top(18);
-    header.set_margin_bottom(6);
-    header.set_margin_start(28);
-    header.set_margin_end(28);
+    header.set_margin_top(scaled_px(18.0));
+    header.set_margin_bottom(scaled_px(6.0));
+    header.set_margin_start(scaled_px(28.0));
+    header.set_margin_end(scaled_px(28.0));
     let ordering = gtk4::Label::new(None);
     ordering.set_valign(gtk4::Align::Center);
     ordering.add_css_class(CSS_BP_PAGE_SUBTITLE);
@@ -231,7 +241,7 @@ pub(super) fn build(
             big.game_menu.open(&sort_state, kind);
         });
     }
-    let start = gtk4::Box::new(gtk4::Orientation::Horizontal, 10);
+    let start = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(10.0));
     start.append(&sort_btn);
     start.append(&ordering);
     header.set_start_widget(Some(&start));
@@ -268,7 +278,7 @@ pub(super) fn build(
             center_tab_icons(tabs);
         }
     });
-    let center = gtk4::Box::new(gtk4::Orientation::Horizontal, 14);
+    let center = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(14.0));
     center.set_valign(gtk4::Align::Center);
     center.append(&shoulder_l.slot);
     center.append(&tabs);
@@ -420,6 +430,9 @@ pub(super) fn build(
         ring,
         overlay: grid_overlay,
         ordering,
+        header,
+        header_start: start,
+        header_center: center,
         tabs,
         shoulder_l,
         shoulder_r,
@@ -489,6 +502,16 @@ impl AllSoftwareUi {
         self.shoulder_scale.set(scale);
         self.refresh_shoulders();
         self.scale_tab_icons(scale);
+        self.header
+            .set_margin_top(scaled_px(18.0));
+        self.header
+            .set_margin_bottom(scaled_px(6.0));
+        self.header
+            .set_margin_start(scaled_px(28.0));
+        self.header
+            .set_margin_end(scaled_px(28.0));
+        self.header_start.set_spacing(scaled_px(10.0));
+        self.header_center.set_spacing(scaled_px(14.0));
     }
 
     /// The tab picker's icons default to 16px regardless of the viewport;
@@ -1003,10 +1026,12 @@ impl AllSoftwareUi {
         // side the pill's actual height fits into the scrolled area —
         // above by preference, below near the top edge.
         let pill_h = self.tooltip.pill_height() as f64;
-        let top_tip = tile_top - BP_RING_OUTSET;
-        let bottom_tip = tile_top + item_h as f64 + BP_RING_OUTSET;
-        let fits_above = top_tip - TAIL_HEIGHT - pill_h >= scrolled_top + 2.0;
-        let fits_below = bottom_tip + TAIL_HEIGHT + pill_h <= scrolled_bottom - 4.0;
+        let ring_outset = crate::ui::css::bp_ring_outset();
+        let tail = super::marquee::scaled_tail_height();
+        let top_tip = tile_top - ring_outset;
+        let bottom_tip = tile_top + item_h as f64 + ring_outset;
+        let fits_above = top_tip - tail - pill_h >= scrolled_top + 2.0;
+        let fits_below = bottom_tip + tail + pill_h <= scrolled_bottom - 4.0;
         if fits_above || !fits_below {
             self.tooltip.set_position(center, viewport, top_tip, false);
         } else {

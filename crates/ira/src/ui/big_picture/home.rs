@@ -695,7 +695,7 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
     ui.marquee.set_visible(true);
     ui.ring.set_visible(true);
     ui.marquee
-        .set_position(center, viewport, content_top - BP_RING_OUTSET, false);
+        .set_position(center, viewport, content_top - crate::ui::css::bp_ring_outset(), false);
     let ring_scale = viewport / 1920.0;
     // The ring hugs what is visibly selected: the full capsule on a game
     // cover, the centered half-size circle on the All Software tile — a

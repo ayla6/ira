@@ -26,8 +26,14 @@ const PAD_Y: i32 = 6;
 const BUBBLE_RADIUS: f64 = 9.0;
 /// The tail IS the distance: its tip is pinned to the tile edge and the
 /// bubble hangs tail-length away, so the pill-to-tile distance is this
-/// constant on every page, at every font size.
-pub(super) const TAIL_HEIGHT: f64 = 9.0;
+/// constant on every page, at every font size. Reference (1080p) pixels.
+const TAIL_HEIGHT: f64 = 9.0;
+
+/// [`TAIL_HEIGHT`] at the current viewport scale, for callers that float
+/// the pill relative to the ring.
+pub(super) fn scaled_tail_height() -> f64 {
+    s(TAIL_HEIGHT)
+}
 const TAIL_HALF: f64 = 16.0;
 /// Elevated popover surface: clearly lighter than the page background so
 /// the bubble reads as its own object, dark enough for the accent title.
@@ -39,13 +45,20 @@ const TAIL_BASE_OVERLAP: f64 = 4.0;
 /// Keep the bubble this far inside the viewport's edges.
 const EDGE_MARGIN: f64 = 16.0;
 
+/// Reference (1080p) pixels at the current viewport scale. The pill's
+/// chrome keeps proportion with the fonts it names, whose sizes the
+/// stylesheet scales the same way.
+fn s(px: f64) -> f64 {
+    px * crate::ui::css::bp_scale()
+}
+
 /// Advances the drift phase by one tick, wrapping at `period` (one name
 /// plus the gap) so the repeat loops seamlessly.
 fn advance_slide(slide: f64, period: f64, dt_ms: f64) -> f64 {
     if period <= 0.0 {
         return 0.0;
     }
-    (slide + SPEED * dt_ms / 1000.0) % period
+    (slide + s(SPEED) * dt_ms / 1000.0) % period
 }
 
 /// A clipping window for the drifting title. Two copies of the label ride
@@ -179,9 +192,9 @@ impl Bubble {
     /// "inversion" where the tail meets the pill).
     fn tail(&self, tail_half: f64, tail_height: f64) -> [(f64, f64); 3] {
         let (base_y, apex_y) = if self.tail_up {
-            (self.y + TAIL_BASE_OVERLAP, self.y - tail_height)
+            (self.y + s(TAIL_BASE_OVERLAP), self.y - tail_height)
         } else {
-            (self.y + self.h - TAIL_BASE_OVERLAP, self.y + self.h + tail_height)
+            (self.y + self.h - s(TAIL_BASE_OVERLAP), self.y + self.h + tail_height)
         };
         if self.tail_up {
             // Apex first: clockwise, like the pill.
@@ -346,9 +359,9 @@ mod imp {
                         apex_x: self.tail_apex.get(),
                         tail_up: self.tail_up.get(),
                     },
-                    BUBBLE_RADIUS,
-                    TAIL_HALF,
-                    TAIL_HEIGHT,
+                    s(BUBBLE_RADIUS),
+                    s(TAIL_HALF),
+                    s(TAIL_HEIGHT),
                 );
                 // Adwaita's elevated popover surface.
                 let (r, g, b, a) = BUBBLE_RGBA;
@@ -377,11 +390,11 @@ mod imp {
                 if stored > 1.0 { stored } else { width as f64 }
             };
             let center = self.center_x.get();
-            let margin = EDGE_MARGIN;
+            let margin = s(EDGE_MARGIN);
 
             // The drift can only engage once the label carries its final
             // style — measuring at set_text time races the CSS font size.
-            let overflowing = natural_w + 2.0 * PAD_X as f64 > max_width;
+            let overflowing = natural_w + 2.0 * s(PAD_X as f64) > max_width;
             if overflowing && !self.sliding.get() {
                 self.sliding.set(true);
                 self.slide.set(0.0);
@@ -389,26 +402,27 @@ mod imp {
             } else if !overflowing {
                 self.sliding.set(false);
             }
-            self.period.set(natural_w + GAP);
+            self.period.set(natural_w + s(GAP));
 
             // The bubble hugs its text and only caps at max_width when the
             // text overflows (that cap is the drift's clip window). It
             // centers on the tile, clamped to stay on screen.
-            let bubble_w = (natural_w + 2.0 * PAD_X as f64).min(max_width);
+            let bubble_w = (natural_w + 2.0 * s(PAD_X as f64)).min(max_width);
             let bubble_x = (center - bubble_w / 2.0)
                 .clamp(margin, (viewport - bubble_w - margin).max(margin));
-            let bubble_h = label.measure(gtk4::Orientation::Vertical, -1).1
-                + 2 * PAD_Y
-                + 4;
+            let bubble_h = label.measure(gtk4::Orientation::Vertical, -1).1 as f64
+                + 2.0 * s(PAD_Y as f64)
+                + s(4.0);
             // The TIP is the anchor: it is pinned to the tile edge by the
             // caller, and the bubble hangs off it — its own measured
             // height can drift with fonts without ever moving the touch
             // point. Tail up: the bubble sits below the tip; tail down:
             // above it.
+            let bubble_h = bubble_h.round() as i32;
             let bubble_y = if self.tail_up.get() {
-                (self.tip_y.get() + TAIL_HEIGHT) as i32
+                (self.tip_y.get() + s(TAIL_HEIGHT)) as i32
             } else {
-                (self.tip_y.get() - TAIL_HEIGHT) as i32 - bubble_h
+                (self.tip_y.get() - s(TAIL_HEIGHT)) as i32 - bubble_h
             };
             self.bubble
                 .set((bubble_x, bubble_y as f64, bubble_w, bubble_h as f64));
@@ -419,8 +433,8 @@ mod imp {
             // first tile, whose bubble happens to sit at x≈margin). A
             // bubble narrower than the tail's bounds clamps to its center
             // instead of an inverted range (clamp aborts on min > max).
-            let tail_lo = TAIL_HALF + 6.0;
-            let tail_hi = (bubble_w - TAIL_HALF - 6.0).max(tail_lo);
+            let tail_lo = s(TAIL_HALF + 6.0);
+            let tail_hi = (bubble_w - s(TAIL_HALF + 6.0)).max(tail_lo);
             self.tail_apex
                 .set(bubble_x + (center - bubble_x).clamp(tail_lo, tail_hi));
 
@@ -429,7 +443,7 @@ mod imp {
                 // slides left at paint time; the next copy follows from
                 // the right. Fitting text centers.
                 let text_x = if self.sliding.get() {
-                    PAD_X
+                    s(PAD_X as f64) as i32
                 } else {
                     ((bubble_w - natural_w) / 2.0).round() as i32
                 };
@@ -565,7 +579,9 @@ impl Marquee {
             .borrow()
             .as_ref()
             .map(|label| {
-                label.measure(gtk4::Orientation::Vertical, -1).1 + 2 * PAD_Y + 4
+                (label.measure(gtk4::Orientation::Vertical, -1).1 as f64
+                    + 2.0 * s(PAD_Y as f64)
+                    + s(4.0)) as i32
             })
             .unwrap_or(0)
     }

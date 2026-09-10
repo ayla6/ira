@@ -39,8 +39,30 @@ pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
 pub const CSS_BP_KEYBOARD: &str = "bp-keyboard";
 /// The selection ring reaches this far past a tile's edge (4px gap plus
 /// the 4px frame), and the tooltip's tail tip rests 3px beyond the
-/// frame — 11px from the tile edge in total, on every page.
+/// frame — 11px from the tile edge in total, at the 1080p reference;
+/// [`bp_ring_outset`] scales it with the viewport.
 pub const BP_RING_OUTSET: f64 = 11.0;
+
+thread_local! {
+    /// The big-picture viewport scale (1.0 = 1920 logical px wide) most
+    /// recently applied through [`init_styles`]. Rust-side geometry that
+    /// mirrors the scaled stylesheet (ring outsets, pill chrome, key
+    /// sizes) reads this instead of threading the scale through every
+    /// constructor; 1.0 until the first refresh names a real value.
+    static BP_SCALE: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
+}
+
+/// The viewport scale the big-picture sheet was last built with. Widgets
+/// that draw pixel geometry outside CSS call this at build/draw time so
+/// their constants keep proportion with the stylesheet.
+pub fn bp_scale() -> f64 {
+    BP_SCALE.with(|s| s.get())
+}
+
+/// [`BP_RING_OUTSET`] at the current viewport scale, kept whole-pixel.
+pub fn bp_ring_outset() -> f64 {
+    (BP_RING_OUTSET * bp_scale()).round()
+}
 pub const CSS_CAPTION: &str = "caption";
 pub const CSS_CIRCULAR: &str = "circular";
 pub const CSS_CLICKABLE_STAT: &str = "clickable-stat";
@@ -395,8 +417,8 @@ fn big_picture_css(s: f64) -> String {
     padding: {status_pad_top} {status_pad_x} {status_pad_bottom} {status_pad_x};
     min-height: {status_min_h};
 }}
-.bp-clock {{ font-size: {small}; padding: 2px 0; }}
-.bp-date, .bp-batt, .bp-clock, .bp-prompt {{ font-size: {small}; padding: 2px 0; }}
+.bp-clock {{ font-size: {small}; padding: {clock_pad} 0; }}
+.bp-date, .bp-batt, .bp-clock, .bp-prompt {{ font-size: {small}; padding: {clock_pad} 0; }}
 .bp-bottom {{
     background-color: @window_bg_color;
     padding: {pad_v} {pad_h};
@@ -407,7 +429,7 @@ fn big_picture_css(s: f64) -> String {
     min-height: {key};
     padding: 0;
     border-radius: 9999px;
-    border: 2px solid alpha(@theme_fg_color, 0.9);
+    border: {prompt_ring} solid alpha(@theme_fg_color, 0.9);
     font-weight: 800;
     font-size: {key_font};
 }}
@@ -415,7 +437,7 @@ fn big_picture_css(s: f64) -> String {
     font-size: {title};
     font-weight: 400;
     color: @accent_color;
-    padding: 2px 0;
+    padding: {clock_pad} 0;
 }}
 .bp-page-title {{ font-size: {page_title}; font-weight: 400; }}
 .bp-page-subtitle {{
@@ -457,13 +479,13 @@ fn big_picture_css(s: f64) -> String {
 }}
 .bp-menu-panel {{
     background: alpha(@theme_bg_color, 0.98);
-    border-radius: 16px;
+    border-radius: {menu_radius};
     padding: {menu_pad};
 }}
 /* The options menu: a full-height panel docked on the right, Switch-style. */
 .bp-option-panel {{
     border-radius: 0;
-    border-left: 1px solid alpha(white, 0.08);
+    border-left: {hairline} solid alpha(white, 0.08);
 }}
 .bp-menu-title {{
     font-size: {subtitle};
@@ -474,7 +496,7 @@ fn big_picture_css(s: f64) -> String {
     padding: {group_row_pad};
     padding-left: {menu_pad};
     padding-right: {menu_pad};
-    border-radius: 10px;
+    border-radius: {row_radius};
     {ring_rest}
 }}
 .bp-menu-row label {{
@@ -502,9 +524,9 @@ fn big_picture_css(s: f64) -> String {
     box-shadow: none;
 }}
 .bp-shoulder {{
-    padding: 2px 10px;
-    border: 2px solid alpha(@theme_fg_color, 0.55);
-    border-radius: 8px;
+    padding: {shoulder_pad_y} {shoulder_pad_x};
+    border: {shoulder_ring} solid alpha(@theme_fg_color, 0.55);
+    border-radius: {shoulder_radius};
     font-size: {small};
 }}
 .bp-group-slot {{
@@ -512,7 +534,7 @@ fn big_picture_css(s: f64) -> String {
 }}
 .bp-key {{
     background: alpha(white, 0.08);
-    border-radius: 8px;
+    border-radius: {key_radius};
     {ring_rest}
 }}
 .bp-key label {{
@@ -530,7 +552,7 @@ fn big_picture_css(s: f64) -> String {
 }}
 /* The text caret: a thin accent bar that blinks (opacity from code). */
 .bp-key-caret {{
-    min-width: 2px;
+    min-width: {caret_width};
     border-radius: 9999px;
     background: @accent_color;
 }}
@@ -547,7 +569,7 @@ fn big_picture_css(s: f64) -> String {
     font-family: "M PLUS 2", sans-serif;
 }}
 .bp-keyboard {{
-    border-radius: 16px 16px 0 0;
+    border-radius: {kbd_radius} {kbd_radius} 0 0;
     padding-top: {kbd_pad_top};
 }}
 .bp-key-badge {{
@@ -559,9 +581,9 @@ fn big_picture_css(s: f64) -> String {
 }}
 .bp-key-preview {{
     padding: {group_row_pad};
-    padding-left: 22px;
+    padding-left: {preview_inset_x};
     background: alpha(white, 0.05);
-    border-radius: 10px;
+    border-radius: {row_radius};
 }}
 .bp-key-preview label {{
     font-size: {page_title};
@@ -573,6 +595,19 @@ fn big_picture_css(s: f64) -> String {
         // the window's first transitional allocation starves the rail
         // below its content and GTK warns about measuring it for ~13px.
         status_min_h = px(56),
+        clock_pad = pxs(2),
+        prompt_ring = pxs(2),
+        menu_radius = px(16),
+        hairline = px(1),
+        row_radius = px(10),
+        shoulder_pad_y = pxs(2),
+        shoulder_pad_x = px(10),
+        shoulder_ring = pxs(2),
+        shoulder_radius = px(8),
+        key_radius = px(8),
+        caret_width = px(2),
+        kbd_radius = px(16),
+        preview_inset_x = px(22),
         small = px(24),
         pad_v = px(18),
         pad_h = px(36),
@@ -611,6 +646,7 @@ pub fn init_styles(ui_scale: f64) {
     thread_local! {
         static PROVIDER: gtk4::CssProvider = gtk4::CssProvider::new();
     }
+    BP_SCALE.with(|s| s.set(ui_scale));
     PROVIDER.with(|provider| {
         provider.load_from_string(&app_css(ui_scale));
         let display = gtk4::gdk::Display::default().expect("no default display");

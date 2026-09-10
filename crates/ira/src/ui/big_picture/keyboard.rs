@@ -169,10 +169,17 @@ fn advance_cursor(
 /// The caret's blink half-period: visible half, then invisible half.
 const BLINK_EVERY_MS: u64 = 500;
 /// The preview text starts this far into the pill, so the caret bar has
-/// room to sit left of the first glyph instead of covering it.
-const PREVIEW_TEXT_INSET: i32 = 3;
+/// room to sit left of the first glyph instead of covering it. Reference
+/// (1080p) pixels; [`fn@scale`] applies the viewport scale.
+const PREVIEW_TEXT_INSET: f64 = 3.0;
 /// The caret bar's width; the CSS `.bp-key-caret` min-width matches.
-const CARET_WIDTH: i32 = 2;
+/// Reference (1080p) pixels; [`fn@scale`] applies the viewport scale.
+const CARET_WIDTH: f64 = 2.0;
+
+/// Reference (1080p) pixels at the current viewport scale, whole-pixel.
+fn scaled_px(px: f64) -> i32 {
+    (px * crate::ui::css::bp_scale()).round() as i32
+}
 
 /// What to do with the finished name.
 type NameCallback = Box<dyn Fn(&SharedState, &str)>;
@@ -247,7 +254,7 @@ impl Keyboard {
         // at the glyph position Pango reports. Moving the caret must
         // never reflow the text — it slides along it.
         let preview_label = gtk4::Label::new(None);
-        preview_label.set_margin_start(PREVIEW_TEXT_INSET);
+        preview_label.set_margin_start(scaled_px(PREVIEW_TEXT_INSET));
         preview_label.set_hexpand(true);
         preview_label.set_halign(gtk4::Align::Fill);
         preview_label.set_xalign(0.0);
@@ -474,7 +481,7 @@ impl Keyboard {
         };
         if let Some(icon_name) = icon_name {
             let icon = gtk4::Image::from_icon_name(icon_name);
-            icon.set_pixel_size(28);
+            icon.set_pixel_size(scaled_px(28.0));
             icon.set_hexpand(true);
             icon.set_halign(gtk4::Align::Center);
             icon.set_valign(gtk4::Align::Center);
@@ -493,10 +500,10 @@ impl Keyboard {
             let badge_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
             badge_box.set_valign(gtk4::Align::Start);
             badge_box.set_halign(gtk4::Align::End);
-            badge_box.set_margin_top(4);
-            badge_box.set_margin_end(4);
+            badge_box.set_margin_top(scaled_px(4.0));
+            badge_box.set_margin_end(scaled_px(4.0));
             let glyph = gtk4::Image::new();
-            glyph.set_pixel_size(24);
+            glyph.set_pixel_size(scaled_px(24.0));
             glyph.set_halign(gtk4::Align::Center);
             glyph.set_valign(gtk4::Align::Center);
             let fallback = gtk4::Label::new(Some(
@@ -520,7 +527,7 @@ impl Keyboard {
         }
         // The keys stretch with the panel and take the entire width.
         button.set_hexpand(true);
-        button.set_size_request(80, 72);
+        button.set_size_request(scaled_px(80.0), scaled_px(72.0));
         if !dead {
             let click_state = state.clone();
             let click = gtk4::GestureClick::new();
@@ -593,9 +600,9 @@ impl Keyboard {
             Icon(&'static str),
             Text(String),
         }
-        let hints = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
+        let hints = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(24.0));
         hints.set_halign(gtk4::Align::End);
-        hints.set_margin_top(8);
+        hints.set_margin_top(scaled_px(8.0));
         let family = self.family.get();
         for (button, hint) in [
             (
@@ -611,9 +618,9 @@ impl Keyboard {
             (ira_input::GamepadButton::B, Hint::Text(crate::tr!("Delete"))),
             (ira_input::GamepadButton::X, Hint::Text(crate::tr!("Cancel"))),
         ] {
-            let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            let item = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(8.0));
             let glyph = gtk4::Image::new();
-            glyph.set_pixel_size(28);
+            glyph.set_pixel_size(scaled_px(28.0));
             let fallback = gtk4::Label::new(Some(
                 &crate::ui::input_profile_assets::source_badge(
                     ira_input::InputSource::Button(button),
@@ -635,7 +642,7 @@ impl Keyboard {
             match hint {
                 Hint::Icon(name) => {
                     let icon = gtk4::Image::from_icon_name(name);
-                    icon.set_pixel_size(22);
+                    icon.set_pixel_size(scaled_px(22.0));
                     icon.add_css_class(CSS_BP_PROMPT);
                     item.append(&icon);
                 }
@@ -864,7 +871,9 @@ impl Keyboard {
         let rect = layout.index_to_pos(byte as i32);
         let scale = gtk4::pango::SCALE as f64;
         let inset = ((rect.height() as f64 / scale) * 0.14).round() as i32;
-        let x = PREVIEW_TEXT_INSET + (rect.x() as f64 / scale).round() as i32 - CARET_WIDTH;
+        let x = scaled_px(PREVIEW_TEXT_INSET)
+            + (rect.x() as f64 / scale).round() as i32
+            - scaled_px(CARET_WIDTH);
         self.preview_caret.set_margin_start(x.max(0));
         self.preview_caret
             .set_margin_top((rect.y() as f64 / scale).round() as i32 + inset);

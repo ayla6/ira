@@ -278,9 +278,53 @@ pub fn load_image_bytes(data: &[u8]) -> Option<image::DynamicImage> {
     if let Ok(img) = image::load_from_memory(data) {
         return Some(img);
     }
+    if is_ico_data(data) {
+        if let Some(img) = decode_largest_png_ico_frame(data) {
+            return Some(img);
+        }
+    }
     let cursor = std::io::Cursor::new(data);
     let decoder = image::codecs::tga::TgaDecoder::new(cursor).ok()?;
     image::DynamicImage::from_decoder(decoder).ok()
+}
+
+/// Extracts the largest PNG-compressed frame from an ICO container and
+/// decodes it. Needed because the image crate's ICO decoder refuses
+/// PNG frames that are not RGBA8 — exactly what Steam's uploaded icons
+/// contain — and rejects the whole file over one such frame.
+fn decode_largest_png_ico_frame(data: &[u8]) -> Option<image::DynamicImage> {
+    const PNG_MAGIC: [u8; 4] = [0x89, b'P', b'N', b'G'];
+    if data.len() < 6 {
+        return None;
+    }
+    let count = u16::from_le_bytes([data[4], data[5]]) as usize;
+    let mut best: Option<(u64, image::DynamicImage)> = None;
+    for index in 0..count {
+        // A malformed entry only loses itself, never the other frames.
+        let Some(dir_start) = (6 + index * 16).checked_add(16).filter(|end| *end <= data.len())
+        else {
+            continue;
+        };
+        let dir = &data[6 + index * 16..dir_start];
+        let frame_size = u32::from_le_bytes([dir[8], dir[9], dir[10], dir[11]]) as usize;
+        let frame_offset = u32::from_le_bytes([dir[12], dir[13], dir[14], dir[15]]) as usize;
+        let Some(frame_end) = frame_offset.checked_add(frame_size).filter(|end| *end <= data.len())
+        else {
+            continue;
+        };
+        let frame = &data[frame_offset..frame_end];
+        if frame.len() < PNG_MAGIC.len() || frame[..4] != PNG_MAGIC {
+            continue;
+        }
+        let Ok(img) = image::load_from_memory(frame) else {
+            continue;
+        };
+        let actual = u64::from(img.width()) * u64::from(img.height());
+        if best.as_ref().is_none_or(|(best_area, _)| actual > *best_area) {
+            best = Some((actual, img));
+        }
+    }
+    best.map(|(_, img)| img)
 }
 
 /// Convert raw image bytes to lossless WebP if the source is PNG or ICO.
@@ -800,5 +844,75 @@ mod tga_tests {
         let (pixels, w, h) = decode_to_rgba(tmp.path()).expect("file decode");
         assert_eq!((w, h), (2, 2));
         assert_eq!(pixels.len(), 2 * 2 * 4);
+    }
+}
+
+#[cfg(test)]
+mod ico_frame_tests {
+    use super::*;
+
+    /// Wraps `png_bytes` in a minimal ICO container whose directory entry
+    /// declares `width`/`height` (0 means 256, like real containers).
+    fn ico_container(png_bytes: &[u8], width: u8, height: u8) -> Vec<u8> {
+        let mut container = vec![0x00, 0x00, 0x01, 0x00, 0x01, 0x00];
+        container.extend_from_slice(&[width, height, 0, 0, 1, 0, 32, 0]);
+        container.extend_from_slice(&(png_bytes.len() as u32).to_le_bytes());
+        container.extend_from_slice(&22u32.to_le_bytes());
+        container.extend_from_slice(png_bytes);
+        container
+    }
+
+    fn png_frame(w: u32, h: u32) -> Vec<u8> {
+        let image = image::RgbImage::new(w, h);
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        bytes.into_inner()
+    }
+
+    #[test]
+    fn test_load_image_bytes_decodes_rgb_png_ico_frames() {
+        // RGB (not RGBA8) PNG frames inside an ICO are what the image
+        // crate's own decoder refuses — Steam's uploaded icons are exactly
+        // this, and a real icon payload must still decode.
+        let container = ico_container(&png_frame(32, 32), 32, 32);
+        let img = load_image_bytes(&container).expect("RGB PNG frame must decode");
+        assert_eq!((img.width(), img.height()), (32, 32));
+    }
+
+    #[test]
+    fn test_load_image_bytes_picks_largest_ico_png_frame() {
+        let container = {
+            let small = png_frame(16, 16);
+            let large = png_frame(64, 64);
+            let mut container = vec![0x00, 0x00, 0x01, 0x00, 0x02, 0x00];
+            for (bytes, side) in [(&small, 16u8), (&large, 64u8)] {
+                container.extend_from_slice(&[side, side, 0, 0, 1, 0, 32, 0]);
+                container.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+                container.extend_from_slice(&(container.len() as u32 + 22u32 - (container.len() as u32)).to_le_bytes());
+            }
+            // Recompute offsets properly: first frame at 6 + 2*16 = 38.
+            let mut proper = vec![0x00, 0x00, 0x01, 0x00, 0x02, 0x00];
+            let frames = [small.clone(), large.clone()];
+            let mut offsets = Vec::new();
+            let mut offset = (6 + frames.len() * 16) as u32;
+            for (bytes, side) in frames.iter().zip([16u8, 64u8]) {
+                proper.extend_from_slice(&[side, side, 0, 0, 1, 0, 32, 0]);
+                proper.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+                proper.extend_from_slice(&offset.to_le_bytes());
+                offsets.push(offset);
+                offset += bytes.len() as u32;
+            }
+            for bytes in &frames {
+                proper.extend_from_slice(bytes);
+            }
+            let _ = offsets;
+            container.clear();
+            container.extend(proper);
+            container
+        };
+        let img = load_image_bytes(&container).expect("largest PNG frame must decode");
+        assert_eq!((img.width(), img.height()), (64, 64));
     }
 }

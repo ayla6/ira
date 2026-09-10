@@ -106,6 +106,13 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
         .unwrap()
         .remove(&game_id);
     if let Some(pid) = pid {
+        // A daemon launch stores a placeholder pid until the daemon reports
+        // the session's real one; there is no process to signal yet, and
+        // pid 0 would aim the signals at our own process group.
+        if pid <= 0 {
+            eprintln!("stop: game {} is still starting; nothing to stop yet", game_id);
+            return;
+        }
         let (wine_exe, wine_prefix, env) = {
             let s = state.borrow();
             let game = s.games.iter().find(|g| g.db_id == game_id);

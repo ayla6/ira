@@ -227,11 +227,22 @@ pub fn launch_game(
         calibration: Some(calibration.to_string_lossy().into_owned()),
         pause_unfocused: launch.input_pause_unfocused.unwrap_or(true),
     };
-    match super::input_daemon::launch_via_daemon(&command, &env, game_dir.as_deref(), &input_launch)
-    {
+    match super::input_daemon::launch_via_daemon(
+        &command,
+        &env,
+        game_dir.as_deref(),
+        &input_launch,
+        ctx.game_id,
+    ) {
         Ok(client) => {
             // The daemon supervises the game from here on; our monitor only
-            // consumes its event stream.
+            // consumes its event stream. The real pid arrives with the
+            // SessionStarted event, but the accepted launch must count as
+            // running right away: the UI rebuilds the play button from this
+            // map as soon as GameStarted lands, and an entry that only
+            // appears seconds later flipped the button back to "Play"
+            // mid-launch.
+            ctx.running_games.lock().unwrap().insert(ctx.game_id, 0);
             let mc = super::wrapper::MonitorContext {
                 sender: ctx.sender.clone(),
                 game_id: ctx.game_id,

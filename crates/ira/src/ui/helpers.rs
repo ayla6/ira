@@ -17,7 +17,6 @@ use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 /// rounding the positions still stops stems from falling between pixels.
 /// (Display-level font options from GtkSettings override these per-label
 /// options whenever GTK refreshes a context — the window builder's
-/// hintfull is the setting that actually reaches the renderer.)
 pub fn crisp_label(label: &gtk4::Label) {
     let context = label.pango_context();
     context.set_round_glyph_positions(true);

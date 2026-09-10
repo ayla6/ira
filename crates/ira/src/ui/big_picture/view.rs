@@ -40,12 +40,6 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     window.set_title(Some(&crate::tr!("Ira")));
     window.set_size_request(900, 650);
 
-    // Big-picture text renders best fully hinted: at TV distance, 'slight'
-    // hinting drops whole pixel columns out of letter stems.
-    let settings = gtk4::Settings::for_display(&gtk4::prelude::WidgetExt::display(&window));
-    settings.set_property("gtk-xft-hinting", 1);
-    settings.set_property("gtk-xft-hintstyle", String::from("hintfull"));
-
     // The window has no width yet here, and a 0-scale sheet would floor
     // every big-picture font to 1px — start from the 1080p reference instead;
     // the first refresh swaps in the real scale.

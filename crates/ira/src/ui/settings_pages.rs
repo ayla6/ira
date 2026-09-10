@@ -1231,6 +1231,11 @@ pub(super) fn build_sgdb_settings_page(
     let mut seeded: Vec<&ira_config::SgdbFilteredUser> = cfg.sgdb_filtered_users.iter().collect();
     seeded.sort_by_key(|user| user.name.to_lowercase());
     for user in &seeded {
+        // The old save path mistook the add-entry row for a user and
+        // persisted its widget type name; drop the accumulated junk.
+        if user.name == "AdwEntryRow" || user.name == "GtkSearchEntry" {
+            continue;
+        }
         add_filtered_user_row(
             &filter_users_list,
             &user.name,
@@ -1246,11 +1251,15 @@ pub(super) fn build_sgdb_settings_page(
             let mut child = list.first_child();
             while let Some(row) = child {
                 child = row.next_sibling();
-                let name = row.widget_name().to_string();
-                if name.is_empty() {
+                // Chrome rows (search, add entry) have no widget name of
+                // their own — their widget_name() is the type name — so
+                // only ActionRows are user rows here.
+                let Some(user_row) = row.downcast_ref::<adw::ActionRow>() else {
                     continue;
-                }
-                row.set_visible(name.to_lowercase().contains(&query));
+                };
+                user_row.set_visible(
+                    user_row.widget_name().to_lowercase().contains(&query),
+                );
             }
         });
     }
@@ -1331,6 +1340,10 @@ fn make_filtered_user_row(
     remove_btn.add_css_class(CSS_FLAT);
     remove_btn.set_valign(gtk4::Align::Center);
     remove_btn.set_tooltip_text(Some(&crate::tr!("Remove from filter list")));
+    // Clicking must not move focus into the row: when the row is then
+    // removed, focus falls back to the window's first widget and the
+    // page scrolls to the top.
+    remove_btn.set_focus_on_click(false);
     row.add_suffix(&remove_btn);
 
     {
@@ -1351,6 +1364,21 @@ fn make_filtered_user_row(
         let overlay_w = glib::WeakRef::<adw::ToastOverlay>::new();
         overlay_w.set(Some(overlay));
         remove_btn.connect_clicked(move |_| {
+            // If the keyboard put focus on this row, anchor it on a
+            // neighbour first — otherwise focus falls back to the top of
+            // the page and the view jumps with it.
+            // Keyboard navigation focuses the row itself; the trash button
+            // no longer takes focus on click.
+            if row_c.has_focus() {
+                let neighbours = [row_c.next_sibling(), row_c.prev_sibling()];
+                if let Some(neighbour) = neighbours
+                    .into_iter()
+                    .flatten()
+                    .find_map(|n| n.downcast_ref::<adw::ActionRow>().cloned())
+                {
+                    neighbour.grab_focus();
+                }
+            }
             row_c.unparent();
             ids.borrow_mut().remove(&name);
             let (Some(list), Some(overlay)) = (list_w.upgrade(), overlay_w.upgrade()) else {
@@ -1395,12 +1423,13 @@ fn insert_user_row_sorted(list: &gtk4::ListBox, row: &adw::ActionRow, name: &str
     let mut index = 0usize;
     while let Some(existing) = child {
         child = existing.next_sibling();
-        let existing_name = existing.widget_name().to_string();
-        if existing_name.is_empty() {
+        // Chrome rows (search, add entry) count toward the insert position
+        // but never compare as users — their widget_name() is a type name.
+        let Some(user_row) = existing.downcast_ref::<adw::ActionRow>() else {
             index += 1;
             continue;
-        }
-        if existing_name.to_lowercase() > name_lower {
+        };
+        if user_row.widget_name().to_lowercase() > name_lower {
             break;
         }
         index += 1;
@@ -1432,7 +1461,10 @@ pub(super) fn filtered_users(
     let mut users = Vec::new();
     let mut child = list.first_child();
     while let Some(c) = child {
-        if let Some(row) = c.downcast_ref::<gtk4::ListBoxRow>() {
+        // Only user rows are ActionRows; the add entry row is an EntryRow
+        // whose widget_name() is its type name — saving it created
+        // phantom "AdwEntryRow" users.
+        if let Some(row) = c.downcast_ref::<adw::ActionRow>() {
             let name = row.widget_name().to_string();
             if !name.is_empty() {
                 let steam64 = ids.borrow().get(&name).cloned().unwrap_or_default();

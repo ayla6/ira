@@ -181,3 +181,50 @@ pub fn generate_galaxy_emu_config(galaxy_dll_folder: &str, product_id: &str) -> 
         write_new_emu_config(&settings_dir, product_id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_find_gog_info_reads_manifest_in_start_dir() {
+        let tmp = TempDir::new().unwrap();
+        let game = tmp.path().join("Super Game");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(
+            game.join("goggame-1207658924.info"),
+            r#"{"buildId":51,"gameId":"1207658924","name":"Super Game"}"#,
+        )
+        .unwrap();
+
+        let (dir, id, name) = find_gog_info(&game.to_string_lossy()).unwrap();
+        assert_eq!(dir, game);
+        assert_eq!(id, "1207658924");
+        assert_eq!(name, "Super Game");
+    }
+
+    #[test]
+    fn test_find_gog_info_walks_up_to_manifest_parent() {
+        let tmp = TempDir::new().unwrap();
+        let game = tmp.path().join("Super Game");
+        std::fs::create_dir_all(game.join("bin")).unwrap();
+        std::fs::write(
+            game.join("goggame-1207658924.info"),
+            r#"{"rootGameId":1207658924,"title":"Super Game"}"#,
+        )
+        .unwrap();
+
+        let sub = game.join("bin");
+        let (dir, id, name) = find_gog_info(&sub.to_string_lossy()).unwrap();
+        assert_eq!(dir, game);
+        assert_eq!(id, "1207658924");
+        assert_eq!(name, "Super Game");
+    }
+
+    #[test]
+    fn test_find_gog_info_none_without_manifest() {
+        let tmp = TempDir::new().unwrap();
+        assert!(find_gog_info(&tmp.path().to_string_lossy()).is_none());
+    }
+}

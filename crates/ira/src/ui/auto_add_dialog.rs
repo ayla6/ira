@@ -41,8 +41,10 @@ pub(super) enum WizardEvent {
     },
     InstallDone,
     /// Automatic identification found no Steam game; ask the user to search.
+    /// `name` is the best display name the manifests provided.
     NeedSteamSearch {
         folder: PathBuf,
+        name: String,
     },
 }
 
@@ -467,14 +469,13 @@ pub(super) fn spawn_identify_thread(
             return;
         }
 
-        let app_id = match identify_app_id(&final_folder, &steam) {
-            Some(id) => id,
-            None => {
-                let _ = tx.send(WizardEvent::NeedSteamSearch {
-                    folder: final_folder,
-                });
-                return;
-            }
+        let (app_id, name) = identify_game(&final_folder, &steam);
+        let Some(app_id) = app_id else {
+            let _ = tx.send(WizardEvent::NeedSteamSearch {
+                folder: final_folder,
+                name,
+            });
+            return;
         };
 
         finish_identify(tx, final_folder, app_id, steam);
@@ -544,18 +545,47 @@ fn resolve_final_folder(
     }
 }
 
-pub(super) fn identify_app_id(folder: &Path, steam: &ira_api::SteamDataClient) -> Option<String> {
+/// Best-effort identification of a picked folder, manifests first: Steam's
+/// `appmanifest_*.acf` pins the app id exactly when the folder sits in
+/// `steamapps/common`, and clean GOG installs carry `goggame-*.info`
+/// manifests whose game name searches the store far better than a folder's
+/// basename. Returns the identified Steam app id (if any) plus the best
+/// display name found, for the search fallback and manual setup.
+pub(super) fn identify_game(
+    folder: &Path,
+    steam: &ira_api::SteamDataClient,
+) -> (Option<String>, String) {
     if let Some(steamapps) = ira_platforms::steam::steamapps_in_path(folder) {
-        let installdir = folder.file_name()?.to_string_lossy().to_string();
-        if let Some((appid, _name)) =
-            ira_platforms::steam::find_appid_for_installdir(&steamapps, &installdir)
-        {
-            return Some(appid);
+        if let Some(installdir) = folder.file_name().and_then(|n| n.to_str()) {
+            if let Some((appid, name)) =
+                ira_platforms::steam::find_appid_for_installdir(&steamapps, installdir)
+            {
+                return (Some(appid), name);
+            }
         }
     }
-    let basename = folder.file_name()?.to_string_lossy().to_string();
-    let results = steam.search_steam_store(&basename);
-    results.into_iter().next().map(|(id, _)| id)
+    let basename = folder
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let manifest_name = folder_manifest_name(folder);
+    if let Some(name) = &manifest_name {
+        if let Some((id, _)) = steam.search_steam_store(name).into_iter().next() {
+            return (Some(id), name.clone());
+        }
+    }
+    let app_id = steam
+        .search_steam_store(&basename)
+        .into_iter()
+        .next()
+        .map(|(id, _)| id);
+    (app_id, manifest_name.unwrap_or(basename))
+}
+
+/// The game name carried by on-disk manifests for `folder`, if any: clean
+/// GOG installs name themselves in `goggame-*.info` files.
+fn folder_manifest_name(folder: &Path) -> Option<String> {
+    ira_platforms::gog::find_gog_info(&folder.to_string_lossy()).map(|(_, _, name)| name)
 }
 
 pub(super) fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
@@ -573,7 +603,9 @@ pub(super) fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEven
             show_pick_page(wizard);
         }
         WizardEvent::Identified(game) => show_identified_form(wizard, *game, None, false),
-        WizardEvent::NeedSteamSearch { folder } => show_steam_search_page(wizard, folder),
+        WizardEvent::NeedSteamSearch { folder, name } => {
+            show_steam_search_page(wizard, folder, name)
+        }
         // Add-phase events are handled by handle_add_event.
         WizardEvent::Added(_) | WizardEvent::EmulatorPrompt { .. } | WizardEvent::InstallDone => {}
     }
@@ -581,7 +613,10 @@ pub(super) fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEven
 
 /// Fallback shown when automatic identification finds no Steam game: let the
 /// user search Steam manually, or fall back to setting the game up by hand.
-fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
+/// `name` is the best display name identification came up with — a GOG
+/// manifest's game name beats the folder's basename for both the search and
+/// the manual form.
+fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf, name: String) {
     let (content, win, state, steam) = {
         let w = wizard.borrow();
         let s = w.state.borrow();
@@ -605,12 +640,6 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf) {
     hint.add_css_class(CSS_DIM_LABEL);
     hint.set_halign(gtk4::Align::Center);
     content.append(&hint);
-
-    let name = folder
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("game")
-        .to_string();
 
     let search_btn = gtk4::Button::with_label(&crate::tr!("Search Steam…"));
     search_btn.add_css_class(CSS_SUGGESTED_ACTION);

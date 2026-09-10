@@ -50,7 +50,12 @@ pub(super) struct HomeUi {
     spacing: i32,
     covers: RefCell<Vec<gtk4::Widget>>,
     games: RefCell<Vec<Game>>,
-    selected: RefCell<usize>,
+    /// The focused cover, if any. Scrolling the carousel by hand clears
+    /// it; the arrows re-acquire from whatever is on screen.
+    selected: Cell<Option<usize>>,
+    /// The last selection before the carousel lost it (manual scrolling) —
+    /// the arrows re-acquire here when it is still on screen.
+    last_selected: Cell<Option<usize>>,
     scroll_anim: RefCell<Option<gtk4::TickCallbackId>>,
     /// The pending post-scroll settle snap, restarted on every native
     /// scroll event.
@@ -136,6 +141,25 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
     }
     main.append(&scrolled);
 
+    // Wheel and touchpad scrolling over the carousel deselect, exactly
+    // like the All Software grid: the pointer has taken over, and the
+    // arrows re-acquire from whatever is on screen. Without this the
+    // settle snap kept yanking the row back to the stale selection.
+    {
+        let wheel_state = state.clone();
+        let wheel = gtk4::EventControllerScroll::new(
+            gtk4::EventControllerScrollFlags::VERTICAL | gtk4::EventControllerScrollFlags::HORIZONTAL,
+        );
+        wheel.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        wheel.connect_scroll(move |_, _, _| {
+            if let Some(big) = wheel_state.borrow().big_picture.clone() {
+                big.home.clear_selection();
+            }
+            glib::Propagation::Proceed
+        });
+        scrolled.add_controller(wheel);
+    }
+
     let spring_bottom = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     spring_bottom.set_vexpand(true);
     main.append(&spring_bottom);
@@ -168,7 +192,8 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
         spacing,
         covers: RefCell::new(Vec::new()),
         games: RefCell::new(Vec::new()),
-        selected: RefCell::new(0),
+        selected: Cell::new(None),
+        last_selected: Cell::new(None),
         scroll_anim: RefCell::new(None),
         snap_source: RefCell::new(None),
         square_queued: RefCell::new(HashSet::new()),
@@ -209,7 +234,7 @@ pub(super) fn refresh(state: &SharedState) {
         ui.row.clear_covers();
         ui.covers.borrow_mut().clear();
         *ui.games.borrow_mut() = Vec::new();
-        *ui.selected.borrow_mut() = 0;
+        ui.selected.set(None);
         ui.marquee.set_visible(false);
         ui.ring.set_visible(false);
         // Zero means "nothing built", so the first real refresh rebuilds.
@@ -250,10 +275,17 @@ pub(super) fn refresh(state: &SharedState) {
     }
 
     // Keep pointing at the same selection across rebuilds when it survives;
-    // resting on the tile follows the games count.
-    let selected_index = *ui.selected.borrow();
-    let at_tile = selected_index >= ui.games.borrow().len() && selected_index > 0;
-    let previous = ui.games.borrow().get(selected_index).map(Game::grid_id);
+    // resting on the tile follows the games count. A selection the pointer
+    // cleared stays cleared.
+    let selected_index = ui.selected.get();
+    let at_tile = matches!(selected_index, Some(i) if i >= ui.games.borrow().len() && i > 0);
+    let previous = selected_index.and_then(|i| {
+        ui.games
+            .borrow()
+            .get(i)
+            .map(Game::grid_id)
+    });
+    let was_empty = ui.games.borrow().is_empty();
 
     ui.row.clear_covers();
 
@@ -286,14 +318,28 @@ pub(super) fn refresh(state: &SharedState) {
     *ui.covers.borrow_mut() = covers;
 
     let selected = if at_tile {
-        games.len()
+        Some(games.len())
     } else {
-        games
-            .iter()
-            .position(|g| Some(g.grid_id()) == previous)
-            .unwrap_or(0)
+        match selected_index {
+            // The same game if it survives; otherwise its old slot clamped
+            // into the new list, so the camera never jumps to the start.
+            Some(i) => games
+                .iter()
+                .position(|g| Some(g.grid_id()) == previous)
+                .or_else(|| Some(i.min(games.len() - 1))),
+            None => None,
+        }
     };
-    *ui.selected.borrow_mut() = selected;
+    // First population parks on the first cover, like the grid parks on
+    // its first tile; only a surface entry re-parks a cleared selection.
+    if was_empty {
+        ui.selected.set(Some(0));
+    } else {
+        ui.selected.set(selected);
+    }
+    if let Some(selected) = ui.selected.get() {
+        ui.last_selected.set(Some(selected));
+    }
     *ui.games.borrow_mut() = games;
     ui.marquee.set_max_width(width as f64 * 2.0);
     apply_selection(&big);
@@ -326,9 +372,8 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
         .borrow()
         .big_picture
         .as_ref()
-        .map(|big| *big.home.selected.borrow())
-        .unwrap_or(usize::MAX);
-    if selected == index {
+        .and_then(|big| big.home.selected.get());
+    if selected == Some(index) {
         super::home::launch_selected(state);
     } else {
         // First click focuses the cover the pointer is on; the camera
@@ -337,7 +382,8 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
         let Some(big) = state.borrow().big_picture.clone() else {
             return;
         };
-        *big.home.selected.borrow_mut() = index;
+        big.home.selected.set(Some(index));
+        big.home.last_selected.set(Some(index));
         restyle_selection(&big);
         sync_title_text(&big.home);
         sync_title_position(&big);
@@ -351,11 +397,42 @@ pub(super) fn move_selection(state: &SharedState, delta: i32, engage: bool) {
     let ui = &big.home;
     // One past the last game is the All Software tile.
     let count = ui.games.borrow().len() + 1;
-    let Some(next) = next_selection(*ui.selected.borrow(), count, delta, engage) else {
+    if count <= 1 {
+        return;
+    }
+    // The arrows moved the selection with nothing focused — the user
+    // scrolled the carousel by hand, which deselects. Re-acquire on a
+    // visible cover first (the old one when it is still on screen), with
+    // the camera parked: the step below moves from somewhere on screen
+    // and its own glide carries the camera.
+    if ui.selected.get().is_none() {
+        let Some((first, last)) = ui.visible_range() else {
+            return;
+        };
+        let start = reacquire_index(ui.last_selected.get(), first, last);
+        ui.selected.set(Some(start));
+        ui.last_selected.set(Some(start));
+        restyle_selection(&big);
+        sync_title_text(ui);
+        sync_title_position(&big);
+    }
+    let Some(next) = next_selection(ui.selected.get().unwrap_or(0), count, delta, engage) else {
         return;
     };
-    *ui.selected.borrow_mut() = next;
+    ui.selected.set(Some(next));
+    ui.last_selected.set(Some(next));
     apply_selection(&big);
+}
+
+/// Where an arrow press resumes after hand-scrolling left nothing
+/// selected: the old selection clamped into whatever the view currently
+/// shows, or the first visible cover with no history. The camera never
+/// jumps to where the selection used to be.
+fn reacquire_index(last: Option<usize>, first_visible: usize, last_visible: usize) -> usize {
+    match last {
+        Some(old) => old.clamp(first_visible, last_visible),
+        None => first_visible,
+    }
 }
 
 /// End the carousel's scroll glide on a whole-cover boundary, so a tab
@@ -370,14 +447,56 @@ pub(super) fn finish_scroll(state: &SharedState) {
         id.remove();
     }
     let adj = ui.scrolled.hadjustment();
-    let selected = *ui.selected.borrow();
-    if let Some(target) = whole_cover_target(ui, &adj, selected) {
+    let target = match ui.selected.get() {
+        Some(selected) => whole_cover_target(ui, &adj, selected),
+        None => nearest_boundary_target(ui, &adj),
+    };
+    if let Some(target) = target {
         adj.set_value(target);
     }
 }
 
 /// Restart the settle timer: native scrolling is still moving.
 impl HomeUi {
+    /// The first and last indexes (covers, then the All Software tile)
+    /// at least partly on screen. None when nothing is laid out to see.
+    fn visible_range(&self) -> Option<(usize, usize)> {
+        let adj = self.scrolled.hadjustment();
+        let (value, page) = (adj.value(), adj.page_size());
+        let count = self.games.borrow().len() + 1;
+        let mut first = None;
+        let mut last = 0;
+        for index in 0..count {
+            let Some((x, w)) = self.row.cover_geometry(index) else {
+                continue;
+            };
+            if x + w > value && x < value + page {
+                if first.is_none() {
+                    first = Some(index);
+                }
+                last = index;
+            }
+        }
+        first.map(|first| (first, last))
+    }
+
+    /// The user scrolled the carousel by hand: the focus goes away
+    /// entirely, so the settle snap rests where the pointer left the row
+    /// instead of dragging it back to the stale selection. The arrows
+    /// bring the focus back on a visible cover (see `move_selection`).
+    fn clear_selection(&self) {
+        if self.selected.get().is_none() {
+            return;
+        }
+        self.selected.set(None);
+        for cover in self.covers.borrow().iter() {
+            cover.remove_css_class(CSS_BP_SELECTED);
+        }
+        self.row.set_selected_cover(None);
+        self.marquee.set_visible(false);
+        self.ring.set_visible(false);
+    }
+
     fn queue_boundary_snap(&self, state: &SharedState) {
         if let Some(id) = self.snap_source.borrow_mut().take() {
             id.remove();
@@ -399,13 +518,14 @@ impl HomeUi {
     }
 }
 
-/// Jump to the nearest whole-cover boundary (the scroll value
-/// `whole_cover_target` names), so a resting carousel never shows a
-/// cover sliced by the viewport edge.
+/// Jump to the whole-cover boundary nearest where native scrolling
+/// stopped, so a resting carousel never shows a cover sliced by the
+/// viewport edge. Anchored to the scroll itself, never to the selection:
+/// a hand-scrolled carousel has none (wheel scrolling deselects), and
+/// pulling toward a stale selection is what dragged the row back.
 fn snap_to_boundary(ui: &HomeUi) {
     let adj = ui.scrolled.hadjustment();
-    let selected = *ui.selected.borrow();
-    if let Some(target) = whole_cover_target(ui, &adj, selected) {
+    if let Some(target) = nearest_boundary_target(ui, &adj) {
         adj.set_value(target);
     }
 }
@@ -432,7 +552,8 @@ fn next_selection(
 }
 
 /// Launch the selected game through the shared launch path (which already
-/// guards against double launches). A no-op on the All Software tile.
+/// guards against double launches). A no-op when nothing is selected or on
+/// the All Software tile.
 pub(super) fn launch_selected(state: &SharedState) {
     let game = state
         .borrow()
@@ -440,7 +561,8 @@ pub(super) fn launch_selected(state: &SharedState) {
         .as_ref()
         .and_then(|big| {
             let ui = &big.home;
-            ui.games.borrow().get(*ui.selected.borrow()).cloned()
+            let selected = ui.selected.get()?;
+            ui.games.borrow().get(selected).cloned()
         });
     let Some(game) = game else {
         return;
@@ -455,9 +577,12 @@ pub(super) fn launch_selected(state: &SharedState) {
 }
 
 /// True when the selection rests on the All Software tile rather than a
-/// game cover.
+/// game cover. False with nothing selected at all.
 pub(super) fn selection_is_tile(big: &Rc<BigPictureUi>) -> bool {
-    *big.home.selected.borrow() >= big.home.games.borrow().len()
+    matches!(
+        big.home.selected.get(),
+        Some(selected) if selected >= big.home.games.borrow().len()
+    )
 }
 
 /// Selection visuals, floating title, and scroll.
@@ -474,22 +599,25 @@ fn apply_selection(big: &Rc<BigPictureUi>) {
 /// selection without touching the scroll position.
 fn restyle_selection(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
-    let selected = *ui.selected.borrow();
+    let selected = ui.selected.get();
     let covers = ui.covers.borrow();
     for (index, cover) in covers.iter().enumerate() {
-        if index == selected {
+        if Some(index) == selected {
             cover.add_css_class(CSS_BP_SELECTED);
         } else {
             cover.remove_css_class(CSS_BP_SELECTED);
         }
     }
-    let selected_cover = covers.get(selected).cloned();
+    let selected_cover = selected.and_then(|selected| covers.get(selected).cloned());
     drop(covers);
     ui.row.set_selected_cover(selected_cover.as_ref());
 }
 
 fn sync_title_text(ui: &HomeUi) {
-    let selected = *ui.selected.borrow();
+    let Some(selected) = ui.selected.get() else {
+        ui.marquee.set_visible(false);
+        return;
+    };
     let game = ui.games.borrow().get(selected).cloned();
     let title = match game {
         Some(game) => game.name,
@@ -503,7 +631,11 @@ fn sync_title_text(ui: &HomeUi) {
 /// grid keeps.
 fn sync_title_position(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
-    let selected = *ui.selected.borrow();
+    let Some(selected) = ui.selected.get() else {
+        ui.marquee.set_visible(false);
+        ui.ring.set_visible(false);
+        return;
+    };
     let Some((x, w)) = ui.row.cover_geometry(selected) else {
         // Nothing to anchor to (the stage is still empty): hide the
         // floats rather than leave them painted at a stale spot.
@@ -581,22 +713,46 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
 /// The scroll value that shows only whole covers. The carousel never
 /// rests with a cover sliced by the viewport edge — a half-visible cover
 /// reads as a broken tile, and a tab slide revealing "the rest of it"
-/// makes it worse — so every landing spot is snapped to a whole-cover
-/// boundary at or left of the selected cover's centered position.
+/// makes it worse — so the selected cover's centered position is snapped
+/// to the whole-cover boundary nearest it.
 fn whole_cover_target(ui: &HomeUi, adj: &gtk4::Adjustment, selected: usize) -> Option<f64> {
     let max = (adj.upper() - adj.page_size()).max(0.0);
     let (x, w) = ui.row.cover_geometry(selected)?;
     let centered = (x + w / 2.0 - adj.page_size() / 2.0).clamp(0.0, max);
-    let first_x = ui.row.cover_geometry(0)?.0;
-    let pitch = match ui.row.cover_geometry(1) {
-        Some((second_x, _)) => second_x - first_x,
-        None => return Some(centered),
-    };
-    if pitch <= 1.0 {
+    let Some((first_x, pitch)) = boundary_rail(ui) else {
         return Some(centered);
-    }
-    let snapped = first_x + (((centered - first_x) / pitch).round() * pitch);
-    Some(snapped.clamp(0.0, max))
+    };
+    Some(boundary_target(first_x, pitch, centered, max))
+}
+
+/// The whole-cover boundary nearest where the scroll currently rests.
+fn nearest_boundary_target(ui: &HomeUi, adj: &gtk4::Adjustment) -> Option<f64> {
+    let max = (adj.upper() - adj.page_size()).max(0.0);
+    let (first_x, pitch) = boundary_rail(ui)?;
+    Some(boundary_target(first_x, pitch, adj.value(), max))
+}
+
+/// Where the cover boundaries sit: the row's first cover x and the step
+/// between consecutive covers. None with fewer than two covers.
+fn boundary_rail(ui: &HomeUi) -> Option<(f64, f64)> {
+    let first_x = ui.row.cover_geometry(0)?.0;
+    let pitch = ui.row.cover_geometry(1)?.0 - first_x;
+    (pitch > 1.0).then_some((first_x, pitch))
+}
+
+/// The whole-cover boundary nearest `anchor`, as a scroll value. The row's
+/// leading spacing pad (scroll 0) is itself a resting spot: the first
+/// boundary would plant cover 0 flush against the viewport edge, so any
+/// anchor that rounds onto it rests at 0 instead — the inset view the
+/// carousel opens with, and the only way back to it after scrolling away.
+fn boundary_target(first_x: f64, pitch: f64, anchor: f64, max: f64) -> f64 {
+    let step = ((anchor - first_x) / pitch).round();
+    let target = if step <= 0.0 {
+        0.0
+    } else {
+        first_x + step * pitch
+    };
+    target.clamp(0.0, max)
 }
 
 /// Smooth-scroll the selected tile into the viewport; the adjustment's
@@ -604,7 +760,9 @@ fn whole_cover_target(ui: &HomeUi, adj: &gtk4::Adjustment, selected: usize) -> O
 /// frame-clock ticks, in sync with vsync, not on drifting timers.
 fn update_scroll(big: &Rc<BigPictureUi>) {
     let ui = &big.home;
-    let selected = *ui.selected.borrow();
+    let Some(selected) = ui.selected.get() else {
+        return;
+    };
     let adj = ui.scrolled.hadjustment();
     let Some(target) = whole_cover_target(ui, &adj, selected) else {
         return;
@@ -713,7 +871,7 @@ fn queue_missing_squares(state: &SharedState, ui: &HomeUi, square_mode: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::next_selection;
+    use super::{boundary_target, next_selection, reacquire_index};
 
     #[test]
     fn test_next_selection_wraps_once_from_the_edge_on_a_fresh_press() {
@@ -726,5 +884,43 @@ mod tests {
         assert_eq!(next_selection(0, 5, 1, false), Some(1));
         assert_eq!(next_selection(2, 5, 2, true), Some(4));
         assert_eq!(next_selection(0, 0, 1, true), None);
+    }
+
+    #[test]
+    fn test_boundary_target_rests_at_the_leading_pad_near_the_start() {
+        let first_x = 8.0;
+        let pitch = 248.0;
+        let max = 4_000.0;
+        // Anything rounding onto the first boundary rests at 0, where the
+        // row's leading pad insets the covers — the opening view.
+        assert_eq!(boundary_target(first_x, pitch, 0.0, max), 0.0);
+        assert_eq!(boundary_target(first_x, pitch, first_x, max), 0.0);
+        assert_eq!(
+            boundary_target(first_x, pitch, first_x + pitch / 2.0 - 1.0, max),
+            0.0
+        );
+        // Past the first boundary's midpoint the second takes over.
+        assert_eq!(
+            boundary_target(first_x, pitch, first_x + pitch / 2.0 + 1.0, max),
+            first_x + pitch
+        );
+        // Ordinary boundaries land on themselves.
+        assert_eq!(
+            boundary_target(first_x, pitch, first_x + 3.0 * pitch, max),
+            first_x + 3.0 * pitch
+        );
+        // And the tail clamps at the scroll's end.
+        assert_eq!(boundary_target(first_x, pitch, 10_000.0, max), max);
+    }
+
+    #[test]
+    fn test_reacquire_index_clamps_the_old_selection_into_view() {
+        // The old selection is on screen: it comes back exactly.
+        assert_eq!(reacquire_index(Some(3), 1, 6), 3);
+        // It is off screen: its slot clamps into the visible range.
+        assert_eq!(reacquire_index(Some(0), 4, 8), 4);
+        assert_eq!(reacquire_index(Some(9), 2, 7), 7);
+        // No history: the first visible cover.
+        assert_eq!(reacquire_index(None, 4, 8), 4);
     }
 }

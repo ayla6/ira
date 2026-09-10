@@ -117,14 +117,9 @@ pub(crate) fn build_virtual_stack(
             }
         }
     };
-    // The cemuhook stream is the DSU backend itself: picking that output
-    // mode always streams, nothing toggles it. A profile on any other
-    // backend can opt into a motion-only companion stream (`dsu_motion`)
-    // for emulators that bind the DSU provider purely as a motion source;
-    // its frames read neutral to a client that wants buttons. It works even
-    // when no gyro exists (motion just reads zero).
-    let motion_enabled =
-        motion_allowed && (backend == VirtualGamepadBackend::Dsu || profile.dsu_motion);
+    // The cemuhook stream exists only as the DSU backend itself: picking
+    // that output mode always streams, nothing toggles it.
+    let motion_enabled = motion_allowed && backend == VirtualGamepadBackend::Dsu;
     let motion = if motion_enabled {
         MotionServer::bind()
     } else {

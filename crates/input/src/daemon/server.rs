@@ -390,7 +390,15 @@ fn start_session(
     std::thread::Builder::new()
         .name("ira-session".to_string())
         .spawn(move || {
-            let _ = done_tx.send(run_session(arguments));
+            // A panicked session must still report done: without it the
+            // handle never leaves `sessions`, the daemon never idles out,
+            // and ira-input outlives Ira itself.
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_session(arguments)))
+                    .unwrap_or_else(|panic| {
+                        Err(format!("session thread panicked: {}", panic_text(&panic)))
+                    });
+            let _ = done_tx.send(result);
         })
         .map_err(|error| format!("spawn session thread: {error}"))?;
     Ok(SessionHandle {
@@ -399,6 +407,17 @@ fn start_session(
         events: event_rx,
         done: done_rx,
     })
+}
+
+/// Best-effort text for a caught panic payload, for the done report.
+fn panic_text(panic: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(text) = panic.downcast_ref::<&str>() {
+        return (*text).to_string();
+    }
+    if let Some(text) = panic.downcast_ref::<String>() {
+        return text.clone();
+    }
+    "unknown panic payload".to_string()
 }
 
 fn respond(clients: &mut Vec<Client>, index: usize, response: Response) {
@@ -517,6 +536,16 @@ mod tests {
             other => panic!("expected bye, got {other:?}"),
         }
         let _ = server.join();
+    }
+
+    #[test]
+    fn test_panic_text_reads_string_payloads() {
+        let borrowed: Box<dyn std::any::Any + Send> = Box::new("boom");
+        assert_eq!(panic_text(&borrowed), "boom");
+        let owned: Box<dyn std::any::Any + Send> = Box::new(String::from("bang"));
+        assert_eq!(panic_text(&owned), "bang");
+        let opaque: Box<dyn std::any::Any + Send> = Box::new(7);
+        assert_eq!(panic_text(&opaque), "unknown panic payload");
     }
 
     #[test]

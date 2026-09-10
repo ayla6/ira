@@ -110,6 +110,11 @@ fn main() {
 
     app.run();
 
+    // The input daemon outlives short-lived callers by design; tell it Ira
+    // is done so it does not linger on its idle timer (or forever, if a
+    // session wedged). A running game makes it stay until the game ends.
+    ira_launcher::input_daemon::shutdown_daemon();
+
     if let Some(state) = state_holder.borrow().as_ref() {
         remove_source(state);
     }

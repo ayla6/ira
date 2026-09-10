@@ -453,7 +453,6 @@ pub(super) struct ConsolePageWidgets {
     pub(super) enable_row: adw::SwitchRow,
     pub(super) exe_row: adw::EntryRow,
     pub(super) core_path_row: Option<adw::EntryRow>,
-    pub(super) fullscreen_row: adw::SwitchRow,
 }
 
 pub(super) fn build_console_settings_page(
@@ -609,12 +608,6 @@ pub(super) fn build_console_settings_page(
         }
     });
 
-    let fullscreen_row = adw::SwitchRow::new();
-    fullscreen_row.set_title(&crate::tr!("Start games in fullscreen"));
-    fullscreen_row.set_subtitle(&crate::tr!("Launch the emulator in fullscreen mode"));
-    fullscreen_row.set_active(cc.fullscreen);
-    emu_group.add(&fullscreen_row);
-
     page.append(&emu_group);
     (
         page,
@@ -622,7 +615,6 @@ pub(super) fn build_console_settings_page(
             enable_row,
             exe_row,
             core_path_row,
-            fullscreen_row,
         },
     )
 }

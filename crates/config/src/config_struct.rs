@@ -63,7 +63,11 @@ pub struct ConsoleConfig {
     pub enabled: bool,
     pub executable: String,
     pub ra_core: String,
-    pub fullscreen: bool,
+    /// Console-wide fullscreen override (`None` = inherit the global
+    /// `default_fullscreen`). Big picture mode forces fullscreen regardless
+    /// of this setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fullscreen: Option<bool>,
     /// Optional console-wide input-remapping gate before controller defaults
     /// (`None` = inherit). The virtual controller type comes from the
     /// selected layout, not from this setting.
@@ -80,7 +84,7 @@ impl Default for ConsoleConfig {
             enabled: true,
             executable: String::new(),
             ra_core: String::new(),
-            fullscreen: false,
+            fullscreen: None,
             controller_mode: None,
             controller_profile: String::new(),
         }
@@ -210,6 +214,11 @@ pub struct Config {
     pub extra_roms_folders: Vec<String>,
     #[serde(default)]
     pub default_native_env_vars: Vec<(String, String)>,
+    /// Fullscreen default for emulator launches. Consoles inherit this unless
+    /// they carry their own `fullscreen` override; big picture mode ignores
+    /// it and always starts fullscreen.
+    #[serde(default)]
+    pub default_fullscreen: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub linux_controller_profile: String,
     /// Input-remapping gate for native Linux games (`None` = inherit).
@@ -319,6 +328,7 @@ impl Default for Config {
             roms_folder: String::new(),
             extra_roms_folders: Vec::new(),
             default_native_env_vars: Vec::new(),
+            default_fullscreen: false,
             linux_controller_profile: String::new(),
             linux_controller_mode: None,
             wine_controller_profile: String::new(),
@@ -347,6 +357,19 @@ impl Default for Config {
 impl Config {
     pub fn console(&self, platform_id: &str) -> &ConsoleConfig {
         self.consoles.get(platform_id).unwrap_or(&EMPTY_CONSOLE)
+    }
+
+    /// Effective fullscreen for a console launch. Big picture mode is the
+    /// fullscreen shell, so it forces fullscreen regardless of any setting;
+    /// on the desktop the console's own override wins and otherwise the
+    /// global `default_fullscreen` applies.
+    pub fn console_fullscreen(&self, platform_id: &str, in_big_picture: bool) -> bool {
+        if in_big_picture {
+            return true;
+        }
+        self.console(platform_id)
+            .fullscreen
+            .unwrap_or(self.default_fullscreen)
     }
 
     pub fn console_mut(&mut self, platform_id: &str) -> &mut ConsoleConfig {
@@ -459,7 +482,7 @@ static EMPTY_CONSOLE: ConsoleConfig = ConsoleConfig {
     enabled: false,
     executable: String::new(),
     ra_core: String::new(),
-    fullscreen: false,
+    fullscreen: None,
     controller_mode: None,
     controller_profile: String::new(),
 };
@@ -490,7 +513,7 @@ mod tests {
             assert_eq!(cc.enabled, def.uses_rom_folder());
             assert_eq!(cc.executable, "");
             assert_eq!(cc.ra_core, "");
-            assert!(!cc.fullscreen);
+            assert_eq!(cc.fullscreen, None);
         }
     }
 
@@ -576,9 +599,46 @@ mod tests {
         assert!(cc.enabled);
         assert_eq!(cc.executable, "");
         assert_eq!(cc.ra_core, "");
-        assert!(!cc.fullscreen);
+        assert_eq!(cc.fullscreen, None);
         assert_eq!(cc.controller_mode, None);
         assert!(cc.controller_profile.is_empty());
+    }
+
+    #[test]
+    fn test_console_fullscreen_resolution() {
+        // Inherit on desktop follows the global default.
+        let cfg = Config {
+            default_fullscreen: true,
+            ..Default::default()
+        };
+        assert!(cfg.console_fullscreen("gba", false));
+        let cfg = Config {
+            default_fullscreen: false,
+            ..Default::default()
+        };
+        assert!(!cfg.console_fullscreen("gba", false));
+        // Big picture forces fullscreen regardless of default or override...
+        assert!(cfg.console_fullscreen("gba", true));
+        // ...while on the desktop the console override wins over the default.
+        let mut overridden = Config::default();
+        overridden.console_mut("gba").fullscreen = Some(false);
+        assert!(overridden.console_fullscreen("gba", true));
+        assert!(!overridden.console_fullscreen("gba", false));
+        overridden.console_mut("gba").fullscreen = Some(true);
+        assert!(overridden.console_fullscreen("gba", false));
+    }
+
+    #[test]
+    fn test_console_config_fullscreen_json_stays_backward_compatible() {
+        // Configs written before fullscreen became inheritable carry an
+        // explicit bool; it must load as a console-level override.
+        let console: ConsoleConfig =
+            serde_json::from_str(r#"{"executable":"","ra_core":"","fullscreen":true}"#).unwrap();
+        assert_eq!(console.fullscreen, Some(true));
+        // New configs omit the key entirely, meaning inherit.
+        let console: ConsoleConfig =
+            serde_json::from_str(r#"{"executable":"","ra_core":""}"#).unwrap();
+        assert_eq!(console.fullscreen, None);
     }
 
     #[test]

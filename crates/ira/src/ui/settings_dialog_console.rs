@@ -17,6 +17,7 @@ use std::sync::Arc;
 pub(super) struct ConsoleSettingsWidgets {
     pub(super) console_widgets: Vec<(&'static str, ConsolePageWidgets)>,
     pub(super) console_profile_widgets: Vec<ConsoleProfileWidgets>,
+    pub(super) fullscreen_states: Vec<(String, OverrideState)>,
     pub(super) source_overlay_states: Vec<(String, OverrideState)>,
     pub(super) source_gamescope_states: Vec<(String, OverrideState)>,
     pub(super) ps4_enable_row: Option<adw::SwitchRow>,
@@ -77,9 +78,13 @@ pub(super) fn apply_emulator_settings(cfg: &mut Config, pages: &ConsoleSettingsW
 
 pub(super) fn apply_override_states(
     cfg: &mut Config,
+    fullscreen_states: &[(String, OverrideState)],
     overlay_states: &[(String, OverrideState)],
     gamescope_states: &[(String, OverrideState)],
 ) {
+    for (console_id, state) in fullscreen_states {
+        cfg.console_mut(console_id).fullscreen = *state.borrow();
+    }
     for (source_id, state) in overlay_states {
         match *state.borrow() {
             Some(value) => {
@@ -111,7 +116,6 @@ pub(super) fn apply_console_settings(cfg: &mut Config, pages: &ConsoleSettingsWi
         let console = cfg.console_mut(console_id);
         console.enabled = widgets.enable_row.is_active();
         console.executable = widgets.exe_row.text().to_string();
-        console.fullscreen = widgets.fullscreen_row.is_active();
         if let Some(ref core_path) = widgets.core_path_row {
             console.ra_core = ira_platforms::emulator_detect::resolve_ra_core_for_console(
                 console_id,
@@ -143,6 +147,7 @@ pub(super) fn register_console_pages(
     let result = ConsoleSettingsWidgets {
         console_widgets: Vec::new(),
         console_profile_widgets: Vec::new(),
+        fullscreen_states: Vec::new(),
         source_overlay_states: Vec::new(),
         source_gamescope_states: Vec::new(),
         ps4_enable_row: None,
@@ -485,6 +490,14 @@ fn add_console_page_overrides(
     registry: Arc<ira_input::ControllerRegistry>,
     result: &mut ConsoleSettingsWidgets,
 ) -> ConsoleProfileWidgets {
+    // The fullscreen row follows the override pattern so every console page
+    // (ROM consoles and dedicated launchers alike) offers it in one place.
+    let (fullscreen_row, fullscreen_state) = build_override_switch_row(
+        &crate::tr!("Start games in fullscreen"),
+        &crate::tr!("Launch the emulator in fullscreen mode"),
+        cfg.default_fullscreen,
+        cfg.console(console_id).fullscreen,
+    );
     let (overlay_row, overlay_state) = build_override_switch_row(
         &crate::tr!("In-game overlay"),
         &crate::tr!("Achievements, screenshots, and recording"),
@@ -498,9 +511,13 @@ fn add_console_page_overrides(
         cfg.overlay.source_gamescope.get(console_id).copied(),
     );
     let group = adw::PreferencesGroup::new();
+    group.add(&fullscreen_row);
     group.add(&overlay_row);
     group.add(&gamescope_row);
     page.prepend(&group);
+    result
+        .fullscreen_states
+        .push((console_id.to_string(), fullscreen_state));
     result
         .source_overlay_states
         .push((console_id.to_string(), overlay_state));

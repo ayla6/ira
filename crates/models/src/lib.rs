@@ -7,6 +7,7 @@ mod asset_type;
 mod consoles;
 pub mod disc;
 mod esde_consoles;
+mod fullscreen;
 mod game;
 mod game_entry;
 mod group;
@@ -25,6 +26,7 @@ pub use app_details::{AppDetails, DlcInfo, UfsPathTransform, UfsRootOverride, Uf
 pub use asset_type::{AssetType, LogoPosition};
 pub use consoles::{all_consoles, console_has_ra, find_console, ConsoleDef, CONSOLES};
 pub use disc::GameDisc;
+pub use fullscreen::fullscreen_args;
 pub use game::parse_db_id;
 pub use game::Game;
 pub use game_entry::GameEntry;

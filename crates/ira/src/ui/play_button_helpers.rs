@@ -163,6 +163,24 @@ fn merge_env_vars(target: &mut Vec<(String, String)>, defaults: &[(String, Strin
     *target = merged;
 }
 
+/// Prepend a dedicated-console launcher's fullscreen CLI arguments when
+/// fullscreen launches are on. These consoles have no `ConsoleDef`, so the
+/// flags live in `ira_models::fullscreen_args`, keyed by game kind.
+fn with_fullscreen_args(
+    kind: ira_models::GameKind,
+    fullscreen: bool,
+    args: Vec<String>,
+) -> Vec<String> {
+    if !fullscreen {
+        return args;
+    }
+    ira_models::fullscreen_args(kind)
+        .iter()
+        .map(|s| s.to_string())
+        .chain(args)
+        .collect()
+}
+
 fn spawn_and_monitor(
     ctx: &LaunchCtx,
     cmd: &[String],
@@ -443,7 +461,7 @@ pub(super) fn launch_retro(
         exe,
         &rom_paths,
         &resolved_core,
-        cc.fullscreen,
+        cfg.console_fullscreen(platform_id, super::big_picture::is_big_picture()),
         fullscreen_flag,
         rom_root,
     );
@@ -461,6 +479,7 @@ pub(super) fn launch_ps4(
     per_game_version: &str,
     global_shadps4_exe: &str,
     game_path: &str,
+    fullscreen: bool,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
@@ -470,7 +489,11 @@ pub(super) fn launch_ps4(
             "shadPS4 executable was not found: {exe}. Install shadPS4 or select an available version in Settings."
         ));
     }
-    let args = vec!["-g".to_string(), game_path.to_string()];
+    let args = with_fullscreen_args(
+        ira_models::GameKind::Ps4,
+        fullscreen,
+        vec!["-g".to_string(), game_path.to_string()],
+    );
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         &exe,
         &args,
@@ -485,6 +508,7 @@ pub(super) fn launch_ps3(
     per_game_emu: &str,
     global_rpcs3_exe: &str,
     game_path: &str,
+    fullscreen: bool,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
@@ -495,7 +519,13 @@ pub(super) fn launch_ps3(
     } else {
         "rpcs3"
     };
-    let args = vec!["--no-gui".to_string(), game_path.to_string()];
+    // RPCS3 parses option flags until the positional game path, so the
+    // fullscreen flag must come before it.
+    let args = with_fullscreen_args(
+        ira_models::GameKind::Ps3,
+        fullscreen,
+        vec!["--no-gui".to_string(), game_path.to_string()],
+    );
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
         &args,
@@ -509,6 +539,7 @@ pub(super) fn launch_vita3k(
     ctx: &LaunchCtx,
     global_executable: &str,
     game_path: &str,
+    fullscreen: bool,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
@@ -517,7 +548,11 @@ pub(super) fn launch_vita3k(
     } else {
         global_executable
     };
-    let args = vec!["-r".to_string(), game_path.to_string()];
+    let args = with_fullscreen_args(
+        ira_models::GameKind::PsVita,
+        fullscreen,
+        vec!["-r".to_string(), game_path.to_string()],
+    );
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
         &args,
@@ -532,6 +567,7 @@ pub(super) fn launch_cemu(
     per_game_emu: &str,
     global_executable: &str,
     game_path: &str,
+    fullscreen: bool,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
@@ -542,7 +578,11 @@ pub(super) fn launch_cemu(
     } else {
         "cemu"
     };
-    let args = vec!["-g".to_string(), game_path.to_string()];
+    let args = with_fullscreen_args(
+        ira_models::GameKind::WiiU,
+        fullscreen,
+        vec!["-g".to_string(), game_path.to_string()],
+    );
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
         &args,
@@ -557,6 +597,7 @@ pub(super) fn launch_azahar(
     per_game_emu: &str,
     global_executable: &str,
     game_path: &str,
+    fullscreen: bool,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
@@ -568,7 +609,11 @@ pub(super) fn launch_azahar(
         "azahar"
     };
     // Azahar takes the ROM or installed title content file positionally.
-    let args = vec![game_path.to_string()];
+    let args = with_fullscreen_args(
+        ira_models::GameKind::ThreeDS,
+        fullscreen,
+        vec![game_path.to_string()],
+    );
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
         &args,

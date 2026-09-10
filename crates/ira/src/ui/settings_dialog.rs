@@ -327,6 +327,7 @@ fn apply_saved_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     apply_system_defaults(cfg, &widgets.system_defaults_widgets);
     apply_override_states(
         cfg,
+        &console_pages.fullscreen_states,
         &console_pages.source_overlay_states,
         &console_pages.source_gamescope_states,
     );

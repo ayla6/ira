@@ -306,6 +306,7 @@ pub fn launch_game(
         controller_input_profile,
     };
 
+    let in_big_picture = super::big_picture::is_big_picture();
     if matches!(
         kind,
         ira_models::GameKind::Retro | ira_models::GameKind::Switch
@@ -324,6 +325,7 @@ pub fn launch_game(
             &per_game_version,
             &global_shadps4_exe,
             &game_path,
+            cfg_clone.console_fullscreen("ps4", in_big_picture),
             cfg_clone.console("ps4").controller_mode,
             (!cfg_clone.console("ps4").controller_profile.is_empty())
                 .then_some(cfg_clone.console("ps4").controller_profile.as_str()),
@@ -334,6 +336,7 @@ pub fn launch_game(
             &per_game_emu,
             &global_rpcs3_exe,
             &game_path,
+            cfg_clone.console_fullscreen("ps3", in_big_picture),
             cfg_clone.console("ps3").controller_mode,
             (!cfg_clone.console("ps3").controller_profile.is_empty())
                 .then_some(cfg_clone.console("ps3").controller_profile.as_str()),
@@ -343,6 +346,7 @@ pub fn launch_game(
             &ctx,
             &global_vita3k_exe,
             &game_path,
+            cfg_clone.console_fullscreen("psvita", in_big_picture),
             cfg_clone.console("psvita").controller_mode,
             (!cfg_clone.console("psvita").controller_profile.is_empty())
                 .then_some(cfg_clone.console("psvita").controller_profile.as_str()),
@@ -353,6 +357,7 @@ pub fn launch_game(
             &per_game_emu,
             &global_cemu_exe,
             &game_path,
+            cfg_clone.console_fullscreen("wiiu", in_big_picture),
             cfg_clone.console("wiiu").controller_mode,
             (!cfg_clone.console("wiiu").controller_profile.is_empty())
                 .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
@@ -363,6 +368,7 @@ pub fn launch_game(
             &per_game_emu,
             &global_azahar_exe,
             &game_path,
+            cfg_clone.console_fullscreen("3ds", in_big_picture),
             cfg_clone.console("3ds").controller_mode,
             (!cfg_clone.console("3ds").controller_profile.is_empty())
                 .then_some(cfg_clone.console("3ds").controller_profile.as_str()),

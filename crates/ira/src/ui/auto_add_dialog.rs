@@ -285,7 +285,9 @@ fn needs_move_choice(folders: &[std::path::PathBuf], path: &Path) -> bool {
 }
 
 /// The picked folder is outside every configured games root: offer to move
-/// it into one of them, listing each with its free space.
+/// it into one of them, listing each with its free space. A standard alert
+/// dialog: the destinations sit in a boxed list, and "Keep where it is" is
+/// the suggested response — dismissing the dialog keeps it in place too.
 fn show_move_target_chooser(
     path: &Path,
     folders: &[std::path::PathBuf],
@@ -295,28 +297,12 @@ fn show_move_target_chooser(
     let basename = path.file_name().and_then(|n| n.to_str()).unwrap_or("game");
     let picked = path.to_path_buf();
 
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&crate::tr!("Move to games folder?"));
-    dialog.set_content_width(480);
-
-    let header = adw::HeaderBar::new();
-    let title = adw::WindowTitle::new(&crate::tr!("Move to games folder?"), "");
-    header.set_title_widget(Some(&title));
-    header.add_css_class(CSS_FLAT);
-
-    let source = gtk4::Label::new(Some(&picked.to_string_lossy()));
-    source.add_css_class(CSS_CAPTION);
-    source.add_css_class(CSS_DIM_LABEL);
-    source.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
-    source.set_halign(gtk4::Align::Center);
-
-    let hint = gtk4::Label::new(Some(&crate::tr!(
-        "Pick where to move it, or keep it where it is."
-    )));
-    hint.add_css_class(CSS_DIM_LABEL);
-    hint.set_wrap(true);
-    hint.set_justify(gtk4::Justification::Center);
-    hint.set_halign(gtk4::Align::Center);
+    let dialog = adw::AlertDialog::new(
+        Some(&crate::tr!("Move to games folder?")),
+        Some(&crate::tr!(
+            "Pick where to move it, or keep it where it is."
+        )),
+    );
 
     let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
@@ -324,37 +310,21 @@ fn show_move_target_chooser(
     for folder in folders {
         list.append(&move_destination_row(folder, basename, &picked, &dialog, wizard));
     }
+    dialog.set_extra_child(Some(&list));
 
-    let keep_btn = gtk4::Button::with_label(&crate::tr!("Keep where it is"));
-    keep_btn.add_css_class(CSS_FLAT);
-    keep_btn.set_halign(gtk4::Align::Center);
+    dialog.add_response("keep", &crate::tr!("Keep where it is"));
+    dialog.set_response_appearance("keep", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("keep"));
+    dialog.set_close_response("keep");
     {
-        let chosen = dialog.clone();
         let keep_wizard = wizard.clone();
-        keep_btn.connect_clicked(move |_| {
-            chosen.close();
-            start_identify(picked.clone(), None, &keep_wizard);
+        let source = picked.clone();
+        dialog.connect_response(None, move |_, response| {
+            if response == "keep" {
+                start_identify(source.clone(), None, &keep_wizard);
+            }
         });
     }
-
-    let body = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    body.set_margin_start(16);
-    body.set_margin_end(16);
-    body.set_margin_bottom(16);
-    body.append(&source);
-    body.append(&hint);
-    body.append(&list);
-    body.append(&keep_btn);
-
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_child(Some(&body));
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroll.set_vexpand(true);
-
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(&scroll));
-    dialog.set_child(Some(&toolbar));
 
     match super::helpers::hosting_window(win) {
         Some(host) => dialog.present(Some(&host)),
@@ -362,34 +332,45 @@ fn show_move_target_chooser(
     }
 }
 
-/// One destination row: the folder path plus its free space. Activating it
-/// closes the chooser and moves the game into that folder.
+/// One destination row: the games root by name, with its path and free
+/// space as the subtitle. Activating it closes the chooser and moves the
+/// game into that folder.
 fn move_destination_row(
     folder: &Path,
     basename: &str,
     picked: &Path,
-    dialog: &adw::Dialog,
+    dialog: &adw::AlertDialog,
     wizard: &Rc<RefCell<Wizard>>,
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
-    let icon = gtk4::Image::from_icon_name("folder-symbolic");
+    let icon = gtk4::Image::from_icon_name("folder-new-symbolic");
     icon.set_valign(gtk4::Align::Center);
     row.add_prefix(&icon);
-    row.set_title(&super::helpers::esc(&folder.to_string_lossy()));
+    row.set_title(&super::helpers::esc(
+        &folder
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| folder.to_string_lossy().into_owned()),
+    ));
+    let mut subtitle = folder.to_string_lossy().into_owned();
     if let Some(free) = super::disk_space::available_bytes(folder) {
-        row.set_subtitle(&crate::tr!("{} free").replacen(
+        subtitle.push_str(" · ");
+        subtitle.push_str(&crate::tr!("{} free").replacen(
             "{}",
             &super::disk_space::format_size(free),
             1,
         ));
     }
+    row.set_subtitle(&super::helpers::esc(&subtitle));
     row.set_activatable(true);
     let dest = folder.join(basename);
     let chosen = dialog.clone();
     let move_wizard = wizard.clone();
     let source = picked.to_path_buf();
     row.connect_activated(move |_| {
-        chosen.close();
+        // Handled here, so the dialog must close without also emitting the
+        // "keep" response.
+        chosen.force_close();
         start_identify(source.clone(), Some(dest.clone()), &move_wizard);
     });
     row

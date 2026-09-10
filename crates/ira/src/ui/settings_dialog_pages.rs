@@ -38,6 +38,7 @@ pub(super) struct SettingsPageWidgets {
     pub(super) steam_entry: adw::PasswordEntryRow,
     pub(super) lang_list: gtk4::ListBox,
     pub(super) saves_row: adw::SwitchRow,
+    pub(super) default_fullscreen_row: adw::SwitchRow,
     pub(super) auto_reload_widgets: AutoReloadWidgets,
     pub(super) controller_default_widgets: Rc<RefCell<Vec<ControllerDefaultWidgets>>>,
     pub(super) game_folders: super::folder_list::FolderListWidgets,
@@ -62,7 +63,6 @@ pub(super) fn build_settings_pages(
     cfg: &Config,
     win: &impl IsA<gtk4::Widget>,
     state: &SharedState,
-    toasts: &adw::ToastOverlay,
 ) -> SettingsPageWidgets {
     let (
         general_page,
@@ -73,10 +73,10 @@ pub(super) fn build_settings_pages(
         lang_list,
         saves_row,
         square_row,
+        default_fullscreen_row,
         auto_reload_widgets,
     ) = build_general_settings_page(cfg);
-    let (sgdb_page, sgdb_widgets) =
-        super::settings_pages::build_sgdb_settings_page(cfg, toasts);
+    let (sgdb_page, sgdb_widgets) = super::settings_pages::build_sgdb_settings_page(cfg);
 
     // One-click maintenance: re-run the SGDB asset ensure for every matched
     // game so missing art (squares included) is fetched again, even for
@@ -142,6 +142,7 @@ pub(super) fn build_settings_pages(
         lang_list,
         saves_row,
         square_row,
+        default_fullscreen_row,
         auto_reload_widgets,
         controller_default_widgets,
         game_folders,

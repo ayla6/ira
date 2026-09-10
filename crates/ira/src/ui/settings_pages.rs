@@ -88,6 +88,7 @@ pub(super) fn build_general_settings_page(
     gtk4::ListBox,
     adw::SwitchRow,
     adw::SwitchRow,
+    adw::SwitchRow,
     AutoReloadWidgets,
 ) {
     let page = settings_page_container();
@@ -111,6 +112,17 @@ pub(super) fn build_general_settings_page(
     bg_row.set_active(cfg.close_to_background);
     notif_group.add(&bg_row);
     page.append(&notif_group);
+
+    let launch_group = adw::PreferencesGroup::new();
+    launch_group.set_title(&crate::tr!("Launching"));
+    let default_fullscreen_row = adw::SwitchRow::new();
+    default_fullscreen_row.set_title(&crate::tr!("Start games in fullscreen"));
+    default_fullscreen_row.set_subtitle(&crate::tr!(
+        "Fullscreen default for emulators; big picture always starts fullscreen. Consoles can override this on their settings page."
+    ));
+    default_fullscreen_row.set_active(cfg.default_fullscreen);
+    launch_group.add(&default_fullscreen_row);
+    page.append(&launch_group);
 
     let hidden_group = adw::PreferencesGroup::new();
     let hidden_row = adw::SwitchRow::new();
@@ -240,6 +252,7 @@ pub(super) fn build_general_settings_page(
         lang_list,
         saves_row,
         square_row,
+        default_fullscreen_row,
         AutoReloadWidgets {
             steam: auto_reload_steam,
             roms: auto_reload_roms,
@@ -1147,10 +1160,7 @@ pub(super) struct SgdbSettingsWidgets {
 
 /// The SteamGridDB settings page: API key, per-asset auto-download
 /// switches, filtered image styles, and the filtered-users editor.
-pub(super) fn build_sgdb_settings_page(
-    cfg: &Config,
-    toasts: &adw::ToastOverlay,
-) -> (gtk4::Box, SgdbSettingsWidgets) {
+pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettingsWidgets) {
     let page = settings_page_container();
 
     let key_group = adw::PreferencesGroup::new();
@@ -1204,21 +1214,22 @@ pub(super) fn build_sgdb_settings_page(
     }
     page.append(&style_group);
 
-    let users_group = adw::PreferencesGroup::new();
-    users_group.set_title(&crate::tr!("Filtered users"));
-    users_group.set_description(Some(&crate::tr!(
-        "Art by these authors is skipped in automatic downloads and sinks to the bottom of manual image search. Click a user to open their profile on SteamGridDB."
-    )));
-    // GNOME Settings' pattern for filterable, extendable lists: a plain
-    // search entry above, the boxed list of rows, and an add button below
-    // that opens a prompt — no input rows living inside the list.
+    // The filtered-users management (search, list, add) is a focused
+    // window of its own — long lists and search do not belong inline in a
+    // scrolled settings page. The page only carries the entry point.
     let filter_users_list = gtk4::ListBox::new();
     filter_users_list.set_selection_mode(gtk4::SelectionMode::None);
     filter_users_list.add_css_class("boxed-list");
     let search_row = gtk4::SearchEntry::new();
     search_row.set_placeholder_text(Some(&crate::tr!("Search filtered users\u{2026}")));
     search_row.set_hexpand(true);
-    search_row.set_margin_bottom(12);
+    let filter_entry = adw::EntryRow::new();
+    filter_entry.set_title(&crate::tr!("Add user\u{2026}"));
+    let filter_add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
+    filter_add_btn.add_css_class(CSS_FLAT);
+    filter_add_btn.set_valign(gtk4::Align::Center);
+    filter_add_btn.set_tooltip_text(Some(&crate::tr!("Add user to the filter list")));
+    filter_entry.add_suffix(&filter_add_btn);
     let filter_user_ids: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(
         cfg.sgdb_filtered_users
             .iter()
@@ -1228,13 +1239,7 @@ pub(super) fn build_sgdb_settings_page(
     let mut seeded: Vec<&ira_config::SgdbFilteredUser> = cfg.sgdb_filtered_users.iter().collect();
     seeded.sort_by_key(|user| user.name.to_lowercase());
     for user in &seeded {
-        add_filtered_user_row(
-            &filter_users_list,
-            &user.name,
-            &user.steam64,
-            &filter_user_ids,
-            toasts,
-        );
+        add_filtered_user_row(&filter_users_list, &user.name, &user.steam64, &filter_user_ids);
     }
     {
         let list = filter_users_list.clone();
@@ -1243,9 +1248,8 @@ pub(super) fn build_sgdb_settings_page(
             let mut child = list.first_child();
             while let Some(row) = child {
                 child = row.next_sibling();
-                // Chrome rows (search, add entry) have no widget name of
-                // their own — their widget_name() is the type name — so
-                // only ActionRows are user rows here.
+                // Only ActionRows are user rows; the add entry row never
+                // takes part in filtering.
                 let Some(user_row) = row.downcast_ref::<adw::ActionRow>() else {
                     continue;
                 };
@@ -1255,25 +1259,10 @@ pub(super) fn build_sgdb_settings_page(
             }
         });
     }
-    users_group.add(&filter_users_list);
-    page.append(&search_row);
-    page.append(&users_group);
-
-    // Inline add: the entry row is the list's tail, so adding stays
-    // type-and-Enter fast. The search entry above filters user rows only.
-    let filter_entry = adw::EntryRow::new();
-    filter_entry.set_title(&crate::tr!("Add user\u{2026}"));
-    let filter_add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    filter_add_btn.add_css_class(CSS_FLAT);
-    filter_add_btn.set_valign(gtk4::Align::Center);
-    filter_add_btn.set_tooltip_text(Some(&crate::tr!("Add user to the filter list")));
-    filter_entry.add_suffix(&filter_add_btn);
-    filter_users_list.append(&filter_entry);
     let add_filtered_action: Rc<dyn Fn()> = {
         let list = filter_users_list.clone();
         let entry = filter_entry.clone();
         let ids = filter_user_ids.clone();
-        let toasts = toasts.clone();
         Rc::new(move || {
             let name = entry.text().trim().to_string();
             if name.is_empty() {
@@ -1286,7 +1275,7 @@ pub(super) fn build_sgdb_settings_page(
                 entry.set_text("");
                 return;
             }
-            add_filtered_user_row(&list, &name, "", &ids, &toasts);
+            add_filtered_user_row(&list, &name, "", &ids);
             entry.set_text("");
         })
     };
@@ -1295,6 +1284,47 @@ pub(super) fn build_sgdb_settings_page(
         filter_add_btn.connect_clicked(move |_| add());
     }
     filter_entry.connect_activate(move |_| add_filtered_action());
+
+    let manage_row = adw::ActionRow::new();
+    manage_row.set_title(&crate::tr!("Filtered users"));
+    manage_row.set_subtitle(&crate::tr!(
+        "Manage the authors whose art is skipped in automatic downloads."
+    ));
+    manage_row.set_activatable(true);
+    let open_btn = gtk4::Button::from_icon_name("go-next-symbolic");
+    open_btn.add_css_class(CSS_FLAT);
+    open_btn.set_valign(gtk4::Align::Center);
+    open_btn.set_tooltip_text(Some(&crate::tr!("Open the filtered users manager")));
+    manage_row.add_suffix(&open_btn);
+    let open_manager: Rc<dyn Fn(&gtk4::Window)> = {
+        let list = filter_users_list.clone();
+        let search = search_row.clone();
+        let add = filter_entry.clone();
+        Rc::new(move |parent: &gtk4::Window| {
+            show_filtered_users_manager(parent.clone(), &list, &search, &add);
+        })
+    };
+    {
+        let open_manager = open_manager.clone();
+        manage_row.connect_activated(move |row| {
+            if let Some(window) = row.root().and_then(|w| w.downcast::<gtk4::Window>().ok()) {
+                open_manager(&window);
+            }
+        });
+    }
+    let open_btn_c = open_btn.clone();
+    open_btn.connect_clicked(move |_| {
+        let Some(window) = open_btn_c
+            .root()
+            .and_then(|root| root.downcast::<gtk4::Window>().ok())
+        else {
+            return;
+        };
+        open_manager(&window);
+    });
+    let users_group = adw::PreferencesGroup::new();
+    users_group.add(&manage_row);
+    page.append(&users_group);
 
     (
         page,
@@ -1308,6 +1338,50 @@ pub(super) fn build_sgdb_settings_page(
     )
 }
 
+/// The filtered-users manager window: search, the user list and the add
+/// entry in one focused surface. The list widget is owned by the settings
+/// widgets and merely re-parented here, so the settings save path keeps
+/// reading the live state no matter how often the window opens.
+fn show_filtered_users_manager(
+    parent: gtk4::Window,
+    list: &gtk4::ListBox,
+    search: &gtk4::SearchEntry,
+    add_entry: &adw::EntryRow,
+) {
+    let win = adw::Window::new();
+    win.set_modal(true);
+    win.set_transient_for(Some(&parent));
+    win.set_destroy_with_parent(true);
+    win.set_title(Some(&crate::tr!("Filtered users")));
+    win.set_default_size(480, 560);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.append(search);
+    content.append(list);
+    content.append(add_entry);
+
+    let scroll = gtk4::ScrolledWindow::new();
+    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&content));
+
+    // The overlay is this window's root: toasts stay in view relative to
+    // the window, wherever the list is scrolled.
+    let toast_overlay = adw::ToastOverlay::new();
+    toast_overlay.set_child(Some(&scroll));
+
+    let header = adw::HeaderBar::new();
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    toolbar.set_content(Some(&toast_overlay));
+    win.set_content(Some(&toolbar));
+    win.present();
+}
+
 /// One row in the filtered-users editor: the author name plus a remove
 /// button. The row's widget name carries the name for saving; activating
 /// the row opens the author's SteamGridDB profile.
@@ -1316,9 +1390,8 @@ fn add_filtered_user_row(
     name: &str,
     steam64: &str,
     ids: &Rc<RefCell<HashMap<String, String>>>,
-    overlay: &adw::ToastOverlay,
 ) {
-    let row = make_filtered_user_row(list, name, steam64, ids, overlay);
+    let row = make_filtered_user_row(list, name, steam64, ids);
     insert_user_row_sorted(list, &row, name);
 }
 
@@ -1327,7 +1400,6 @@ fn make_filtered_user_row(
     name: &str,
     steam64: &str,
     ids: &Rc<RefCell<HashMap<String, String>>>,
-    overlay: &adw::ToastOverlay,
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_widget_name(name);
@@ -1359,15 +1431,8 @@ fn make_filtered_user_row(
         // rows) alive after the settings window is gone.
         let list_w = glib::WeakRef::<gtk4::ListBox>::new();
         list_w.set(Some(list));
-        let overlay_w = glib::WeakRef::<adw::ToastOverlay>::new();
-        overlay_w.set(Some(overlay));
         remove_btn.connect_clicked(move |_| {
-            // If the keyboard put focus on this row, anchor it on a
-            // neighbour first — otherwise focus falls back to the top of
-            // the page and the view jumps with it.
-            // Keyboard navigation focuses the row itself; the trash button
-            // no longer takes focus on click.
-            let (Some(list), Some(overlay)) = (list_w.upgrade(), overlay_w.upgrade()) else {
+            let Some(list) = list_w.upgrade() else {
                 return;
             };
             // Keyboard navigation focuses the row itself; the trash button
@@ -1386,6 +1451,13 @@ fn make_filtered_user_row(
             }
             list.remove(&row_c);
             ids.borrow_mut().remove(&name);
+            // The toast host is the manager window's root overlay, found
+            // from wherever this row is currently parented.
+            let overlay = row_c
+                .root()
+                .and_then(|root| root.downcast::<adw::Window>().ok())
+                .and_then(|window| window.content())
+                .and_then(|content| content.downcast::<adw::ToastOverlay>().ok());
             // HIG pattern for destructive list actions: announce the change
             // and offer Undo before the removal is final.
             let toast = adw::Toast::new(
@@ -1396,22 +1468,17 @@ fn make_filtered_user_row(
             {
                 let list = list.clone();
                 let ids = ids.clone();
-                let overlay = overlay.clone();
                 let name = name.clone();
                 let steam64 = steam64.clone();
                 toast.connect_button_clicked(move |_| {
                     ids.borrow_mut().insert(name.clone(), steam64.clone());
-                    let row = make_filtered_user_row(
-                        &list,
-                        &name,
-                        &steam64,
-                        &ids,
-                        &overlay,
-                    );
+                    let row = make_filtered_user_row(&list, &name, &steam64, &ids);
                     insert_user_row_sorted(&list, &row, &name);
                 });
             }
-            overlay.add_toast(toast);
+            if let Some(ref overlay) = overlay {
+                overlay.add_toast(toast);
+            }
         });
     }
     row

@@ -41,6 +41,7 @@ struct SavedSettingsWidgets {
     sgdb: super::settings_pages::SgdbSettingsWidgets,
     hidden_row: adw::SwitchRow,
     saves_row: adw::SwitchRow,
+    default_fullscreen_row: adw::SwitchRow,
     auto_reload_widgets: AutoReloadWidgets,
     steam_enable_row: adw::SwitchRow,
     game_folders: super::folder_list::FolderListWidgets,
@@ -68,7 +69,6 @@ struct SettingsDialogParams {
     sidebar: gtk4::ListBox,
     stack: gtk4::Stack,
     content_area: gtk4::Box,
-    toasts: adw::ToastOverlay,
     cfg: Config,
     steam: Arc<SteamDataClient>,
     state: SharedState,
@@ -109,7 +109,6 @@ pub fn show_settings_dialog(
         sidebar: layout.sidebar,
         stack: layout.stack,
         content_area: layout.content_area,
-        toasts: layout.toast_overlay,
         cfg,
         steam,
         state: state.clone(),
@@ -126,13 +125,12 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         sidebar,
         stack,
         content_area,
-        toasts,
         cfg,
         steam,
         state,
         rom_platforms_with_games,
     } = params;
-    let pages = build_settings_pages(&cfg, &win, &state, &toasts);
+    let pages = build_settings_pages(&cfg, &win, &state);
     register_settings_pages(&pages, &sidebar, &stack);
     let steam_page = pages.steam_page.clone();
     let ra_page = pages.ra_page.clone();
@@ -208,6 +206,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         sgdb: pages.sgdb_widgets,
         hidden_row: pages.hidden_row,
         saves_row: pages.saves_row,
+        default_fullscreen_row: pages.default_fullscreen_row,
         auto_reload_widgets: pages.auto_reload_widgets,
         steam_enable_row: pages.steam_enable_row,
         game_folders: pages.game_folders.clone(),
@@ -343,6 +342,7 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
     cfg.close_to_background = widgets.bg_row.is_active();
     cfg.show_hidden_games = widgets.hidden_row.is_active();
     cfg.big_picture_square_capsules = widgets.square_row.is_active();
+    cfg.default_fullscreen = widgets.default_fullscreen_row.is_active();
     cfg.sgdb_disabled_assets = widgets
         .sgdb
         .auto_asset_rows

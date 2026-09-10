@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-10 15:52-0300\n"
+"POT-Creation-Date: 2026-09-10 16:13-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -176,7 +176,7 @@ msgstr ""
 #: crates/ira/src/ui/add_game_dialog.rs:53
 #: crates/ira/src/ui/input_profile_editor.rs:279
 #: crates/ira/src/ui/input_profile_stick_settings.rs:65
-#: crates/ira/src/ui/settings_dialog_pages.rs:176
+#: crates/ira/src/ui/settings_dialog_pages.rs:177
 msgid "General"
 msgstr ""
 
@@ -207,8 +207,8 @@ msgstr ""
 #: crates/ira/src/ui/group_dialog.rs:20
 #: crates/ira/src/ui/group_dialog.rs:67
 #: crates/ira/src/ui/group_dialog.rs:109
-#: crates/ira/src/ui/helpers.rs:484
-#: crates/ira/src/ui/helpers.rs:818
+#: crates/ira/src/ui/helpers.rs:475
+#: crates/ira/src/ui/helpers.rs:809
 #: crates/ira/src/ui/input_profile_editor.rs:395
 #: crates/ira/src/ui/input_profile_editor_save.rs:121
 #: crates/ira/src/ui/input_profile_output_capture.rs:53
@@ -217,8 +217,8 @@ msgstr ""
 #: crates/ira/src/ui/play_history.rs:226
 #: crates/ira/src/ui/profile_dialog.rs:198
 #: crates/ira/src/ui/profile_dialog.rs:446
-#: crates/ira/src/ui/settings_dialog.rs:252
-#: crates/ira/src/ui/settings_pages.rs:500
+#: crates/ira/src/ui/settings_dialog.rs:251
+#: crates/ira/src/ui/settings_pages.rs:513
 msgid "Cancel"
 msgstr ""
 
@@ -305,7 +305,7 @@ msgstr ""
 #: crates/ira/src/ui/settings_console.rs:188
 #: crates/ira/src/ui/settings_console.rs:240
 #: crates/ira/src/ui/settings_console.rs:297
-#: crates/ira/src/ui/settings_console.rs:504
+#: crates/ira/src/ui/settings_console.rs:505
 msgid "Select executable"
 msgstr ""
 
@@ -450,8 +450,8 @@ msgstr ""
 #: crates/ira/src/ui/image_manager.rs:237
 #: crates/ira/src/ui/image_manager.rs:261
 #: crates/ira/src/ui/image_manager.rs:324
-#: crates/ira/src/ui/settings_dialog_pages.rs:230
-#: crates/ira/src/ui/settings_pages.rs:144
+#: crates/ira/src/ui/settings_dialog_pages.rs:231
+#: crates/ira/src/ui/settings_pages.rs:156
 #: crates/ira/src/ui/steam_search_dialog.rs:190
 msgid "Steam"
 msgstr ""
@@ -491,7 +491,7 @@ msgstr ""
 
 #: crates/ira/src/ui/auto_add_dialog.rs:1373
 #: crates/ira/src/ui/edit_game_pages.rs:358
-#: crates/ira/src/ui/settings_pages.rs:765
+#: crates/ira/src/ui/settings_pages.rs:778
 msgid "Emulator version"
 msgstr ""
 
@@ -1017,7 +1017,7 @@ msgstr ""
 #: crates/ira/src/ui/input_profile_editor.rs:140
 #: crates/ira/src/ui/input_profile_editor_save.rs:123
 #: crates/ira/src/ui/profile_dialog.rs:452
-#: crates/ira/src/ui/settings_dialog.rs:269
+#: crates/ira/src/ui/settings_dialog.rs:268
 msgid "Save"
 msgstr ""
 
@@ -1087,22 +1087,22 @@ msgid "Launch config"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:25
-#: crates/ira/src/ui/settings_dialog_console.rs:489
-#: crates/ira/src/ui/settings_dialog.rs:145
-#: crates/ira/src/ui/settings_dialog.rs:166
+#: crates/ira/src/ui/settings_dialog_console.rs:490
+#: crates/ira/src/ui/settings_dialog.rs:143
+#: crates/ira/src/ui/settings_dialog.rs:164
 msgid "In-game overlay"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:26
-#: crates/ira/src/ui/settings_dialog_console.rs:490
-#: crates/ira/src/ui/settings_dialog.rs:146
-#: crates/ira/src/ui/settings_dialog.rs:167
+#: crates/ira/src/ui/settings_dialog_console.rs:491
+#: crates/ira/src/ui/settings_dialog.rs:144
+#: crates/ira/src/ui/settings_dialog.rs:165
 msgid "Achievements, screenshots, and recording"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:35
 #: crates/ira/src/ui/edit_game_overlay.rs:78
-#: crates/ira/src/ui/settings_dialog_pages.rs:184
+#: crates/ira/src/ui/settings_dialog_pages.rs:185
 msgid "Overlay"
 msgstr ""
 
@@ -1114,49 +1114,49 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_overlay.rs:39
 #: crates/ira/src/ui/edit_game_system.rs:153
 #: crates/ira/src/ui/profile_dialog.rs:386
-#: crates/ira/src/ui/settings_pages.rs:404
-#: crates/ira/src/ui/settings_pages.rs:816
+#: crates/ira/src/ui/settings_pages.rs:417
+#: crates/ira/src/ui/settings_pages.rs:829
 #: crates/ira/src/ui/wine_config_widget.rs:290
 msgid "Auto"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:40
-#: crates/ira/src/ui/settings_pages.rs:817
+#: crates/ira/src/ui/settings_pages.rs:830
 msgid "VAAPI (AMD/Intel)"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:41
-#: crates/ira/src/ui/settings_pages.rs:818
+#: crates/ira/src/ui/settings_pages.rs:831
 msgid "NVENC (NVIDIA)"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:42
-#: crates/ira/src/ui/settings_pages.rs:819
+#: crates/ira/src/ui/settings_pages.rs:832
 msgid "Software (CPU)"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:45
-#: crates/ira/src/ui/settings_pages.rs:824
+#: crates/ira/src/ui/settings_pages.rs:837
 msgid "Video encoder"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:52
-#: crates/ira/src/ui/settings_pages.rs:833
+#: crates/ira/src/ui/settings_pages.rs:846
 msgid "Low (720p 30fps)"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:53
-#: crates/ira/src/ui/settings_pages.rs:834
+#: crates/ira/src/ui/settings_pages.rs:847
 msgid "Medium (1080p 30fps)"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:54
-#: crates/ira/src/ui/settings_pages.rs:835
+#: crates/ira/src/ui/settings_pages.rs:848
 msgid "High (1080p 60fps)"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:57
-#: crates/ira/src/ui/settings_pages.rs:840
+#: crates/ira/src/ui/settings_pages.rs:853
 msgid "Recording quality"
 msgstr ""
 
@@ -1284,7 +1284,7 @@ msgid "Hours, like 2:30 or 12.5"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_playtime.rs:94
-#: crates/ira/src/ui/settings_pages.rs:1076
+#: crates/ira/src/ui/settings_pages.rs:1089
 msgid "Add"
 msgstr ""
 
@@ -1331,57 +1331,57 @@ msgid "Choose the entries whose time counts together"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:48
-#: crates/ira/src/ui/settings_pages.rs:287
+#: crates/ira/src/ui/settings_pages.rs:300
 #: crates/ira/src/ui/wine_config_widget.rs:96
 #: crates/ira/src/ui/wine_config_widget.rs:170
 msgid "Performance"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:51
-#: crates/ira/src/ui/settings_pages.rs:290
+#: crates/ira/src/ui/settings_pages.rs:303
 msgid "Gamemode"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:52
-#: crates/ira/src/ui/settings_pages.rs:291
+#: crates/ira/src/ui/settings_pages.rs:304
 msgid "Feral Interactive GameMode"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:59
-#: crates/ira/src/ui/settings_pages.rs:296
+#: crates/ira/src/ui/settings_pages.rs:309
 msgid "MangoHud"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:60
-#: crates/ira/src/ui/settings_pages.rs:297
+#: crates/ira/src/ui/settings_pages.rs:310
 msgid "Performance overlay"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:68
-#: crates/ira/src/ui/settings_dialog_console.rs:495
-#: crates/ira/src/ui/settings_dialog.rs:151
-#: crates/ira/src/ui/settings_dialog.rs:172
-#: crates/ira/src/ui/settings_pages.rs:302
+#: crates/ira/src/ui/settings_dialog_console.rs:496
+#: crates/ira/src/ui/settings_dialog.rs:149
+#: crates/ira/src/ui/settings_dialog.rs:170
+#: crates/ira/src/ui/settings_pages.rs:315
 msgid "Gamescope"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:69
-#: crates/ira/src/ui/settings_dialog_console.rs:496
-#: crates/ira/src/ui/settings_dialog.rs:152
-#: crates/ira/src/ui/settings_dialog.rs:173
-#: crates/ira/src/ui/settings_pages.rs:303
+#: crates/ira/src/ui/settings_dialog_console.rs:497
+#: crates/ira/src/ui/settings_dialog.rs:150
+#: crates/ira/src/ui/settings_dialog.rs:171
+#: crates/ira/src/ui/settings_pages.rs:316
 msgid "Valve Gamescope compositor"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:150
-#: crates/ira/src/ui/settings_pages.rs:401
+#: crates/ira/src/ui/settings_pages.rs:414
 #: crates/ira/src/ui/wine_config_widget.rs:193
 #: crates/ira/src/ui/wine_config_widget.rs:310
 msgid "Graphics"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:158
-#: crates/ira/src/ui/settings_pages.rs:409
+#: crates/ira/src/ui/settings_pages.rs:422
 msgid "GPU"
 msgstr ""
 
@@ -1390,12 +1390,12 @@ msgid "Graphics card to use for rendering"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_variants.rs:72
-#: crates/ira/src/ui/settings_pages.rs:999
+#: crates/ira/src/ui/settings_pages.rs:1012
 msgid "Move up"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_variants.rs:92
-#: crates/ira/src/ui/settings_pages.rs:1004
+#: crates/ira/src/ui/settings_pages.rs:1017
 msgid "Move down"
 msgstr ""
 
@@ -1571,7 +1571,7 @@ msgid "Open emulator without game"
 msgstr ""
 
 #: crates/ira/src/ui/game_header.rs:346
-#: crates/ira/src/ui/helpers.rs:95
+#: crates/ira/src/ui/helpers.rs:92
 #: crates/ira/src/ui/window.rs:305
 msgid "Settings"
 msgstr ""
@@ -1587,7 +1587,7 @@ msgid "Reset"
 msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:46
-#: crates/ira/src/ui/settings_dialog_pages.rs:278
+#: crates/ira/src/ui/settings_dialog_pages.rs:279
 msgid "RetroAchievements"
 msgstr ""
 
@@ -1655,8 +1655,8 @@ msgid "Follow global"
 msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:293
-#: crates/ira/src/ui/settings_console.rs:541
-#: crates/ira/src/ui/settings_console.rs:558
+#: crates/ira/src/ui/settings_console.rs:542
+#: crates/ira/src/ui/settings_console.rs:559
 msgid "RetroArch core"
 msgstr ""
 
@@ -1672,7 +1672,7 @@ msgstr ""
 #: crates/ira/src/ui/settings_console.rs:226
 #: crates/ira/src/ui/settings_console.rs:283
 #: crates/ira/src/ui/settings_console.rs:347
-#: crates/ira/src/ui/settings_console.rs:481
+#: crates/ira/src/ui/settings_console.rs:482
 msgid "Emulator"
 msgstr ""
 
@@ -1726,7 +1726,7 @@ msgid "Move saves to a persistent location and create symlinks"
 msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:713
-#: crates/ira/src/ui/settings_pages.rs:501
+#: crates/ira/src/ui/settings_pages.rs:514
 msgid "Migrate"
 msgstr ""
 
@@ -1788,7 +1788,7 @@ msgstr ""
 msgid "Delete “{}”? Games in this collection will not be removed."
 msgstr ""
 
-#: crates/ira/src/ui/helpers.rs:819
+#: crates/ira/src/ui/helpers.rs:810
 msgid "Confirm"
 msgstr ""
 
@@ -1837,13 +1837,13 @@ msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:427
 #: crates/ira/src/ui/settings_dialog_console.rs:168
-#: crates/ira/src/ui/settings_dialog_console.rs:391
+#: crates/ira/src/ui/settings_dialog_console.rs:392
 msgid "PS4"
 msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:428
 #: crates/ira/src/ui/settings_dialog_console.rs:167
-#: crates/ira/src/ui/settings_dialog_console.rs:382
+#: crates/ira/src/ui/settings_dialog_console.rs:383
 msgid "PS3"
 msgstr ""
 
@@ -1853,12 +1853,12 @@ msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:430
 #: crates/ira/src/ui/settings_dialog_console.rs:172
-#: crates/ira/src/ui/settings_dialog_console.rs:409
+#: crates/ira/src/ui/settings_dialog_console.rs:410
 msgid "Wii U"
 msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:431
-#: crates/ira/src/ui/settings_pages.rs:189
+#: crates/ira/src/ui/settings_pages.rs:201
 msgid "Switch"
 msgstr ""
 
@@ -3579,7 +3579,7 @@ msgstr ""
 #: crates/ira/src/ui/input_profile_preview.rs:209
 #: crates/ira/src/ui/input_profile_search_filters.rs:111
 #: crates/ira/src/ui/input_profile_settings.rs:155
-#: crates/ira/src/ui/settings_dialog_pages.rs:192
+#: crates/ira/src/ui/settings_dialog_pages.rs:193
 msgid "Controller"
 msgstr ""
 
@@ -3816,7 +3816,7 @@ msgid "over {parent}"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_settings.rs:94
-#: crates/ira/src/ui/settings_dialog_pages.rs:257
+#: crates/ira/src/ui/settings_dialog_pages.rs:258
 msgid "Profiles"
 msgstr ""
 
@@ -4209,7 +4209,7 @@ msgid "Select installer files"
 msgstr ""
 
 #: crates/ira/src/ui/installer_add_dialog.rs:160
-#: crates/ira/src/ui/settings_dialog_pages.rs:250
+#: crates/ira/src/ui/settings_dialog_pages.rs:251
 msgid "Wine"
 msgstr ""
 
@@ -4718,56 +4718,57 @@ msgstr ""
 msgid "Auto-detect emulator"
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:470
+#: crates/ira/src/ui/settings_console.rs:471
 #, rust-format
 msgid "Enable {display_name} ROM discovery"
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:473
+#: crates/ira/src/ui/settings_console.rs:474
 #, rust-format
 msgid "Scan for {display_name} ROM files in the configured folder"
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:486
+#: crates/ira/src/ui/settings_console.rs:487
 msgid "Emulator executable"
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:520
+#: crates/ira/src/ui/settings_console.rs:521
 msgid "Custom core file"
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:524
+#: crates/ira/src/ui/settings_console.rs:525
 msgid "Select RetroArch core"
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:543
+#: crates/ira/src/ui/settings_console.rs:544
 msgid ""
 "No compatible cores installed. Install one with RetroArch's Core Downloader."
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:556
+#: crates/ira/src/ui/settings_console.rs:557
 msgid "Custom core file..."
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:559
+#: crates/ira/src/ui/settings_console.rs:560
 msgid "Select a core for this console"
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:613
+#: crates/ira/src/ui/settings_console.rs:616
+#: crates/ira/src/ui/settings_pages.rs:119
 msgid "Start games in fullscreen"
 msgstr ""
 
-#: crates/ira/src/ui/settings_console.rs:614
+#: crates/ira/src/ui/settings_console.rs:617
 msgid "Launch the emulator in fullscreen mode"
 msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_console.rs:169
-#: crates/ira/src/ui/settings_dialog_console.rs:400
+#: crates/ira/src/ui/settings_dialog_console.rs:401
 msgid "PS Vita"
 msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_console.rs:175
-#: crates/ira/src/ui/settings_dialog_console.rs:418
+#: crates/ira/src/ui/settings_dialog_console.rs:419
 msgid "Nintendo 3DS"
 msgstr ""
 
@@ -4796,47 +4797,47 @@ msgstr ""
 msgid "Fetch"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:200
+#: crates/ira/src/ui/settings_dialog_pages.rs:201
 msgid "Game system"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:204
+#: crates/ira/src/ui/settings_dialog_pages.rs:205
 msgid "Metadata"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:211
+#: crates/ira/src/ui/settings_dialog_pages.rs:212
 #: crates/ira/src/ui/steam_search_dialog.rs:211
 msgid "SteamGridDB"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:215
-#: crates/ira/src/ui/settings_dialog_pages.rs:222
+#: crates/ira/src/ui/settings_dialog_pages.rs:216
+#: crates/ira/src/ui/settings_dialog_pages.rs:223
 msgid "PC games"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:238
+#: crates/ira/src/ui/settings_dialog_pages.rs:239
 msgid "API emulators"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:246
+#: crates/ira/src/ui/settings_dialog_pages.rs:247
 msgid "Lutris migration"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:271
+#: crates/ira/src/ui/settings_dialog_pages.rs:272
 msgid "Emulation"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:286
-#: crates/ira/src/ui/settings_pages.rs:149
-#: crates/ira/src/ui/settings_pages.rs:650
+#: crates/ira/src/ui/settings_dialog_pages.rs:287
+#: crates/ira/src/ui/settings_pages.rs:161
+#: crates/ira/src/ui/settings_pages.rs:663
 msgid "ROM library"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:348
+#: crates/ira/src/ui/settings_dialog_pages.rs:349
 msgid "Linux controller"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:356
+#: crates/ira/src/ui/settings_dialog_pages.rs:357
 msgid "Wine controller"
 msgstr ""
 
@@ -4848,489 +4849,501 @@ msgstr ""
 msgid "Checking installed emulators and controller profiles"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:96
+#: crates/ira/src/ui/settings_pages.rs:97
 msgid "Live updates"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:99
+#: crates/ira/src/ui/settings_pages.rs:100
 msgid "Notify on new unlocks"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:101
+#: crates/ira/src/ui/settings_pages.rs:102
 msgid "Show a desktop notification the moment a trophy unlocks"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:107
+#: crates/ira/src/ui/settings_pages.rs:108
 msgid "Close to background"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:109
+#: crates/ira/src/ui/settings_pages.rs:110
 msgid "Closing the window keeps the watcher running silently in the background"
 msgstr ""
 
 #: crates/ira/src/ui/settings_pages.rs:117
+msgid "Launching"
+msgstr ""
+
+#: crates/ira/src/ui/settings_pages.rs:121
+msgid ""
+"Fullscreen default for emulators; big picture always starts fullscreen. "
+"Consoles can override this on their settings page."
+msgstr ""
+
+#: crates/ira/src/ui/settings_pages.rs:129
 #: crates/ira/src/ui/window.rs:354
 msgid "Show hidden games"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:122
+#: crates/ira/src/ui/settings_pages.rs:134
 msgid "Centralize game saves"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:124
+#: crates/ira/src/ui/settings_pages.rs:136
 msgid ""
 "Symlink save data to a central location so it persists across Wine prefix "
 "resets"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:130
+#: crates/ira/src/ui/settings_pages.rs:142
 msgid "Square covers in big picture"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:132
+#: crates/ira/src/ui/settings_pages.rs:144
 msgid ""
 "Big picture mode shows square capsule art, falling back to cropped cover "
 "capsules"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:139
+#: crates/ira/src/ui/settings_pages.rs:151
 msgid "Automatic library reloads"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:141
+#: crates/ira/src/ui/settings_pages.rs:153
 msgid ""
 "Choose which sources are scanned when Ira starts. Manual rescans always "
 "check every enabled source."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:145
+#: crates/ira/src/ui/settings_pages.rs:157
 msgid "Scan installed Steam games when Ira starts"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:150
+#: crates/ira/src/ui/settings_pages.rs:162
 msgid "Scan ROM folders and refresh RetroAchievements games when Ira starts"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:154
+#: crates/ira/src/ui/settings_pages.rs:166
 msgid "Read ROM contents"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:156
+#: crates/ira/src/ui/settings_pages.rs:168
 msgid ""
 "Extract DS icons and RetroAchievements hashes from ROM files, "
 "including .zip/.7z/.zst archives — slower scans"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:161
+#: crates/ira/src/ui/settings_pages.rs:173
 msgid "shadPS4"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:162
+#: crates/ira/src/ui/settings_pages.rs:174
 msgid "Scan shadPS4 games when Ira starts"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:166
+#: crates/ira/src/ui/settings_pages.rs:178
 msgid "RPCS3"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:167
+#: crates/ira/src/ui/settings_pages.rs:179
 msgid "Scan RPCS3 games when Ira starts"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:171
+#: crates/ira/src/ui/settings_pages.rs:183
 msgid "Vita3K"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:172
+#: crates/ira/src/ui/settings_pages.rs:184
 msgid "Scan Vita3K games when Ira starts"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:176
+#: crates/ira/src/ui/settings_pages.rs:188
 msgid "Cemu"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:177
+#: crates/ira/src/ui/settings_pages.rs:189
 msgid "Scan Cemu games when Ira starts"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:181
+#: crates/ira/src/ui/settings_pages.rs:193
 msgid "Azahar"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:182
+#: crates/ira/src/ui/settings_pages.rs:194
 msgid "Scan Azahar games when Ira starts"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:190
+#: crates/ira/src/ui/settings_pages.rs:202
 msgid "Scan installed Switch titles when Ira starts"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:209
-#: crates/ira/src/ui/settings_pages.rs:1157
+#: crates/ira/src/ui/settings_pages.rs:221
+#: crates/ira/src/ui/settings_pages.rs:1167
 msgid "API keys"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:212
+#: crates/ira/src/ui/settings_pages.rs:224
 msgid "Steam web API key"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:220
+#: crates/ira/src/ui/settings_pages.rs:232
 msgid "Language preferences"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:224
+#: crates/ira/src/ui/settings_pages.rs:236
 msgid ""
 "When a game is added, the first supported language from this list is used "
 "for the emulator config"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:410
+#: crates/ira/src/ui/settings_pages.rs:423
 msgid "Graphics card to use for rendering by default"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:441
+#: crates/ira/src/ui/settings_pages.rs:454
 msgid "Lutris installation"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:446
+#: crates/ira/src/ui/settings_pages.rs:459
 msgid "Lutris data directory"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:450
+#: crates/ira/src/ui/settings_pages.rs:463
 msgid "Lutris not found"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:457
+#: crates/ira/src/ui/settings_pages.rs:470
 msgid "Migration"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:459
-#: crates/ira/src/ui/settings_pages.rs:494
+#: crates/ira/src/ui/settings_pages.rs:472
+#: crates/ira/src/ui/settings_pages.rs:507
 msgid "Import Lutris games"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:461
+#: crates/ira/src/ui/settings_pages.rs:474
 msgid ""
 "Reads each Lutris game's config and creates a game entry with wine settings"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:463
+#: crates/ira/src/ui/settings_pages.rs:476
 msgid "Import all"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:496
+#: crates/ira/src/ui/settings_pages.rs:509
 #, rust-format
 msgid "Import {} Lutris game(s) as managed Wine games?"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:574
+#: crates/ira/src/ui/settings_pages.rs:587
 msgid "Enable Steam integration"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:576
+#: crates/ira/src/ui/settings_pages.rs:589
 msgid "Scan your Steam library for installed games and achievements"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:583
+#: crates/ira/src/ui/settings_pages.rs:596
 msgid "Steam installation"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:587
+#: crates/ira/src/ui/settings_pages.rs:600
 msgid "Steam directory"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:591
+#: crates/ira/src/ui/settings_pages.rs:604
 msgid "Steam not found"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:599
+#: crates/ira/src/ui/settings_pages.rs:612
 msgid "Steam user IDs"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:601
+#: crates/ira/src/ui/settings_pages.rs:614
 msgid "None found"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:620
+#: crates/ira/src/ui/settings_pages.rs:633
 msgid "PC games folders"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:621
+#: crates/ira/src/ui/settings_pages.rs:634
 msgid "Add games folder…"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:622
+#: crates/ira/src/ui/settings_pages.rs:635
 msgid "Select games folder"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:626
+#: crates/ira/src/ui/settings_pages.rs:639
 msgid ""
 "New downloads and installs go to the first folder; all of them are scanned "
 "for games."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:651
+#: crates/ira/src/ui/settings_pages.rs:664
 msgid "Add ROM root…"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:652
+#: crates/ira/src/ui/settings_pages.rs:665
 msgid "Select base ROM folder"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:657
+#: crates/ira/src/ui/settings_pages.rs:670
 msgid ""
 "The primary ROM root is missing. Choose a new location; game metadata and "
 "relative paths will be kept."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:661
+#: crates/ira/src/ui/settings_pages.rs:674
 #, rust-format
 msgid ""
 "Missing system folders: {}. Adjust your ROM roots if these games were moved; "
 "metadata is retained."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:665
+#: crates/ira/src/ui/settings_pages.rs:678
 msgid ""
 "Each root stores a subfolder per system, such as gba, psx, and ps2. All "
 "roots are scanned."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:680
+#: crates/ira/src/ui/settings_pages.rs:693
 msgid "Enable RetroAchievements"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:682
+#: crates/ira/src/ui/settings_pages.rs:695
 msgid "Fetch achievements for matched retro games from retroachievements.org"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:689
+#: crates/ira/src/ui/settings_pages.rs:702
 msgid "Account"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:691
+#: crates/ira/src/ui/settings_pages.rs:704
 msgid ""
 "A Web API key is required: it fetches hardcore unlocks and real earned "
 "dates. Get it from retroachievements.org → Settings → Keys."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:695
+#: crates/ira/src/ui/settings_pages.rs:708
 msgid "Username"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:700
+#: crates/ira/src/ui/settings_pages.rs:713
 msgid "Web API key"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:718
+#: crates/ira/src/ui/settings_pages.rs:731
 msgid "API emulator files"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:720
+#: crates/ira/src/ui/settings_pages.rs:733
 msgid "Drop emulator files into the structure below"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:724
+#: crates/ira/src/ui/settings_pages.rs:737
 msgid "Directory"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:728
+#: crates/ira/src/ui/settings_pages.rs:741
 msgid "Open"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:742
+#: crates/ira/src/ui/settings_pages.rs:755
 msgid "Default version"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:744
+#: crates/ira/src/ui/settings_pages.rs:757
 msgid "Version to use when installing API emulators on games"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:758
+#: crates/ira/src/ui/settings_pages.rs:771
 msgid "(no versions installed)"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:767
+#: crates/ira/src/ui/settings_pages.rs:780
 msgid "Default version directory to use when installing"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:804
+#: crates/ira/src/ui/settings_pages.rs:817
 msgid "Enable in-game overlay"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:806
+#: crates/ira/src/ui/settings_pages.rs:819
 msgid ""
 "Shows achievements, screenshots, and recording during gameplay (Vulkan games "
 "only)"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:813
+#: crates/ira/src/ui/settings_pages.rs:826
 msgid "Recording"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:826
+#: crates/ira/src/ui/settings_pages.rs:839
 msgid ""
 "Auto detects the best available encoder. Use Software if your GPU lacks "
 "hardware encoding."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:846
+#: crates/ira/src/ui/settings_pages.rs:859
 msgid "Enable replay buffer"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:848
+#: crates/ira/src/ui/settings_pages.rs:861
 msgid "Keeps recent gameplay available as a rolling DASH session"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:863
+#: crates/ira/src/ui/settings_pages.rs:876
 msgid "Replay buffer duration"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:865
+#: crates/ira/src/ui/settings_pages.rs:878
 msgid "Minutes of gameplay retained for instant replay"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:878
+#: crates/ira/src/ui/settings_pages.rs:891
 msgid "Hotkeys"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:880
+#: crates/ira/src/ui/settings_pages.rs:893
 msgid "Keyboard and gamepad bindings. Click to set."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:885
+#: crates/ira/src/ui/settings_pages.rs:898
 msgid "Toggle overlay"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:893
+#: crates/ira/src/ui/settings_pages.rs:906
 #: crates/overlay/src/ui/model.rs:205
 #: crates/overlay/src/ui/renderer.rs:513
 msgid "Screenshot"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:901
+#: crates/ira/src/ui/settings_pages.rs:914
 msgid "Toggle recording"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:910
+#: crates/ira/src/ui/settings_pages.rs:923
 msgid "Appearance"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:913
+#: crates/ira/src/ui/settings_pages.rs:926
 msgid "Select overlay font"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:931
+#: crates/ira/src/ui/settings_pages.rs:944
 msgid "Reset to system default"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:936
+#: crates/ira/src/ui/settings_pages.rs:949
 msgid "Font family"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1009
+#: crates/ira/src/ui/settings_pages.rs:1022
 msgid "Remove language"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1159
+#: crates/ira/src/ui/settings_pages.rs:1169
 msgid "SteamGridDB API key"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1165
+#: crates/ira/src/ui/settings_pages.rs:1175
 msgid "Auto-download"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1167
+#: crates/ira/src/ui/settings_pages.rs:1177
 msgid "Which image types are fetched automatically when missing"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1171
+#: crates/ira/src/ui/settings_pages.rs:1181
 msgid "Icons"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1172
+#: crates/ira/src/ui/settings_pages.rs:1182
 msgid "Heroes"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1173
+#: crates/ira/src/ui/settings_pages.rs:1183
 msgid "Capsules"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1174
+#: crates/ira/src/ui/settings_pages.rs:1184
 msgid "Squares"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1175
+#: crates/ira/src/ui/settings_pages.rs:1185
 msgid "Headers"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1176
+#: crates/ira/src/ui/settings_pages.rs:1186
 msgid "Logos"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1187
+#: crates/ira/src/ui/settings_pages.rs:1197
 msgid "Allowed image styles"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1189
+#: crates/ira/src/ui/settings_pages.rs:1199
 msgid ""
 "Enabled styles are fetched automatically and come first in manual image "
 "search; disabled ones sink to the bottom"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1193
+#: crates/ira/src/ui/settings_pages.rs:1203
 msgid "Alternate"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1194
+#: crates/ira/src/ui/settings_pages.rs:1204
 msgid "Blurred"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1195
+#: crates/ira/src/ui/settings_pages.rs:1205
 msgid "White logo"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1196
+#: crates/ira/src/ui/settings_pages.rs:1206
 msgid "Material"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1197
+#: crates/ira/src/ui/settings_pages.rs:1207
 msgid "No logo"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1208
-msgid "Filtered users"
-msgstr ""
-
-#: crates/ira/src/ui/settings_pages.rs:1210
-msgid ""
-"Art by these authors is skipped in automatic downloads and sinks to the "
-"bottom of manual image search. Click a user to open their profile on "
-"SteamGridDB."
-msgstr ""
-
-#: crates/ira/src/ui/settings_pages.rs:1219
+#: crates/ira/src/ui/settings_pages.rs:1224
 msgid "Search filtered users…"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1265
+#: crates/ira/src/ui/settings_pages.rs:1227
 msgid "Add user…"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1269
+#: crates/ira/src/ui/settings_pages.rs:1231
 msgid "Add user to the filter list"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1340
+#: crates/ira/src/ui/settings_pages.rs:1289
+#: crates/ira/src/ui/settings_pages.rs:1355
+msgid "Filtered users"
+msgstr ""
+
+#: crates/ira/src/ui/settings_pages.rs:1291
+msgid "Manage the authors whose art is skipped in automatic downloads."
+msgstr ""
+
+#: crates/ira/src/ui/settings_pages.rs:1297
+msgid "Open the filtered users manager"
+msgstr ""
+
+#: crates/ira/src/ui/settings_pages.rs:1412
 msgid "Remove from filter list"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1392
+#: crates/ira/src/ui/settings_pages.rs:1464
 #, rust-format
 msgid "{} was unfiltered"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1394
+#: crates/ira/src/ui/settings_pages.rs:1466
 msgid "Undo"
 msgstr ""
 

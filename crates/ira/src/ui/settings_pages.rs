@@ -1209,19 +1209,16 @@ pub(super) fn build_sgdb_settings_page(
     users_group.set_description(Some(&crate::tr!(
         "Art by these authors is skipped in automatic downloads and sinks to the bottom of manual image search. Click a user to open their profile on SteamGridDB."
     )));
-    // One boxed list with the search and entry as its first rows: entry and
-    // users render as a single card, the way libadwaita settings lists do
-    // it. The overlay floats "user was unfiltered (Undo)" toasts.
+    // GNOME Settings' pattern for filterable, extendable lists: a plain
+    // search entry above, the boxed list of rows, and an add button below
+    // that opens a prompt — no input rows living inside the list.
     let filter_users_list = gtk4::ListBox::new();
     filter_users_list.set_selection_mode(gtk4::SelectionMode::None);
     filter_users_list.add_css_class("boxed-list");
     let search_row = gtk4::SearchEntry::new();
     search_row.set_placeholder_text(Some(&crate::tr!("Search filtered users\u{2026}")));
     search_row.set_hexpand(true);
-    filter_users_list.append(&search_row);
-    let filter_entry = adw::EntryRow::new();
-    filter_entry.set_title(&crate::tr!("Add user\u{2026}"));
-    filter_users_list.append(&filter_entry);
+    search_row.set_margin_bottom(12);
     let filter_user_ids: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(
         cfg.sgdb_filtered_users
             .iter()
@@ -1258,11 +1255,20 @@ pub(super) fn build_sgdb_settings_page(
             }
         });
     }
+    users_group.add(&filter_users_list);
+    page.append(&search_row);
+    page.append(&users_group);
+
+    // Inline add: the entry row is the list's tail, so adding stays
+    // type-and-Enter fast. The search entry above filters user rows only.
+    let filter_entry = adw::EntryRow::new();
+    filter_entry.set_title(&crate::tr!("Add user\u{2026}"));
     let filter_add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     filter_add_btn.add_css_class(CSS_FLAT);
     filter_add_btn.set_valign(gtk4::Align::Center);
     filter_add_btn.set_tooltip_text(Some(&crate::tr!("Add user to the filter list")));
     filter_entry.add_suffix(&filter_add_btn);
+    filter_users_list.append(&filter_entry);
     let add_filtered_action: Rc<dyn Fn()> = {
         let list = filter_users_list.clone();
         let entry = filter_entry.clone();
@@ -1289,8 +1295,6 @@ pub(super) fn build_sgdb_settings_page(
         filter_add_btn.connect_clicked(move |_| add());
     }
     filter_entry.connect_activate(move |_| add_filtered_action());
-    users_group.add(&filter_users_list);
-    page.append(&users_group);
 
     (
         page,

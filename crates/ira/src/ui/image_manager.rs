@@ -284,25 +284,34 @@ fn build_steam_icon_button(
                 });
             if let Some(clienticon) = clienticon {
                 let dest_webp = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.webp");
-                if !dest_webp.is_file() {
-                    if let Some(parent) = dest_webp.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    let ico_bytes = {
-                        let ico_path = ira_platforms::steam::steam_install_dir()
-                            .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
-                        ico_path.as_ref().and_then(|p| {
-                            if p.is_file() { std::fs::read(p).ok() } else { None }
-                        })
-                    };
-                    let ico_bytes = ico_bytes.unwrap_or_else(|| {
-                        let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
-                        steam.download_bytes(&url).ok().unwrap_or_default()
-                    });
-                    if let Some(webp) = ira_parser::convert_bytes_to_lossless_webp(&ico_bytes) {
-                        let _ = std::fs::write(&dest_webp, &webp);
-                    }
+                // An explicit click is a re-download: a stale icon.webp
+                // from an earlier failed attempt must not short-circuit it.
+                let _ = std::fs::remove_file(&dest_webp);
+                if let Some(parent) = dest_webp.parent() {
+                    let _ = std::fs::create_dir_all(parent);
                 }
+                let ico_bytes = {
+                    let ico_path = ira_platforms::steam::steam_install_dir()
+                        .map(|d| d.join("steam").join("games").join(format!("{}.ico", clienticon)));
+                    ico_path.as_ref().and_then(|p| {
+                        if p.is_file() { std::fs::read(p).ok() } else { None }
+                    })
+                };
+                let ico_bytes = ico_bytes.unwrap_or_else(|| {
+                    let url = format!("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/{}/{}.ico", id_c, clienticon);
+                    steam.download_bytes(&url).ok().unwrap_or_default()
+                });
+                if ico_bytes.is_empty() {
+                    eprintln!("steam icon download failed for {id_c}: no bytes from any source");
+                } else if let Some(webp) = ira_parser::convert_bytes_to_lossless_webp(&ico_bytes) {
+                    let _ = std::fs::write(&dest_webp, &webp);
+                } else {
+                    eprintln!("steam icon download failed for {id_c}: undecodable icon bytes");
+                }
+            } else {
+                eprintln!(
+                    "steam icon download failed for {id_c}: no clienticon hash in the steamcmd appinfo or the local appinfo.vdf"
+                );
             }
             let _ = tx.send(());
         });

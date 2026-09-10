@@ -14,14 +14,21 @@ use std::cell::{Cell, RefCell};
 /// How many tiles sit in one row, fixed like the game grid's columns.
 pub(super) const COLS: usize = 5;
 
-/// The flow's own edge margins and child spacing; the tile sizing keeps
-/// in step with them.
+/// The flow's own edge margins and child spacing at the 1080p reference;
+/// the tile sizing keeps in step with them. Scaled with the viewport and
+/// re-applied in [`Self::ensure_sized`].
 const FLOW_MARGIN: i32 = 28;
 const FLOW_SPACING: i32 = 18;
 
 /// The smallest slot allocation the ring will draw from; anything smaller
 /// is a pre-layout placeholder, never a tile (tiles are 160px at least).
 const MIN_RING_TILE: i32 = 8;
+
+/// Slot-size clamps at the 1080p reference, scaled with the viewport so
+/// tiles keep their proportion on every screen instead of pinning at
+/// 520px on a 4K television or at 200px in a small window.
+const MIN_TILE: f64 = 160.0;
+const MAX_TILE: f64 = 520.0;
 
 pub(super) struct GroupsGrid {
     /// The scrolled tiles with the selection ring floating over them; the
@@ -109,16 +116,30 @@ impl GroupsGrid {
     /// Track the viewport: slots are square and sized like the game
     /// grid's tiles (the flow's real allocation split over the columns —
     /// a window-width read can disagree with the allocation and overflow).
-    /// Returns true when the size moved and the tiles need a reload.
+    /// The flow's margins and spacings ride along so a resize keeps every
+    /// metric proportional. Returns true when the size moved and the
+    /// tiles need a reload.
     pub(super) fn ensure_sized(&self) -> bool {
+        let s = crate::ui::css::bp_scale();
+        let margin = (FLOW_MARGIN as f64 * s).round() as i32;
+        let spacing = (FLOW_SPACING as f64 * s).round() as i32;
+        self.flow.set_margin_top((12.0 * s).round() as i32);
+        self.flow.set_margin_bottom((20.0 * s).round() as i32);
+        self.flow.set_margin_start(margin);
+        self.flow.set_margin_end(margin);
+        self.flow.set_row_spacing(spacing as u32);
+        self.flow.set_column_spacing(spacing as u32);
+
         let width = self.flow.width();
         if width < 600 {
             return false;
         }
-        let desired = ((width - 2 * FLOW_MARGIN - (COLS as i32 - 1) * FLOW_SPACING) as f64
-            / COLS as f64)
+        let desired = ((width - 2 * margin - (COLS as i32 - 1) * spacing) as f64 / COLS as f64)
             .round() as i32;
-        let desired = desired.clamp(160, 520);
+        let desired = desired.clamp(
+            (MIN_TILE * s).round() as i32,
+            (MAX_TILE * s).round() as i32,
+        );
         if self.tile.get() == desired {
             return false;
         }
@@ -150,7 +171,17 @@ impl GroupsGrid {
             .collect();
         crate::ui::helpers::clear_children(&self.flow);
         self.slots.borrow_mut().clear();
-        let tile = self.tile.get().max(200);
+        // 0 means the flow has no real allocation yet; building at the
+        // reference size keeps the first layout sane. Once a real tile
+        // size exists it is used as-is — flooring small viewports at a
+        // 200px minimum made slots overflow their FlowBox cells, which
+        // left the selection ring anchored to a tile bigger than the one
+        // on screen.
+        let tile = if self.tile.get() > 0 {
+            self.tile.get()
+        } else {
+            200
+        };
         self.append_new_group_tile(state, tile);
         // (member count, group, cover games) — the count feeds the size
         // ordering, the covers feed the collage.
@@ -181,7 +212,10 @@ impl GroupsGrid {
     /// opens) and registered for selection painting. Returns the slot for
     /// the caller to fill.
     fn append_tile_shell(&self, state: &SharedState, label: &str, tile: i32) -> gtk4::Box {
-        let tile_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+        let tile_box = gtk4::Box::new(
+            gtk4::Orientation::Vertical,
+            (8.0 * crate::ui::css::bp_scale()).round() as i32,
+        );
         let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         slot.add_css_class(CSS_BP_GROUP_SLOT);
         slot.set_size_request(tile, tile);

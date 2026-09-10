@@ -410,12 +410,10 @@ fn big_picture_css(s: f64) -> String {
         width = pxs(2),
         offset = pxs(-2),
     );
-    let status_pad_x = px(24);
     format!(
         r#".bp-status {{
     background-color: @window_bg_color;
-    padding: {status_pad_top} {status_pad_x} {status_pad_bottom} {status_pad_x};
-    min-height: {status_min_h};
+    padding: {status_pad_v} {status_pad_x};
 }}
 .bp-clock {{ font-size: {small}; padding: {clock_pad} 0; }}
 .bp-date, .bp-batt, .bp-clock, .bp-prompt {{ font-size: {small}; padding: {clock_pad} 0; }}
@@ -589,12 +587,8 @@ fn big_picture_css(s: f64) -> String {
     font-size: {page_title};
 }}
 "#,
-        status_pad_top = px(16),
-        status_pad_bottom = px(4),
-        // The clock line plus both paddings: without a floor of its own,
-        // the window's first transitional allocation starves the rail
-        // below its content and GTK warns about measuring it for ~13px.
-        status_min_h = px(56),
+        status_pad_v = px(12),
+        status_pad_x = px(24),
         clock_pad = pxs(2),
         prompt_ring = pxs(2),
         menu_radius = px(16),

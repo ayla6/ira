@@ -32,7 +32,7 @@ pub(super) struct SettingsPageWidgets {
     pub(super) notif_row: adw::SwitchRow,
     pub(super) bg_row: adw::SwitchRow,
     pub(super) square_row: adw::SwitchRow,
-    pub(super) sgdb_page: adw::ToastOverlay,
+    pub(super) sgdb_page: gtk4::Box,
     pub(super) sgdb_widgets: super::settings_pages::SgdbSettingsWidgets,
     pub(super) hidden_row: adw::SwitchRow,
     pub(super) steam_entry: adw::PasswordEntryRow,
@@ -62,6 +62,7 @@ pub(super) fn build_settings_pages(
     cfg: &Config,
     win: &impl IsA<gtk4::Widget>,
     state: &SharedState,
+    toasts: &adw::ToastOverlay,
 ) -> SettingsPageWidgets {
     let (
         general_page,
@@ -74,7 +75,8 @@ pub(super) fn build_settings_pages(
         square_row,
         auto_reload_widgets,
     ) = build_general_settings_page(cfg);
-    let (sgdb_page, sgdb_widgets) = super::settings_pages::build_sgdb_settings_page(cfg);
+    let (sgdb_page, sgdb_widgets) =
+        super::settings_pages::build_sgdb_settings_page(cfg, toasts);
 
     // One-click maintenance: re-run the SGDB asset ensure for every matched
     // game so missing art (squares included) is fetched again, even for

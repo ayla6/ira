@@ -1149,7 +1149,8 @@ pub(super) struct SgdbSettingsWidgets {
 /// switches, filtered image styles, and the filtered-users editor.
 pub(super) fn build_sgdb_settings_page(
     cfg: &Config,
-) -> (adw::ToastOverlay, SgdbSettingsWidgets) {
+    toasts: &adw::ToastOverlay,
+) -> (gtk4::Box, SgdbSettingsWidgets) {
     let page = settings_page_container();
 
     let key_group = adw::PreferencesGroup::new();
@@ -1211,7 +1212,6 @@ pub(super) fn build_sgdb_settings_page(
     // One boxed list with the search and entry as its first rows: entry and
     // users render as a single card, the way libadwaita settings lists do
     // it. The overlay floats "user was unfiltered (Undo)" toasts.
-    let toast_overlay = adw::ToastOverlay::new();
     let filter_users_list = gtk4::ListBox::new();
     filter_users_list.set_selection_mode(gtk4::SelectionMode::None);
     filter_users_list.add_css_class("boxed-list");
@@ -1231,17 +1231,12 @@ pub(super) fn build_sgdb_settings_page(
     let mut seeded: Vec<&ira_config::SgdbFilteredUser> = cfg.sgdb_filtered_users.iter().collect();
     seeded.sort_by_key(|user| user.name.to_lowercase());
     for user in &seeded {
-        // The old save path mistook the add-entry row for a user and
-        // persisted its widget type name; drop the accumulated junk.
-        if user.name == "AdwEntryRow" || user.name == "GtkSearchEntry" {
-            continue;
-        }
         add_filtered_user_row(
             &filter_users_list,
             &user.name,
             &user.steam64,
             &filter_user_ids,
-            &toast_overlay,
+            toasts,
         );
     }
     {
@@ -1272,7 +1267,7 @@ pub(super) fn build_sgdb_settings_page(
         let list = filter_users_list.clone();
         let entry = filter_entry.clone();
         let ids = filter_user_ids.clone();
-        let toast_overlay = toast_overlay.clone();
+        let toasts = toasts.clone();
         Rc::new(move || {
             let name = entry.text().trim().to_string();
             if name.is_empty() {
@@ -1285,7 +1280,7 @@ pub(super) fn build_sgdb_settings_page(
                 entry.set_text("");
                 return;
             }
-            add_filtered_user_row(&list, &name, "", &ids, &toast_overlay);
+            add_filtered_user_row(&list, &name, "", &ids, &toasts);
             entry.set_text("");
         })
     };
@@ -1297,9 +1292,8 @@ pub(super) fn build_sgdb_settings_page(
     users_group.add(&filter_users_list);
     page.append(&users_group);
 
-    toast_overlay.set_child(Some(&page));
     (
-        toast_overlay,
+        page,
         SgdbSettingsWidgets {
             sgdb_entry,
             auto_asset_rows,
@@ -1369,6 +1363,13 @@ fn make_filtered_user_row(
             // the page and the view jumps with it.
             // Keyboard navigation focuses the row itself; the trash button
             // no longer takes focus on click.
+            let (Some(list), Some(overlay)) = (list_w.upgrade(), overlay_w.upgrade()) else {
+                return;
+            };
+            // Keyboard navigation focuses the row itself; the trash button
+            // no longer takes focus on click. Either way, anchor focus on
+            // a neighbour before the row goes, or the page jumps to the
+            // top when focus falls back to the window's first widget.
             if row_c.has_focus() {
                 let neighbours = [row_c.next_sibling(), row_c.prev_sibling()];
                 if let Some(neighbour) = neighbours
@@ -1379,11 +1380,8 @@ fn make_filtered_user_row(
                     neighbour.grab_focus();
                 }
             }
-            row_c.unparent();
+            list.remove(&row_c);
             ids.borrow_mut().remove(&name);
-            let (Some(list), Some(overlay)) = (list_w.upgrade(), overlay_w.upgrade()) else {
-                return;
-            };
             // HIG pattern for destructive list actions: announce the change
             // and offer Undo before the removal is final.
             let toast = adw::Toast::new(

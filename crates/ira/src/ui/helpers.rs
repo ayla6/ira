@@ -84,6 +84,9 @@ pub struct SettingsWindowLayout {
     pub stack: gtk4::Stack,
     pub content_area: gtk4::Box,
     pub sidebar_area: gtk4::Box,
+    /// Window-level toast host: pages add their toasts here so they float
+    /// over the viewport instead of over a scrolled page's content.
+    pub toast_overlay: adw::ToastOverlay,
 }
 
 pub fn settings_window_layout(parent: &adw::ApplicationWindow) -> SettingsWindowLayout {
@@ -112,6 +115,8 @@ pub fn settings_window_layout_sized(
     let (width, height) = fitted_window_size(preferred, (parent.width(), parent.height()));
     win.set_default_size(width, height);
 
+    let toast_overlay = adw::ToastOverlay::new();
+
     let DialogWidgets {
         outer,
         sidebar_area,
@@ -122,13 +127,17 @@ pub fn settings_window_layout_sized(
     } = dialog_widgets();
     header.set_title_widget(Some(&gtk4::Label::new(Some(title))));
     // AdwWindow only accepts set_content; gtk_window_set_child aborts.
-    win.set_content(Some(&outer));
+    // Toasts belong on a window-level overlay so they stay in view no
+    // matter where a page's scrolled content is.
+    toast_overlay.set_child(Some(&outer));
+    win.set_content(Some(&toast_overlay));
 
     SettingsWindowLayout {
         window: win,
         sidebar,
         stack,
         content_area,
+        toast_overlay,
         sidebar_area,
     }
 }

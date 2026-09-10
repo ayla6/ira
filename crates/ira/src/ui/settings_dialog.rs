@@ -68,6 +68,7 @@ struct SettingsDialogParams {
     sidebar: gtk4::ListBox,
     stack: gtk4::Stack,
     content_area: gtk4::Box,
+    toasts: adw::ToastOverlay,
     cfg: Config,
     steam: Arc<SteamDataClient>,
     state: SharedState,
@@ -108,6 +109,7 @@ pub fn show_settings_dialog(
         sidebar: layout.sidebar,
         stack: layout.stack,
         content_area: layout.content_area,
+        toasts: layout.toast_overlay,
         cfg,
         steam,
         state: state.clone(),
@@ -124,12 +126,13 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         sidebar,
         stack,
         content_area,
+        toasts,
         cfg,
         steam,
         state,
         rom_platforms_with_games,
     } = params;
-    let pages = build_settings_pages(&cfg, &win, &state);
+    let pages = build_settings_pages(&cfg, &win, &state, &toasts);
     register_settings_pages(&pages, &sidebar, &stack);
     let steam_page = pages.steam_page.clone();
     let ra_page = pages.ra_page.clone();

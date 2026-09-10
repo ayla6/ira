@@ -303,10 +303,10 @@ impl SteamDataClient {
         self.fetch_steam_cdn_asset(app_id, dir, asset, dest_ext, cdn_suffixes)
     }
 
-    /// Download from the Steam CDN onto `{file_base}.{dest_ext}`, trying each
-    /// CDN suffix in order; convert to lossless WebP when possible, prefer the
-    /// WebP result, and generate the thumbnail variant. Returns "" on total
-    /// failure.
+    /// Download from the Steam CDN onto `{file_base}.{dest_ext}`, trying
+    /// each URL in order; convert to lossless WebP when possible, prefer
+    /// the WebP result, and generate the thumbnail variant. Returns "" on
+    /// total failure.
     fn fetch_steam_cdn_asset(
         &self,
         app_id: &str,
@@ -318,12 +318,29 @@ impl SteamDataClient {
         let base = asset.file_base();
         let dest = dir.join(format!("{}.{}", base, dest_ext));
 
+        // The store's own appdetails answer comes first: new releases
+        // publish their assets under hashed directories the fixed legacy
+        // paths below never cover.
+        let mut urls: Vec<String> = Vec::new();
+        if let Some(store_base) = self.store_image_base(app_id) {
+            urls.extend(
+                cdn_suffixes
+                    .iter()
+                    .map(|suffix| format!("{store_base}/{suffix}")),
+            );
+        }
+        urls.extend(
+            cdn_suffixes
+                .iter()
+                .map(|suffix| steam_cdn_url(app_id, suffix)),
+        );
+
         let mut found = String::new();
         if dest.is_file() {
             found = dest.to_string_lossy().into_owned();
         } else {
-            for suffix in cdn_suffixes {
-                found = self.fetch_image(&steam_cdn_url(app_id, suffix), &dest);
+            for url in urls {
+                found = self.fetch_image(&url, &dest);
                 if !found.is_empty() {
                     break;
                 }

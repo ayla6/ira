@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use crate::types::{
-    AppDetails, DlcInfo, GlobalAchievementsResponse, SteamCmdInfo, SteamCmdLaunch,
-    SteamCmdLaunchInfo, SteamCmdResponse, SteamReviewSummary, SteamReviewsResponse,
+    AppDetails, DlcInfo, GlobalAchievementsResponse, SteamAppDetailsEntry, SteamCmdInfo,
+    SteamCmdLaunch, SteamCmdLaunchInfo, SteamCmdResponse, SteamReviewSummary, SteamReviewsResponse,
 };
 use crate::util::{pick_lang, urlencode};
 use crate::SteamDataClient;
@@ -108,6 +108,33 @@ impl SteamDataClient {
                 }
             }
         }
+    }
+
+    /// The directory holding this app's store images, taken from the
+    /// store's own `appdetails` answer: new releases publish assets under
+    /// hashed directories the fixed legacy paths never cover. Cached per
+    /// app (misses too) because every asset fetch consults it.
+    pub(crate) fn store_image_base(&self, app_id: &str) -> Option<String> {
+        if let Some(base) = self.store_image_cache.lock().unwrap().get(app_id) {
+            return base.clone();
+        }
+        let base = self.fetch_store_image_base(app_id);
+        self.store_image_cache
+            .lock()
+            .unwrap()
+            .insert(app_id.to_string(), base.clone());
+        base
+    }
+
+    fn fetch_store_image_base(&self, app_id: &str) -> Option<String> {
+        let url = format!("https://store.steampowered.com/api/appdetails?appids={app_id}");
+        let raw: std::collections::HashMap<String, SteamAppDetailsEntry> =
+            self.http_get_json(&url)?;
+        let entry = raw.get(app_id)?;
+        if !entry.success {
+            return None;
+        }
+        header_image_base(&entry.data.as_ref()?.header_image)
     }
 
     pub fn search_steam_store(&self, term: &str) -> Vec<(String, String)> {
@@ -492,6 +519,15 @@ pub fn read_app_details_from_cache(path: &Path) -> Option<AppDetails> {
     extract_app_details(&raw, &app_id)
 }
 
+/// `…/apps/<id>[/<hash>]/header.jpg?t=…` → `…/apps/<id>[/<hash>]`, so the
+/// other store assets can be requested next to the header. `None` when the
+/// URL does not name a header.jpg (then only the legacy paths remain).
+fn header_image_base(header_image: &str) -> Option<String> {
+    let without_query = header_image.split('?').next()?;
+    let stripped = without_query.strip_suffix("/header.jpg")?;
+    (!stripped.is_empty()).then(|| stripped.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,6 +553,24 @@ mod tests {
         assert_eq!(launches[1].description, "Start Launcher");
         assert_eq!(launches[2].executable, "linux_run");
         assert_eq!(launches[2].oslist, "linux");
+    }
+
+    #[test]
+    fn test_header_image_base_strips_hash_and_query() {
+        assert_eq!(
+            header_image_base(
+                "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/4659620/                 e1fc78d7ff003b772b8637de6440c541c25fa0b9/header.jpg?t=1788964897"
+            ),
+            Some(
+                "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/4659620/                 e1fc78d7ff003b772b8637de6440c541c25fa0b9"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            header_image_base("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/413410/header.jpg"),
+            Some("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/413410".to_string())
+        );
+        assert_eq!(header_image_base("https://example.com/some/other.png"), None);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -11,6 +12,10 @@ pub struct SteamDataClient {
     pub(crate) sgdb_api_key: Mutex<String>,
     pub(crate) cache_dir: PathBuf,
     pub(crate) http: reqwest::blocking::Client,
+    /// Per-app directory of the store's own image URLs (appdetails
+    /// `header_image`, minus the filename), cached across asset fetches;
+    /// `None` entries are misses, also cached.
+    pub(crate) store_image_cache: Mutex<HashMap<String, Option<String>>>,
     /// Bit per [`AssetType`]: set = auto-download allowed. Defaults to all
     /// enabled; the settings page rebuilds it from the disabled list.
     pub(crate) sgdb_auto_mask: AtomicU64,
@@ -32,6 +37,7 @@ impl SteamDataClient {
                 .user_agent("Ira/0.1 (https://github.com/ayla6/ira)")
                 .build()
                 .expect("failed to build HTTP client"),
+            store_image_cache: Mutex::new(HashMap::new()),
             sgdb_auto_mask: AtomicU64::new(u64::MAX),
             sgdb_filtered_users: Mutex::new(Vec::new()),
             sgdb_filtered_styles: Mutex::new(Vec::new()),

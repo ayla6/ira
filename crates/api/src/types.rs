@@ -101,14 +101,32 @@ pub(crate) struct SteamSchemaStats {
 #[derive(Debug, Deserialize)]
 pub(crate) struct SteamSchemaAchievement {
     pub name: String,
-    pub _defaultvalue: i64,
     #[serde(rename = "displayName")]
     pub display_name: String,
+    #[serde(default)]
     pub hidden: i64,
+    /// Hidden achievements routinely omit the description in Valve's schema.
+    #[serde(default)]
     pub description: String,
     pub icon: String,
-    #[serde(rename = "icongray")]
+    #[serde(rename = "icongray", default)]
     pub icon_gray: String,
+}
+
+/// The slice of the store `appdetails` answer Ira needs: the store's own
+/// image URLs. New releases publish them under hashed directories the
+/// legacy fixed paths never cover.
+#[derive(Debug, Deserialize)]
+pub(crate) struct SteamAppDetailsImages {
+    #[serde(rename = "header_image")]
+    pub header_image: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct SteamAppDetailsEntry {
+    pub success: bool,
+    #[serde(default)]
+    pub data: Option<SteamAppDetailsImages>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -427,4 +445,63 @@ pub struct SteamCmdLaunchInfo {
     pub oslist: String,
     /// Optional human-readable description (e.g. "Start Launcher").
     pub description: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Steam schema omits `description` on hidden achievements and the
+    /// whole stats block on games without any — both used to fail the decode
+    /// and abort achievement generation for those games.
+    #[test]
+    fn test_steam_schema_decodes_achievements_without_description() {
+        let fixture = r#"{
+            "game": {
+                "gameName": "Touhou Koumakyou: New Classic",
+                "gameVersion": "7",
+                "availableGameStats": {
+                    "achievements": [
+                        {
+                            "name": "Achievement01",
+                            "defaultvalue": 0,
+                            "displayName": "Welcome to Gensoukyou",
+                            "hidden": 0,
+                            "description": "Set out to resolve the incident for the first time.",
+                            "icon": "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/4659620/f2ea0a53ef2a93a8377fb3578f0c61e78aa9727b.jpg",
+                            "icongray": "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/4659620/368e6b495be9ddc48995a23d092201a638b739e6.jpg"
+                        },
+                        {
+                            "name": "Achievement05",
+                            "defaultvalue": 0,
+                            "displayName": "The Very Angry Bookworm",
+                            "hidden": 1,
+                            "icon": "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/4659620/195896951f39b2f3697cf84e3c646ed406b927cd.jpg",
+                            "icongray": "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/4659620/8ec0dea112e4f5fae28a07d717027007153f83bb.jpg"
+                        }
+                    ]
+                }
+            }
+        }"#;
+
+        let schema: SteamSchemaResponse = serde_json::from_str(fixture).unwrap();
+        let achs = schema.game.available_game_stats.unwrap().achievements;
+        assert_eq!(achs.len(), 2);
+        assert_eq!(achs[0].description, "Set out to resolve the incident for the first time.");
+        assert_eq!(achs[1].description, "");
+        assert_eq!(achs[1].display_name, "The Very Angry Bookworm");
+    }
+
+    #[test]
+    fn test_steam_schema_decodes_games_without_any_achievements() {
+        let fixture = r#"{
+            "game": {
+                "gameName": "Some Game",
+                "gameVersion": "2"
+            }
+        }"#;
+
+        let schema: SteamSchemaResponse = serde_json::from_str(fixture).unwrap();
+        assert!(schema.game.available_game_stats.is_none());
+    }
 }

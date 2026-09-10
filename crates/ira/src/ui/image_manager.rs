@@ -277,7 +277,7 @@ fn build_steam_icon_button(
         let rx = std::cell::RefCell::new(rx);
         std::thread::spawn(move || {
             let _s = tracing::info_span!("steam_icon_download", app_id = %id_c).entered();
-            let clienticon = steam.cached_clienticon(&id_c)
+            let clienticon = steam.clienticon_hash(&id_c)
                 .or_else(|| {
                     let app_id_num: u32 = id_c.parse().ok()?;
                     ira_platforms::steam::get_clienticon(app_id_num)

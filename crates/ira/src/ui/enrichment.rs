@@ -300,10 +300,12 @@ fn fetch_steam_game_icon(
     steam: &std::sync::Arc<ira_api::SteamDataClient>,
 ) -> Option<String> {
     let _s = tracing::info_span!("fetch_steam_game_icon", app_id = %app_id).entered();
-    let clienticon = steam.cached_clienticon(app_id).or_else(|| {
-        let app_id_num: u32 = app_id.parse().ok()?;
-        ira_platforms::steam::get_clienticon(app_id_num)
-    })?;
+    let clienticon = steam
+        .clienticon_hash(app_id)
+        .or_else(|| {
+            let app_id_num: u32 = app_id.parse().ok()?;
+            ira_platforms::steam::get_clienticon(app_id_num)
+        })?;
     if clienticon.is_empty() {
         return None;
     }

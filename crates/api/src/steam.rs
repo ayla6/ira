@@ -294,12 +294,14 @@ impl SteamDataClient {
             if j.dest.exists() {
                 continue;
             }
-            let mut urls = vec![j.url.clone()];
+            // The retired host 404s every community image now, so the
+            // rewritten mirrors go first and the schema URL is the
+            // fallback — half the requests, no dead-host round trips.
+            let mut urls = Vec::new();
             if let Some(modern) = modernize_community_image_url(&j.url) {
-                // The community_assets mirrors serve the same tree; a file
-                // missing from one is usually on the others.
                 urls.extend(mirror_variants(&modern));
             }
+            urls.push(j.url.clone());
             for (index, url) in urls.iter().enumerate() {
                 let last = index + 1 == urls.len();
                 match self.http.get(url).send() {
@@ -333,6 +335,17 @@ impl SteamDataClient {
     fn load_appdetails_cache(&self, app_id: &str) -> Option<SteamCmdResponse> {
         let data = std::fs::read(self.game_dir(app_id).join("appdetails.json")).ok()?;
         parse_appdetails_response(&data)
+    }
+
+    /// The app's clienticon hash, fetching the steamcmd appinfo on first
+    /// use: callers reach this before anything else populated the cache,
+    /// and the hash only exists there.
+    pub fn clienticon_hash(&self, app_id: &str) -> Option<String> {
+        self.cached_clienticon(app_id)
+            .or_else(|| {
+                self.ensure_steamcmd_raw(app_id)?;
+                self.cached_clienticon(app_id)
+            })
     }
 
     /// Resolve the clienticon hash for a Steam app from cached steamcmd.net data.

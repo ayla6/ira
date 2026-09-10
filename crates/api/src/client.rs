@@ -33,6 +33,7 @@ impl SteamDataClient {
             sgdb_api_key: Mutex::new(sgdb_key),
             cache_dir: PathBuf::from(data_dir),
             http: reqwest::blocking::Client::builder()
+                .connect_timeout(Duration::from_secs(5))
                 .timeout(Duration::from_secs(20))
                 .user_agent("Ira/0.1 (https://github.com/ayla6/ira)")
                 .build()

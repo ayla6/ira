@@ -259,23 +259,42 @@ impl SteamDataClient {
         Ok(())
     }
 
-    /// Download missing achievement icons, logging per-file failures.
+    /// Download missing achievement icons, logging per-file failures. The
+    /// schema still hands community images out on the retired akamai host;
+    /// when that 404s, the same file is retried on the shared mirrors under
+    /// the current community_assets path.
     fn download_icon_files(&self, jobs: &[IconJob]) {
         for j in jobs {
             if j.dest.exists() {
                 continue;
             }
-            match self.http.get(&j.url).send() {
-                Ok(r) if r.status().is_success() => match r.bytes() {
-                    Ok(bytes) => {
-                        if let Err(e) = std::fs::write(&j.dest, &bytes) {
-                            eprintln!("  icon write failed {}: {}", j.url, e);
+            let mut urls = vec![j.url.clone()];
+            if let Some(modern) = modernize_community_image_url(&j.url) {
+                urls.push(modern);
+            }
+            for (index, url) in urls.iter().enumerate() {
+                let last = index + 1 == urls.len();
+                match self.http.get(url).send() {
+                    Ok(r) if r.status().is_success() => match r.bytes() {
+                        Ok(bytes) => {
+                            if let Err(e) = std::fs::write(&j.dest, &bytes) {
+                                eprintln!("  icon write failed {url}: {e}");
+                            }
+                            break;
                         }
+                        Err(e) => eprintln!("  icon read failed {url}: {e}"),
+                    },
+                    // A non-final candidate that comes up empty stays
+                    // quiet: the current-host retry is expected to succeed.
+                    Ok(r) if !last => {
+                        let _ = r.status();
                     }
-                    Err(e) => eprintln!("  icon read failed {}: {}", j.url, e),
-                },
-                Ok(r) => eprintln!("  icon download failed {}: HTTP {}", j.url, r.status()),
-                Err(e) => eprintln!("  icon download failed {}: {}", j.url, e),
+                    Ok(r) => eprintln!("  icon download failed {url}: HTTP {}", r.status()),
+                    Err(e) if !last => {
+                        let _ = e;
+                    }
+                    Err(e) => eprintln!("  icon download failed {url}: {e}"),
+                }
             }
         }
     }
@@ -519,6 +538,18 @@ pub fn read_app_details_from_cache(path: &Path) -> Option<AppDetails> {
     extract_app_details(&raw, &app_id)
 }
 
+/// The steam schema still names community images on the retired
+/// `steamcdn-a.akamaihd.net/steamcommunity/public` host, where they now
+/// 404; the same files live on the shared mirrors under
+/// `community_assets`. Returns the modern URL, or `None` for anything
+/// else (those URLs are served where they point).
+fn modernize_community_image_url(url: &str) -> Option<String> {
+    let rest = url
+        .strip_prefix("https://steamcdn-a.akamaihd.net/steamcommunity/public/")
+        .or_else(|| url.strip_prefix("https://cdn.akamai.steamstatic.com/steamcommunity/public/"))?;
+    Some(format!("https://shared.akamai.steamstatic.com/community_assets/{rest}"))
+}
+
 /// `…/apps/<id>[/<hash>]/header.jpg?t=…` → `…/apps/<id>[/<hash>]`, so the
 /// other store assets can be requested next to the header. `None` when the
 /// URL does not name a header.jpg (then only the legacy paths remain).
@@ -553,6 +584,30 @@ mod tests {
         assert_eq!(launches[1].description, "Start Launcher");
         assert_eq!(launches[2].executable, "linux_run");
         assert_eq!(launches[2].oslist, "linux");
+    }
+
+    #[test]
+    fn test_modernize_community_image_url_rewrites_retired_hosts() {
+        assert_eq!(
+            modernize_community_image_url(
+                "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/4659620/                 f2ea0a53ef2a93a8377fb3578f0c61e78aa9727b.jpg"
+            ),
+            Some(
+                "https://shared.akamai.steamstatic.com/community_assets/images/apps/4659620/                 f2ea0a53ef2a93a8377fb3578f0c61e78aa9727b.jpg"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            modernize_community_image_url(
+                "https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/413410/abc.jpg"
+            ),
+            Some("https://shared.akamai.steamstatic.com/community_assets/images/apps/413410/abc.jpg".to_string())
+        );
+        assert_eq!(
+            modernize_community_image_url("https://shared.akamai.steamstatic.com/community_assets/images/apps/413410/abc.jpg"),
+            None
+        );
+        assert_eq!(modernize_community_image_url("https://example.com/image.jpg"), None);
     }
 
     #[test]

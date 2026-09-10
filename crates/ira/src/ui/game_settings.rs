@@ -456,7 +456,6 @@ fn build_service_ids_section(
     state: &SharedState,
     win: &adw::Window,
 ) -> (bool, Option<adw::EntryRow>) {
-    let mut app_id_entry: Option<adw::EntryRow> = None;
     let add_id_row = |title: &str, value: &str| {
         let row = adw::ActionRow::new();
         row.set_title(title);
@@ -489,59 +488,99 @@ fn build_service_ids_section(
         return (true, None);
     }
 
-    if game.trophy_source != ira_models::TrophySource::Gse
-        && game.trophy_source != ira_models::TrophySource::Nge
-        && !game.kind.is_trophy_console()
-    {
-        return (false, None);
-    }
-
+    // PS4/PS3 keep their shipped identifiers read-only too.
     if game.kind.is_trophy_console() {
         add_id_row(&crate::tr!("NPWR code"), &game.app_id);
         add_id_row(&crate::tr!("Game serial"), &game.platform_id);
         return (true, None);
-    } else if game.trophy_source == ira_models::TrophySource::Gse {
-        let row = adw::EntryRow::new();
-        row.set_title(&crate::tr!("Steam app ID"));
-        row.set_text(&game.app_id);
-        let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
-        search_btn.set_valign(gtk4::Align::Center);
-        search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
-        search_btn.add_css_class(CSS_FLAT);
-        let sc = state.clone();
-        let game_name = game.name.clone();
-        let db_id = game.db_id;
-        let win_c = Downgrade::downgrade(win);
-        let row_c = Downgrade::downgrade(&row);
-        search_btn.connect_clicked(move |_| {
-            let Some(win) = win_c.upgrade() else {
-                return;
-            };
-            let Some(row_c) = row_c.upgrade() else {
-                return;
-            };
-            let on_select = {
-                let sc = sc.clone();
-                Rc::new(move |sid: &str, matched_name: &str| {
-                    match_game_to_steam(&sc, db_id, sid.to_string(), matched_name.to_string());
-                })
-            };
-            super::steam_search::show_steam_id_search_popup(
-                &sc, &game_name, &win, &row_c, "Match", on_select,
-            );
-        });
-        row.add_suffix(&search_btn);
-        parent.add(&row);
-        app_id_entry = Some(row);
-    } else if game.trophy_source == ira_models::TrophySource::Nge {
+    }
+
+    // Every remaining kind is a PC game: its store id is always shown. It is
+    // editable so a plain PC game can be pointed at its Steam entry — that
+    // id feeds save centralization, image matching and the store search —
+    // and read-only when the Steam integration owns the value. GSE games
+    // match through the search (wiring up Goldberg); other sources only
+    // take the picked id into the entry, keeping their trophy source.
+    if game.kind == ira_models::GameKind::Steam
+        || game.trophy_source == ira_models::TrophySource::SteamNative
+    {
+        add_id_row(&crate::tr!("Steam app ID"), &game.app_id);
+        return (true, None);
+    }
+
+    if game.trophy_source == ira_models::TrophySource::Nge {
         let row = adw::EntryRow::new();
         row.set_title(&crate::tr!("GOG product ID"));
         row.set_text(&game.app_id);
         parent.add(&row);
-        app_id_entry = Some(row);
+        return (true, Some(row));
     }
 
+    let row = build_steam_app_id_row(
+        game,
+        state,
+        win,
+        game.trophy_source == ira_models::TrophySource::Gse,
+    );
+    parent.add(&row);
+    let app_id_entry = Some(row);
+
     (app_id_entry.is_some(), app_id_entry)
+}
+
+/// An editable "Steam app ID" entry with a store-search suffix. When
+/// `match_on_select` is set (Goldberg games), picking a result matches the
+/// whole game to Steam; otherwise picking only fills the entry and the
+/// normal Save applies it.
+fn build_steam_app_id_row(
+    game: &Game,
+    state: &SharedState,
+    win: &adw::Window,
+    match_on_select: bool,
+) -> adw::EntryRow {
+    let row = adw::EntryRow::new();
+    row.set_title(&crate::tr!("Steam app ID"));
+    row.set_text(&game.app_id);
+    let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
+    search_btn.set_valign(gtk4::Align::Center);
+    search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
+    search_btn.add_css_class(CSS_FLAT);
+    let sc = state.clone();
+    let game_name = game.name.clone();
+    let db_id = game.db_id;
+    let win_c = Downgrade::downgrade(win);
+    let row_c = Downgrade::downgrade(&row);
+    search_btn.connect_clicked(move |_| {
+        let Some(win) = win_c.upgrade() else {
+            return;
+        };
+        let Some(row_c) = row_c.upgrade() else {
+            return;
+        };
+        let on_select = {
+            let sc = sc.clone();
+            Rc::new(move |sid: &str, matched_name: &str| {
+                if match_on_select {
+                    match_game_to_steam(&sc, db_id, sid.to_string(), matched_name.to_string());
+                }
+            })
+        };
+        let button_label = if match_on_select {
+            crate::tr!("Match")
+        } else {
+            crate::tr!("Use")
+        };
+        super::steam_search::show_steam_id_search_popup(
+            &sc,
+            &game_name,
+            &win,
+            &row_c,
+            &button_label,
+            on_select,
+        );
+    });
+    row.add_suffix(&search_btn);
+    row
 }
 
 /// The RetroAchievements hash stored at scan time, when the ROM carries

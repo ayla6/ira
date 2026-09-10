@@ -126,6 +126,32 @@ impl SteamDataClient {
         base
     }
 
+    /// The app's own library art URLs — grid, hero and logo — from the
+    /// appinfo's library_assets_full: per-release hash directories the
+    /// fixed CDN paths never cover on newer releases. English art first,
+    /// the 2x size before the 1x; empty when the appinfo carries none.
+    pub(crate) fn store_library_urls(&self, app_id: &str, key: &str) -> Vec<String> {
+        let Some(raw) = self.ensure_steamcmd_raw(app_id) else {
+            return Vec::new();
+        };
+        let Some(relative) = raw
+            .data
+            .get(app_id)
+            .and_then(|app| app.common.library_assets_full.as_ref())
+            .and_then(|full| library_image_relative(full, key))
+        else {
+            return Vec::new();
+        };
+        let base =
+            format!("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{app_id}");
+        let mut urls = Vec::new();
+        if let Some(two_x) = two_x_variant(relative) {
+            urls.push(format!("{base}/{two_x}"));
+        }
+        urls.push(format!("{base}/{relative}"));
+        urls
+    }
+
     fn fetch_store_image_base(&self, app_id: &str) -> Option<String> {
         let url = format!("https://store.steampowered.com/api/appdetails?appids={app_id}");
         let raw: std::collections::HashMap<String, SteamAppDetailsEntry> =
@@ -270,7 +296,9 @@ impl SteamDataClient {
             }
             let mut urls = vec![j.url.clone()];
             if let Some(modern) = modernize_community_image_url(&j.url) {
-                urls.push(modern);
+                // The community_assets mirrors serve the same tree; a file
+                // missing from one is usually on the others.
+                urls.extend(mirror_variants(&modern));
             }
             for (index, url) in urls.iter().enumerate() {
                 let last = index + 1 == urls.len();
@@ -550,6 +578,57 @@ fn modernize_community_image_url(url: &str) -> Option<String> {
     Some(format!("https://shared.akamai.steamstatic.com/community_assets/{rest}"))
 }
 
+/// The shared Steam CDNs are mirrors of one path: akamai, fastly and
+/// cloudflare serve identical trees, and files do go missing from single
+/// mirrors. Every `shared.*` URL is therefore tried on each mirror in
+/// turn; URLs on other hosts are returned unchanged.
+pub(crate) fn mirror_variants(url: &str) -> Vec<String> {
+    const MIRRORS: [&str; 3] = [
+        "https://shared.akamai.steamstatic.com",
+        "https://shared.fastly.steamstatic.com",
+        "https://shared.cloudflare.steamstatic.com",
+    ];
+    let Some(rest) = url
+        .strip_prefix("https://shared.akamai.steamstatic.com")
+        .or_else(|| url.strip_prefix("https://shared.fastly.steamstatic.com"))
+        .or_else(|| url.strip_prefix("https://shared.cloudflare.steamstatic.com"))
+        .or_else(|| url.strip_prefix("https://shared.steamstatic.com"))
+    else {
+        return vec![url.to_string()];
+    };
+    MIRRORS.iter().map(|mirror| format!("{mirror}{rest}")).collect()
+}
+
+/// Picks the library art relative path for `key` out of the appinfo's
+/// library_assets_full: English first, then any language. Values without a
+/// `<hash>/` component (empty strings, bare file names) are unusable.
+fn library_image_relative<'a>(
+    full: &'a crate::types::SteamCmdLibraryAssetsFull,
+    key: &str,
+) -> Option<&'a str> {
+    let entry = match key {
+        "library_capsule" => full.library_capsule.as_ref(),
+        "library_hero" => full.library_hero.as_ref(),
+        "library_logo" => full.library_logo.as_ref(),
+        _ => None,
+    }?;
+    let image = &entry.image;
+    let usable = |relative: &String| relative.contains('/');
+    image
+        .get("english")
+        .filter(|relative| usable(relative))
+        .map(String::as_str)
+        .or_else(|| image.values().find(|relative| usable(relative)).map(String::as_str))
+}
+
+/// `library_capsule.jpg` → `library_capsule_2x.jpg` — Steam serves the
+/// higher-resolution variant under the derived name. `None` when the name
+/// already is one or has no extension.
+fn two_x_variant(file: &str) -> Option<String> {
+    let (stem, ext) = file.rsplit_once('.')?;
+    (!stem.ends_with("_2x")).then(|| format!("{stem}_2x.{ext}"))
+}
+
 /// `…/apps/<id>[/<hash>]/header.jpg?t=…` → `…/apps/<id>[/<hash>]`, so the
 /// other store assets can be requested next to the header. `None` when the
 /// URL does not name a header.jpg (then only the legacy paths remain).
@@ -608,6 +687,60 @@ mod tests {
             None
         );
         assert_eq!(modernize_community_image_url("https://example.com/image.jpg"), None);
+    }
+
+    #[test]
+    fn test_mirror_variants_covers_all_shared_mirrors() {
+        let url = "https://shared.akamai.steamstatic.com/community_assets/images/apps/4659620/a.jpg";
+        let variants = mirror_variants(url);
+        assert_eq!(variants.len(), 3);
+        assert!(variants[0].starts_with("https://shared.akamai.steamstatic.com/"));
+        assert!(variants[1].starts_with("https://shared.fastly.steamstatic.com/"));
+        assert!(variants[2].starts_with("https://shared.cloudflare.steamstatic.com/"));
+        // The mirror-less shared host expands to the same three.
+        assert_eq!(
+            mirror_variants("https://shared.steamstatic.com/x/y.png"),
+            mirror_variants("https://shared.akamai.steamstatic.com/x/y.png")
+        );
+        // Other hosts pass through untouched.
+        assert_eq!(
+            mirror_variants("https://steamcdn-a.akamaihd.net/x.jpg"),
+            vec!["https://steamcdn-a.akamaihd.net/x.jpg".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_two_x_variant_inserts_before_extension() {
+        assert_eq!(
+            two_x_variant("library_capsule.jpg"),
+            Some("library_capsule_2x.jpg".to_string())
+        );
+        assert_eq!(two_x_variant("logo.png"), Some("logo_2x.png".to_string()));
+        assert_eq!(two_x_variant("library_hero_2x.jpg"), None);
+        assert_eq!(two_x_variant("noextension"), None);
+    }
+
+    #[test]
+    fn test_library_image_relative_prefers_english_usable_paths() {
+        let full: crate::types::SteamCmdLibraryAssetsFull = serde_json::from_value(serde_json::json!({
+            "library_capsule": {"image": {"english": "571b9e19/library_capsule.jpg"}},
+            "library_hero": {"image": {"koreana": "7bf388d4/library_hero.jpg"}},
+            "library_logo": {"image": {"english": ""}},
+        }))
+        .unwrap();
+
+        assert_eq!(
+            library_image_relative(&full, "library_capsule"),
+            Some("571b9e19/library_capsule.jpg")
+        );
+        // No English: any usable language wins.
+        assert_eq!(
+            library_image_relative(&full, "library_hero"),
+            Some("7bf388d4/library_hero.jpg")
+        );
+        // Empty and bare-name values are unusable; nothing picks them.
+        assert_eq!(library_image_relative(&full, "library_logo"), None);
+        assert_eq!(library_image_relative(&full, "unknown"), None);
     }
 
     #[test]

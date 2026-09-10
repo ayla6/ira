@@ -298,12 +298,35 @@ pub(crate) struct SteamCmdCommon {
     pub supported_languages: HashMap<String, SteamCmdLanguage>,
     #[serde(default)]
     pub library_assets: SteamCmdLibraryAssets,
+    /// Steam's own library art pointers: per-language `<hash>/<file>`
+    /// paths relative to the app's store_item_assets directory. Newer
+    /// releases publish grid, hero and logo only under these hash
+    /// directories — the fixed CDN paths never cover them.
+    #[serde(default)]
+    pub library_assets_full: Option<SteamCmdLibraryAssetsFull>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct SteamCmdLibraryAssets {
     #[serde(default)]
     pub logo_position: SteamCmdLogoPosition,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdLibraryAssetsFull {
+    #[serde(default)]
+    pub library_capsule: Option<SteamCmdLibraryImage>,
+    #[serde(default)]
+    pub library_hero: Option<SteamCmdLibraryImage>,
+    #[serde(rename = "library_logo", default)]
+    pub library_logo: Option<SteamCmdLibraryImage>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct SteamCmdLibraryImage {
+    /// `<hash>/<file>` per language.
+    #[serde(default)]
+    pub image: HashMap<String, String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

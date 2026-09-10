@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::steam::mirror_variants;
 use crate::SteamDataClient;
 use ira_models::{AssetType, DlcInfo};
 
@@ -318,10 +319,20 @@ impl SteamDataClient {
         let base = asset.file_base();
         let dest = dir.join(format!("{}.{}", base, dest_ext));
 
-        // The store's own appdetails answer comes first: new releases
-        // publish their assets under hashed directories the fixed legacy
-        // paths below never cover.
+        // The store's own answers come first: the appinfo's library art
+        // lives in per-release hash directories, and the appdetails header
+        // base covers the rest — the fixed legacy paths below never see
+        // newer releases.
         let mut urls: Vec<String> = Vec::new();
+        let library_key = match asset {
+            AssetType::Grid => Some("library_capsule"),
+            AssetType::Hero => Some("library_hero"),
+            AssetType::Logo => Some("library_logo"),
+            _ => None,
+        };
+        if let Some(key) = library_key {
+            urls.extend(self.store_library_urls(app_id, key));
+        }
         if let Some(store_base) = self.store_image_base(app_id) {
             urls.extend(
                 cdn_suffixes
@@ -334,6 +345,10 @@ impl SteamDataClient {
                 .iter()
                 .map(|suffix| steam_cdn_url(app_id, suffix)),
         );
+        // Every shared-CDN candidate is tried on each mirror: the three
+        // hosts serve identical trees, and files go missing from single
+        // mirrors.
+        let urls: Vec<String> = urls.iter().flat_map(|url| mirror_variants(url)).collect();
 
         let mut found = String::new();
         if dest.is_file() {

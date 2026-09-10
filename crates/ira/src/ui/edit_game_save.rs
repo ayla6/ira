@@ -33,6 +33,9 @@ pub(super) struct SaveGameSettingsParams {
     pub app_default_wine: WineConfig,
     pub game_exe: String,
     pub game_folder: String,
+    /// The game's controller layout before the dialog opened, so a changed
+    /// selection can reach a running input session.
+    pub old_input_profile: Option<String>,
     pub language_row: Option<adw::ComboRow>,
     pub languages: Vec<String>,
     pub saved_platform_id: String,
@@ -842,6 +845,15 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     let (launch, wine, new_profile_id) = build_launch_config_and_wine(&params);
     if let Err(e) = ira_db::save_game_config(&db, params.db_id, &launch, &wine, new_profile_id) {
         eprintln!("Failed to save game config: {}", e);
+    }
+    if launch.input_profile.as_deref() != params.old_input_profile.as_deref() {
+        if let Some(profile) = launch.input_profile.as_deref() {
+            super::edit_game_controller::reload_running_session_layout(
+                &params.state,
+                params.db_id,
+                Path::new(profile),
+            );
+        }
     }
     if params.launch_config_widgets.is_some() {
         apply_wine_registry(&params.old_wine, &wine);

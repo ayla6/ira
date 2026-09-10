@@ -42,6 +42,9 @@ struct Client {
 
 struct SessionHandle {
     id: u64,
+    /// The launch's client-chosen routing key (Ira's game id), so requests
+    /// like a layout switch can address the session later.
+    tag: Option<i64>,
     events: Receiver<SessionEvent>,
     done: Receiver<Result<i32, String>>,
 }
@@ -304,7 +307,29 @@ fn process_request(
                     sessions.push(handle);
                     respond(clients, index, Response::Launched { session: *next_session_id });
                 }
-                Err(error) => respond(clients, index, Response::Error(error)),
+                Err(error) => respond(clients, index, Response::Error { message: error }),
+            }
+        }
+        Request::ReloadProfile { tag, profile } => {
+            let session = sessions
+                .iter()
+                .find(|session| session.tag == Some(tag))
+                .map(|session| session.id);
+            match session {
+                Some(id) => {
+                    hub.send(HubCommand::ReloadProfile {
+                        id,
+                        path: std::path::PathBuf::from(profile),
+                    });
+                    respond(clients, index, Response::Reloaded);
+                }
+                None => respond(
+                    clients,
+                    index,
+                    Response::Error {
+                        message: format!("no running session for game {tag}"),
+                    },
+                ),
             }
         }
         Request::Shutdown { stop_running } => {
@@ -312,7 +337,9 @@ fn process_request(
                 respond(
                     clients,
                     index,
-                    Response::Error("game sessions are running".to_string()),
+                    Response::Error {
+                    message: "game sessions are running".to_string(),
+                },
                 );
                 return;
             }
@@ -368,6 +395,7 @@ fn start_session(
         .map_err(|error| format!("spawn session thread: {error}"))?;
     Ok(SessionHandle {
         id: session_id,
+        tag: launch.tag,
         events: event_rx,
         done: done_rx,
     })
@@ -464,6 +492,7 @@ mod tests {
             trace: false,
             motion_port: Some(0),
             steam_app_id: None,
+            tag: None,
         }
     }
 
@@ -570,6 +599,70 @@ mod tests {
         );
 
         shutdown_and_join(&mut client, server);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_daemon_routes_layout_switch_to_the_tagged_session() {
+        let dir = temp_test_dir("switch");
+        let path = dir.join("test.sock");
+        let first_profile = dir.join("first.json");
+        write_profile(&first_profile, crate::VirtualGamepadBackend::XInput);
+        let second_profile = dir.join("second.json");
+        write_profile(&second_profile, crate::VirtualGamepadBackend::DirectInput);
+        let server = std::thread::spawn({
+            let path = path.clone();
+            move || run_daemon_on(&path)
+        });
+        let mut client = wait_for_server(&path);
+
+        let mut request = session_request(
+            vec!["sleep".into(), "2".into()],
+            Some(first_profile.display().to_string()),
+        );
+        request.tag = Some(77);
+        let watcher = std::thread::spawn(move || {
+            let mut reloads = 0;
+            let code = client
+                .launch_and_wait(request, |event| {
+                    if matches!(event, Event::ProfileReloaded { .. }) {
+                        reloads += 1;
+                    }
+                })
+                .expect("session must end cleanly");
+            (code, reloads)
+        });
+
+        // The session needs a moment to start before the switch can land;
+        // an unknown tag must be refused either way.
+        std::thread::sleep(Duration::from_millis(300));
+        let mut switcher = wait_for_server(&path);
+        let unknown = switcher.request(Request::ReloadProfile {
+            tag: 41,
+            profile: second_profile.display().to_string(),
+        });
+        assert!(
+            matches!(unknown, Ok(Response::Error { .. })),
+            "an unknown tag must be refused"
+        );
+        match switcher
+            .request(Request::ReloadProfile {
+                tag: 77,
+                profile: second_profile.display().to_string(),
+            })
+            .unwrap()
+        {
+            Response::Reloaded => {}
+            other => panic!("expected reloaded, got {other:?}"),
+        }
+        drop(switcher);
+        let (code, reloads) = watcher.join().unwrap();
+        assert_eq!(code, 0);
+        // Exactly one switch was requested, and the session applied it.
+        assert!(reloads >= 1, "the layout switch must reach the session");
+
+        let mut final_client = wait_for_server(&path);
+        shutdown_and_join(&mut final_client, server);
         std::fs::remove_dir_all(&dir).ok();
     }
 

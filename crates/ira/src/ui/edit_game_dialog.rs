@@ -549,6 +549,7 @@ fn build_dialog_contents(
     let old_wine_s = saved_wine.clone();
     let app_default_wine_s = app_default_wine.clone();
     let game_exe_s = saved_launch.exe.clone();
+    let old_input_profile_s = saved_launch.input_profile.clone();
     let language_row_w = language_row.as_ref().map(Downgrade::downgrade);
     let languages_s = languages.clone();
     let lwa_rc = Rc::new(lwa);
@@ -614,6 +615,7 @@ fn build_dialog_contents(
             old_wine: old_wine_s.clone(),
             app_default_wine: app_default_wine_s.clone(),
             game_exe: game_exe_s.clone(),
+            old_input_profile: old_input_profile_s.clone(),
             game_folder: game_folder.clone(),
             language_row,
             languages: languages_s.clone(),

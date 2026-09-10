@@ -43,6 +43,7 @@ pub fn run_via_daemon(arguments: &Arguments) -> Result<i32, String> {
         trace: arguments.trace,
         motion_port: arguments.motion_port,
         steam_app_id: arguments.steam_app_id.clone(),
+        tag: None,
     })?;
     client.wait_session(|event| match event {
         Event::Output { line, .. } => eprintln!("{line}"),

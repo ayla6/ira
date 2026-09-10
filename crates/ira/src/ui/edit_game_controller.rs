@@ -256,6 +256,28 @@ fn show_editor(
     );
 }
 
+/// The game is running under the input daemon: ask its session to switch to
+/// the newly saved layout right away. Without this the session keeps the
+/// layout it launched with — it only watches that one file for edits, and a
+/// different layout means a different file. Best-effort: a failed switch is
+/// logged and the layout applies at the next launch.
+pub(super) fn reload_running_session_layout(state: &SharedState, db_id: i64, path: &Path) {
+    let running = state
+        .borrow()
+        .running_games
+        .lock()
+        .map(|games| games.contains_key(&db_id))
+        .unwrap_or(false);
+    if !running {
+        return;
+    }
+    if let Err(error) =
+        ira_launcher::input_daemon::reload_session_profile(db_id, &path.to_string_lossy())
+    {
+        eprintln!("Failed to switch the running game's layout: {error}");
+    }
+}
+
 /// Associate `path` with the game and switch input remapping on so the saved
 /// layout is the one the launcher starts. Which virtual controller the game
 /// sees is decided by the layout itself.
@@ -292,6 +314,7 @@ fn enable_input_for_game(state: &SharedState, game: &Game, path: &Path) {
         }
         Err(error) => eprintln!("Failed to read game config for input enable: {error}"),
     }
+    reload_running_session_layout(state, game.db_id, path);
 }
 
 #[derive(Clone)]

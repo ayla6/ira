@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking message change; the daemon answers `status` with
 /// its version so a stale client can bail out cleanly.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -16,6 +16,11 @@ pub enum Request {
     Status,
     /// `stop_running` also stops an active game session (SIGTERM semantics).
     Shutdown { stop_running: bool },
+    /// Switch a running session's controller layout: the session reloads
+    /// from `profile` as if that file had been edited in place. Addressed
+    /// by the launch `tag`, so the sender needs no connection to the
+    /// session's launch.
+    ReloadProfile { tag: i64, profile: String },
 }
 
 /// A game session handed to the daemon. `command` is the fully built game
@@ -35,6 +40,9 @@ pub struct LaunchRequest {
     pub trace: bool,
     pub motion_port: Option<u16>,
     pub steam_app_id: Option<String>,
+    /// Client-chosen routing key (Ira's game id) so later requests can
+    /// address this session without holding the launch connection open.
+    pub tag: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,8 +52,13 @@ pub enum Response {
     /// the session id that identifies them to their owner.
     Launched { session: u64 },
     Status(DaemonStatus),
+    /// A reload request reached its session.
+    Reloaded,
     Bye,
-    Error(String),
+    /// A named-field variant on purpose: serde cannot serialize an
+    /// internally tagged newtype variant that holds a bare string, so the
+    /// errors below would never reach a client and leave it waiting.
+    Error { message: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +115,7 @@ mod tests {
             trace: false,
             motion_port: Some(26760),
             steam_app_id: None,
+            tag: Some(12),
         }));
         let line = serde_json::to_string(&request).unwrap();
         let parsed: Wire = serde_json::from_str(&line).unwrap();
@@ -112,6 +126,39 @@ mod tests {
                 assert_eq!(launch.working_dir.as_deref(), Some("/games/dir"));
                 assert!(launch.pause_unfocused);
                 assert_eq!(launch.motion_port, Some(26760));
+                assert_eq!(launch.tag, Some(12));
+            }
+            other => panic!("wrong wire message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_wire_reload_request_roundtrip() {
+        let request = Wire::Request(Request::ReloadProfile {
+            tag: 12,
+            profile: "/profiles/y.json".into(),
+        });
+        let line = serde_json::to_string(&request).unwrap();
+        match serde_json::from_str::<Wire>(&line).unwrap() {
+            Wire::Request(Request::ReloadProfile { tag, profile }) => {
+                assert_eq!(tag, 12);
+                assert_eq!(profile, "/profiles/y.json");
+            }
+            other => panic!("wrong wire message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_wire_error_response_serializes_with_a_message() {
+        // Regression: internally tagged newtype variants with a bare string
+        // fail at serialization time, so errors never reached clients.
+        let response = Wire::Response(Response::Error {
+            message: "no running session for game 41".into(),
+        });
+        let line = serde_json::to_string(&response).expect("error responses must serialize");
+        match serde_json::from_str::<Wire>(&line).unwrap() {
+            Wire::Response(Response::Error { message }) => {
+                assert_eq!(message, "no running session for game 41");
             }
             other => panic!("wrong wire message: {other:?}"),
         }

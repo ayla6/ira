@@ -222,6 +222,27 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     }
                 }
                 PadEvent::ProfileChanged => {}
+                PadEvent::ReloadProfile(path) => {
+                    // The game's layout was switched in the app: point the
+                    // watcher at the new file and let the regular reload
+                    // path apply it — mapping edits hot-apply, a changed
+                    // controller kind rebuilds the output stack.
+                    if !devices::is_real_profile(&path) {
+                        eprintln!(
+                            "ira-input: layout switch ignored, {} is not a profile",
+                            path.display()
+                        );
+                    } else if let Some(monitor) = profile_monitor.as_mut() {
+                        eprintln!("ira-input: switching layout to {}", path.display());
+                        monitor.retarget(&path);
+                    } else {
+                        eprintln!(
+                            "ira-input: layout switch to {} ignored; \
+                             the session runs the builtin layout",
+                            path.display()
+                        );
+                    }
+                }
                 PadEvent::Live => hub_live = true,
                 PadEvent::Frozen => {
                     if hub_live {

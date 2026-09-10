@@ -113,7 +113,7 @@ impl DaemonClient {
     pub fn status(&mut self) -> Result<DaemonStatus, String> {
         match self.request(Request::Status)? {
             Response::Status(status) => Ok(status),
-            Response::Error(error) => Err(error),
+            Response::Error { message } => Err(message),
             _ => Err("unexpected response to status".to_string()),
         }
     }
@@ -126,7 +126,7 @@ impl DaemonClient {
                 self.session = Some(session);
                 Ok(session)
             }
-            Response::Error(error) => Err(error),
+            Response::Error { message } => Err(message),
             _ => Err("unexpected response to launch".to_string()),
         }
     }
@@ -155,7 +155,7 @@ impl DaemonClient {
                         }
                     }
                 }
-                Wire::Response(Response::Error(error)) => return Err(error),
+                Wire::Response(Response::Error { message }) => return Err(message),
                 Wire::Response(_) => {}
                 Wire::Request(_) => {}
             }

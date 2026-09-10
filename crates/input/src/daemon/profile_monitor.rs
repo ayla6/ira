@@ -59,6 +59,28 @@ impl ProfileMonitor {
         &self.path
     }
 
+    /// Points the watcher at a different profile file: the game's layout
+    /// was switched in the app. The inotify instance and its wake pump
+    /// survive; the watch re-arms on the new parent directory and the
+    /// switch itself counts as a pending change, so the session reloads
+    /// from the new path on its next pass.
+    pub(crate) fn retarget(&mut self, path: &Path) {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let parent = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        self.path = path.to_path_buf();
+        self.parent = parent.to_path_buf();
+        self.filename = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.watch = -1;
+        self.reload = true;
+    }
+
     /// The inotify descriptor to park in an external poll set, so profile
     /// writes wake the session loop immediately. `None` when inotify could
     /// not be created and the caller must fall back to periodic drains.
@@ -313,6 +335,48 @@ mod tests {
         std::fs::write(dir.join("other.txt"), "x").unwrap();
         thread::sleep(Duration::from_millis(50));
         assert!(!monitor.changed());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_profile_monitor_retarget_reloads_new_file_at_once() {
+        let dir = temp_profile_dir("retarget-instant");
+        let first = dir.join("first.json");
+        std::fs::write(&first, "one").unwrap();
+        let mut monitor = ProfileMonitor::new(first.clone());
+        thread::sleep(Duration::from_millis(20));
+        assert!(!monitor.changed());
+        let second = dir.join("second.json");
+        std::fs::write(&second, "two").unwrap();
+        monitor.retarget(&second);
+        assert_eq!(monitor.path(), second.as_path());
+        // The switch itself is the change: no write to the new file needed.
+        assert!(wait_for_change(&mut monitor, Duration::from_secs(2)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_profile_monitor_retarget_keeps_watching_new_file() {
+        let dir = temp_profile_dir("retarget-watch");
+        let first = dir.join("first.json");
+        std::fs::write(&first, "one").unwrap();
+        let mut monitor = ProfileMonitor::new(first.clone());
+        thread::sleep(Duration::from_millis(20));
+        let second = dir.join("second.json");
+        std::fs::write(&second, "two").unwrap();
+        monitor.retarget(&second);
+        assert!(wait_for_change(&mut monitor, Duration::from_secs(2)));
+        // The initial reload consumed; further edits to the OLD file must
+        // not trigger, edits to the NEW one must.
+        thread::sleep(Duration::from_millis(50));
+        assert!(!monitor.changed());
+        std::fs::write(&first, "three").unwrap();
+        thread::sleep(Duration::from_millis(50));
+        assert!(!monitor.changed());
+        let tmp = dir.join(".second.json.tmp");
+        std::fs::write(&tmp, "four").unwrap();
+        std::fs::rename(&tmp, &second).unwrap();
+        assert!(wait_for_change(&mut monitor, Duration::from_secs(2)));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

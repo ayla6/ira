@@ -59,6 +59,9 @@ pub(crate) enum PadEvent {
     /// Session-local wake: the profile watcher thread signals a save. The
     /// hub never sends this variant.
     ProfileChanged,
+    /// The game's controller layout was switched in the app; the session
+    /// reloads from the new profile path. Server-routed, focus-independent.
+    ReloadProfile(PathBuf),
 }
 
 /// The pad's state at subscribe time, so a session can build its output
@@ -87,6 +90,8 @@ pub(crate) enum HubCommand {
     Focus { id: u64, focused: bool },
     /// Rumble from a session; only the routed session's commands play.
     Rumble { id: u64, command: RumbleCommand },
+    /// Server-routed layout switch for one session, regardless of focus.
+    ReloadProfile { id: u64, path: PathBuf },
 }
 
 struct RouteEntry {
@@ -338,6 +343,11 @@ fn drain_commands(
             Ok(HubCommand::Rumble { id, command }) => {
                 if *routed == Some(id) {
                     play_rumble(pad, command);
+                }
+            }
+            Ok(HubCommand::ReloadProfile { id, path }) => {
+                if let Some(entry) = routes.get(&id) {
+                    let _ = entry.events.send(PadEvent::ReloadProfile(path));
                 }
             }
         }

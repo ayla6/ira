@@ -60,6 +60,7 @@ pub use hid_dualsense::DualsenseUhidDevice;
 pub use hid_imu::ImuUhidDevice;
 pub use hid_switch_pro::SwitchProUhidDevice;
 pub use uhid::{UhidDevice, BUS_USB};
+pub mod steam;
 pub mod vdf;
 pub use sensor::{discover_sdl_gamepads, Sdl3SensorBackend, SdlGamepadInfo, SensorSample};
 pub use vdf::{import_vdf, import_vdf_file, ImportReport};

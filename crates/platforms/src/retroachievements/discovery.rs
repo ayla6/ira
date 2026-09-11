@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::consoles::{all_consoles, ConsoleDef};
-use crate::retroachievements::api::{RaClient, RaGameEntry};
+use crate::retroachievements::api::{is_main_ra_entry, RaClient, RaGameEntry};
 use ira_config::Config;
 use ira_models::{normalize_name, Game, GameDisc, TrophySource};
 
@@ -234,10 +234,7 @@ fn build_ra_games_for_console(
             save_dir,
             console.def.ra_console_id,
         ) {
-            Some(g) => g
-                .into_iter()
-                .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
-                .collect(),
+            Some(g) => g.into_iter().filter(is_main_ra_entry).collect(),
             None => {
                 if !new_roms.is_empty() {
                     eprintln!(

@@ -8,14 +8,16 @@ use super::state::SharedState;
 use super::steam_search_dialog::{build_search_dialog, match_result_row, SearchDialogWidgets};
 use ira_platforms::retroachievements::api::{RaClient, RaGameEntry};
 
-fn apply_ra_match(
+/// Persist an RA match everywhere it lives: the DB ids, the in-memory game
+/// (which drops its stale achievement list), the settings dialog's pending
+/// RA-unmatch, and a background enrichment for the new id. Settings pages
+/// showing this game are rebuilt on the next idle.
+pub(super) fn persist_ra_match(
     sc: &SharedState,
     db_id: i64,
     platform_id: &str,
     ra_id: u32,
     ra_title: &str,
-    on_match: &Option<Rc<dyn Fn()>>,
-    dialog: &adw::Dialog,
 ) {
     let app_id = ra_id.to_string();
     if let Err(e) = ira_db::update_game_ids(
@@ -76,10 +78,6 @@ fn apply_ra_match(
             game: None,
         });
     }
-    if let Some(ref cb) = on_match {
-        cb();
-    }
-    dialog.close();
     let sc_refresh = sc.clone();
     glib::idle_add_local_once(move || {
         super::game_settings::refresh_ra_section(&sc_refresh, db_id);
@@ -94,6 +92,22 @@ fn apply_ra_match(
             },
         );
     });
+}
+
+fn apply_ra_match(
+    sc: &SharedState,
+    db_id: i64,
+    platform_id: &str,
+    ra_id: u32,
+    ra_title: &str,
+    on_match: &Option<Rc<dyn Fn()>>,
+    dialog: &adw::Dialog,
+) {
+    persist_ra_match(sc, db_id, platform_id, ra_id, ra_title);
+    if let Some(ref cb) = on_match {
+        cb();
+    }
+    dialog.close();
 }
 
 fn populate_results(

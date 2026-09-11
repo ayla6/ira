@@ -140,6 +140,19 @@ impl RaClient {
         Ok(resp)
     }
 
+    /// The console's game list: fetched (or served from a fresh cache) via
+    /// [`Self::fetch_console_games`], falling back to a stale cache when the
+    /// fetch fails. None only when there is no list at all.
+    fn console_games(&self, save_dir: &str, console_id: u32) -> Option<Vec<RaGameEntry>> {
+        match self.fetch_console_games(save_dir, console_id) {
+            Ok(games) => Some(games),
+            Err(e) => {
+                eprintln!("RA: failed to load console game list: {}", e);
+                read_console_games_cache(save_dir, console_id)
+            }
+        }
+    }
+
     /// Search the console's full game list (fetched on demand from the Web API
     /// when no fresh cache exists) for titles matching `query`, excluding
     /// Subset/hack variants. Matching is punctuation-insensitive, and a query
@@ -150,15 +163,8 @@ impl RaClient {
         console_id: u32,
         query: &str,
     ) -> Vec<RaGameEntry> {
-        let games = match self.fetch_console_games(save_dir, console_id) {
-            Ok(games) => games,
-            Err(e) => {
-                eprintln!("RA search: failed to load console game list: {}", e);
-                match read_console_games_cache(save_dir, console_id) {
-                    Some(games) => games,
-                    None => return Vec::new(),
-                }
-            }
+        let Some(games) = self.console_games(save_dir, console_id) else {
+            return Vec::new();
         };
         let mut results = search_games(games.clone(), query);
         if let Ok(id) = query.parse::<u32>() {
@@ -183,14 +189,25 @@ impl RaClient {
         if rom_hash.is_empty() {
             return None;
         }
-        let games = match self.fetch_console_games(save_dir, console_id) {
-            Ok(games) => games,
-            Err(e) => {
-                eprintln!("RA hash lookup: failed to load console game list: {}", e);
-                read_console_games_cache(save_dir, console_id)?
-            }
-        };
+        let games = self.console_games(save_dir, console_id)?;
         find_game_by_hash(&games, rom_hash)
+    }
+
+    /// Resolves a ROM to its RA game the way the library scan does: exact
+    /// hash first, then a title equal to one of `names` under the shared
+    /// normalizer (tried in order), preferring entries that have
+    /// achievements. Hack/subset variants are never returned, and a name
+    /// that is merely *contained* in a title is not a match — the caller is
+    /// an automatic matcher and must not guess.
+    pub fn match_ra_game(
+        &self,
+        save_dir: &str,
+        console_id: u32,
+        rom_hash: &str,
+        names: &[&str],
+    ) -> Option<RaGameEntry> {
+        let games = self.console_games(save_dir, console_id)?;
+        find_game_by_hash(&games, rom_hash).or_else(|| match_by_title(&games, names))
     }
 
     pub fn fetch_web_game_progress(
@@ -344,6 +361,12 @@ impl RaClient {
     }
 }
 
+/// Whether an RA list entry is a real game rather than a `~Hack~` or
+/// `[Subset - …]` variant, which matchers never resolve to.
+pub fn is_main_ra_entry(game: &RaGameEntry) -> bool {
+    !game.title.contains('~') && !game.title.contains("[Subset")
+}
+
 /// Punctuation-insensitive title filter: both sides go through
 /// [`normalize_name`], so "Castlevania - Dawn of Sorrow" finds
 /// "Castlevania: Dawn of Sorrow" and "World Ends With You, The" finds
@@ -352,9 +375,32 @@ fn filter_ra_games(games: Vec<RaGameEntry>, q: &str) -> Vec<RaGameEntry> {
     let norm_q = normalize_name(q);
     games
         .into_iter()
-        .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
+        .filter(is_main_ra_entry)
         .filter(|g| normalize_name(&g.title).contains(&norm_q))
         .collect()
+}
+
+/// The first of `names` that equals a main entry's title under the shared
+/// normalizer; among equal titles an entry with achievements wins over a
+/// same-titled regional duplicate without a set.
+fn match_by_title(games: &[RaGameEntry], names: &[&str]) -> Option<RaGameEntry> {
+    names
+        .iter()
+        .map(|name| normalize_name(name))
+        .filter(|key| !key.is_empty())
+        .find_map(|key| {
+            let mut without_set = None;
+            for game in games.iter().filter(|g| is_main_ra_entry(g)) {
+                if normalize_name(&game.title) != key {
+                    continue;
+                }
+                if game.num_achievements > 0 {
+                    return Some(game.clone());
+                }
+                without_set.get_or_insert_with(|| game.clone());
+            }
+            without_set
+        })
 }
 
 /// [`filter_ra_games`], broadened: when the full query has no hit, only the
@@ -595,6 +641,40 @@ mod cache_tests {
     #[test]
     fn test_find_game_by_hash_empty_list_is_none() {
         assert!(super::find_game_by_hash(&[], "abc123").is_none());
+    }
+
+    #[test]
+    fn test_match_ra_game_hash_then_exact_title() {
+        let client = RaClient::new("user", "key");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_str().unwrap();
+        write_cache(
+            dir,
+            3,
+            r#"[
+                {"ID":1,"Title":"Pokémon Emerald Version","ImageIcon":"","ImageUrl":"","NumAchievements":0,"Points":0,"Hashes":["aaa"]},
+                {"ID":2,"Title":"Pokémon Emerald Version","ImageIcon":"","ImageUrl":"","NumAchievements":40,"Points":9,"Hashes":["bbb"]},
+                {"ID":3,"Title":"~Hack~ Pokemon Emerald Version","ImageIcon":"","ImageUrl":"","NumAchievements":5,"Points":5},
+                {"ID":4,"Title":"The Legend of Zelda: Phantom Hourglass","ImageIcon":"","ImageUrl":"","NumAchievements":1,"Points":1}
+            ]"#,
+        );
+        let matched = |hash: &str, names: &[&str]| client.match_ra_game(dir, 3, hash, names).map(|g| g.id);
+        // The hash wins outright, even over a same-titled entry with a set.
+        assert_eq!(matched("AAA", &["Pokemon - Emerald Version"]), Some(1));
+        // Title equality ignores accents and " - " vs ":"; the entry with
+        // achievements beats the regional duplicate without one.
+        assert_eq!(matched("", &["Pokemon - Emerald Version"]), Some(2));
+        // Later names are tried when earlier ones miss; the No-Intro
+        // article-before-subtitle form matches the store spelling.
+        assert_eq!(
+            matched("", &["Custom Title", "Legend of Zelda, The - Phantom Hourglass (USA)"]),
+            Some(4)
+        );
+        // Containment is not a match for an automatic matcher, and hacks
+        // never resolve.
+        assert_eq!(matched("", &["Pokemon"]), None);
+        assert_eq!(matched("", &["~Hack~ Pokemon Emerald Version"]), None);
+        assert_eq!(matched("", &[""]), None);
     }
 
     #[test]

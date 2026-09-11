@@ -1,11 +1,9 @@
 use crate::Game;
 use adw::prelude::*;
-use std::cell::Cell;
-use std::rc::Rc;
 
 use super::css::*;
-use super::helpers::replace_row_actions;
-use super::ra_match_dialog::show_ra_search_dialog;
+use super::mass_match_batch::{run_batch, BatchItem, RowActions};
+use super::mass_match_ra::{attach_ra_actions, ra_pass_available, start_ra_batch_matching};
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::state::SharedState;
 use super::steam_search_dialog::{handle_steam_search_result, status_label};
@@ -95,126 +93,31 @@ fn populate_match_list(
     needs_matching: &[Game],
     state: &SharedState,
     dialog: &adw::Dialog,
-) -> Vec<gtk4::Box> {
-    let mut row_action_boxes: Vec<gtk4::Box> = Vec::new();
-
-    for game in needs_matching.iter() {
-        let action_box = if needs_ra_match(game) {
-            let ac = create_match_row(list, &game.name, &crate::tr!("RA: not matched"));
-            let inner = ac.clone();
-            let sc = state.clone();
-            let gn = game.name.clone();
-            let pid = game.platform_id.clone();
-            let did = game.db_id;
-            let dlg = dialog.clone();
-            let ra_btn = gtk4::Button::with_label(&crate::tr!("Search RA…"));
-            ra_btn.add_css_class(CSS_SUGGESTED_ACTION);
-            let sc2 = sc.clone();
-            let gn2 = gn.clone();
-            let pid2 = pid.clone();
-            let dlg2 = dlg.clone();
-            let did2 = did;
-            let inner_c = inner.clone();
-            ra_btn.connect_clicked(move |_| {
-                let inner_update = inner_c.clone();
-                show_ra_search_dialog(
-                    &sc2,
-                    did2,
-                    &gn2,
-                    &pid2,
-                    &dlg2,
-                    Some(Rc::new(move || {
-                        replace_row_actions(&inner_update, |ab| {
-                            ab.append(&status_label(
-                                &crate::tr!("RA: matched"),
-                                CSS_SUCCESS_LABEL,
-                            ));
-                        });
-                    })),
-                );
-            });
-            inner.append(&ra_btn);
-            ac
-        } else {
+) -> Vec<RowActions> {
+    let ra_available = ra_pass_available(state);
+    needs_matching
+        .iter()
+        .map(|game| {
             let searching_text = if needs_steam_match(game) {
                 crate::tr!("Searching Steam...")
-            } else {
+            } else if needs_sgdb_match(game) {
                 crate::tr!("Searching SGDB...")
+            } else {
+                String::new()
             };
-            create_match_row(list, &game.name, &searching_text)
-        };
-        row_action_boxes.push(action_box);
-    }
-
-    row_action_boxes
-}
-
-/// One queued batch candidate: the game to match plus which list row its
-/// result belongs to.
-struct BatchItem {
-    name: String,
-    db_id: i64,
-    row_idx: usize,
-}
-
-/// A finished candidate handed from the worker thread back to the UI loop.
-struct BatchHit {
-    row_idx: usize,
-    db_id: i64,
-    name: String,
-    matched: Option<(String, String)>,
-}
-
-/// Shared shape of both batch passes: one sequential worker thread computes
-/// matches over `queue`, and results are applied on the UI loop every
-/// `interval_ms` until the queue drains. `worker` runs off-thread and must
-/// not touch GTK; it waits `pace_ms` before every request but the first,
-/// so a rate-limited service sees one request per pace, never a burst.
-/// `on_result` runs on the main loop.
-fn run_batch(
-    queue: Vec<BatchItem>,
-    interval_ms: u64,
-    pace_ms: u64,
-    worker: impl Fn(&BatchItem) -> Option<(String, String)> + Send + 'static,
-    on_result: impl Fn(BatchHit) + 'static,
-) {
-    let total = queue.len();
-    let (tx, rx) = std::sync::mpsc::channel::<BatchHit>();
-    std::thread::spawn(move || {
-        for (index, item) in queue.iter().enumerate() {
-            if index > 0 && pace_ms > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(pace_ms));
-            }
-            let matched = worker(item);
-            let _ = tx.send(BatchHit {
-                row_idx: item.row_idx,
-                db_id: item.db_id,
-                name: item.name.clone(),
-                matched,
-            });
-        }
-    });
-
-    let rx = std::cell::RefCell::new(rx);
-    let remaining = Cell::new(total);
-    glib::timeout_add_local(std::time::Duration::from_millis(interval_ms), move || {
-        if let Ok(hit) = rx.borrow_mut().try_recv() {
-            on_result(hit);
-            let left = remaining.get();
-            if left <= 1 {
-                return glib::ControlFlow::Break;
-            }
-            remaining.set(left - 1);
-        }
-        glib::ControlFlow::Continue
-    });
+            let (row, main) = create_match_row(list, &game.name, &searching_text);
+            let ra = needs_ra_match(game)
+                .then(|| attach_ra_actions(&row, state, game, dialog, ra_available));
+            RowActions { main, ra }
+        })
+        .collect()
 }
 
 fn start_steam_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
     title_map: Vec<(String, String, String)>,
-    row_action_boxes: &[gtk4::Box],
+    rows: &[RowActions],
     dialog: &adw::Dialog,
 ) {
     let queue: Vec<BatchItem> = needs_matching
@@ -262,13 +165,13 @@ fn start_steam_batch_matching(
         {
             let state = state.clone();
             let steam = steam;
-            let row_boxes = row_action_boxes.to_vec();
+            let rows = rows.to_vec();
             let parent_dialog = dialog.clone();
             move |hit| {
-                if hit.row_idx < row_boxes.len() {
+                if let Some(row) = rows.get(hit.row_idx) {
                     handle_steam_search_result(
                         &state,
-                        &row_boxes[hit.row_idx],
+                        &row.main,
                         &steam,
                         &hit.name,
                         hit.db_id,
@@ -284,7 +187,7 @@ fn start_steam_batch_matching(
 fn start_sgdb_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
-    row_action_boxes: &[gtk4::Box],
+    rows: &[RowActions],
     dialog: &adw::Dialog,
 ) {
     let queue: Vec<BatchItem> = needs_matching
@@ -316,13 +219,13 @@ fn start_sgdb_batch_matching(
         },
         {
             let state = state.clone();
-            let row_boxes = row_action_boxes.to_vec();
+            let rows = rows.to_vec();
             let parent_dialog = dialog.clone();
             move |hit| {
-                if hit.row_idx < row_boxes.len() {
+                if let Some(row) = rows.get(hit.row_idx) {
                     handle_unified_sgdb_result(
                         &state,
-                        &row_boxes[hit.row_idx],
+                        &row.main,
                         hit.db_id,
                         &hit.name,
                         hit.matched,
@@ -374,24 +277,25 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     scrolled.set_propagate_natural_height(true);
     scrolled.set_min_content_height(160);
     scrolled.set_max_content_height(500);
-    let row_action_boxes = populate_match_list(&list, &needs_matching, state, &dialog);
+    let rows = populate_match_list(&list, &needs_matching, state, &dialog);
     content.append(&scrolled);
 
     toolbar.set_content(Some(&content));
     dialog.set_child(Some(&toolbar));
     dialog.present(Some(&window));
 
-    start_steam_batch_matching(
-        state,
-        &needs_matching,
-        title_map,
-        &row_action_boxes,
-        &dialog,
-    );
-    start_sgdb_batch_matching(state, &needs_matching, &row_action_boxes, &dialog);
+    start_steam_batch_matching(state, &needs_matching, title_map, &rows, &dialog);
+    start_sgdb_batch_matching(state, &needs_matching, &rows, &dialog);
+    start_ra_batch_matching(state, &needs_matching, &rows, &dialog);
 }
 
-fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> gtk4::Box {
+/// One list row: the game's title plus its main action box, which starts
+/// as a dim status label when `searching_text` is set.
+fn create_match_row(
+    list: &gtk4::ListBox,
+    name: &str,
+    searching_text: &str,
+) -> (adw::ActionRow, gtk4::Box) {
     let row = adw::ActionRow::new();
     // Game titles are shown as typed — "Fear & Hunger" is not markup.
     row.set_use_markup(false);
@@ -402,11 +306,13 @@ fn create_match_row(list: &gtk4::ListBox, name: &str, searching_text: &str) -> g
 
     let action_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     action_box.set_valign(gtk4::Align::Center);
-    action_box.append(&status_label(searching_text, CSS_DIM_LABEL));
+    if !searching_text.is_empty() {
+        action_box.append(&status_label(searching_text, CSS_DIM_LABEL));
+    }
     row.add_suffix(&action_box);
 
     list.append(&row);
-    action_box
+    (row, action_box)
 }
 
 #[cfg(test)]

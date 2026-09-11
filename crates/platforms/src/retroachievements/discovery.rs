@@ -157,13 +157,23 @@ fn build_ra_games_for_console(
 
     let existing_entries = {
         let _s = tracing::info_span!("db_find_rom").entered();
-        ira_db::find_all_rom_by_platform(db, console.def.id).unwrap_or_default()
+        ira_db::find_all_rom_by_platform(db, console.def.id).unwrap_or_else(|e| {
+            eprintln!("Failed to list roms for {}: {}", console.def.id, e);
+            Vec::new()
+        })
     };
     let disc_paths = {
         let _s = tracing::info_span!("db_disc_paths").entered();
-        ira_db::get_disc_paths_for_platform(db, console.def.id).unwrap_or_default()
+        ira_db::get_disc_paths_for_platform(db, console.def.id).unwrap_or_else(|e| {
+            eprintln!("Failed to list discs for {}: {}", console.def.id, e);
+            HashSet::new()
+        })
     };
-    let disc_owners = ira_db::get_disc_owners_for_platform(db, console.def.id).unwrap_or_default();
+    let disc_owners = ira_db::get_disc_owners_for_platform(db, console.def.id)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to list disc owners for {}: {}", console.def.id, e);
+            HashMap::new()
+        });
 
     let all_groups = group_multi_disc_roms(db, roms);
     let grouped_paths: HashSet<String> = all_groups
@@ -277,11 +287,15 @@ fn build_ra_games_for_console(
                 let rom_norm = normalize_name(&rom_name);
                 if let Some(ra_id) = ra_index.find(&entry.rom_hash, &rom_norm) {
                     let new_game_id = ra_id.to_string();
-                    if ira_db::find_by_game_id(db, &new_game_id, console.def.id)
-                        .ok()
-                        .flatten()
-                        .is_none()
-                    {
+                    let already_matched =
+                        ira_db::find_by_game_id(db, &new_game_id, console.def.id)
+                            .unwrap_or_else(|e| {
+                                eprintln!(
+                                    "Failed to look up game_id {new_game_id}: {e}"
+                                );
+                                None
+                            });
+                    if already_matched.is_none() {
                         let ra_title = ra_index
                             .title_of(ra_id)
                             .map(str::to_string)
@@ -448,8 +462,12 @@ fn build_ra_games_for_console(
                 }
             }
 
-            let existing_by_id =
-                canonical_id.and_then(|id| ira_db::find_by_db_id(db, id).ok().flatten());
+            let existing_by_id = canonical_id.and_then(|id| {
+                ira_db::find_by_db_id(db, id).unwrap_or_else(|e| {
+                    eprintln!("Failed to look up game {id}: {e}");
+                    None
+                })
+            });
             let existing_hash = existing_by_id
                 .as_ref()
                 .map(|e| e.rom_hash.clone())
@@ -788,7 +806,10 @@ fn enrich_nds_roms(
 /// exists, so downloaded or user-chosen icons always win.
 fn write_nds_icon(save_dir: &str, db_id: i64, icon_rgba: &[u8]) {
     let data_dir = ira_parser::retro_data_dir(save_dir, db_id);
-    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+    if ira_parser::find_image_file(
+            &data_dir,
+            ira_models::AssetType::Icon.file_base(),
+        ).is_some() {
         return;
     }
     if std::fs::create_dir_all(&data_dir).is_err() {
@@ -837,7 +858,10 @@ fn precompute_switch_metas(
 /// exists, so downloaded or user-chosen icons always win.
 fn write_switch_icon(save_dir: &str, db_id: i64, icon: &crate::switch::SwitchIcon) {
     let data_dir = ira_parser::switch_data_dir(save_dir, db_id);
-    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+    if ira_parser::find_image_file(
+            &data_dir,
+            ira_models::AssetType::Icon.file_base(),
+        ).is_some() {
         return;
     }
     match icon {
@@ -846,7 +870,11 @@ fn write_switch_icon(save_dir: &str, db_id: i64, icon: &crate::switch::SwitchIco
                 eprintln!("Failed to create data dir for game {db_id}: {e}");
                 return;
             }
-            if ira_parser::import_image_as_webp(cached, &data_dir, "icon").is_none() {
+            if ira_parser::import_image_as_webp(
+                cached,
+                &data_dir,
+                ira_models::AssetType::Icon.file_base(),
+            ).is_none() {
                 eprintln!("Failed to import Switch icon for game {db_id}");
             }
         }
@@ -897,7 +925,7 @@ fn enrich_switch_roms(
         let needs_title = game.name.is_empty() || game.name == file_title;
         let needs_icon = ira_parser::find_image_file(
             &ira_parser::switch_data_dir(save_dir, game.db_id),
-            "icon",
+            ira_models::AssetType::Icon.file_base(),
         )
         .is_none();
         if !(needs_id || needs_title || needs_icon) {

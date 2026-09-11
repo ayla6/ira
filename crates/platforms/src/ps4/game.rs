@@ -56,7 +56,6 @@ pub fn load_shadps4_game(
     let mut game = Game {
         app_id: npwr_id.clone(),
         kind: ira_models::GameKind::Ps4,
-        trophy_source: ira_models::TrophySource::Empty,
         platform_id: serial.clone(),
         db_id,
         name: if meta.title.is_empty() {
@@ -64,44 +63,24 @@ pub fn load_shadps4_game(
         } else {
             meta.title.clone()
         },
-        name_lower: String::new(),
-        icon_path: String::new(),
-        hero_image_path: String::new(),
-        grid_path: String::new(),
-        header_path: String::new(),
-        logo_path: String::new(),
-            square_path: String::new(),
-        achievements: Vec::new(),
-        earned_count: 0,
-        total_count: 0,
         hidden: meta.hidden,
         slug: serial.clone(),
         playtime,
         last_played: meta.last_played,
         logo_position: meta.logo_position.clone(),
         logo_size: meta.logo_size,
-        manual_unmatch: false,
         sort_title: meta.sort_title.clone(),
         game_path: shad.game_path.to_string_lossy().into_owned(),
         sgdb_id: meta.sgdb_id.clone(),
         shadps4_version: meta.shadps4_version.clone(),
-        release_date: String::new(),
-        release_timestamp: 0,
-        metacritic_score: -1,
-        steam_review_score: -1,
-        steam_review_count: 0,
-        ra_core: String::new(),
-        emulator_override: String::new(),
-        rom_path: String::new(),
-        game_folder: String::new(),
-        variant_id: None,
+        ..Default::default()
     };
     game.name_lower = game.name.to_lowercase();
 
     // Default icon: copy the game's sce_sys/icon0.png to data/ps4/{NPWR}/ and
     // convert to WebP. Only copies if no icon (webp/jpg) already exists in the data dir.
     let ps4_data_dir = Path::new(save_dir).join("data").join("ps4").join(npwr_id);
-    if ira_parser::find_image_file(&ps4_data_dir, "icon").is_none() {
+    if ira_parser::find_image_file(&ps4_data_dir, ira_models::AssetType::Icon.file_base()).is_none() {
         let default_icon = shad.game_path.join("sce_sys").join("icon0.png");
         if default_icon.is_file() {
             let _ = std::fs::create_dir_all(&ps4_data_dir);
@@ -115,7 +94,7 @@ pub fn load_shadps4_game(
     let image_dir = ps4_data_dir.clone();
 
     // Fallback to the emulator's original sce_sys/icon0.png if no icon in data dir.
-    if ira_parser::find_image_file(&image_dir, "icon").is_none() {
+    if ira_parser::find_image_file(&image_dir, ira_models::AssetType::Icon.file_base()).is_none() {
         let default_icon = shad.game_path.join("sce_sys").join("icon0.png");
         if default_icon.is_file() {
             game.icon_path = default_icon.to_string_lossy().into_owned();

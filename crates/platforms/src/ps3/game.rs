@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::ps4::parse_trop_xml;
@@ -49,7 +50,6 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
     let mut out = Game {
         app_id: npwr_id.clone(),
         kind: ira_models::GameKind::Ps3,
-        trophy_source: ira_models::TrophySource::Empty,
         platform_id: serial.clone(),
         db_id,
         name: if meta.title.is_empty() {
@@ -57,44 +57,23 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
         } else {
             meta.title.clone()
         },
-        name_lower: String::new(),
-        icon_path: String::new(),
-        hero_image_path: String::new(),
-        grid_path: String::new(),
-        header_path: String::new(),
-        logo_path: String::new(),
-        square_path: String::new(),
-        achievements: Vec::new(),
-        earned_count: 0,
-        total_count: 0,
         hidden: meta.hidden,
         slug: serial.clone(),
         playtime,
         last_played,
         logo_position: meta.logo_position.clone(),
         logo_size: meta.logo_size,
-        manual_unmatch: false,
         sort_title: meta.sort_title.clone(),
         game_path: game.game_path.to_string_lossy().into_owned(),
         sgdb_id: meta.sgdb_id.clone(),
-        shadps4_version: String::new(),
-        release_date: String::new(),
-        release_timestamp: 0,
-        metacritic_score: -1,
-        steam_review_score: -1,
-        steam_review_count: 0,
-        ra_core: String::new(),
-        emulator_override: String::new(),
-        rom_path: String::new(),
-        game_folder: String::new(),
-        variant_id: None,
+        ..Default::default()
     };
     out.name_lower = out.name.to_lowercase();
 
     // Default icon: copy the game's ICON0.PNG to data/ps3/{NPWR}/ and convert
     // to WebP. Only copies if no icon (webp/jpg) already exists in the data dir.
     let ps3_data_dir = Path::new(save_dir).join("data").join("ps3").join(npwr_id);
-    if ira_parser::find_image_file(&ps3_data_dir, "icon").is_none() {
+    if ira_parser::find_image_file(&ps3_data_dir, ira_models::AssetType::Icon.file_base()).is_none() {
         let default_icon = game.game_path.join("ICON0.PNG");
         if default_icon.is_file() {
             let _ = std::fs::create_dir_all(&ps3_data_dir);
@@ -109,7 +88,7 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
     let image_dir = ps3_data_dir.clone();
 
     // Fallback to the emulator's original ICON0.PNG if no icon in data dir.
-    if ira_parser::find_image_file(&image_dir, "icon").is_none() {
+    if ira_parser::find_image_file(&image_dir, ira_models::AssetType::Icon.file_base()).is_none() {
         let default_icon = game.game_path.join("ICON0.PNG");
         if default_icon.is_file() {
             out.icon_path = default_icon.to_string_lossy().into_owned();
@@ -138,7 +117,10 @@ pub fn load_ps3_trophies_in(npwr_id: &str, config_dir: &Path) -> Vec<MergedAchie
     }
 
     let defs = parse_trop_xml(&trophy_conf_path_in(config_dir, npwr_id));
-    let unlock_states = parse_tropusr(&tropusr_path_in(config_dir, npwr_id)).unwrap_or_default();
+    let unlock_states = parse_tropusr(&tropusr_path_in(config_dir, npwr_id)).unwrap_or_else(|e| {
+        eprintln!("Failed to parse TROPUSR.DAT for {npwr_id}: {e}");
+        HashMap::new()
+    });
 
     let mut achievements = Vec::new();
     for def in &defs {

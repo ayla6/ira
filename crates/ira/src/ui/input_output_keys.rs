@@ -140,6 +140,24 @@ fn char_at(s: &str, index: u16) -> String {
         .to_string()
 }
 
+/// The ten keyboard modifiers a hotkey capture treats as part of a chord
+/// rather than as the captured key itself.
+pub(crate) fn is_modifier_key(keyval: gtk4::gdk::Key) -> bool {
+    matches!(
+        keyval,
+        gtk4::gdk::Key::Shift_L
+            | gtk4::gdk::Key::Shift_R
+            | gtk4::gdk::Key::Control_L
+            | gtk4::gdk::Key::Control_R
+            | gtk4::gdk::Key::Alt_L
+            | gtk4::gdk::Key::Alt_R
+            | gtk4::gdk::Key::Meta_L
+            | gtk4::gdk::Key::Meta_R
+            | gtk4::gdk::Key::Super_L
+            | gtk4::gdk::Key::Super_R
+    )
+}
+
 /// The human name of an evdev keycode, matching the picker's tile labels.
 /// `None` for codes Ira cannot name; callers fall back to the number.
 pub(crate) fn keycode_display_name(keycode: u16) -> Option<String> {

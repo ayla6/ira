@@ -3,6 +3,8 @@ use gtk4::glib;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::input_output_keys::is_modifier_key;
+
 const GAMEPAD_BUTTON_NAMES: &[(u16, &str)] = &[
     (0x130, "A"),
     (0x131, "B"),
@@ -137,7 +139,7 @@ fn setup_keyboard(
             return glib::Propagation::Stop;
         }
 
-        if is_modifier(keyval) {
+        if is_modifier_key(keyval) {
             return glib::Propagation::Proceed;
         }
 
@@ -350,22 +352,6 @@ fn poll_gamepad_buttons() -> Option<String> {
         }
     }
     found
-}
-
-fn is_modifier(keyval: gdk4::Key) -> bool {
-    matches!(
-        keyval,
-        gdk4::Key::Shift_L
-            | gdk4::Key::Shift_R
-            | gdk4::Key::Control_L
-            | gdk4::Key::Control_R
-            | gdk4::Key::Alt_L
-            | gdk4::Key::Alt_R
-            | gdk4::Key::Meta_L
-            | gdk4::Key::Meta_R
-            | gdk4::Key::Super_L
-            | gdk4::Key::Super_R
-    )
 }
 
 fn modifier_names(state: gdk4::ModifierType) -> String {

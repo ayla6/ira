@@ -1,6 +1,8 @@
 use adw::prelude::*;
 use std::rc::Rc;
 
+use super::input_output_keys::is_modifier_key;
+
 const XKB_EVDEV_OFFSET: u32 = 8;
 
 pub(super) fn show_keyboard_output_capture(
@@ -88,22 +90,6 @@ fn present_dialog<P: IsA<gtk4::Widget>>(dialog: &adw::Dialog, parent: &P, conten
         mapped.grab_focus();
     });
     dialog.present(Some(parent));
-}
-
-fn is_modifier_key(keyval: gdk4::Key) -> bool {
-    matches!(
-        keyval,
-        gdk4::Key::Shift_L
-            | gdk4::Key::Shift_R
-            | gdk4::Key::Control_L
-            | gdk4::Key::Control_R
-            | gdk4::Key::Alt_L
-            | gdk4::Key::Alt_R
-            | gdk4::Key::Meta_L
-            | gdk4::Key::Meta_R
-            | gdk4::Key::Super_L
-            | gdk4::Key::Super_R
-    )
 }
 
 #[cfg(test)]

@@ -1,12 +1,7 @@
 use std::path::{Path, PathBuf};
+use crate::emu_dirs::home_dir;
 
 pub const RPCS3_FLATPAK_ID: &str = "net.rpcs3.RPCS3";
-
-fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-}
 
 /// RPCS3 config directory.
 /// Linux: ~/.config/rpcs3/

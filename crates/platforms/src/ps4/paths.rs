@@ -1,12 +1,7 @@
 use std::path::PathBuf;
+use crate::emu_dirs::home_dir;
 
 pub const SHADPS4_FLATPAK_ID: &str = "net.shadps4.shadPS4";
-
-fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-}
 
 /// shadPS4 user data directory.
 /// Linux: ~/.local/share/shadPS4/

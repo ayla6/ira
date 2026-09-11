@@ -1,6 +1,7 @@
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
-    find_game_dll_folder, has_emulator_backups, is_windows, restore_backup,
+    api_emulators_dir, backup_file, compute_relative, copy_file, detect_arch,
+    detect_folder_bitness, find_game_dll_folder, has_emulator_backups, is_windows,
+    restore_backup,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
@@ -116,34 +117,6 @@ fn symlink_dll_dirs_to_settings(root: &Path, settings_dir: &Path) {
     }
 }
 
-/// Compute a relative path from `from_dir` to `to_path`.
-#[cfg(unix)]
-fn compute_relative(from_dir: &Path, to_path: &Path) -> PathBuf {
-    use std::path::Component;
-
-    let from_components: Vec<_> = from_dir.components().collect();
-    let to_components: Vec<_> = to_path.components().collect();
-
-    let mut common = 0;
-    while common < from_components.len()
-        && common < to_components.len()
-        && from_components[common] == to_components[common]
-    {
-        common += 1;
-    }
-
-    let up = from_components.len() - common;
-    let mut result = PathBuf::new();
-    for _ in 0..up {
-        result.push("..");
-    }
-    for comp in &to_components[common..] {
-        if let Component::Normal(s) = comp {
-            result.push(s);
-        }
-    }
-    result
-}
 
 pub fn write_gse_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result<(), String> {
     let mut content = String::from("[app::dlcs]\n");

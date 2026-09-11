@@ -1,5 +1,35 @@
 use std::path::{Path, PathBuf};
 
+/// Compute a relative path from `from_dir` to `to_path` (used for the
+/// per-game settings symlinks).
+#[cfg(unix)]
+pub(crate) fn compute_relative(from_dir: &Path, to_path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let from_components: Vec<_> = from_dir.components().collect();
+    let to_components: Vec<_> = to_path.components().collect();
+
+    let mut common = 0;
+    while common < from_components.len()
+        && common < to_components.len()
+        && from_components[common] == to_components[common]
+    {
+        common += 1;
+    }
+
+    let up = from_components.len() - common;
+    let mut result = PathBuf::new();
+    for _ in 0..up {
+        result.push("..");
+    }
+    for comp in &to_components[common..] {
+        if let Component::Normal(s) = comp {
+            result.push(s);
+        }
+    }
+    result
+}
+
 pub(crate) fn backup_file(path: &Path) -> Result<(), String> {
     let bak = path.with_extension(format!(
         "{}.bak",

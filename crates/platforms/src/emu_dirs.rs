@@ -18,6 +18,15 @@ pub fn flatpak_app_dir(executable: &str) -> Option<PathBuf> {
     Some(home_dir().join(".var").join("app").join(id))
 }
 
+/// `<flatpak app root>/<suffix>` for `flatpak:<id>` executables, else just
+/// `suffix` (relative to the executable's own directory).
+pub(crate) fn app_path_for(executable: &str, suffix: &str) -> PathBuf {
+    match flatpak_app_dir(executable) {
+        Some(base) => base.join(suffix),
+        None => PathBuf::from(suffix),
+    }
+}
+
 pub fn cache_home() -> PathBuf {
     xdg::BaseDirectories::new()
         .get_cache_home()

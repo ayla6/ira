@@ -1,23 +1,7 @@
 use std::path::{Path, PathBuf};
+use crate::emu_dirs::{app_path_for, home_dir};
 
 pub const AZAHAR_FLATPAK_ID: &str = "org.azahar_emu.Azahar";
-
-fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-}
-
-fn app_path_for(executable: &str, suffix: &str) -> PathBuf {
-    let base = executable
-        .strip_prefix("flatpak:")
-        .map(|id| home_dir().join(".var").join("app").join(id))
-        .unwrap_or_default();
-    if !base.as_os_str().is_empty() {
-        return base.join(suffix);
-    }
-    PathBuf::from(suffix)
-}
 
 /// Azahar runs fully portable when a `user` directory sits next to the
 /// executable; it then keeps config and data inside it.

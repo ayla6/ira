@@ -1,12 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::ps4::{parse_psf, psf_get_title, psf_get_title_id};
-
-fn home_dir() -> PathBuf {
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-}
+use crate::emu_dirs::home_dir;
 
 pub fn vita_fs_path() -> PathBuf {
     vita_fs_path_for("")

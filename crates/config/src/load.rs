@@ -21,7 +21,15 @@ pub(crate) fn backup_path() -> PathBuf {
 }
 
 fn parse_config_file(path: &PathBuf) -> Option<Config> {
-    let data = std::fs::read(path).ok()?;
+    // A read failure (permissions, I/O) must not pass for "fresh install" —
+    // the next save would otherwise overwrite the real config with defaults.
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Failed to read {}: {e}", path.display());
+            return None;
+        }
+    };
     match serde_json::from_slice::<Config>(&data) {
         Ok(c) => Some(c),
         Err(e) => {

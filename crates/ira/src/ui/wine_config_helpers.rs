@@ -53,189 +53,103 @@ pub(super) fn make_revert_btn() -> gtk4::Button {
     btn
 }
 
-pub(super) fn track_switch(
-    row: &adw::SwitchRow,
-    field: &str,
-    default_val: bool,
-    overridden: &OverrideList,
-) {
-    let is_overridden = overridden.borrow().contains(&field.to_string());
-    let revert_btn = make_revert_btn();
-    revert_btn.set_visible(is_overridden);
-    row.add_suffix(&revert_btn);
+/// Generates a `track_*` helper: the row's change signal marks the field
+/// overridden and reveals the revert button; clicking the button applies
+/// the default inside a `reverting` guard (so the change signal ignores
+/// it), clears the override, and hides the button again.
+macro_rules! track_impl {
+    ($fn_name:ident, ($($w:ident: $wt:ty),+), $signal_w:ident.$signal:ident, $suffix_w:ident, $apply:ident, $val_ty:ty) => {
+        pub(super) fn $fn_name(
+            $($w: &$wt),+,
+            field: &str,
+            default_val: $val_ty,
+            overridden: &OverrideList,
+        ) {
+            let revert_btn = make_revert_btn();
+            revert_btn.set_visible(overridden.borrow().contains(&field.to_string()));
+            $suffix_w.add_suffix(&revert_btn);
+            let reverting = Rc::new(RefCell::new(false));
 
-    let reverting = Rc::new(RefCell::new(false));
+            let field_s = field.to_string();
+            let ov = overridden.clone();
+            let btn = revert_btn.clone();
+            let rev = reverting.clone();
+            $signal_w.$signal(move |_| {
+                if *rev.borrow() {
+                    return;
+                }
+                if !ov.borrow().contains(&field_s) {
+                    ov.borrow_mut().push(field_s.clone());
+                }
+                btn.set_visible(true);
+            });
 
-    let field_s = field.to_string();
-    let ov = overridden.clone();
-    let btn = revert_btn.clone();
-    let rev = reverting.clone();
-    row.connect_active_notify(move |_| {
-        if *rev.borrow() {
-            return;
+            let field_s = field.to_string();
+            let ov = overridden.clone();
+            let $signal_w = Downgrade::downgrade($signal_w);
+            let btn = Downgrade::downgrade(&revert_btn);
+            revert_btn.connect_clicked(move |_| {
+                let Some($signal_w) = $signal_w.upgrade() else {
+                    return;
+                };
+                let Some(btn) = btn.upgrade() else {
+                    return;
+                };
+                *reverting.borrow_mut() = true;
+                $apply(&$signal_w, default_val);
+                *reverting.borrow_mut() = false;
+                ov.borrow_mut().retain(|f| f != &field_s);
+                btn.set_visible(false);
+            });
         }
-        if !ov.borrow().contains(&field_s) {
-            ov.borrow_mut().push(field_s.clone());
-        }
-        btn.set_visible(true);
-    });
-
-    let field_s2 = field.to_string();
-    let ov2 = overridden.clone();
-    let row2 = Downgrade::downgrade(row);
-    let btn2 = Downgrade::downgrade(&revert_btn);
-    let rev2 = reverting;
-    revert_btn.connect_clicked(move |_| {
-        let Some(row2) = row2.upgrade() else {
-            return;
-        };
-        let Some(btn2) = btn2.upgrade() else {
-            return;
-        };
-        *rev2.borrow_mut() = true;
-        row2.set_active(default_val);
-        *rev2.borrow_mut() = false;
-        ov2.borrow_mut().retain(|f| f != &field_s2);
-        btn2.set_visible(false);
-    });
+    };
 }
 
-pub(super) fn track_spin_row(
-    row: &adw::SpinRow,
-    field: &str,
-    default_val: i32,
-    overridden: &OverrideList,
-) {
-    let is_overridden = overridden.borrow().contains(&field.to_string());
-    let revert_btn = make_revert_btn();
-    revert_btn.set_visible(is_overridden);
-    row.add_suffix(&revert_btn);
-
-    let reverting = Rc::new(RefCell::new(false));
-
-    let field_s = field.to_string();
-    let ov = overridden.clone();
-    let btn = revert_btn.clone();
-    let rev = reverting.clone();
-    row.connect_value_notify(move |_| {
-        if *rev.borrow() {
-            return;
-        }
-        if !ov.borrow().contains(&field_s) {
-            ov.borrow_mut().push(field_s.clone());
-        }
-        btn.set_visible(true);
-    });
-
-    let field_s2 = field.to_string();
-    let ov2 = overridden.clone();
-    let row2 = Downgrade::downgrade(row);
-    let btn2 = Downgrade::downgrade(&revert_btn);
-    let rev2 = reverting;
-    revert_btn.connect_clicked(move |_| {
-        let Some(row2) = row2.upgrade() else {
-            return;
-        };
-        let Some(btn2) = btn2.upgrade() else {
-            return;
-        };
-        *rev2.borrow_mut() = true;
-        row2.set_value(default_val as f64);
-        *rev2.borrow_mut() = false;
-        ov2.borrow_mut().retain(|f| f != &field_s2);
-        btn2.set_visible(false);
-    });
+fn apply_switch(row: &adw::SwitchRow, v: bool) {
+    row.set_active(v);
 }
 
-pub(super) fn track_combo(
-    row: &adw::ComboRow,
-    field: &str,
-    default_selected: u32,
-    overridden: &OverrideList,
-) {
-    let is_overridden = overridden.borrow().contains(&field.to_string());
-    let revert_btn = make_revert_btn();
-    revert_btn.set_visible(is_overridden);
-    row.add_suffix(&revert_btn);
-
-    let reverting = Rc::new(RefCell::new(false));
-
-    let field_s = field.to_string();
-    let ov = overridden.clone();
-    let btn = revert_btn.clone();
-    let rev = reverting.clone();
-    row.connect_selected_notify(move |_| {
-        if *rev.borrow() {
-            return;
-        }
-        if !ov.borrow().contains(&field_s) {
-            ov.borrow_mut().push(field_s.clone());
-        }
-        btn.set_visible(true);
-    });
-
-    let field_s2 = field.to_string();
-    let ov2 = overridden.clone();
-    let row2 = Downgrade::downgrade(row);
-    let btn2 = Downgrade::downgrade(&revert_btn);
-    let rev2 = reverting;
-    revert_btn.connect_clicked(move |_| {
-        let Some(row2) = row2.upgrade() else {
-            return;
-        };
-        let Some(btn2) = btn2.upgrade() else {
-            return;
-        };
-        *rev2.borrow_mut() = true;
-        row2.set_selected(default_selected);
-        *rev2.borrow_mut() = false;
-        ov2.borrow_mut().retain(|f| f != &field_s2);
-        btn2.set_visible(false);
-    });
+fn apply_spin_row_value(row: &adw::SpinRow, v: i32) {
+    row.set_value(v as f64);
 }
 
-pub(super) fn track_spin(
-    spin: &gtk4::SpinButton,
-    row: &adw::ActionRow,
-    field: &str,
-    default_val: i32,
-    overridden: &OverrideList,
-) {
-    let is_overridden = overridden.borrow().contains(&field.to_string());
-    let revert_btn = make_revert_btn();
-    revert_btn.set_visible(is_overridden);
-    row.add_suffix(&revert_btn);
-    let reverting = Rc::new(RefCell::new(false));
-    let field_s = field.to_string();
-    let overridden_for_changed = overridden.clone();
-    let button_for_changed = revert_btn.clone();
-    let reverting_for_changed = reverting.clone();
-    spin.connect_value_changed(move |_| {
-        if *reverting_for_changed.borrow() {
-            return;
-        }
-        if !overridden_for_changed.borrow().contains(&field_s) {
-            overridden_for_changed.borrow_mut().push(field_s.clone());
-        }
-        button_for_changed.set_visible(true);
-    });
-    let field_s = field.to_string();
-    let overridden_for_revert = overridden.clone();
-    let spin_for_revert = Downgrade::downgrade(spin);
-    let button_for_revert = Downgrade::downgrade(&revert_btn);
-    revert_btn.connect_clicked(move |_| {
-        let Some(spin_for_revert) = spin_for_revert.upgrade() else {
-            return;
-        };
-        let Some(button_for_revert) = button_for_revert.upgrade() else {
-            return;
-        };
-        *reverting.borrow_mut() = true;
-        spin_for_revert.set_value(default_val as f64);
-        *reverting.borrow_mut() = false;
-        overridden_for_revert
-            .borrow_mut()
-            .retain(|value| value != &field_s);
-        button_for_revert.set_visible(false);
-    });
+fn apply_combo_selected(row: &adw::ComboRow, v: u32) {
+    row.set_selected(v);
 }
+
+fn apply_spin_button_value(spin: &gtk4::SpinButton, v: i32) {
+    spin.set_value(v as f64);
+}
+
+track_impl!(
+    track_switch,
+    (row: adw::SwitchRow),
+    row.connect_active_notify,
+    row,
+    apply_switch,
+    bool
+);
+track_impl!(
+    track_spin_row,
+    (row: adw::SpinRow),
+    row.connect_value_notify,
+    row,
+    apply_spin_row_value,
+    i32
+);
+track_impl!(
+    track_combo,
+    (row: adw::ComboRow),
+    row.connect_selected_notify,
+    row,
+    apply_combo_selected,
+    u32
+);
+track_impl!(
+    track_spin,
+    (spin: gtk4::SpinButton, row: adw::ActionRow),
+    spin.connect_value_changed,
+    row,
+    apply_spin_button_value,
+    i32
+);

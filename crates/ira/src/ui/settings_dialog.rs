@@ -241,29 +241,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         sidebar.select_row(Some(&first));
     }
 
-    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    btn_row.set_halign(gtk4::Align::End);
-    btn_row.set_margin_start(16);
-    btn_row.set_margin_end(16);
-    btn_row.set_margin_top(8);
-    btn_row.set_margin_bottom(12);
-
-    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
-    let win_c = win.clone();
-    cancel_btn.connect_clicked(move |_| {
-        win_c.close();
-    });
-    let win_c = win.clone();
-    let cancel_shortcut = gtk4::EventControllerKey::new();
-    cancel_shortcut.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk4::gdk::Key::Escape {
-            win_c.close();
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
-        }
-    });
-    win.add_controller(cancel_shortcut);
+    let btn_row = super::helpers::dialog_button_row_with_escape(&win);
 
     let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
@@ -310,7 +288,6 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         win_clone.close();
     });
 
-    btn_row.append(&cancel_btn);
     btn_row.append(&save_btn);
     content_area.append(&btn_row);
     if let Some(row) = sidebar.selected_row().filter(|row| row.parent().is_some()) {

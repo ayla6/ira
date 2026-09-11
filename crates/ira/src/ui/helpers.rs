@@ -41,6 +41,63 @@ pub(crate) fn logged_db_vec<T>(what: &str, result: Result<Vec<T>, String>) -> Ve
     })
 }
 
+/// Pops up a context popover anchored at `(x, y)` on `parent`. Registers
+/// the action group and unregisters + unparents the popover once it closes
+/// (via an idle — unparenting directly inside `closed` is not allowed).
+pub(crate) fn popup_context_popover(
+    parent: &impl IsA<gtk4::Widget>,
+    popover: &gtk4::PopoverMenu,
+    actions: &impl IsA<gio::ActionGroup>,
+    action_group_name: &str,
+    x: i32,
+    y: i32,
+) {
+    popover.set_parent(parent);
+    popover.set_pointing_to(Some(&gdk4::Rectangle::new(x, y, 1, 1)));
+    parent.insert_action_group(action_group_name, Some(actions));
+    let popover_clone = popover.clone();
+    popover.connect_closed(move |_| {
+        let p = popover_clone.clone();
+        gtk4::glib::idle_add_local_once(move || {
+            p.unparent();
+        });
+    });
+    popover.popup();
+}
+
+/// The right-aligned button row under a settings-style window, starting
+/// with a Cancel button, plus an Escape-to-close controller on `win`
+/// (unlike `adw::Dialog` sheets, plain windows don't close on Escape).
+/// Callers append their action buttons (Save, …) to the returned row.
+pub(crate) fn dialog_button_row_with_escape(win: &adw::Window) -> gtk4::Box {
+    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    btn_row.set_halign(gtk4::Align::End);
+    btn_row.set_margin_start(16);
+    btn_row.set_margin_end(16);
+    btn_row.set_margin_top(8);
+    btn_row.set_margin_bottom(12);
+
+    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
+    let win_c = win.clone();
+    cancel_btn.connect_clicked(move |_| {
+        win_c.close();
+    });
+    btn_row.append(&cancel_btn);
+
+    let escape_close = gtk4::EventControllerKey::new();
+    let win_c = win.clone();
+    escape_close.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk4::gdk::Key::Escape {
+            win_c.close();
+            gtk4::glib::Propagation::Stop
+        } else {
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    win.add_controller(escape_close);
+
+    btn_row
+}
 
 pub struct DialogLayout {
     pub window: adw::Dialog,

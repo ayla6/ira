@@ -79,6 +79,19 @@ impl SidebarItem {
         Self::new_game_variant(db_id, None, name, icon_path, hidden, playing)
     }
 
+    /// Sidebar entry for a listed game; the running flag comes from the
+    /// set of currently running db_ids.
+    pub fn from_game(game: &crate::Game, running_games: &std::collections::HashSet<i64>) -> Self {
+        Self::new_game_variant(
+            game.db_id,
+            game.variant_id,
+            &game.name,
+            &game.icon_path,
+            game.hidden,
+            running_games.contains(&game.db_id),
+        )
+    }
+
     pub fn new_game_variant(
         db_id: i64,
         variant_id: Option<i64>,

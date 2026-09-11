@@ -12,6 +12,7 @@ use super::context_menu_actions::{
 use super::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
+use ira_models::AssetType;
 
 fn setup_and_show_popover(
     menu: &gio::Menu,
@@ -23,17 +24,7 @@ fn setup_and_show_popover(
     let popover = gtk4::PopoverMenu::from_model(Some(menu));
     popover.set_halign(gtk4::Align::Start);
     popover.set_has_arrow(false);
-    popover.set_parent(parent);
-    popover.set_pointing_to(Some(&gdk4::Rectangle::new(at_x as i32, at_y as i32, 1, 1)));
-    parent.insert_action_group("game", Some(actions));
-    let popover_clone = popover.clone();
-    popover.connect_closed(move |_| {
-        let p = popover_clone.clone();
-        glib::idle_add_local_once(move || {
-            p.unparent();
-        });
-    });
-    popover.popup();
+    super::helpers::popup_context_popover(parent, &popover, actions, "game", at_x as i32, at_y as i32);
 }
 
 fn build_collections_submenu(
@@ -96,7 +87,7 @@ pub fn show_game_context_menu(
 
     let (game_folder, game_file, wine_prefix, manual_script) = {
         let s = state.borrow();
-        let config = ira_db::get_game_config(&s.db, game.db_id).ok().flatten();
+        let config = super::helpers::logged_game_config(&s.db, game.db_id);
         let app_default = s.cfg.default_wine_config.clone();
         let (launch, mut wine, profile_id) = config.unwrap_or_default();
         if let Some(pid) = profile_id {
@@ -342,12 +333,12 @@ pub fn show_image_reset_menu(
     let image_dir = ira_parser::entry_data_dir(&save_dir, &entry);
 
     let candidates: [(String, &str); 6] = [
-        (crate::tr!("Icon"), "icon"),
-        (crate::tr!("Capsule"), "vertical"),
-        (crate::tr!("Square"), "square"),
-        (crate::tr!("Header"), "header"),
-        (crate::tr!("Logo"), "logo"),
-        (crate::tr!("Hero"), "hero"),
+        (crate::tr!("Icon"), AssetType::Icon.file_base()),
+        (crate::tr!("Capsule"), AssetType::Grid.file_base()),
+        (crate::tr!("Square"), AssetType::Square.file_base()),
+        (crate::tr!("Header"), AssetType::Header.file_base()),
+        (crate::tr!("Logo"), AssetType::Logo.file_base()),
+        (crate::tr!("Hero"), AssetType::Hero.file_base()),
     ];
     let existing: Vec<(String, &str)> = candidates
         .iter()
@@ -380,27 +371,15 @@ pub fn show_image_reset_menu(
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
     popover.set_halign(gtk4::Align::Start);
     popover.set_has_arrow(false);
-    popover.set_parent(parent);
-    popover.set_pointing_to(Some(&gdk4::Rectangle::new(
-        at_x as i32,
-        at_y as i32,
-        1,
-        1,
-    )));
-    parent.insert_action_group("image", Some(&actions));
-    let popover_clone = popover.clone();
-    popover.connect_closed(move |_| {
-        let p = popover_clone.clone();
-        glib::idle_add_local_once(move || {
-            p.unparent();
-        });
-    });
-    popover.popup();
+    super::helpers::popup_context_popover(parent, &popover, &actions, "image", at_x as i32, at_y as i32);
 }
 
 /// Delete one stored art file from the game's data dir and update the
 /// shared state so every view falls back immediately.
 fn reset_game_image(state: &SharedState, game: &Game, base: &str) {
+    let Some(asset) = AssetType::from_file_base(base) else {
+        return;
+    };
     let (db, save_dir) = {
         let s = state.borrow();
         (s.db.clone(), s.save_dir.clone())
@@ -416,15 +395,7 @@ fn reset_game_image(state: &SharedState, game: &Game, base: &str) {
     }
 
     let mut updated = game.clone();
-    match base {
-        "icon" => updated.icon_path.clear(),
-        "hero" => updated.hero_image_path.clear(),
-        "vertical" => updated.grid_path.clear(),
-        "square" => updated.square_path.clear(),
-        "header" => updated.header_path.clear(),
-        "logo" => updated.logo_path.clear(),
-        _ => {}
-    }
+    updated.asset_path_mut(asset).clear();
 
     {
         let mut s = state.borrow_mut();
@@ -433,15 +404,7 @@ fn reset_game_image(state: &SharedState, game: &Game, base: &str) {
             .iter_mut()
             .filter(|g| g.db_id == game.db_id && g.variant_id == game.variant_id)
         {
-            match base {
-                "icon" => g.icon_path.clear(),
-                "hero" => g.hero_image_path.clear(),
-                "vertical" => g.grid_path.clear(),
-                "square" => g.square_path.clear(),
-                "header" => g.header_path.clear(),
-                "logo" => g.logo_path.clear(),
-                _ => {}
-            }
+            g.asset_path_mut(asset).clear();
         }
     }
     super::helpers::replace_grid_game(state, &updated);

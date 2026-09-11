@@ -48,7 +48,7 @@ fn extract_game_and_config(
     let (game, config, app_default_wine) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == db_id).cloned();
-        let config = ira_db::get_game_config(&s.db, db_id).ok().flatten();
+        let config = super::helpers::logged_game_config(&s.db, db_id);
         let app_default_wine = s.cfg.default_wine_config.clone();
         (game, config, app_default_wine)
     };
@@ -111,17 +111,7 @@ fn build_launch_wine_advanced_pages(
     let save_dir = state.borrow().save_dir.clone();
     let registry = state.borrow().controller_registry.clone();
 
-    let overlay_source_id = match game.kind {
-        ira_models::GameKind::Steam => Some("steam"),
-        ira_models::GameKind::Retro => Some(game.platform_id.as_str()),
-        ira_models::GameKind::Ps4 => Some("ps4"),
-        ira_models::GameKind::Ps3 => Some("ps3"),
-        ira_models::GameKind::PsVita => Some("psvita"),
-        ira_models::GameKind::WiiU => Some("wiiu"),
-        ira_models::GameKind::ThreeDS => Some("3ds"),
-        ira_models::GameKind::Switch => Some("switch"),
-        _ => None,
-    };
+    let overlay_source_id = game.overlay_source_id();
     let (
         overlay_default,
         gamemode_default,
@@ -430,37 +420,7 @@ fn build_dialog_contents(
 
     setup_sidebar_navigation(&sidebar, &stack);
 
-    let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    btn_row.set_halign(gtk4::Align::End);
-    btn_row.set_margin_start(16);
-    btn_row.set_margin_end(16);
-    btn_row.set_margin_top(8);
-    btn_row.set_margin_bottom(12);
-
-    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
-    let win_c = Downgrade::downgrade(&win);
-    cancel_btn.connect_clicked(move |_| {
-        if let Some(win) = win_c.upgrade() {
-            win.close();
-        }
-    });
-    // Unlike `adw::Dialog` sheets, plain windows don't close on Escape;
-    // mirror the app settings window's Escape-to-cancel shortcut.
-    let escape_close = gtk4::EventControllerKey::new();
-    {
-        let win_c = Downgrade::downgrade(&win);
-        escape_close.connect_key_pressed(move |_, key, _, _| {
-            if key == gtk4::gdk::Key::Escape {
-                if let Some(win) = win_c.upgrade() {
-                    win.close();
-                }
-                glib::Propagation::Stop
-            } else {
-                glib::Propagation::Proceed
-            }
-        });
-    }
-    win.add_controller(escape_close);
+    let btn_row = super::helpers::dialog_button_row_with_escape(&win);
 
     if let Some(btn) = &migrate_btn {
         let state_w = Rc::downgrade(&state);
@@ -640,7 +600,6 @@ fn build_dialog_contents(
         });
     });
 
-    btn_row.append(&cancel_btn);
     btn_row.append(&save_btn);
     content_area.append(&btn_row);
 

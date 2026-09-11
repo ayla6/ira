@@ -10,6 +10,7 @@ use ira_models::{GameKind, GameLaunchConfig, GameVariant, TrophySource, WineConf
 use super::add_game_db::{add_game_to_db, AddGameToDbParams};
 use super::css::*;
 use super::edit_game_dialog::show_edit_game_dialog;
+use super::helpers::clear_children;
 use super::state::SharedState;
 use super::steam_search_dialog::{
     show_search_results_dialog, SearchResultsDialogParams, SearchSource,
@@ -1708,12 +1709,6 @@ pub(super) fn show_error(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     alert.set_default_response(Some("ok"));
     alert.set_close_response("ok");
     alert.present(Some(win.as_widget()));
-}
-
-pub(super) fn clear_children(container: &gtk4::Box) {
-    while let Some(child) = container.first_child() {
-        container.remove(&child);
-    }
 }
 
 fn move_dir(src: &Path, dst: &Path) -> Result<(), String> {

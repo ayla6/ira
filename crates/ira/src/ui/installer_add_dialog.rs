@@ -15,11 +15,11 @@ use ira_platforms::installer::{
 };
 
 use super::auto_add_dialog::{
-    clear_children, resolve_wine_config, set_status, show_error, show_identified_form,
+    resolve_wine_config, set_status, show_error, show_identified_form,
     spawn_identify_thread, IdentifiedGame, Wizard, WizardEvent,
 };
 use super::css::*;
-use super::helpers::esc;
+use super::helpers::{clear_children, esc};
 use super::state::SharedState;
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
 use super::wizard_window::WizardWindow;
@@ -241,9 +241,7 @@ fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerStat
 }
 
 fn rebuild_installer_list(list: &gtk4::ListBox, ist: &Rc<RefCell<InstallerState>>) {
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
+    clear_children(list);
     let installers = ist.borrow().installers.clone();
     if installers.is_empty() {
         let row = adw::ActionRow::new();

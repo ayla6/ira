@@ -173,15 +173,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
             if !is_collapsed {
                 for game in &collection_games {
-                    let is_running = running_games.contains(&game.db_id);
-                    items.push(SidebarItem::new_game_variant(
-                        game.db_id,
-                        game.variant_id,
-                        &game.name,
-                        &game.icon_path,
-                        game.hidden,
-                        is_running,
-                    ));
+                    items.push(SidebarItem::from_game(game, &running_games));
                 }
             }
         }
@@ -201,15 +193,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
             if !is_collapsed {
                 for game in &uncategorized {
-                    let is_running = running_games.contains(&game.db_id);
-                    items.push(SidebarItem::new_game_variant(
-                        game.db_id,
-                        game.variant_id,
-                        &game.name,
-                        &game.icon_path,
-                        game.hidden,
-                        is_running,
-                    ));
+                    items.push(SidebarItem::from_game(game, &running_games));
                 }
             }
         }
@@ -237,15 +221,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
         });
 
         for game in &filtered {
-            let is_running = running_games.contains(&game.db_id);
-            items.push(SidebarItem::new_game_variant(
-                game.db_id,
-                game.variant_id,
-                &game.name,
-                &game.icon_path,
-                game.hidden,
-                is_running,
-            ));
+            items.push(SidebarItem::from_game(game, &running_games));
         }
     }
 
@@ -447,17 +423,7 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
                 });
                 actions.add_action(&delete_action);
 
-                popover.set_parent(&r);
-                popover.set_pointing_to(Some(&gdk4::Rectangle::new(x as i32, y as i32, 1, 1)));
-                r.insert_action_group("grp", Some(&actions));
-                let popover_clone = popover.clone();
-                popover.connect_closed(move |_| {
-                    let p = popover_clone.clone();
-                    glib::idle_add_local_once(move || {
-                        p.unparent();
-                    });
-                });
-                popover.popup();
+                super::helpers::popup_context_popover(&r, &popover, &actions, "grp", x as i32, y as i32);
             }
         });
         row.add_controller(right_click);
@@ -511,12 +477,7 @@ fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
                     .collect();
                 show_multi_game_context_menu(&sc, &db_ids, &r, x, y);
             } else {
-                let game = sc
-                    .borrow()
-                    .games
-                    .iter()
-                    .find(|g| g.db_id == db_id && g.variant_id == variant_id)
-                    .cloned();
+                let game = sc.borrow().find_game(db_id, variant_id);
                 if let Some(game) = game {
                     show_game_context_menu(&sc, &game, &r, x, y, None::<&gtk4::ListBoxRow>);
                 }

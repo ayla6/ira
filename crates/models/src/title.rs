@@ -9,6 +9,7 @@
 /// "Pokémon" and "Pokemon", "World Ends With You, The" and "The World Ends
 /// With You" land on the same key.
 pub fn normalize_name(s: &str) -> String {
+    let s = front_load_article(s);
     // "&" and "and" must land on the same key: titles use either.
     let s = s.replace('&', " and ");
     let mut result = String::with_capacity(s.len());
@@ -43,7 +44,7 @@ pub fn normalize_name(s: &str) -> String {
     while result.ends_with(' ') {
         result.pop();
     }
-    front_load_article(result)
+    result
 }
 
 /// Accented Latin letters fold onto their base letter so "Pokémon" and
@@ -73,18 +74,40 @@ fn fold_accent(c: char) -> char {
     }
 }
 
-/// A trailing English article moves to the front, so a file named
-/// "World Ends With You, The" and a store title "The World Ends With You"
-/// normalize to the same key.
-fn front_load_article(norm: String) -> String {
-    for article in [" the", " an", " a"] {
-        if let Some(base) = norm.strip_suffix(article) {
-            if !base.is_empty() {
-                return format!("{} {}", &article[1..], base);
+/// Moves a file-name-style article back to the front: No-Intro names write
+/// "World Ends With You, The" and "Legend of Zelda, The - Phantom
+/// Hourglass", where store titles say "The World Ends With You" and "The
+/// Legend of Zelda: Phantom Hourglass". The ", The" must sit at the end of
+/// the main title — before a subtitle, tag group or the end of the name —
+/// so a comma inside prose ("Me, the Robot") is left alone.
+fn front_load_article(s: &str) -> String {
+    let bytes = s.as_bytes();
+    for article in ["the", "an", "a"] {
+        let mut from = 0;
+        while let Some(rel) = bytes[from..].iter().position(|b| *b == b',') {
+            let start = from + rel;
+            let end = start + 2 + article.len();
+            if end <= bytes.len()
+                && bytes[start + 1] == b' '
+                && bytes[start + 2..end].eq_ignore_ascii_case(article.as_bytes())
+                && ends_main_title(&bytes[end..])
+            {
+                return format!("{} {}{}", &s[start + 2..end], &s[..start], &s[end..]);
             }
+            from = start + 1;
         }
     }
-    norm
+    s.to_string()
+}
+
+/// Whether the bytes after a ", The" are a subtitle separator, a tag
+/// group, or nothing — the places a file-name article can legally end.
+fn ends_main_title(rest: &[u8]) -> bool {
+    rest.is_empty()
+        || rest.starts_with(b" -")
+        || rest.starts_with(b":")
+        || rest.starts_with(b" (")
+        || rest.starts_with(b" [")
 }
 
 #[cfg(test)]
@@ -123,6 +146,27 @@ mod tests {
         );
         assert_eq!(normalize_name("Hoshi no Kirby, The"), "the hoshi no kirby");
         assert_eq!(normalize_name("Odyssey, An"), "an odyssey");
+        assert_eq!(normalize_name("Boy and His Blob, A"), "a boy and his blob");
+    }
+
+    #[test]
+    fn test_normalize_name_article_before_subtitle_or_tags() {
+        // No-Intro puts the article after the main title, before the subtitle.
+        assert_eq!(
+            normalize_name("Legend of Zelda, The - Phantom Hourglass (USA)"),
+            normalize_name("The Legend of Zelda: Phantom Hourglass")
+        );
+        assert_eq!(
+            normalize_name("Wizard of Oz, The - Beyond the Yellow Brick Road"),
+            "the wizard of oz beyond the yellow brick road"
+        );
+        assert_eq!(
+            normalize_name("World Ends with You, The (USA)"),
+            "the world ends with you"
+        );
+        // A comma inside prose is not an article marker.
+        assert_eq!(normalize_name("Me, the Robot"), "me the robot");
+        assert_eq!(normalize_name("Game, Anthology Edition"), "game anthology edition");
     }
 
     #[test]

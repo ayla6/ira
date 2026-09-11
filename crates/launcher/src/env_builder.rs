@@ -1,6 +1,22 @@
 use crate::wine_launch;
 use ira_models::{ControllerInputMode, GameLaunchConfig, WineConfig};
 
+/// Sets `key` to `value`, replacing any previous entry.
+fn env_set(env: &mut Vec<(String, String)>, key: &str, value: &str) {
+    env.retain(|(k, _)| k != key);
+    env.push((key.to_string(), value.to_string()));
+}
+
+/// Prepends `value` to `key`, merging with an existing entry
+/// colon-separated (LD_PRELOAD / LD_LIBRARY_PATH style).
+fn env_prepend(env: &mut Vec<(String, String)>, key: &str, value: &str) {
+    let merged = match env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()) {
+        Some(prev) if !prev.is_empty() => format!("{}:{}", value, prev),
+        _ => value.to_string(),
+    };
+    env_set(env, key, &merged);
+}
+
 fn has_exec(name: &str) -> bool {
     std::env::var_os("PATH")
         .and_then(|p| std::env::split_paths(&p).find(|d| d.join(name).is_file()))
@@ -162,16 +178,7 @@ pub fn build_env(
                 w.denuvo_api.trim_start_matches('/')
             );
             if std::path::Path::new(&denuvo_so).is_file() {
-                let existing = env
-                    .iter()
-                    .find(|(k, _)| k == "LD_PRELOAD")
-                    .map(|(_, v)| v.clone());
-                let merged = match existing {
-                    Some(prev) if !prev.is_empty() => format!("{}:{}", denuvo_so, prev),
-                    _ => denuvo_so,
-                };
-                env.retain(|(k, _)| k != "LD_PRELOAD");
-                env.push(("LD_PRELOAD".to_string(), merged));
+                env_prepend(&mut env, "LD_PRELOAD", &denuvo_so);
             } else {
                 eprintln!(
                     "Denuvo emulator not found: {} (denuvo_api='{}')",
@@ -203,28 +210,10 @@ pub fn apply_launch_overrides(env: &mut Vec<(String, String)>, launch: &GameLaun
     }
 
     if !launch.ld_preload.is_empty() {
-        let existing = env
-            .iter()
-            .find(|(k, _)| k == "LD_PRELOAD")
-            .map(|(_, v)| v.clone());
-        let merged = match existing {
-            Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_preload, prev),
-            _ => launch.ld_preload.clone(),
-        };
-        env.retain(|(k, _)| k != "LD_PRELOAD");
-        env.push(("LD_PRELOAD".to_string(), merged));
+        env_prepend(env, "LD_PRELOAD", &launch.ld_preload);
     }
     if !launch.ld_library_path.is_empty() {
-        let existing = env
-            .iter()
-            .find(|(k, _)| k == "LD_LIBRARY_PATH")
-            .map(|(_, v)| v.clone());
-        let merged = match existing {
-            Some(prev) if !prev.is_empty() => format!("{}:{}", launch.ld_library_path, prev),
-            _ => launch.ld_library_path.clone(),
-        };
-        env.retain(|(k, _)| k != "LD_LIBRARY_PATH");
-        env.push(("LD_LIBRARY_PATH".to_string(), merged));
+        env_prepend(env, "LD_LIBRARY_PATH", &launch.ld_library_path);
     }
 
     if !launch.gpu.is_empty() {
@@ -271,8 +260,7 @@ fn take_gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, Stri
 /// `WAYLAND_DISPLAY` to find the compositor it nests in.
 fn gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, String)> {
     let mut game_env = take_gamescope_game_env(env);
-    game_env.retain(|(key, _)| key != "WAYLAND_DISPLAY");
-    game_env.push(("WAYLAND_DISPLAY".to_string(), "gamescope-0".to_string()));
+    env_set(&mut game_env, "WAYLAND_DISPLAY", "gamescope-0");
     game_env
 }
 
@@ -326,10 +314,8 @@ pub fn apply_performance(
     }
     let mangohud_enabled = launch.mangohud.unwrap_or(false) && has_exec("mangohud");
     if mangohud_enabled {
-        env.retain(|(k, _)| k != "MANGOHUD");
-        env.push(("MANGOHUD".to_string(), "1".to_string()));
-        env.retain(|(k, _)| k != "MANGOHUD_DLSYM");
-        env.push(("MANGOHUD_DLSYM".to_string(), "1".to_string()));
+        env_set(env, "MANGOHUD", "1");
+        env_set(env, "MANGOHUD_DLSYM", "1");
     }
 
     if launch.gamescope.unwrap_or(false) && has_exec("gamescope") {
@@ -405,30 +391,15 @@ pub fn add_overlay_env(
         return;
     };
 
-    env.retain(|(k, _)| k != "VK_LAYER_PATH");
-    env.push(("VK_LAYER_PATH".to_string(), layer_dir.clone()));
-    env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS");
-    env.push((
-        "VK_INSTANCE_LAYERS".to_string(),
-        "VK_LAYER_IRA_OVERLAY".to_string(),
-    ));
+    env_set(env, "VK_LAYER_PATH", &layer_dir);
+    env_set(env, "VK_INSTANCE_LAYERS", "VK_LAYER_IRA_OVERLAY");
 
     eprintln!("ira-overlay: injecting VK layer (path={layer_dir}) + shim + SHM");
 
-    let existing = env
-        .iter()
-        .find(|(k, _)| k == "LD_PRELOAD")
-        .map(|(_, v)| v.clone());
-    let merged = match existing {
-        Some(prev) if !prev.is_empty() => format!("{}:{}", shim_path, prev),
-        _ => shim_path,
-    };
-    env.retain(|(k, _)| k != "LD_PRELOAD");
-    env.push(("LD_PRELOAD".to_string(), merged));
+    env_prepend(env, "LD_PRELOAD", &shim_path);
 
     if let Some(shm) = overlay_shm {
-        env.retain(|(k, _)| k != "IRA_OVERLAY_SHM");
-        env.push(("IRA_OVERLAY_SHM".to_string(), shm.to_string()));
+        env_set(env, "IRA_OVERLAY_SHM", shm);
     }
 
     // Resolve font family: user config → system default via fontconfig → fallback.
@@ -436,8 +407,7 @@ pub fn add_overlay_env(
         .map(str::to_string)
         .or_else(detect_system_font)
         .unwrap_or_else(|| "sans-serif".to_string());
-    env.retain(|(k, _)| k != "IRA_OVERLAY_FONT_FAMILY");
-    env.push(("IRA_OVERLAY_FONT_FAMILY".to_string(), font));
+    env_set(env, "IRA_OVERLAY_FONT_FAMILY", &font);
 }
 
 /// Injects overlay components into a game running inside Gamescope while
@@ -448,8 +418,7 @@ pub fn add_overlay_env_without_ui(
     font_family: Option<&str>,
 ) {
     add_overlay_env(env, overlay_shm, font_family);
-    env.retain(|(key, _)| key != "IRA_OVERLAY_DISABLE_UI");
-    env.push(("IRA_OVERLAY_DISABLE_UI".to_string(), "1".to_string()));
+    env_set(env, "IRA_OVERLAY_DISABLE_UI", "1");
 }
 
 /// Queries fontconfig (`fc-match`) for the system's default sans-serif font family.
@@ -509,16 +478,14 @@ pub fn add_overlay_env_standalone(
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS" && k != "VK_LAYER_PATH");
 
     if let Some(shm) = overlay_shm {
-        env.retain(|(k, _)| k != "IRA_OVERLAY_SHM");
-        env.push(("IRA_OVERLAY_SHM".to_string(), shm.to_string()));
+        env_set(env, "IRA_OVERLAY_SHM", shm);
     }
 
     let font = font_family
         .map(str::to_string)
         .or_else(detect_system_font)
         .unwrap_or_else(|| "sans-serif".to_string());
-    env.retain(|(k, _)| k != "IRA_OVERLAY_FONT_FAMILY");
-    env.push(("IRA_OVERLAY_FONT_FAMILY".to_string(), font));
+    env_set(env, "IRA_OVERLAY_FONT_FAMILY", &font);
 }
 
 pub(crate) fn input_binary_path() -> Option<String> {

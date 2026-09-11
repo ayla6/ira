@@ -10,6 +10,7 @@ use ira_db::DbConn;
 
 use ira_models::{AppSender, ControllerInputMode, WineConfig};
 
+use super::helpers::logged_game_config;
 use super::input_profile_store::read_profile;
 use super::state::SharedState;
 
@@ -243,10 +244,8 @@ fn build_emulator_env_and_wrap(
 ) -> Result<Vec<(String, String)>, String> {
     let mut env = ira_launcher::env_builder::clean_parent_env();
 
-    let (launch, wine, _profile_id) = ira_db::get_game_config(ctx.db, ctx.db_id)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let (launch, wine, _profile_id) =
+        logged_game_config(ctx.db, ctx.db_id).unwrap_or_default();
 
     let mut launch = launch;
     apply_system_defaults(&mut launch, &ctx.system_defaults);
@@ -455,8 +454,14 @@ pub(super) fn launch_retro(
     let fullscreen_flag = ira_models::find_console(platform_id)
         .map(|d| d.fullscreen_flag)
         .unwrap_or("--fullscreen");
-    let discs = ira_db::get_discs(ctx.db, ctx.db_id).unwrap_or_default();
-    let default_disc_id = ira_db::get_default_disc(ctx.db, ctx.db_id).ok().flatten();
+    let discs = ira_db::get_discs(ctx.db, ctx.db_id).unwrap_or_else(|e| {
+        eprintln!("Failed to read discs for db_id {}: {}", ctx.db_id, e);
+        Vec::new()
+    });
+    let default_disc_id = ira_db::get_default_disc(ctx.db, ctx.db_id).unwrap_or_else(|e| {
+        eprintln!("Failed to read default disc for db_id {}: {}", ctx.db_id, e);
+        None
+    });
     let resolve = |raw: &str| -> String {
         if raw.is_empty() {
             String::new()
@@ -497,6 +502,50 @@ pub(super) fn launch_retro(
     spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
 
+/// Per-game override → integration-global setting → well-known binary name.
+fn resolve_emulator_exe<'a>(per_game: &'a str, global: &'a str, fallback: &'a str) -> &'a str {
+    if !per_game.is_empty() {
+        per_game
+    } else if !global.is_empty() {
+        global
+    } else {
+        fallback
+    }
+}
+
+/// The shared emulator-launch pipeline: fullscreen flags, filesystem
+/// sandboxing, emulator env, then spawn + monitor.
+pub(super) struct EmulatorLaunchOpts<'a> {
+    pub game_path: &'a str,
+    pub fullscreen: bool,
+    pub console_mode: Option<ControllerInputMode>,
+    pub console_profile: Option<&'a str>,
+}
+
+fn launch_emulator(
+    ctx: &LaunchCtx,
+    kind: ira_models::GameKind,
+    exe: &str,
+    label: &str,
+    args: Vec<String>,
+    opts: EmulatorLaunchOpts<'_>,
+) -> Result<(), String> {
+    let EmulatorLaunchOpts {
+        game_path,
+        fullscreen,
+        console_mode,
+        console_profile,
+    } = opts;
+    let args = with_fullscreen_args(kind, fullscreen, args);
+    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
+        exe,
+        &args,
+        Some(std::path::Path::new(game_path)),
+    );
+    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
+    spawn_and_monitor(ctx, &cmd, &env, label)
+}
+
 pub(super) fn launch_ps4(
     ctx: &LaunchCtx,
     per_game_version: &str,
@@ -512,18 +561,19 @@ pub(super) fn launch_ps4(
             "shadPS4 executable was not found: {exe}. Install shadPS4 or select an available version in Settings."
         ));
     }
-    let args = with_fullscreen_args(
+    launch_emulator(
+        ctx,
         ira_models::GameKind::Ps4,
-        fullscreen,
-        vec!["-g".to_string(), game_path.to_string()],
-    );
-    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         &exe,
-        &args,
-        Some(std::path::Path::new(game_path)),
-    );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
-    spawn_and_monitor(ctx, &cmd, &env, "shadPS4")
+        "shadPS4",
+        vec!["-g".to_string(), game_path.to_string()],
+        EmulatorLaunchOpts {
+            game_path,
+            fullscreen,
+            console_mode,
+            console_profile,
+        },
+    )
 }
 
 pub(super) fn launch_ps3(
@@ -535,27 +585,22 @@ pub(super) fn launch_ps3(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = if !per_game_emu.is_empty() {
-        per_game_emu
-    } else if !global_rpcs3_exe.is_empty() {
-        global_rpcs3_exe
-    } else {
-        "rpcs3"
-    };
+    let exe = resolve_emulator_exe(per_game_emu, global_rpcs3_exe, "rpcs3");
     // RPCS3 parses option flags until the positional game path, so the
     // fullscreen flag must come before it.
-    let args = with_fullscreen_args(
+    launch_emulator(
+        ctx,
         ira_models::GameKind::Ps3,
-        fullscreen,
-        vec!["--no-gui".to_string(), game_path.to_string()],
-    );
-    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
-        &args,
-        Some(std::path::Path::new(game_path)),
-    );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
-    spawn_and_monitor(ctx, &cmd, &env, "RPCS3")
+        "RPCS3",
+        vec!["--no-gui".to_string(), game_path.to_string()],
+        EmulatorLaunchOpts {
+            game_path,
+            fullscreen,
+            console_mode,
+            console_profile,
+        },
+    )
 }
 
 pub(super) fn launch_vita3k(
@@ -566,23 +611,20 @@ pub(super) fn launch_vita3k(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = if global_executable.is_empty() {
-        "vita3k"
-    } else {
-        global_executable
-    };
-    let args = with_fullscreen_args(
+    let exe = resolve_emulator_exe("", global_executable, "vita3k");
+    launch_emulator(
+        ctx,
         ira_models::GameKind::PsVita,
-        fullscreen,
-        vec!["-r".to_string(), game_path.to_string()],
-    );
-    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
-        &args,
-        Some(std::path::Path::new(game_path)),
-    );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
-    spawn_and_monitor(ctx, &cmd, &env, "Vita3K")
+        "Vita3K",
+        vec!["-r".to_string(), game_path.to_string()],
+        EmulatorLaunchOpts {
+            game_path,
+            fullscreen,
+            console_mode,
+            console_profile,
+        },
+    )
 }
 
 pub(super) fn launch_cemu(
@@ -594,25 +636,20 @@ pub(super) fn launch_cemu(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = if !per_game_emu.is_empty() {
-        per_game_emu
-    } else if !global_executable.is_empty() {
-        global_executable
-    } else {
-        "cemu"
-    };
-    let args = with_fullscreen_args(
+    let exe = resolve_emulator_exe(per_game_emu, global_executable, "cemu");
+    launch_emulator(
+        ctx,
         ira_models::GameKind::WiiU,
-        fullscreen,
-        vec!["-g".to_string(), game_path.to_string()],
-    );
-    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
-        &args,
-        Some(std::path::Path::new(game_path)),
-    );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
-    spawn_and_monitor(ctx, &cmd, &env, "Cemu")
+        "Cemu",
+        vec!["-g".to_string(), game_path.to_string()],
+        EmulatorLaunchOpts {
+            game_path,
+            fullscreen,
+            console_mode,
+            console_profile,
+        },
+    )
 }
 
 pub(super) fn launch_azahar(
@@ -624,26 +661,21 @@ pub(super) fn launch_azahar(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = if !per_game_emu.is_empty() {
-        per_game_emu
-    } else if !global_executable.is_empty() {
-        global_executable
-    } else {
-        "azahar"
-    };
+    let exe = resolve_emulator_exe(per_game_emu, global_executable, "azahar");
     // Azahar takes the ROM or installed title content file positionally.
-    let args = with_fullscreen_args(
+    launch_emulator(
+        ctx,
         ira_models::GameKind::ThreeDS,
-        fullscreen,
-        vec![game_path.to_string()],
-    );
-    let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
-        &args,
-        Some(std::path::Path::new(game_path)),
-    );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
-    spawn_and_monitor(ctx, &cmd, &env, "Azahar")
+        "Azahar",
+        vec![game_path.to_string()],
+        EmulatorLaunchOpts {
+            game_path,
+            fullscreen,
+            console_mode,
+            console_profile,
+        },
+    )
 }
 
 /// Per-game and integration-global emulator paths used to resolve which
@@ -759,10 +791,7 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String
         "-applaunch".to_string(),
         app_id.to_string(),
     ];
-    let (launch, _, _) = ira_db::get_game_config(ctx.db, ctx.db_id)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let (launch, _, _) = logged_game_config(ctx.db, ctx.db_id).unwrap_or_default();
     let input_mode = resolved_input_mode(
         ira_models::GameKind::Steam,
         launch.input_mode,
@@ -828,10 +857,8 @@ pub(super) fn launch_other(
     pc_controller_profiles: PcControllerProfiles<'_>,
     app_id: &str,
 ) -> Result<(), String> {
-    let (mut launch, mut wine, profile_id) = ira_db::get_game_config(ctx.db, ctx.db_id)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let (mut launch, mut wine, profile_id) =
+        logged_game_config(ctx.db, ctx.db_id).unwrap_or_default();
 
     apply_system_defaults(&mut launch, &ctx.system_defaults);
     if launch.gamescope_w == Some(0) || launch.gamescope_h == Some(0) {
@@ -863,24 +890,27 @@ pub(super) fn launch_other(
     }
 
     if let Some(vid) = variant_id {
-        if let Ok(variants) = ira_db::get_variants(ctx.db, ctx.db_id) {
-            if let Some(var) = variants.iter().find(|v| v.id == vid) {
-                if !var.exe.is_empty() {
-                    launch.exe = var.exe.clone();
-                }
-                if !var.working_dir.is_empty() {
-                    launch.working_dir = var.working_dir.clone();
-                }
-                if !var.args.is_empty() {
-                    launch.args = var.args.clone();
-                }
-                if !var.env_vars.is_empty() {
-                    launch.env_vars = var.env_vars.clone();
-                }
-                if !var.pre_launch.is_empty() {
-                    launch.pre_launch = var.pre_launch.clone();
+        match ira_db::get_variants(ctx.db, ctx.db_id) {
+            Ok(variants) => {
+                if let Some(var) = variants.iter().find(|v| v.id == vid) {
+                    if !var.exe.is_empty() {
+                        launch.exe = var.exe.clone();
+                    }
+                    if !var.working_dir.is_empty() {
+                        launch.working_dir = var.working_dir.clone();
+                    }
+                    if !var.args.is_empty() {
+                        launch.args = var.args.clone();
+                    }
+                    if !var.env_vars.is_empty() {
+                        launch.env_vars = var.env_vars.clone();
+                    }
+                    if !var.pre_launch.is_empty() {
+                        launch.pre_launch = var.pre_launch.clone();
+                    }
                 }
             }
+            Err(e) => eprintln!("Failed to read variants for db_id {}: {}", ctx.db_id, e),
         }
     }
 

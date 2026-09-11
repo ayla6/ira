@@ -187,6 +187,30 @@ fn with_fullscreen_args(
         .collect()
 }
 
+/// Session bookkeeping for a directly spawned process: playtime counting is
+/// the caller's policy (emulators count, Steam does not — Steam records
+/// playtime in its own appmanifests, which Ira reads back).
+fn monitor_context(
+    ctx: &LaunchCtx,
+    cmd: &[String],
+    env: &[(String, String)],
+    count_playtime: bool,
+) -> ira_launcher::wrapper::MonitorContext {
+    ira_launcher::wrapper::MonitorContext {
+        sender: ctx.sender.clone(),
+        game_id: ctx.game_id,
+        variant_id: None,
+        count_playtime,
+        started_at: ctx.started_at,
+        db: ctx.db.clone(),
+        running_games: ctx.running_games.clone(),
+        env: env.to_vec(),
+        command: cmd.to_vec(),
+        post_exit: String::new(),
+        working_dir: None,
+    }
+}
+
 fn spawn_and_monitor(
     ctx: &LaunchCtx,
     cmd: &[String],
@@ -198,19 +222,7 @@ fn spawn_and_monitor(
         Ok(child) => {
             let pid = child.id() as i32;
             ctx.running_games.lock().unwrap().insert(ctx.game_id, pid);
-            let mc = ira_launcher::wrapper::MonitorContext {
-                sender: ctx.sender.clone(),
-                game_id: ctx.game_id,
-                variant_id: None,
-                count_playtime: true,
-                started_at: ctx.started_at,
-                db: ctx.db.clone(),
-                running_games: ctx.running_games.clone(),
-                env: env.to_vec(),
-                command: cmd.to_vec(),
-                post_exit: String::new(),
-                working_dir: None,
-            };
+            let mc = monitor_context(ctx, cmd, env, true);
             std::thread::spawn(move || {
                 ira_launcher::wrapper::monitor_process(child, pid, mc);
             });
@@ -739,8 +751,11 @@ fn pick(preferred: &str, secondary: &str, fallback: &str) -> String {
 }
 
 pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String> {
+    // -silent boots the Steam client without raising its library window —
+    // the game still starts, Steam just stays in the background.
     let mut cmd = vec![
         "steam".to_string(),
+        "-silent".to_string(),
         "-applaunch".to_string(),
         app_id.to_string(),
     ];
@@ -780,18 +795,27 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String
         return Ok(true);
     }
     let env = std::env::vars().collect::<Vec<_>>();
-    match ira_launcher::wrapper::spawn_game(&cmd, &env, None, None) {
-        Ok(_child) => {}
+    let child = match ira_launcher::wrapper::spawn_game(&cmd, &env, None, None) {
+        Ok(child) => Some(child),
         Err(_) => {
+            // No `steam` binary on PATH: desktop-installed Steam only
+            // answers its steam:// scheme.
             let uri = format!("steam://run/{}", app_id);
             let cmd = vec!["xdg-open".to_string(), uri];
-            if let Err(e) = ira_launcher::wrapper::spawn_game(&cmd, &env, None, None) {
-                return Err(format!("Failed to launch Steam game: {}", e));
+            match ira_launcher::wrapper::spawn_game(&cmd, &env, None, None) {
+                Ok(child) => Some(child),
+                Err(e) => return Err(format!("Failed to launch Steam game: {}", e)),
             }
         }
-    }
-    // Steam detaches from the app launcher, so there is no child process we can track.
-    Ok(false)
+    };
+    // Steam hands the launch to its client (or boots one), so the spawned
+    // process is never the game. Mark the session as running immediately —
+    // a placeholder pid until the supervisor sees the game's real
+    // processes — and let it watch for the game's exit.
+    ctx.running_games.lock().unwrap().insert(ctx.game_id, 0);
+    let mc = monitor_context(ctx, &cmd, &env, false);
+    ira_launcher::steam_watch::monitor_steam_launch(child, app_id.to_string(), mc);
+    Ok(true)
 }
 
 pub(super) fn launch_other(

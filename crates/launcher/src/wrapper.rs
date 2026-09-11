@@ -197,7 +197,7 @@ pub fn game_log_path(save_dir: &str, game_id: i64) -> String {
 /// Drains one piped output stream of a spawned process into the shared game
 /// log buffer, one line at a time. Runs on its own thread so both pipes can
 /// be read live without deadlocking on a full pipe buffer.
-fn pipe_lines_to_log<R: Read + std::marker::Send + 'static>(pipe: Option<R>, log: GameLog) {
+pub(crate) fn pipe_lines_to_log<R: Read + std::marker::Send + 'static>(pipe: Option<R>, log: GameLog) {
     std::thread::spawn(move || {
         let Some(mut reader) = pipe else { return };
         let mut buf = [0u8; 4096];
@@ -315,7 +315,7 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
 /// Shared end-of-session bookkeeping for both monitors: zombie reaping,
 /// post-exit script, playtime recording, and the UI notifications.
 /// `exit_code` carries the daemon session's reported code, if any.
-fn finalize_game(
+pub(crate) fn finalize_game(
     ctx: &MonitorContext,
     log_buf: &GameLog,
     child_pid: Option<i32>,
@@ -388,7 +388,7 @@ fn finalize_game(
 
 /// The first lines of every game log: the command being run and the launch
 /// environment, minus cargo's own noise.
-fn log_launch_header(ctx: &MonitorContext, log_buf: &GameLog, started_message: &str) {
+pub(crate) fn log_launch_header(ctx: &MonitorContext, log_buf: &GameLog, started_message: &str) {
     let mut log = log_buf.lock().unwrap();
     log.push(format!("{} from {}", started_message, ctx.command.join(" ")));
     let mut sorted_env = ctx.env.clone();

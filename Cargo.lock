@@ -2158,6 +2158,7 @@ name = "ira-launcher"
 version = "0.1.0"
 dependencies = [
  "ira-db",
+ "ira-input",
  "ira-input-ipc",
  "ira-models",
  "ira-overlay-ipc",

@@ -99,12 +99,29 @@ pub(super) fn active_controller_input(
 }
 
 pub fn stop_game(state: &SharedState, game_id: i64) {
+    // A Steam game is spawned and owned by the Steam client, so its own
+    // steam://stop is the only clean stop — killing the process tree would
+    // reach into Steam's runtime. Dropping the registry entry unmarks the
+    // game right away, and the launch supervisor reports the session over
+    // once it notices (or the game's processes are gone).
+    let steam_app_id = {
+        let s = state.borrow();
+        s.games
+            .iter()
+            .find(|g| g.db_id == game_id)
+            .filter(|g| g.kind == ira_models::GameKind::Steam)
+            .map(|g| g.app_id.clone())
+    };
     let pid = state
         .borrow()
         .running_games
         .lock()
         .unwrap()
         .remove(&game_id);
+    if let Some(app_id) = steam_app_id {
+        ira_input::steam::request_steam_stop(&app_id);
+        return;
+    }
     if let Some(pid) = pid {
         // A daemon launch stores a placeholder pid until the daemon reports
         // the session's real one; there is no process to signal yet, and

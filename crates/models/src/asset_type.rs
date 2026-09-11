@@ -76,6 +76,14 @@ impl AssetType {
         }
     }
 
+    /// The asset whose `file_base()` equals `base` ("vertical" → Grid).
+    pub fn from_file_base(base: &str) -> Option<Self> {
+        AssetType::all()
+            .iter()
+            .copied()
+            .find(|a| a.file_base() == base)
+    }
+
     pub fn sgdb_dimensions(self) -> &'static [&'static str] {
         match self {
             AssetType::Grid => &["600x900"],
@@ -210,6 +218,15 @@ mod tests {
         assert_eq!(AssetType::Grid.file_base(), "vertical");
         assert_eq!(AssetType::Header.file_base(), "header");
         assert_eq!(AssetType::Logo.file_base(), "logo");
+    }
+
+    #[test]
+    fn test_asset_type_from_file_base() {
+        assert_eq!(AssetType::from_file_base("vertical"), Some(AssetType::Grid));
+        assert_eq!(AssetType::from_file_base("icon"), Some(AssetType::Icon));
+        assert_eq!(AssetType::from_file_base("square"), Some(AssetType::Square));
+        assert_eq!(AssetType::from_file_base("grid"), None);
+        assert_eq!(AssetType::from_file_base("garbage"), None);
     }
 
     #[test]

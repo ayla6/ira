@@ -190,6 +190,39 @@ impl GameEntry {
             classification_ids: String::new(),
         }
     }
+
+    /// A display `Game` carrying this row's persisted fields. Art paths,
+    /// achievements, and `app_id` stay at their defaults until the loader
+    /// (or a matching flow) fills them in.
+    pub fn to_game(&self) -> super::game::Game {
+        super::game::Game {
+            kind: self.kind,
+            trophy_source: self.trophy_source,
+            platform_id: self.platform_id.clone(),
+            db_id: self.id,
+            name: self.title.clone(),
+            name_lower: self.title.to_lowercase(),
+            hidden: self.hidden,
+            playtime: self.playtime,
+            last_played: self.last_played,
+            logo_position: self.logo_position.clone(),
+            logo_size: self.logo_size,
+            manual_unmatch: self.manual_unmatch,
+            sort_title: self.sort_title.clone(),
+            sgdb_id: self.sgdb_id.clone().unwrap_or_default(),
+            shadps4_version: self.shadps4_version.clone(),
+            release_date: self.release_date.clone(),
+            release_timestamp: self.release_timestamp,
+            metacritic_score: self.metacritic_score,
+            steam_review_score: self.steam_review_score,
+            steam_review_count: self.steam_review_count,
+            ra_core: self.ra_core.clone(),
+            emulator_override: self.emulator_override.clone(),
+            rom_path: self.rom_path.clone(),
+            game_folder: self.game_folder.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -232,6 +265,31 @@ mod tests {
         assert_eq!(entry.cached_earned_count, 0);
         assert_eq!(entry.cached_total_count, 0);
         assert_eq!(entry.cached_achievement_mtime, 0);
+    }
+
+    #[test]
+    fn test_to_game_carries_persisted_fields() {
+        let mut entry =
+            GameEntry::for_reload(7, GameKind::Retro, TrophySource::Ra, "", "gid", "psx");
+        entry.title = "Sonic".to_string();
+        entry.hidden = true;
+        entry.playtime = 3.5;
+        entry.sgdb_id = Some("sg_1".to_string());
+
+        let g = entry.to_game();
+
+        assert_eq!(g.db_id, 7);
+        assert_eq!(g.kind, GameKind::Retro);
+        assert_eq!(g.platform_id, "psx");
+        assert_eq!(g.name, "Sonic");
+        assert_eq!(g.name_lower, "sonic");
+        assert!(g.hidden);
+        assert_eq!(g.playtime, 3.5);
+        assert_eq!(g.sgdb_id, "sg_1");
+        // Loader-filled fields stay empty.
+        assert_eq!(g.app_id, "");
+        assert!(g.achievements.is_empty());
+        assert_eq!(g.icon_path, "");
     }
 
     #[test]

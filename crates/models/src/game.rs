@@ -1,5 +1,5 @@
 use super::achievement::MergedAchievement;
-use super::asset_type::LogoPosition;
+use super::asset_type::{AssetType, LogoPosition};
 use super::kind::{GameKind, TrophySource};
 
 #[derive(Debug, Clone)]
@@ -114,6 +114,47 @@ impl Game {
         self.name_lower = self.name.to_lowercase();
     }
 
+    /// The key this game's overlay settings live under: Steam and the
+    /// emulator consoles use their kind id, Retro games their platform id
+    /// (e.g. "psx"); Wine/Linux/Other games have no per-source key.
+    pub fn overlay_source_id(&self) -> Option<&str> {
+        match self.kind {
+            GameKind::Steam
+            | GameKind::Ps4
+            | GameKind::Ps3
+            | GameKind::PsVita
+            | GameKind::WiiU
+            | GameKind::ThreeDS
+            | GameKind::Switch => Some(self.kind.as_str()),
+            GameKind::Retro => Some(self.platform_id.as_str()),
+            GameKind::Wine | GameKind::Linux | GameKind::Other => None,
+        }
+    }
+
+    /// The stored path for `asset` ("", when the game has none).
+    pub fn asset_path(&self, asset: AssetType) -> &str {
+        match asset {
+            AssetType::Icon => &self.icon_path,
+            AssetType::Hero => &self.hero_image_path,
+            AssetType::Grid => &self.grid_path,
+            AssetType::Header => &self.header_path,
+            AssetType::Logo => &self.logo_path,
+            AssetType::Square => &self.square_path,
+        }
+    }
+
+    /// Mutable access to the field storing `asset`'s path.
+    pub fn asset_path_mut(&mut self, asset: AssetType) -> &mut String {
+        match asset {
+            AssetType::Icon => &mut self.icon_path,
+            AssetType::Hero => &mut self.hero_image_path,
+            AssetType::Grid => &mut self.grid_path,
+            AssetType::Header => &mut self.header_path,
+            AssetType::Logo => &mut self.logo_path,
+            AssetType::Square => &mut self.square_path,
+        }
+    }
+
     pub fn sort_key(&self) -> &str {
         if self.sort_title.is_empty() {
             &self.name
@@ -192,6 +233,29 @@ mod tests {
             ..Default::default()
         };
         assert!((g.completion_pct() - 50.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_overlay_source_id_per_kind() {
+        let mut g = Game {
+            kind: GameKind::Steam,
+            ..Default::default()
+        };
+        assert_eq!(g.overlay_source_id(), Some("steam"));
+        g.kind = GameKind::Ps4;
+        assert_eq!(g.overlay_source_id(), Some("ps4"));
+        g.kind = GameKind::Switch;
+        assert_eq!(g.overlay_source_id(), Some("switch"));
+        g.kind = GameKind::Retro;
+        assert_eq!(g.overlay_source_id(), Some(""));
+        g.platform_id = "psx".to_string();
+        assert_eq!(g.overlay_source_id(), Some("psx"));
+        g.kind = GameKind::Wine;
+        assert_eq!(g.overlay_source_id(), None);
+        g.kind = GameKind::Linux;
+        assert_eq!(g.overlay_source_id(), None);
+        g.kind = GameKind::Other;
+        assert_eq!(g.overlay_source_id(), None);
     }
 
     #[test]

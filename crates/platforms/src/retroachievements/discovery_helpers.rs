@@ -222,11 +222,6 @@ impl RaMatchIndex {
         self.titled.is_empty() && self.untitled.is_empty() && self.by_hash.is_empty()
     }
 
-    /// Whether any RA game in the list claims `rom_hash`.
-    pub(super) fn knows_hash(&self, rom_hash: &str) -> bool {
-        !rom_hash.is_empty() && self.by_hash.contains_key(&rom_hash.to_lowercase())
-    }
-
     pub(super) fn title_of(&self, id: u32) -> Option<&str> {
         self.titles.get(&id).map(String::as_str)
     }
@@ -307,16 +302,6 @@ mod tests {
         let empty = RaMatchIndex::new(&[]);
         assert!(empty.is_empty());
         assert_eq!(empty.find("cafe", "chrono trigger"), None);
-    }
-
-    #[test]
-    fn test_match_index_knows_hash() {
-        let games = vec![entry(3, "Chrono Trigger", 5, &["cafe"])];
-        let index = RaMatchIndex::new(&games);
-        assert!(index.knows_hash("CAFE"));
-        assert!(!index.knows_hash("beef"));
-        assert!(!index.knows_hash(""));
-        assert!(!RaMatchIndex::new(&[]).knows_hash("cafe"));
     }
 
     #[test]

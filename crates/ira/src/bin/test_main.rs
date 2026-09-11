@@ -13,6 +13,7 @@ fn main() {
         "discover" => test_discover(),
         "trophies" => test_trophies(),
         "playtime" => test_playtime(),
+        "scan" => bench_scan(),
         "all" => {
             test_psf();
             test_npbind();
@@ -21,7 +22,7 @@ fn main() {
             test_playtime();
         }
         _ => {
-            eprintln!("Usage: ira-test [psf|npbind|discover|trophies|playtime|all]");
+            eprintln!("Usage: ira-test [psf|npbind|discover|trophies|playtime|scan|all]");
             std::process::exit(1);
         }
     }
@@ -113,5 +114,46 @@ fn test_playtime() {
     for (serial, time) in &times {
         let hours = ps4::parse_playtime(time);
         println!("  {} -> {} ({:.2}h)", serial, time, hours);
+    }
+}
+
+/// Times the ROM library scan against a throwaway copy of the real
+/// database (the real caches and data dirs are used as-is, like the app
+/// does). With the `trace` feature, spans go to `ira-scan-trace.json` in
+/// the temp dir for a per-phase breakdown.
+fn bench_scan() {
+    let cfg = ira_config::load_config();
+    let src = format!("{}/ira.db", cfg.save_dir);
+    let dir = std::env::temp_dir().join(format!("ira-scan-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let db_copy = dir.join("ira.db");
+    std::fs::copy(&src, &db_copy).expect("copy database");
+    let db = ira_db::init_db(&db_copy.to_string_lossy());
+
+    let runs: usize = std::env::var("SCAN_RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(2);
+    for run in 1..=runs {
+        let start = std::time::Instant::now();
+        let load_ns = std::sync::atomic::AtomicU64::new(0);
+        let load_calls = std::sync::atomic::AtomicU64::new(0);
+        let games = ira_platforms::retroachievements::build_ra_games(
+            &db,
+            &cfg.save_dir,
+            &cfg,
+            |entry, save_dir| {
+                let t = std::time::Instant::now();
+                let r = ira::game_loader::load_game(entry, save_dir);
+                load_ns.fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+                load_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                r
+            },
+            |msg| eprintln!("  [{:8.2?}] {msg}", start.elapsed()),
+        );
+        println!(
+            "run {run}: {} games in {:.2?}; load_game {} calls, {:.2?} summed across threads",
+            games.len(),
+            start.elapsed(),
+            load_calls.load(std::sync::atomic::Ordering::Relaxed),
+            std::time::Duration::from_nanos(load_ns.load(std::sync::atomic::Ordering::Relaxed))
+        );
     }
 }

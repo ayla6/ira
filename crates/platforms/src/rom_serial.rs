@@ -15,7 +15,7 @@ const DISC_EXTENSIONS: &[&str] = &[
     "img", "gz",
 ];
 
-fn is_disc_extension(path: &Path) -> bool {
+pub(crate) fn is_disc_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| DISC_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))

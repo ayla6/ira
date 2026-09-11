@@ -338,10 +338,16 @@ fn build_ra_games_for_console(
 
         let groups = group_multi_disc_roms(db, new_roms);
         let nds_infos = precompute_nds_infos(console, unpack_roms, &groups, &to_relative);
+        let hashed: HashSet<&str> = existing_by_path
+            .iter()
+            .filter(|(_, entry)| !entry.rom_hash.is_empty())
+            .map(|(path, _)| path.as_str())
+            .collect();
         let rom_hashes = compute_rom_hashes(
             &nds_infos,
             &groups,
             &to_relative,
+            &hashed,
             console.def.extensions,
             unpack_roms,
         );
@@ -629,16 +635,20 @@ fn precompute_nds_infos(
 
 /// Content hash for every new ROM group's first disc, keyed by the path
 /// relative to the console folder. NDS RA hashes (already computed) win;
-/// everything else is a full MD5 of the ROM data, read once per file on
-/// the scan that first sees it — through the decompressed entry for
-/// `.zip`/`.7z`/`.zst` containers, which are skipped entirely while
+/// everything else is a full MD5 of the ROM data — through the decompressed
+/// entry for `.zip`/`.7z`/`.zst` containers, which are skipped while
 /// `unpack_roms` is off rather than stored under a useless container
-/// digest. The hash is what later scans use to reattach a game whose ROM
-/// reappears under a new name or path, and what RA lookups match on.
+/// digest. A file is read at most once: rows in `hashed` already carry
+/// their digest (multi-disc groups re-enter this path on every scan), and
+/// disc images are never hashed at all — no RA console hashes a whole disc
+/// image, and their serial, probed from specific sectors, is the identity
+/// that reattaches them. The hash is what later scans use to reattach a
+/// cartridge ROM that reappears under a new name, and what RA matches on.
 fn compute_rom_hashes(
     nds_infos: &HashMap<String, crate::nds::DsRomInfo>,
     groups: &[DiscGroup],
     to_relative: &dyn Fn(&std::path::Path) -> String,
+    hashed: &HashSet<&str>,
     extensions: &[&str],
     unpack_roms: bool,
 ) -> HashMap<String, String> {
@@ -656,7 +666,10 @@ fn compute_rom_hashes(
         .filter_map(|group| group.roms.first())
         .map(|(_, path, _)| (to_relative(path), path.clone()))
         .filter(|(relative, path)| {
-            !hashes.contains_key(relative) && (unpack_roms || !is_archive_path(path))
+            !hashes.contains_key(relative)
+                && !hashed.contains(relative.as_str())
+                && !crate::rom_serial::is_disc_extension(path)
+                && (unpack_roms || !is_archive_path(path))
         })
         .collect();
     let pick = |name: &str| has_rom_extension(name, extensions);
@@ -688,12 +701,11 @@ fn is_archive_path(path: &std::path::Path) -> bool {
         .is_some_and(crate::archives::is_archive_extension)
 }
 
-/// Rows stuck with a whole-container digest — scans before archive-aware
-/// hashing md5'd the zip itself, which no RA game lists — or with no hash
-/// at all (archive scanned while `unpack_roms` was off) are rehashed
-/// through the decompressed entry. Limited to unmatched archive paths whose
-/// stored hash no RA game claims, so the pass costs nothing once the
-/// corrected hash is in the RA list.
+/// Archive rows with no hash yet — the container's digest was cleared
+/// because no RA game lists it, or the archive was first scanned while
+/// `unpack_roms` was off — are hashed once through the decompressed entry.
+/// Only unmatched rows are worth the read, and a stored hash is never
+/// recomputed, so the pass costs nothing after that one scan.
 fn rehash_archived_rom(
     db: &ira_db::DbConn,
     console: &ActiveConsole,
@@ -706,8 +718,8 @@ fn rehash_archived_rom(
         || ra_index.is_empty()
         || entry.manual_unmatch
         || entry.trophy_source != TrophySource::Empty
+        || !entry.rom_hash.is_empty()
         || !is_archive_path(std::path::Path::new(rom_path_str))
-        || ra_index.knows_hash(&entry.rom_hash)
     {
         return;
     }
@@ -716,9 +728,6 @@ fn rehash_archived_rom(
     let Some(hash) = crate::rom_hash::content_md5(&abs, &pick) else {
         return;
     };
-    if hash == entry.rom_hash {
-        return;
-    }
     if let Err(e) = ira_db::set_rom_hash(db, entry.id, &hash) {
         eprintln!("Failed to store rehashed ROM hash: {}", e);
         return;
@@ -862,8 +871,8 @@ fn write_switch_icon(save_dir: &str, db_id: i64, icon: &crate::switch::SwitchIco
 /// Switch integration existed: the title id becomes the game id, the
 /// native application title (emulator cache or the ROM's control NACP)
 /// replaces the file-name-derived one, and the native icon (cache or
-/// decrypted NCA) is imported. Games already carrying a title id are
-/// left alone.
+/// decrypted NCA) is imported. Games that already have all three are
+/// skipped without opening the ROM.
 fn enrich_switch_roms(
     db: &ira_db::DbConn,
     save_dir: &str,
@@ -876,6 +885,22 @@ fn enrich_switch_roms(
     };
     for game in games.iter_mut() {
         if game.rom_path.is_empty() {
+            continue;
+        }
+        let file_title = std::path::Path::new(&game.rom_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // Opening an XCI/NSP is the expensive part; a game that already has
+        // its title id, a native title and an icon has nothing to gain.
+        let needs_id = !crate::switch::is_title_id(&game.app_id);
+        let needs_title = game.name.is_empty() || game.name == file_title;
+        let needs_icon = ira_parser::find_image_file(
+            &ira_parser::switch_data_dir(save_dir, game.db_id),
+            "icon",
+        )
+        .is_none();
+        if !(needs_id || needs_title || needs_icon) {
             continue;
         }
         let rom = resolve_in_folders(&console.folders, &game.rom_path);
@@ -896,10 +921,6 @@ fn enrich_switch_roms(
             }
         }
 
-        let file_title = std::path::Path::new(&game.rom_path)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
         if !meta.title.is_empty() && (game.name.is_empty() || game.name == file_title) {
             if let Err(e) = ira_db::update_game_title(db, game.db_id, &meta.title) {
                 eprintln!("Failed to set Switch title for game {}: {e}", game.db_id);
@@ -1163,7 +1184,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_rehashes_archived_rom_and_matches_by_content_hash() {
+    fn test_scan_hashes_unhashed_archived_rom_and_matches_by_content_hash() {
         let tmp = tempfile::tempdir().unwrap();
         let rom_dir = tmp.path().join("roms/gba");
         std::fs::create_dir_all(&rom_dir).unwrap();
@@ -1200,8 +1221,9 @@ mod tests {
         .unwrap();
 
         let db = test_db();
-        // Scanned before archive-aware hashing: the row carries the zip's
-        // own digest, which no RA game lists.
+        // The row was scanned while the archive could not be hashed (the
+        // container digest was cleared, unpacking was off at the time) and
+        // never matched: it carries no hash at all.
         let db_id = ira_db::add_game(
             &db,
             ira_models::GameKind::Retro,
@@ -1213,9 +1235,6 @@ mod tests {
         )
         .unwrap();
         ira_db::set_rom_path(&db, db_id, "Some Game (USA).zip").unwrap();
-        let container_hash = crate::rom_hash::file_md5(&archive).unwrap();
-        assert_ne!(container_hash, content_hash);
-        ira_db::set_rom_hash(&db, db_id, &container_hash).unwrap();
 
         let games = super::build_ra_games_for_console(
             &db,

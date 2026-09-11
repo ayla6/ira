@@ -106,10 +106,17 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
             if let Some(big) = scroll_state.borrow().big_picture.clone() {
                 // Rebuild the carousel when the viewport (and with it the
                 // capsule size) changes; a no-op while it stays put.
+                // Deferred to an idle: this signal fires mid-allocation, and
+                // refresh reloads the stylesheet — re-styling widgets while
+                // the layout pass is still walking them measures and
+                // allocates them against mixed old/new styles.
                 let desired = ((big.home.page.width() as f64 / 6.0).round() as i32).max(160);
                 if desired != big.home.capsule.get() {
                     big.home.capsule.set(desired);
-                    super::view::refresh(&scroll_state);
+                    let refresh_state = scroll_state.clone();
+                    glib::idle_add_local_once(move || {
+                        super::view::refresh(&refresh_state);
+                    });
                 }
                 sync_title_position(&big);
                 // The rebuild above can run while the row is still

@@ -492,20 +492,22 @@ pub(crate) fn refresh(state: &SharedState) {
     };
     // Big-picture sizes scale with the viewport (1.0 = 1920 wide), which also
     // cancels desktop display scaling: logical pixels shrink as the scale
-    // grows, and everything follows.
+    // grows, and everything follows. The stylesheet only reloads when the
+    // scale really moved: refresh runs on every game-list update — and from
+    // the carousel's adjustment, mid-layout — and reloading the CSS would
+    // re-style the whole widget tree there, leaving widgets measured and
+    // allocated against half-applied styles.
     let scale = big_picture_scale(state);
-    if scale > 0.01 {
+    if scale > 0.01 && (big.ui_scale.get() - scale).abs() > 0.001 {
+        big.ui_scale.set(scale);
         crate::ui::css::init_styles(scale);
         big.status.set_icon_scale(scale);
         big.bottom.set_icon_scale(scale);
         big.all.set_icon_scale(scale);
         // A pill whose text was set at the old font keeps measuring its
         // stale layout; force a re-measure when the scale actually moved.
-        if (big.ui_scale.get() - scale).abs() > 0.001 {
-            big.ui_scale.set(scale);
-            big.all.revalidate_tooltip();
-            super::home::revalidate_pill(&big);
-        }
+        big.all.revalidate_tooltip();
+        super::home::revalidate_pill(&big);
     }
     super::home::refresh(state);
     big.all.refresh(state);

@@ -6,6 +6,7 @@ use tracing::info_span;
 
 use crate::retroachievements::paths;
 use ira_config::Config;
+use ira_models::normalize_name;
 
 pub use super::api_types::read_console_games_cache;
 use super::api_types::WebGameProgress;
@@ -141,7 +142,8 @@ impl RaClient {
 
     /// Search the console's full game list (fetched on demand from the Web API
     /// when no fresh cache exists) for titles matching `query`, excluding
-    /// Subset/hack variants.
+    /// Subset/hack variants. Matching is punctuation-insensitive, and a query
+    /// with no hit retries on the part before its first " - ".
     pub fn search_ra_games(
         &self,
         save_dir: &str,
@@ -158,7 +160,7 @@ impl RaClient {
                 }
             }
         };
-        let mut results = filter_ra_games(games.clone(), query);
+        let mut results = search_games(games.clone(), query);
         if let Ok(id) = query.parse::<u32>() {
             if let Some(game) = games.into_iter().find(|g| g.id == id) {
                 if !results.iter().any(|g| g.id == id) {
@@ -342,13 +344,31 @@ impl RaClient {
     }
 }
 
+/// Punctuation-insensitive title filter: both sides go through
+/// [`normalize_name`], so "Castlevania - Dawn of Sorrow" finds
+/// "Castlevania: Dawn of Sorrow" and "World Ends With You, The" finds
+/// "The World Ends With You". Hack/subset variants stay excluded.
 fn filter_ra_games(games: Vec<RaGameEntry>, q: &str) -> Vec<RaGameEntry> {
-    let q = q.to_lowercase();
+    let norm_q = normalize_name(q);
     games
         .into_iter()
         .filter(|g| !g.title.contains('~') && !g.title.contains("[Subset"))
-        .filter(|g| g.title.to_lowercase().contains(&q))
+        .filter(|g| normalize_name(&g.title).contains(&norm_q))
         .collect()
+}
+
+/// [`filter_ra_games`], broadened: when the full query has no hit, only the
+/// part before its first " - " is searched — file names hang region dumps
+/// and subtitles off it that RA titles spell with ":" or not at all.
+fn search_games(games: Vec<RaGameEntry>, query: &str) -> Vec<RaGameEntry> {
+    let results = filter_ra_games(games.clone(), query);
+    if !results.is_empty() {
+        return results;
+    }
+    match query.split_once(" - ") {
+        Some((prefix, _)) if !prefix.trim().is_empty() => filter_ra_games(games, prefix),
+        _ => results,
+    }
 }
 
 fn find_game_by_hash(games: &[RaGameEntry], rom_hash: &str) -> Option<RaGameEntry> {
@@ -365,8 +385,20 @@ fn find_game_by_hash(games: &[RaGameEntry], rom_hash: &str) -> Option<RaGameEntr
 mod cache_tests {
     use std::time::Duration;
 
-    use super::RaClient;
+    use super::{RaClient, RaGameEntry};
     use crate::retroachievements::paths;
+
+    fn entry(id: u32, title: &str) -> RaGameEntry {
+        RaGameEntry {
+            id,
+            title: title.to_string(),
+            image_icon: String::new(),
+            image_url: String::new(),
+            num_achievements: 1,
+            points: 1,
+            hashes: Vec::new(),
+        }
+    }
 
     fn write_cache(save_dir: &str, console_id: u32, contents: &str) {
         let path = paths::console_games_path(save_dir, console_id);
@@ -439,16 +471,7 @@ mod cache_tests {
 
     #[test]
     fn test_filter_ra_games_matches_substring_and_skips_subsets() {
-        use super::{filter_ra_games, RaGameEntry};
-        let entry = |id: u32, title: &str| RaGameEntry {
-            id,
-            title: title.to_string(),
-            image_icon: String::new(),
-            image_url: String::new(),
-            num_achievements: 1,
-            points: 1,
-            hashes: Vec::new(),
-        };
+        use super::filter_ra_games;
         let games = vec![
             entry(1, "Super Mario World"),
             entry(2, "Super Mario World [Subset - Anything]"),
@@ -462,18 +485,58 @@ mod cache_tests {
 
     #[test]
     fn test_filter_ra_games_empty_query_matches_all() {
-        use super::{filter_ra_games, RaGameEntry};
-        let games = vec![RaGameEntry {
-            id: 1,
-            title: "Mario".to_string(),
-            image_icon: String::new(),
-            image_url: String::new(),
-            num_achievements: 1,
-            points: 1,
-            hashes: Vec::new(),
-        }];
+        use super::filter_ra_games;
+        let games = vec![entry(1, "Mario")];
         let result = filter_ra_games(games, "");
         assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_ra_games_normalizes_punctuation_and_articles() {
+        use super::filter_ra_games;
+        let games = vec![
+            entry(1, "Castlevania: Dawn of Sorrow"),
+            entry(2, "The World Ends with You"),
+        ];
+        // File-name punctuation and trailing articles find the RA spelling.
+        let hit = |q: &str, id: u32| {
+            let result = filter_ra_games(games.clone(), q);
+            assert_eq!(result.len(), 1, "query {q:?}");
+            assert_eq!(result[0].id, id, "query {q:?}");
+        };
+        hit("Castlevania - Dawn of Sorrow", 1);
+        hit("castlevania dawn of sorrow", 1);
+        hit("World Ends With You, The", 2);
+        hit("the world ends with you", 2);
+    }
+
+    #[test]
+    fn test_search_games_falls_back_to_prefix_before_dash() {
+        use super::search_games;
+        let games = vec![
+            entry(1, "Castlevania: Aria of Sorrow"),
+            entry(2, "Castlevania: Dawn of Sorrow"),
+            entry(3, "Castlevania Judgment"),
+            entry(4, "Bubble Bobble"),
+        ];
+        // No title contains the whole file-name text ("USA" is outside any
+        // bracket group), so the part before " - " decides.
+        let result = search_games(games, "Castlevania - Dawn of Sorrow USA");
+        assert_eq!(
+            result.iter().map(|g| g.id).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn test_search_games_full_query_wins_when_it_matches() {
+        use super::search_games;
+        let games = vec![
+            entry(1, "Castlevania: Aria of Sorrow"),
+            entry(2, "Castlevania: Dawn of Sorrow"),
+        ];
+        let result = search_games(games, "Castlevania - Dawn of Sorrow");
+        assert_eq!(result.iter().map(|g| g.id).collect::<Vec<_>>(), [2]);
     }
 
     #[test]

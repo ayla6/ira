@@ -10,16 +10,29 @@ impl SteamDataClient {
         if sgdb_key.is_empty() {
             return None;
         }
-        let resp = self
+        let resp = match self
             .http
             .get(url)
             .header("Authorization", format!("Bearer {}", sgdb_key))
             .send()
-            .ok()?;
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                eprintln!("SGDB request to {url} failed: {e}");
+                return None;
+            }
+        };
         if !resp.status().is_success() {
+            eprintln!("SGDB request to {url} returned {}", resp.status());
             return None;
         }
-        resp.json().ok()
+        match resp.json() {
+            Ok(json) => Some(json),
+            Err(e) => {
+                eprintln!("SGDB response from {url} is not JSON: {e}");
+                None
+            }
+        }
     }
 
     /// Candidate asset URLs for `endpoint`, best first. SGDB serves its own

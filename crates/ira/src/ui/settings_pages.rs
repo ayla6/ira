@@ -4,6 +4,7 @@ use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
 use adw::prelude::*;
 use ira_config::Config;
+use ira_models::AssetType;
 use ira_overlay_ipc::{
     clamp_replay_buffer_seconds, MAX_REPLAY_BUFFER_SECONDS, MIN_REPLAY_BUFFER_SECONDS,
 };
@@ -1177,14 +1178,23 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
         "Which image types are fetched automatically when missing"
     )));
     let mut auto_asset_rows: Vec<(String, adw::SwitchRow)> = Vec::new();
-    for (label, name) in [
-        (crate::tr!("Icons"), "icon"),
-        (crate::tr!("Heroes"), "hero"),
-        (crate::tr!("Capsules"), "vertical"),
-        (crate::tr!("Squares"), "square"),
-        (crate::tr!("Headers"), "header"),
-        (crate::tr!("Logos"), "logo"),
+    for asset in [
+        AssetType::Icon,
+        AssetType::Hero,
+        AssetType::Grid,
+        AssetType::Square,
+        AssetType::Header,
+        AssetType::Logo,
     ] {
+        let label = match asset {
+            AssetType::Icon => crate::tr!("Icons"),
+            AssetType::Hero => crate::tr!("Heroes"),
+            AssetType::Grid => crate::tr!("Capsules"),
+            AssetType::Square => crate::tr!("Squares"),
+            AssetType::Header => crate::tr!("Headers"),
+            AssetType::Logo => crate::tr!("Logos"),
+        };
+        let name = asset.file_base();
         let row = adw::SwitchRow::new();
         row.set_title(&label);
         row.set_active(!cfg.sgdb_disabled_assets.iter().any(|n| n == name));

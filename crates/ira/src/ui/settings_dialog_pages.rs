@@ -345,7 +345,7 @@ fn build_pc_controller_profiles(
     let linux = super::input_profile_settings::add_pc_profile_group(
         page,
         &pc_controller_cfg,
-        "linux",
+        ira_models::GameKind::Linux.as_str(),
         &crate::tr!("Linux controller"),
         win,
         registry.clone(),
@@ -353,7 +353,7 @@ fn build_pc_controller_profiles(
     let wine = super::input_profile_settings::add_pc_profile_group(
         page,
         &pc_controller_cfg,
-        "wine",
+        ira_models::GameKind::Wine.as_str(),
         &crate::tr!("Wine controller"),
         win,
         registry,

@@ -105,51 +105,12 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     } else {
         &entry.game_id
     };
-    let kind = entry.kind;
 
-    let mut game = Game {
-        app_id: app_id.to_string(),
-        kind,
-        trophy_source: entry.trophy_source,
-        platform_id: entry.platform_id.to_string(),
-        db_id: entry.id,
-        name: if entry.title.is_empty() {
-            crate::tr!("App ID: {}").replacen("{}", app_id, 1)
-        } else {
-            entry.title.clone()
-        },
-        name_lower: String::new(),
-        icon_path: String::new(),
-        hero_image_path: String::new(),
-        grid_path: String::new(),
-        header_path: String::new(),
-        logo_path: String::new(),
-        square_path: String::new(),
-        achievements: Vec::new(),
-        earned_count: 0,
-        total_count: 0,
-        hidden: entry.hidden,
-        slug: String::new(),
-        playtime: entry.playtime,
-        last_played: entry.last_played,
-        logo_position: entry.logo_position.clone(),
-        logo_size: entry.logo_size,
-        manual_unmatch: entry.manual_unmatch,
-        sort_title: entry.sort_title.clone(),
-        game_path: String::new(),
-        sgdb_id: entry.sgdb_id.clone().unwrap_or_default(),
-        shadps4_version: entry.shadps4_version.clone(),
-        variant_id: None,
-        release_date: entry.release_date.clone(),
-        release_timestamp: entry.release_timestamp,
-        metacritic_score: entry.metacritic_score,
-        steam_review_score: entry.steam_review_score,
-        steam_review_count: entry.steam_review_count,
-        ra_core: entry.ra_core.clone(),
-        emulator_override: entry.emulator_override.clone(),
-        rom_path: entry.rom_path.clone(),
-        game_folder: entry.game_folder.clone(),
-    };
+    let mut game = entry.to_game();
+    game.app_id = app_id.to_string();
+    if entry.title.is_empty() {
+        game.name = crate::tr!("App ID: {}").replacen("{}", app_id, 1);
+    }
 
     // Retro and Switch paths stay relative to the console's ROM folder;
     // every console kind with an emulator library stores the absolute

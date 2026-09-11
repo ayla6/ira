@@ -262,7 +262,7 @@ fn ensure_default_icon(
             ira_models::AssetType::Icon,
         ) {
             if let Some(path) =
-                ira_parser::find_image_file(&ira_parser::game_data_dir(save_dir, game), "icon")
+                ira_parser::find_image_file(&ira_parser::game_data_dir(save_dir, game), ira_models::AssetType::Icon.file_base())
             {
                 game.icon_path = path.to_string_lossy().into_owned();
             }

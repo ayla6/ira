@@ -141,7 +141,7 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     let is_jpeg = source
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
-    let is_icon = base_name == "icon";
+    let is_icon = base_name == ira_models::AssetType::Icon.file_base();
 
     let img = {
         let _s = tracing::info_span!("ensure_small_decode", base_name).entered();

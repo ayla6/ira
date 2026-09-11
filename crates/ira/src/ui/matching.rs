@@ -129,45 +129,11 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
 /// paths are filled in. `game_path` carries the ROM path so the native
 /// icon import can find console ROMs.
 fn sgdb_game_from_entry(entry: &ira_models::GameEntry, sgdb_id: &str) -> Game {
-    Game {
-        app_id: String::new(),
-        kind: entry.kind,
-        trophy_source: entry.trophy_source,
-        platform_id: entry.platform_id.clone(),
-        db_id: entry.id,
-        name: entry.title.clone(),
-        name_lower: entry.title.to_lowercase(),
-        icon_path: String::new(),
-        hero_image_path: String::new(),
-        grid_path: String::new(),
-        header_path: String::new(),
-        logo_path: String::new(),
-        square_path: String::new(),
-        achievements: Vec::new(),
-        earned_count: 0,
-        total_count: 0,
-        hidden: entry.hidden,
-        slug: String::new(),
-        playtime: 0.0,
-        last_played: entry.last_played,
-        logo_position: entry.logo_position.clone(),
-        logo_size: entry.logo_size,
-        manual_unmatch: entry.manual_unmatch,
-        sort_title: entry.sort_title.clone(),
-        game_path: entry.rom_path.clone(),
-        sgdb_id: sgdb_id.to_string(),
-        shadps4_version: entry.shadps4_version.clone(),
-        release_date: entry.release_date.clone(),
-        release_timestamp: entry.release_timestamp,
-        metacritic_score: entry.metacritic_score,
-        steam_review_score: entry.steam_review_score,
-        steam_review_count: entry.steam_review_count,
-        ra_core: entry.ra_core.clone(),
-        emulator_override: entry.emulator_override.clone(),
-        rom_path: entry.rom_path.clone(),
-        game_folder: entry.game_folder.clone(),
-        variant_id: None,
-    }
+    let mut game = entry.to_game();
+    game.playtime = 0.0;
+    game.game_path = entry.rom_path.clone();
+    game.sgdb_id = sgdb_id.to_string();
+    game
 }
 
 /// Persist accepting an SGDB match on the DB side: store the SGDB id and,

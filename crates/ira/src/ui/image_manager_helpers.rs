@@ -54,14 +54,12 @@ pub(super) fn find_best_image_path(
     _id: &str,
     save_dir: &str,
 ) -> String {
-    let field_path = match AssetType::from_string(field) {
-        Some(AssetType::Icon) if !game.icon_path.is_empty() => game.icon_path.clone(),
-        Some(AssetType::Hero) if !game.hero_image_path.is_empty() => game.hero_image_path.clone(),
-        Some(AssetType::Grid) if !game.grid_path.is_empty() => game.grid_path.clone(),
-        Some(AssetType::Header) if !game.header_path.is_empty() => game.header_path.clone(),
-        Some(AssetType::Logo) if !game.logo_path.is_empty() => game.logo_path.clone(),
-        _ => String::new(),
-    };
+    let field_path = AssetType::from_string(field)
+        .filter(|a| *a != AssetType::Square)
+        .map(|a| game.asset_path(a))
+        .filter(|p| !p.is_empty())
+        .unwrap_or("")
+        .to_string();
     if !field_path.is_empty() && std::path::Path::new(&field_path).is_file() {
         return field_path;
     }
@@ -81,11 +79,7 @@ pub(super) fn find_best_image_path(
 
 fn image_path_for_asset<'a>(game: &'a Game, asset: &'a str) -> &'a str {
     match AssetType::from_string(asset) {
-        Some(AssetType::Icon) => &game.icon_path,
-        Some(AssetType::Hero) => &game.hero_image_path,
-        Some(AssetType::Grid) => &game.grid_path,
-        Some(AssetType::Header) => &game.header_path,
-        Some(AssetType::Logo) => &game.logo_path,
+        Some(a) if a != AssetType::Square => game.asset_path(a),
         _ => "",
     }
 }
@@ -253,18 +247,12 @@ pub(super) fn write_native_icon_to_disk(
     asset: ira_models::AssetType,
 ) -> bool {
     let image_dir = match game.kind {
-        ira_models::GameKind::Ps4 => std::path::Path::new(save_dir)
-            .join("data")
-            .join("ps4")
-            .join(&game.app_id),
-        ira_models::GameKind::Ps3 => std::path::Path::new(save_dir)
-            .join("data")
-            .join("ps3")
-            .join(&game.app_id),
-        ira_models::GameKind::ThreeDS => ira_parser::three_ds_data_dir(save_dir, &game.app_id),
-        ira_models::GameKind::WiiU => ira_parser::wiiu_data_dir(save_dir, &game.app_id),
-        ira_models::GameKind::Switch => ira_parser::switch_data_dir(save_dir, game.db_id),
-        ira_models::GameKind::Retro => ira_parser::retro_data_dir(save_dir, game.db_id),
+        ira_models::GameKind::Ps4
+        | ira_models::GameKind::Ps3
+        | ira_models::GameKind::ThreeDS
+        | ira_models::GameKind::WiiU
+        | ira_models::GameKind::Switch
+        | ira_models::GameKind::Retro => ira_parser::game_data_dir(save_dir, game),
         _ => return false,
     };
     let _ = std::fs::create_dir_all(&image_dir);

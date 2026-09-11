@@ -108,8 +108,6 @@ pub fn init_db(db_path: &str) -> DbConn {
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != '';
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = 'ps4';
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps3_serial ON games(kind, platform_id) WHERE kind = 'ps3';
             CREATE TABLE IF NOT EXISTS game_configs (
                 game_id INTEGER NOT NULL UNIQUE,
                 launch_config TEXT NOT NULL DEFAULT '',
@@ -163,6 +161,15 @@ pub fn init_db(db_path: &str) -> DbConn {
                 name TEXT NOT NULL DEFAULT ''
             );",
         ).expect("failed to create tables");
+        // Serial-number indexes keyed by the models' kind strings — raw
+        // literals here would silently diverge from GameKind's serialized form.
+        conn.execute_batch(&format!(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = '{}';
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps3_serial ON games(kind, platform_id) WHERE kind = '{}';",
+            ira_models::GameKind::Ps4.as_str(),
+            ira_models::GameKind::Ps3.as_str(),
+        ))
+        .expect("failed to create kind serial indexes");
         // Schema migrations for databases created before a column existed.
         ensure_column(&conn, "games", "rom_hash", "TEXT NOT NULL DEFAULT ''");
         ensure_column(&conn, "games", "vanished", "INTEGER NOT NULL DEFAULT 0");

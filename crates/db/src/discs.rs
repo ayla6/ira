@@ -21,11 +21,12 @@ pub fn get_disc_owners_for_platform(
 ) -> Result<std::collections::HashMap<String, i64>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c
-        .prepare(
+        .prepare(&format!(
             "SELECT gd.rom_path, gd.game_id FROM game_discs gd
          JOIN games g ON gd.game_id = g.id
-         WHERE g.kind = 'retro' AND g.platform_id = ?1",
-        )
+         WHERE g.kind = '{}' AND g.platform_id = ?1",
+            ira_models::GameKind::Retro.as_str()
+        ))
         .map_err(err)?;
     let rows = stmt
         .query_map(params![platform_id], |row| {

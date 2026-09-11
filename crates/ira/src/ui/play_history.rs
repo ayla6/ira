@@ -61,14 +61,12 @@ pub fn show_play_history_dialog(
 ) -> adw::Dialog {
     let game_name = state
         .borrow()
-        .games
-        .iter()
-        .find(|g| g.db_id == game_id && g.variant_id == variant_id)
-        .map(|g| g.name.clone())
+        .find_game(game_id, variant_id)
+        .map(|g| g.name)
         .unwrap_or_default();
 
     let dialog = adw::Dialog::new();
-    dialog.set_title(&format!("{} {}", crate::tr!("Play history for"), game_name));
+    dialog.set_title(&crate::tr!("Play history for {}").replacen("{}", &game_name, 1));
     dialog.set_content_width(820);
     dialog.set_content_height(500);
 
@@ -118,9 +116,12 @@ pub fn show_play_history_dialog(
             let mut sessions = Vec::new();
             for member in super::helpers::linked_members(&state, game_id) {
                 let variant = if member == game_id { variant_id } else { None };
-                sessions.extend(
-                    ira_db::get_sessions_for_game(&db, member, variant).unwrap_or_default(),
-                );
+                sessions.extend(ira_db::get_sessions_for_game(&db, member, variant).unwrap_or_else(
+                    |e| {
+                        eprintln!("Failed to read sessions for game {}: {e}", member);
+                        Vec::new()
+                    },
+                ));
             }
             sessions.sort_by_key(|s| std::cmp::Reverse(s.started_at));
             clear_children(&box_);
@@ -173,12 +174,7 @@ pub fn show_play_history_dialog(
         *rebuild_handle_close.borrow_mut() = None;
         let still_active = refresh_state.borrow().displayed_db_id == game_id;
         let game = if still_active {
-            refresh_state
-                .borrow()
-                .games
-                .iter()
-                .find(|g| g.db_id == game_id && g.variant_id == variant_id)
-                .cloned()
+            refresh_state.borrow().find_game(game_id, variant_id)
         } else {
             None
         };
@@ -294,54 +290,58 @@ fn compute_game_weeks(sessions: &[ira_models::PlaySession], game_name: &str) -> 
     let start = week_starts.len().saturating_sub(max_weeks);
     let week_starts = &week_starts[start..];
 
-    let mut weeks: Vec<WeekData> = Vec::new();
-    for &ws in week_starts {
-        let days: Vec<DayData> = generate_week_days(ws)
-            .into_iter()
-            .map(|date| {
-                let sessions_for_day = by_day.get(&date);
-                let total: f64 = sessions_for_day
-                    .map(|ss| ss.iter().map(|s| s.duration_seconds as f64).sum())
-                    .unwrap_or(0.0);
-                let details: Vec<DayDetail> = sessions_for_day
-                    .map(|ss| {
-                        ss.iter()
-                            .map(|s| DayDetail {
-                                session_id: Some(s.id),
-                                label: format_time(s.started_at),
-                                value: format_duration(s.duration_seconds),
-                                color_hex: None,
-                                sessions: vec![],
-                            })
-                            .collect()
+    let weeks = assemble_weeks(week_starts, |date| {
+        let sessions_for_day = by_day.get(&date);
+        let total: f64 = sessions_for_day
+            .map(|ss| ss.iter().map(|s| s.duration_seconds as f64).sum())
+            .unwrap_or(0.0);
+        let details: Vec<DayDetail> = sessions_for_day
+            .map(|ss| {
+                ss.iter()
+                    .map(|s| DayDetail {
+                        session_id: Some(s.id),
+                        label: format_time(s.started_at),
+                        value: format_duration(s.duration_seconds),
+                        color_hex: None,
+                        sessions: vec![],
                     })
-                    .unwrap_or_default();
-                let segments = if total > 0.0 {
-                    vec![BarSegment {
-                        value: total,
-                        color_index: Some(0),
-                        label: game_name.to_string(),
-                    }]
-                } else {
-                    vec![]
-                };
-                DayData {
-                    date,
-                    total,
-                    segments,
-                    details,
-                }
+                    .collect()
             })
-            .collect();
-        let week_total = days.iter().map(|d| d.total).sum();
-        weeks.push(WeekData {
-            week_start: ws,
-            days,
-            week_total,
-        });
-    }
+            .unwrap_or_default();
+        let segments = if total > 0.0 {
+            vec![BarSegment {
+                value: total,
+                color_index: Some(0),
+                label: game_name.to_string(),
+            }]
+        } else {
+            vec![]
+        };
+        DayData {
+            date,
+            total,
+            segments,
+            details,
+        }
+    });
 
     weeks
+}
+
+/// Assembles one `WeekData` per week start from a per-day builder.
+fn assemble_weeks(week_starts: &[chrono::NaiveDate], build_day: impl Fn(chrono::NaiveDate) -> DayData) -> Vec<WeekData> {
+    week_starts
+        .iter()
+        .map(|&ws| {
+            let days: Vec<DayData> = generate_week_days(ws).into_iter().map(&build_day).collect();
+            let week_total = days.iter().map(|d| d.total).sum();
+            WeekData {
+                week_start: ws,
+                days,
+                week_total,
+            }
+        })
+        .collect()
 }
 
 pub fn show_daily_history_dialog(state: &SharedState) {
@@ -363,15 +363,21 @@ pub fn show_daily_history_dialog(state: &SharedState) {
     let now = now_secs();
     let from = now - 84 * 86400;
 
-    let all_sessions =
-        ira_db::get_sessions_range(&state.borrow().db, from, now).unwrap_or_default();
+    let all_sessions = ira_db::get_sessions_range(&state.borrow().db, from, now)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to read play sessions: {e}");
+            Vec::new()
+        });
 
     // Straight from the database: games that left the library keep their
     // rows, and their past sessions must still read as themselves.
     let game_names: HashMap<i64, String> = {
         let db = state.borrow().db.clone();
         ira_db::load_all_games(&db)
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to read game titles: {e}");
+                Vec::new()
+            })
             .into_iter()
             .map(|entry| (entry.id, entry.title))
             .collect()
@@ -418,29 +424,17 @@ fn compute_app_weeks(
         .map(|i| cur_week - chrono::Duration::days(i * 7))
         .collect();
 
-    let mut weeks: Vec<WeekData> = Vec::new();
-    for &ws in &week_starts {
-        let days: Vec<DayData> = generate_week_days(ws)
-            .into_iter()
-            .map(|date| {
-                let day_games = by_day.get(&date);
-                let (segments, details) = build_day_data(day_games, game_names);
-                let total: f64 = segments.iter().map(|s| s.value).sum();
-                DayData {
-                    date,
-                    total,
-                    segments,
-                    details,
-                }
-            })
-            .collect();
-        let week_total = days.iter().map(|d| d.total).sum();
-        weeks.push(WeekData {
-            week_start: ws,
-            days,
-            week_total,
-        });
-    }
+    let weeks = assemble_weeks(&week_starts, |date| {
+        let day_games = by_day.get(&date);
+        let (segments, details) = build_day_data(day_games, game_names);
+        let total: f64 = segments.iter().map(|s| s.value).sum();
+        DayData {
+            date,
+            total,
+            segments,
+            details,
+        }
+    });
 
     weeks
 }

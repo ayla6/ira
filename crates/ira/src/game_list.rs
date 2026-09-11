@@ -854,8 +854,18 @@ fn load_special_game(
     icon_path: &std::path::Path,
 ) -> Option<Game> {
     let meta = find_or_create_console_entry(db, kind, game_id, game_id, title, false)?;
-    let entry = db::find_by_db_id(db, meta.db_id).ok().flatten()?;
-    let mut game = game_loader::load_game_fast(&entry, save_dir).ok()?;
+    let entry = db::find_by_db_id(db, meta.db_id)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to read game {}: {e}", meta.db_id);
+            None
+        })?;
+    let mut game = match game_loader::load_game_fast(&entry, save_dir) {
+        Ok(game) => game,
+        Err(e) => {
+            eprintln!("Failed to load game {}: {e}", meta.db_id);
+            return None;
+        }
+    };
     if (game.name.is_empty() || game_loader::is_placeholder_name(&game.name)) && !title.is_empty() {
         game.set_name(title);
     }
@@ -920,11 +930,11 @@ fn default_wiiu_icon(
     game_path: &std::path::Path,
 ) -> std::path::PathBuf {
     let data_dir = ira_parser::wiiu_data_dir(save_dir, title_id);
-    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+    if ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
         return std::path::PathBuf::new();
     }
     let icon_tga = game_path.join("meta").join("iconTex.tga");
-    ira_parser::import_image_as_webp(&icon_tga, &data_dir, "icon").unwrap_or_default()
+    ira_parser::import_image_as_webp(&icon_tga, &data_dir, ira_models::AssetType::Icon.file_base()).unwrap_or_default()
 }
 
 fn build_azahar_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
@@ -955,7 +965,7 @@ fn default_azahar_icon(save_dir: &str, title_id: &str, icon: Option<&[u8]>) -> s
         return std::path::PathBuf::new();
     };
     let data_dir = ira_parser::three_ds_data_dir(save_dir, title_id);
-    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+    if ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
         return std::path::PathBuf::new();
     }
     if std::fs::create_dir_all(&data_dir).is_err() {
@@ -967,7 +977,7 @@ fn default_azahar_icon(save_dir: &str, title_id: &str, icon: Option<&[u8]>) -> s
         return std::path::PathBuf::new();
     }
     ira_parser::convert_to_lossless_webp(&png);
-    match ira_parser::find_image_file(&data_dir, "icon") {
+    match ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()) {
         Some(path) => path,
         None => std::path::PathBuf::new(),
     }
@@ -992,13 +1002,17 @@ fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &st
                 &installed.title,
                 false,
             )?;
-            let entry = db::find_by_db_id(db, meta.db_id).ok().flatten()?;
+            let entry = db::find_by_db_id(db, meta.db_id)
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to read game {}: {e}", meta.db_id);
+                    None
+                })?;
             let data_dir = ira_parser::switch_data_dir(save_dir, meta.db_id);
             // Cache-miss fallback: the NAND-installed control NCA is
             // decrypted when the emulator cached no icon; its NACP also
             // supplies the application title when the cache had none.
             let nand = if installed.icon.is_none()
-                && ira_parser::find_image_file(&data_dir, "icon").is_none()
+                && ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_none()
             {
                 ira_platforms::switch::extract_installed_meta(executable, &installed.title_id)
             } else {
@@ -1017,7 +1031,13 @@ fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &st
                     }
                 }
             }
-            let mut game = game_loader::load_game_fast(&entry, save_dir).ok()?;
+            let mut game = match game_loader::load_game_fast(&entry, save_dir) {
+                Ok(game) => game,
+                Err(e) => {
+                    eprintln!("Failed to load game {}: {e}", meta.db_id);
+                    return None;
+                }
+            };
             if let Some(native) = &native_title {
                 if rename
                     || game.name.is_empty()
@@ -1037,7 +1057,7 @@ fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &st
                 nand.as_ref().and_then(|control| control.icon.as_deref()),
             );
             if let Some(path) =
-                ira_parser::find_image_file(&data_dir, "icon")
+                ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base())
             {
                 game.icon_path = path.to_string_lossy().into_owned();
             }
@@ -1070,7 +1090,7 @@ fn default_switch_icon(
     nand: Option<&[u8]>,
 ) {
     let data_dir = ira_parser::switch_data_dir(save_dir, db_id);
-    if ira_parser::find_image_file(&data_dir, "icon").is_some() {
+    if ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
         return;
     }
     if let Some(bytes) = nand {
@@ -1089,7 +1109,7 @@ fn default_switch_icon(
     let Some(cached) = cached else {
         return;
     };
-    if ira_parser::import_image_as_webp(cached, &data_dir, "icon").is_none() {
+    if ira_parser::import_image_as_webp(cached, &data_dir, ira_models::AssetType::Icon.file_base()).is_none() {
         eprintln!("Failed to import Switch icon for game {db_id}");
     }
 }

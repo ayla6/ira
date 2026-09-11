@@ -121,10 +121,7 @@ fn refresh_displayed_game_if(
     }
     let game = state
         .borrow()
-        .games
-        .iter()
-        .find(|g| g.db_id == displayed_db_id && g.variant_id == displayed_variant_id)
-        .cloned();
+        .find_game(displayed_db_id, displayed_variant_id);
     if let Some(game) = game {
         display_game(&game, state);
     }

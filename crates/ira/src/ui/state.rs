@@ -111,6 +111,17 @@ pub struct AppState {
     pub fetch_progress: RefCell<Option<super::fetch_images::FetchIndicator>>,
 }
 
+impl AppState {
+    /// Clone of the listed game with this identity. `(db_id, variant_id)`
+    /// is the game identity used by selection, sessions, and the sidebar.
+    pub fn find_game(&self, db_id: i64, variant_id: Option<i64>) -> Option<Game> {
+        self.games
+            .iter()
+            .find(|g| g.db_id == db_id && g.variant_id == variant_id)
+            .cloned()
+    }
+}
+
 pub type SharedState = Rc<RefCell<AppState>>;
 
 extern "C" {

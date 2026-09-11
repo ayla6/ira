@@ -258,10 +258,7 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
                             .filter(|v| *v > 0);
                         let game = sc2
                             .borrow()
-                            .games
-                            .iter()
-                            .find(|g| g.db_id == db_id && g.variant_id == variant_id)
-                            .cloned();
+                            .find_game(db_id, variant_id);
                         if let Some(game) = game {
                             super::context_menu::show_image_reset_menu(
                                 &sc2,
@@ -280,20 +277,9 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
                 let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
                 if db_id != 0 {
                     let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
-                        .and_then(|ptr| {
-                            let v = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                            if v > 0 {
-                                Some(v)
-                            } else {
-                                None
-                            }
-                        });
-                    let game = sc2
-                        .borrow()
-                        .games
-                        .iter()
-                        .find(|g| g.db_id == db_id && g.variant_id == variant_id)
-                        .cloned();
+                        .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed))
+                        .filter(|v| *v > 0);
+                    let game = sc2.borrow().find_game(db_id, variant_id);
                     if let Some(game) = game {
                         show_game_context_menu(
                             &sc2,

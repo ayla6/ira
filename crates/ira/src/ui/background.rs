@@ -110,12 +110,7 @@ pub fn restore_content(state: &SharedState) {
         .split("-v")
         .nth(1)
         .and_then(|s| s.parse::<i64>().ok());
-    let game = state
-        .borrow()
-        .games
-        .iter()
-        .find(|g| g.db_id == db_id && g.variant_id == variant_id)
-        .cloned();
+    let game = state.borrow().find_game(db_id, variant_id);
     if let Some(game) = game {
         display_game(&game, state);
 

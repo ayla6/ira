@@ -120,22 +120,19 @@ impl ShoulderBadge {
         let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         slot.set_valign(gtk4::Align::Center);
         let glyph = gtk4::Image::new();
-        glyph.set_halign(gtk4::Align::Center);
-        glyph.set_valign(gtk4::Align::Center);
         let fallback = gtk4::Label::new(None);
         fallback.add_css_class(CSS_BP_SHOULDER);
-        fallback.set_halign(gtk4::Align::Center);
-        fallback.set_valign(gtk4::Align::Center);
         slot.append(&glyph);
         slot.append(&fallback);
         Self { slot, glyph, fallback }
     }
 
     fn refresh(&self, button: ira_input::GamepadButton, family: ira_input::ControllerFamily, scale: f64) {
-        // One slot width keeps the tab picker from sliding when the glyph
-        // art replaces the letter badge; the height follows the content so
-        // the badge and the pill center on the same line.
-        self.slot.set_size_request((46.0 * scale).round().max(12.0) as i32, -1);
+        // The slot hugs its content: a GtkBox lays children out one after
+        // another on its main axis, so a slot wider than the art would not
+        // center it — the leftover width would sit between only one badge
+        // and the tab picker, and the two shoulders would hang at different
+        // distances from it.
         self.glyph.set_pixel_size((34.0 * scale).round().max(8.0) as i32);
         self.fallback.set_text(&crate::ui::input_profile_assets::source_badge(
             ira_input::InputSource::Button(button),

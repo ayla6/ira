@@ -186,6 +186,29 @@ fn resolve_program(program: &str, env: &[(String, String)]) -> Option<std::path:
         .find(|candidate| candidate.is_file())
 }
 
+/// Renders a command for the log the way a shell would need it typed:
+/// arguments a shell would misread (spaces, quotes, globs, …) are
+/// single-quoted, so a path with spaces reads as one argument and the line
+/// can be pasted into a terminal. The spawn itself is argv-based and never
+/// needs this; it's display-only.
+fn display_command(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|arg| {
+            let plain = !arg.is_empty()
+                && arg
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_/.:=,+@%~".contains(&b));
+            if plain {
+                arg.clone()
+            } else {
+                format!("'{}'", arg.replace('\'', "'\\''"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn game_log_path(save_dir: &str, game_id: i64) -> String {
     Path::new(save_dir)
         .join("logs")
@@ -390,7 +413,11 @@ pub(crate) fn finalize_game(
 /// environment, minus cargo's own noise.
 pub(crate) fn log_launch_header(ctx: &MonitorContext, log_buf: &GameLog, started_message: &str) {
     let mut log = log_buf.lock().unwrap();
-    log.push(format!("{} from {}", started_message, ctx.command.join(" ")));
+    log.push(format!(
+        "{} from {}",
+        started_message,
+        display_command(&ctx.command)
+    ));
     let mut sorted_env = ctx.env.clone();
     sorted_env.sort_by(|a, b| a.0.cmp(&b.0));
     for (k, v) in &sorted_env {
@@ -731,7 +758,40 @@ fn find_wineserver(wine_exe: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::format_spawn_error;
+    use super::{display_command, format_spawn_error};
+
+    #[test]
+    fn test_display_command_quotes_arguments_with_spaces() {
+        assert_eq!(
+            display_command(&[
+                "azahar".to_string(),
+                "/games/Zelda Tears of the Kingdom.3ds".to_string(),
+            ]),
+            "azahar '/games/Zelda Tears of the Kingdom.3ds'"
+        );
+    }
+
+    #[test]
+    fn test_display_command_leaves_plain_arguments_bare() {
+        assert_eq!(
+            display_command(&[
+                "flatpak".to_string(),
+                "run".to_string(),
+                "--filesystem=/games:ro".to_string(),
+                "org.azahar_emu.Azahar".to_string(),
+            ]),
+            "flatpak run --filesystem=/games:ro org.azahar_emu.Azahar"
+        );
+    }
+
+    #[test]
+    fn test_display_command_quotes_empty_and_embedded_quotes() {
+        assert_eq!(display_command(&[String::new()]), "''");
+        assert_eq!(
+            display_command(&["/games/it's.iso".to_string()]),
+            "'/games/it'\\''s.iso'"
+        );
+    }
 
     #[test]
     fn test_format_spawn_error_reports_missing_program_and_cwd() {

@@ -178,7 +178,10 @@ pub fn write_gse_language(settings_dir: &Path, language: &str) -> Result<(), Str
     let path = settings_dir.join("configs.user.ini");
     let mut content = String::new();
     if path.exists() {
-        content = std::fs::read_to_string(&path).unwrap_or_default();
+        // A failed read must not fall through to the rewrite below — that
+        // would replace the whole file with just the language line.
+        content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
     }
     if !content.contains("[user::general]") {
         content.push_str("[user::general]\n");

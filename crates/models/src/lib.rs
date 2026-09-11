@@ -19,6 +19,7 @@ mod group_order;
 mod screenscraper;
 mod sort_mode;
 mod steam_languages;
+mod title;
 pub mod variant;
 
 pub use achievement::{AchievementStatus, GogAchievementStatus, MergedAchievement, StringOrMap};
@@ -30,6 +31,7 @@ pub use fullscreen::fullscreen_args;
 pub use game::parse_db_id;
 pub use game::Game;
 pub use game_entry::GameEntry;
+pub use title::normalize_name;
 pub use group::{Group, GroupSelection};
 pub use kind::*;
 pub use launch_config::{ControllerInputMode, GameLaunchConfig, WineConfig, WineProfile};

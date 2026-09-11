@@ -114,7 +114,7 @@ fn migrate_dir(source: &Path, target: &Path) {
     if let Some(parent) = target.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let count = safe_migrate_dir_contents(source, target);
+    let count = ira_parser::safe_migrate_dir_contents(source, target);
     if count > 0 {
         let _ = std::fs::remove_dir_all(source);
     }
@@ -133,56 +133,7 @@ fn migrate_dir_contents(source: &Path, target: &Path) {
     if !source.is_dir() {
         return;
     }
-    safe_migrate_dir_contents(source, target);
-}
-
-/// Safely copy directory contents recursively, verifying each file copy
-/// before deleting the source. Returns number of files migrated.
-fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
-    let _ = std::fs::create_dir_all(target);
-    let Ok(entries) = std::fs::read_dir(source) else {
-        return 0;
-    };
-    let mut count = 0;
-    for entry in entries.flatten() {
-        let src = entry.path();
-        let dst = target.join(entry.file_name());
-        if dst.exists() {
-            continue;
-        }
-        if src.is_dir() {
-            let sub_count = safe_migrate_dir_contents(&src, &dst);
-            count += sub_count;
-            if sub_count > 0
-                || std::fs::read_dir(&src)
-                    .map(|mut e| e.next().is_none())
-                    .unwrap_or(true)
-            {
-                let _ = std::fs::remove_dir(&src);
-            }
-        } else {
-            if safe_copy_and_verify(&src, &dst) {
-                let _ = std::fs::remove_file(&src);
-                count += 1;
-            }
-        }
-    }
-    count
-}
-
-/// Copy a file and verify the destination matches the source by size.
-/// Returns true if the copy is verified safe.
-fn safe_copy_and_verify(src: &Path, dst: &Path) -> bool {
-    if std::fs::copy(src, dst).is_err() {
-        return false;
-    }
-    match (std::fs::metadata(src), std::fs::metadata(dst)) {
-        (Ok(s), Ok(d)) if s.len() == d.len() => true,
-        _ => {
-            let _ = std::fs::remove_file(dst);
-            false
-        }
-    }
+    ira_parser::safe_migrate_dir_contents(source, target);
 }
 
 #[cfg(test)]

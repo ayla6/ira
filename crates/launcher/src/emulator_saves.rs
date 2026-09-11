@@ -63,7 +63,7 @@ fn create_save_symlink(base: &Path, name: &str, centralized: &Path) {
             name,
             target.display()
         );
-        crate::game_saves::safe_migrate_dir_contents(&target, centralized);
+        ira_parser::safe_migrate_dir_contents(&target, centralized);
         let _ = std::fs::remove_dir(&target);
     }
 

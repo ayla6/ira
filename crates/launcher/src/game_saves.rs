@@ -2,55 +2,6 @@ use std::path::{Path, PathBuf};
 
 use ira_models::{UfsRootOverride, UfsSaveFile};
 
-/// Safely migrate contents of `source` into `target` by copying each file,
-/// verifying the copy matches the original, and only then deleting the source.
-/// Files already at `target` are left in place. Subdirectories are copied recursively.
-/// Returns the number of files successfully migrated.
-pub(crate) fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
-    let _ = std::fs::create_dir_all(target);
-    let Ok(entries) = std::fs::read_dir(source) else {
-        return 0;
-    };
-    let mut count = 0;
-    for entry in entries.flatten() {
-        let src = entry.path();
-        let dst = target.join(entry.file_name());
-        if dst.exists() {
-            continue;
-        }
-        if src.is_dir() {
-            let sub_count = safe_migrate_dir_contents(&src, &dst);
-            count += sub_count;
-            if sub_count > 0
-                || std::fs::read_dir(&src)
-                    .map(|mut e| e.next().is_none())
-                    .unwrap_or(true)
-            {
-                let _ = std::fs::remove_dir(&src);
-            }
-        } else if safe_copy_and_verify(&src, &dst) {
-            let _ = std::fs::remove_file(&src);
-            count += 1;
-        }
-    }
-    count
-}
-
-/// Copy a file and verify the destination matches the source by size and content hash.
-/// Returns true if the copy is verified safe.
-fn safe_copy_and_verify(src: &Path, dst: &Path) -> bool {
-    if std::fs::copy(src, dst).is_err() {
-        return false;
-    }
-    match (std::fs::metadata(src), std::fs::metadata(dst)) {
-        (Ok(s), Ok(d)) if s.len() == d.len() => true,
-        _ => {
-            let _ = std::fs::remove_file(dst);
-            false
-        }
-    }
-}
-
 /// Centralized save path: `<save_dir>/saves/<app_id>/`
 fn centralized_base(save_dir: &str, app_id: &str) -> PathBuf {
     Path::new(save_dir).join("saves").join(app_id)
@@ -447,7 +398,7 @@ fn create_save_symlink_checked(
             default_path.display(),
             centralized_path.display()
         );
-        safe_migrate_dir_contents(default_path, centralized_path);
+        ira_parser::safe_migrate_dir_contents(default_path, centralized_path);
         if std::fs::read_dir(default_path)
             .map_err(|error| format!("failed to inspect {}: {error}", default_path.display()))?
             .next()

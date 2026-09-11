@@ -5,7 +5,9 @@ use std::sync::mpsc;
 use super::css::*;
 use super::game_display::display_game;
 use super::grid_view::show_grid_view;
-use super::helpers::{clear_children, poll_channel, refresh_settings_images_page, status_row};
+use super::helpers::{
+    clear_children, poll_channel, refresh_settings_images_page, replace_row_actions, status_row,
+};
 use super::image_manager::build_image_manager_content_with_drafts;
 use super::matching::{fetch_and_report_sgdb_assets, persist_sgdb_match};
 use super::state::SharedState;
@@ -38,9 +40,10 @@ fn manual_sgdb_search_button(
         let cb: MatchCallback = Rc::new({
             let action_box = action_box.clone();
             move |_sgdb_id, matched_name| {
-                clear_children(&action_box);
                 let text = matched_sgdb_text(matched_name);
-                action_box.append(&status_label(&text, CSS_SUCCESS_LABEL));
+                replace_row_actions(&action_box, |ab| {
+                    ab.append(&status_label(&text, CSS_SUCCESS_LABEL));
+                });
             }
         });
         show_sgdb_search_dialog(&state, db_id, &game_name, &parent_dialog, Some(cb));
@@ -170,16 +173,16 @@ pub(super) fn handle_unified_sgdb_result(
                 show_grid_view(&sc);
             }
             // Update the mass match row to show unmatched state with manual search
-            clear_children(&action_box_c);
-            let label = status_label(&crate::tr!("SGDB: unmatched"), CSS_DIM_LABEL);
-            action_box_c.append(&label);
-            action_box_c.append(&manual_sgdb_search_button(
-                &sc,
-                &action_box_c,
-                &parent_c,
-                db_id,
-                &game_name_c,
-            ));
+            replace_row_actions(&action_box_c, |ab| {
+                ab.append(&status_label(&crate::tr!("SGDB: unmatched"), CSS_DIM_LABEL));
+                ab.append(&manual_sgdb_search_button(
+                    &sc,
+                    ab,
+                    &parent_c,
+                    db_id,
+                    &game_name_c,
+                ));
+            });
         });
         action_box.append(&undo_btn);
     } else {

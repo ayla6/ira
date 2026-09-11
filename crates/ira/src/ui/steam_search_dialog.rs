@@ -6,7 +6,10 @@ use std::sync::Arc;
 
 use super::add_game::prompt_for_steam_id;
 use super::css::*;
-use super::helpers::{clamped, clamped_boxed_list, clear_children, esc, poll_channel, status_row};
+use super::helpers::{
+    clamped, clamped_boxed_list, clear_children, esc, poll_channel, replace_row_actions,
+    status_row,
+};
 use super::matching::{match_game_to_sgdb, match_game_to_steam};
 use super::state::SharedState;
 
@@ -150,13 +153,12 @@ pub(super) fn handle_steam_search_result(
 
         let ab = action_box.clone();
         let on_match: MatchCallback = Rc::new(move |sid, name| {
-            clear_children(&ab);
             let text = if name.is_empty() {
                 crate::tr!("Matched: {}").replacen("{}", sid, 1)
             } else {
                 matched_text(sid, name)
             };
-            ab.append(&status_label(&text, CSS_SUCCESS_LABEL));
+            replace_row_actions(&ab, |ab| ab.append(&status_label(&text, CSS_SUCCESS_LABEL)));
         });
 
         let id_btn = gtk4::Button::with_label(&crate::tr!("Enter ID"));

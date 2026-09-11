@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use crate::consoles::{all_consoles, ConsoleDef};
 use crate::retroachievements::api::{RaClient, RaGameEntry};
 use ira_config::Config;
-use ira_models::{Game, GameDisc, TrophySource};
+use ira_models::{normalize_name, Game, GameDisc, TrophySource};
 
 use super::discovery_helpers::{
-    group_multi_disc_roms, normalize_name, rom_display_title, scan_roms, DiscGroup, RaMatchIndex,
+    group_multi_disc_roms, rom_display_title, scan_roms, DiscGroup, RaMatchIndex,
 };
 
 struct ActiveConsole {
@@ -267,6 +267,7 @@ fn build_ra_games_for_console(
                 continue;
             }
             let mut entry = entry.clone();
+            rehash_archived_rom(db, console, rom_path_str, &mut entry, &ra_index, unpack_roms);
 
             if entry.trophy_source == ira_models::TrophySource::Empty
                 && !entry.manual_unmatch
@@ -340,7 +341,13 @@ fn build_ra_games_for_console(
 
         let groups = group_multi_disc_roms(db, new_roms);
         let nds_infos = precompute_nds_infos(console, unpack_roms, &groups, &to_relative);
-        let rom_hashes = compute_rom_hashes(&nds_infos, &groups, &to_relative);
+        let rom_hashes = compute_rom_hashes(
+            &nds_infos,
+            &groups,
+            &to_relative,
+            console.def.extensions,
+            unpack_roms,
+        );
         for group in &groups {
             let (rom_name, rom_path, _disc_num) = &group.roms[0];
             let rom_path_str = to_relative(rom_path);
@@ -625,13 +632,18 @@ fn precompute_nds_infos(
 
 /// Content hash for every new ROM group's first disc, keyed by the path
 /// relative to the console folder. NDS RA hashes (already computed) win;
-/// everything else falls back to a full-file MD5, read once per file on
-/// the scan that first sees it. The hash is what later scans use to
-/// reattach a game whose ROM reappears under a new name or path.
+/// everything else is a full MD5 of the ROM data, read once per file on
+/// the scan that first sees it — through the decompressed entry for
+/// `.zip`/`.7z`/`.zst` containers, which are skipped entirely while
+/// `unpack_roms` is off rather than stored under a useless container
+/// digest. The hash is what later scans use to reattach a game whose ROM
+/// reappears under a new name or path, and what RA lookups match on.
 fn compute_rom_hashes(
     nds_infos: &HashMap<String, crate::nds::DsRomInfo>,
     groups: &[DiscGroup],
     to_relative: &dyn Fn(&std::path::Path) -> String,
+    extensions: &[&str],
+    unpack_roms: bool,
 ) -> HashMap<String, String> {
     if groups.is_empty() {
         return HashMap::new();
@@ -646,11 +658,14 @@ fn compute_rom_hashes(
         .iter()
         .filter_map(|group| group.roms.first())
         .map(|(_, path, _)| (to_relative(path), path.clone()))
-        .filter(|(relative, _)| !hashes.contains_key(relative))
+        .filter(|(relative, path)| {
+            !hashes.contains_key(relative) && (unpack_roms || !is_archive_path(path))
+        })
         .collect();
+    let pick = |name: &str| has_rom_extension(name, extensions);
     let digests: Vec<Option<String>> = targets
         .par_iter()
-        .map(|(_, abs)| crate::rom_hash::file_md5(abs))
+        .map(|(_, abs)| crate::rom_hash::content_md5(abs, &pick))
         .collect();
     for ((relative, _), digest) in targets.into_iter().zip(digests) {
         if let Some(digest) = digest {
@@ -658,6 +673,60 @@ fn compute_rom_hashes(
         }
     }
     hashes
+}
+
+/// Whether `name` carries one of the console's ROM extensions — the test
+/// that picks the ROM entry out of an archive.
+fn has_rom_extension(name: &str, extensions: &[&str]) -> bool {
+    std::path::Path::new(name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| extensions.iter().any(|e| e.eq_ignore_ascii_case(ext)))
+        .unwrap_or(false)
+}
+
+fn is_archive_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(crate::archives::is_archive_extension)
+}
+
+/// Rows stuck with a whole-container digest — scans before archive-aware
+/// hashing md5'd the zip itself, which no RA game lists — or with no hash
+/// at all (archive scanned while `unpack_roms` was off) are rehashed
+/// through the decompressed entry. Limited to unmatched archive paths whose
+/// stored hash no RA game claims, so the pass costs nothing once the
+/// corrected hash is in the RA list.
+fn rehash_archived_rom(
+    db: &ira_db::DbConn,
+    console: &ActiveConsole,
+    rom_path_str: &str,
+    entry: &mut ira_models::GameEntry,
+    ra_index: &RaMatchIndex,
+    unpack_roms: bool,
+) {
+    if !unpack_roms
+        || ra_index.is_empty()
+        || entry.manual_unmatch
+        || entry.trophy_source != TrophySource::Empty
+        || !is_archive_path(std::path::Path::new(rom_path_str))
+        || ra_index.knows_hash(&entry.rom_hash)
+    {
+        return;
+    }
+    let abs = resolve_in_folders(&console.folders, rom_path_str);
+    let pick = |name: &str| has_rom_extension(name, console.def.extensions);
+    let Some(hash) = crate::rom_hash::content_md5(&abs, &pick) else {
+        return;
+    };
+    if hash == entry.rom_hash {
+        return;
+    }
+    if let Err(e) = ira_db::set_rom_hash(db, entry.id, &hash) {
+        eprintln!("Failed to store rehashed ROM hash: {}", e);
+        return;
+    }
+    entry.rom_hash = hash;
 }
 
 /// Extracts DS banner icons and RetroAchievements hashes for games that
@@ -869,29 +938,6 @@ mod tests {
     use std::path::PathBuf;
 
     use super::super::discovery_helpers::*;
-
-    #[test]
-    fn test_normalize_name_basic() {
-        assert_eq!(
-            normalize_name("Final Fantasy VII (USA)"),
-            "final fantasy vii"
-        );
-    }
-
-    #[test]
-    fn test_normalize_name_underscores() {
-        assert_eq!(normalize_name("Final_Fantasy.VII"), "final fantasy vii");
-    }
-
-    #[test]
-    fn test_normalize_name_version_tags() {
-        assert_eq!(normalize_name("Chrono Trigger [!]"), "chrono trigger");
-    }
-
-    #[test]
-    fn test_normalize_name_empty() {
-        assert_eq!(normalize_name(""), "");
-    }
 
     #[test]
     fn test_rom_display_title_strips_region_language_and_version_tags() {
@@ -1117,6 +1163,78 @@ mod tests {
         let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
         assert!(entry.rom_path.is_empty());
         assert_eq!(entry.title, "Gone game");
+    }
+
+    #[test]
+    fn test_scan_rehashes_archived_rom_and_matches_by_content_hash() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rom_dir = tmp.path().join("roms/gba");
+        std::fs::create_dir_all(&rom_dir).unwrap();
+        let archive = rom_dir.join("Some Game (USA).zip");
+        {
+            let file = std::fs::File::create(&archive).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            zip.start_file(
+                "Some Game (USA).gba",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            std::io::Write::write_all(&mut zip, b"gba rom bytes").unwrap();
+            zip.finish().unwrap();
+        }
+        let plain = tmp.path().join("plain.gba");
+        std::fs::write(&plain, b"gba rom bytes").unwrap();
+        let content_hash = crate::rom_hash::file_md5(&plain).unwrap();
+
+        let console = gba_console(&rom_dir);
+        let save_dir = tmp.path().join("save").to_string_lossy().into_owned();
+        let cache = crate::retroachievements::paths::console_games_path(
+            &save_dir,
+            console.def.ra_console_id,
+        );
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        // The RA title shares nothing with the file name: only the hash can match.
+        std::fs::write(
+            &cache,
+            format!(
+                r#"[{{"ID":77,"Title":"Totally Different Title","ImageIcon":"","ImageUrl":"","NumAchievements":3,"Points":10,"Hashes":["{content_hash}"]}}]"#
+            ),
+        )
+        .unwrap();
+
+        let db = test_db();
+        // Scanned before archive-aware hashing: the row carries the zip's
+        // own digest, which no RA game lists.
+        let db_id = ira_db::add_game(
+            &db,
+            ira_models::GameKind::Retro,
+            ira_models::TrophySource::Empty,
+            "",
+            "",
+            "gba",
+            "Some Game",
+        )
+        .unwrap();
+        ira_db::set_rom_path(&db, db_id, "Some Game (USA).zip").unwrap();
+        let container_hash = crate::rom_hash::file_md5(&archive).unwrap();
+        assert_ne!(container_hash, content_hash);
+        ira_db::set_rom_hash(&db, db_id, &container_hash).unwrap();
+
+        let games = super::build_ra_games_for_console(
+            &db,
+            &save_dir,
+            &console,
+            true,
+            true,
+            &load_entry_stub,
+            &|_| {},
+        );
+
+        assert_eq!(games.len(), 1);
+        let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
+        assert_eq!(entry.rom_hash, content_hash);
+        assert_eq!(entry.game_id, "77");
+        assert_eq!(entry.trophy_source, ira_models::TrophySource::Ra);
     }
 
     fn test_db() -> ira_db::DbConn {

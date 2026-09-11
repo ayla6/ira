@@ -1,42 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use ira_models::normalize_name;
+
 use super::api_types::RaGameEntry;
-
-pub(super) fn normalize_name(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut in_brackets = 0i32;
-    let mut prev_space = true;
-
-    for c in s.chars() {
-        match c {
-            '(' | '[' => in_brackets += 1,
-            ')' | ']' => {
-                if in_brackets > 0 {
-                    in_brackets -= 1;
-                }
-            }
-            _ if in_brackets > 0 => {}
-            _ => {
-                let c = if c == '_' || c == '.' { ' ' } else { c };
-                for lc in c.to_lowercase() {
-                    if lc.is_alphanumeric() {
-                        result.push(lc);
-                        prev_space = false;
-                    } else if !prev_space {
-                        result.push(' ');
-                        prev_space = true;
-                    }
-                }
-            }
-        }
-    }
-
-    while result.ends_with(' ') {
-        result.pop();
-    }
-    result
-}
 
 fn remove_version_tags(s: &str) -> String {
     let mut result = String::new();
@@ -255,6 +222,11 @@ impl RaMatchIndex {
         self.titled.is_empty() && self.untitled.is_empty() && self.by_hash.is_empty()
     }
 
+    /// Whether any RA game in the list claims `rom_hash`.
+    pub(super) fn knows_hash(&self, rom_hash: &str) -> bool {
+        !rom_hash.is_empty() && self.by_hash.contains_key(&rom_hash.to_lowercase())
+    }
+
     pub(super) fn title_of(&self, id: u32) -> Option<&str> {
         self.titles.get(&id).map(String::as_str)
     }
@@ -335,6 +307,16 @@ mod tests {
         let empty = RaMatchIndex::new(&[]);
         assert!(empty.is_empty());
         assert_eq!(empty.find("cafe", "chrono trigger"), None);
+    }
+
+    #[test]
+    fn test_match_index_knows_hash() {
+        let games = vec![entry(3, "Chrono Trigger", 5, &["cafe"])];
+        let index = RaMatchIndex::new(&games);
+        assert!(index.knows_hash("CAFE"));
+        assert!(!index.knows_hash("beef"));
+        assert!(!index.knows_hash(""));
+        assert!(!RaMatchIndex::new(&[]).knows_hash("cafe"));
     }
 
     #[test]

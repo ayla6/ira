@@ -112,7 +112,10 @@ pub fn get_playtime_by_day(
             let day_str: String = row.get(0)?;
             let total: i64 = row.get(1)?;
             let day = chrono::NaiveDate::parse_from_str(&day_str, "%Y-%m-%d")
-                .unwrap_or_else(|_| chrono::NaiveDate::default());
+                .unwrap_or_else(|e| {
+                    eprintln!("Unexpected session date {day_str:?}: {e}");
+                    chrono::NaiveDate::default()
+                });
             Ok((day, total))
         })
         .map_err(err)?;

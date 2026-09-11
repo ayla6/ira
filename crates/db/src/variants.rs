@@ -85,8 +85,14 @@ pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, Str
     let rows = stmt
         .query_map(params![game_id], |row| {
             let env_str: String = row.get(6)?;
+            let variant_id: i64 = row.get(0)?;
             let env_vars: Vec<(String, String)> =
-                serde_json::from_str(&env_str).unwrap_or_default();
+                serde_json::from_str(&env_str).unwrap_or_else(|e| {
+                    eprintln!(
+                        "Corrupt env_vars JSON for variant {variant_id} of game {game_id}: {e}"
+                    );
+                    Vec::new()
+                });
             Ok(GameVariant {
                 id: row.get(0)?,
                 game_id: row.get(1)?,
@@ -120,7 +126,13 @@ pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> 
             params![variant.game_id],
             |row| row.get(0),
         )
-        .unwrap_or(0);
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "Failed to read next sort_order for game {}: {e}",
+                variant.game_id
+            );
+            0
+        });
     let sql = format!(
         "INSERT INTO game_variants ({}) VALUES ({})",
         variant_insert_columns(),

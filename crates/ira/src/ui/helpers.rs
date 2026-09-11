@@ -871,10 +871,68 @@ pub fn display_playtime(state: &SharedState, game: &Game) -> f64 {
         .sum()
 }
 
+/// Replaces the contents of a match-list row's action box without losing
+/// the list's scroll position. Removing the button that holds keyboard
+/// focus would hand focus to the first row and scroll the list back to the
+/// top, so the enclosing row takes focus instead and the scrolled window
+/// is put back where it was once the new children are allocated.
+pub fn replace_row_actions(action_box: &gtk4::Box, rebuild: impl FnOnce(&gtk4::Box)) {
+    let scrolled = action_box
+        .ancestor(gtk4::ScrolledWindow::static_type())
+        .and_then(|w| w.downcast::<gtk4::ScrolledWindow>().ok());
+    let position = scrolled.as_ref().map(|s| s.vadjustment().value());
+    clear_children(action_box);
+    rebuild(action_box);
+    if let Some(row) = action_box.ancestor(gtk4::ListBoxRow::static_type()) {
+        row.grab_focus();
+    }
+    if let (Some(scrolled), Some(position)) = (scrolled, position) {
+        glib::idle_add_local_once(move || scrolled.vadjustment().set_value(position));
+    }
+}
+
+/// The one SGDB search result whose title equals `game_name` under
+/// [`ira_models::normalize_name`], or None. SGDB autocomplete is fuzzy, so
+/// the automatic match paths must take a real title match or nothing —
+/// never the first suggestion ("Fire Emblem" for a Japanese-titled ROM).
+pub fn matching_sgdb_result(
+    results: &[(String, String)],
+    game_name: &str,
+) -> Option<(String, String)> {
+    let norm = ira_models::normalize_name(game_name);
+    results
+        .iter()
+        .find(|(_, name)| ira_models::normalize_name(name) == norm)
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ira_models::LogoPosition;
+
+    #[test]
+    fn test_matching_sgdb_result_requires_title_equality() {
+        let results = vec![
+            ("1".to_string(), "Fire Emblem".to_string()),
+            ("2".to_string(), "Fire Emblem: Shadow Dragon".to_string()),
+        ];
+        // A fuzzy suggestion for a Japanese-titled ROM is never taken.
+        assert_eq!(
+            super::matching_sgdb_result(&results, "ファイアーエムブレム 暗黒竜と光の剣"),
+            None
+        );
+        // Punctuation differences still count as the same title.
+        assert_eq!(
+            super::matching_sgdb_result(&results, "fire emblem shadow dragon")
+                .map(|(id, _)| id),
+            Some("2".to_string())
+        );
+        assert_eq!(
+            super::matching_sgdb_result(&results, "Fire Emblem").map(|(id, _)| id),
+            Some("1".to_string())
+        );
+    }
 
     #[test]
     fn test_format_duration_zero() {

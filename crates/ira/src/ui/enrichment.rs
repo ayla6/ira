@@ -279,7 +279,8 @@ fn ensure_default_icon(
     if !sgdb_matchable || !steam.has_sgdb_key() {
         return;
     }
-    let Some((sgdb_id, _)) = steam.search_sgdb(&game.name).into_iter().next() else {
+    let results = steam.search_sgdb(&game.name);
+    let Some((sgdb_id, _)) = super::helpers::matching_sgdb_result(&results, &game.name) else {
         return;
     };
     let dir = ira_parser::game_data_dir(save_dir, game);

@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use super::css::*;
-use super::helpers::clear_children;
+use super::helpers::replace_row_actions;
 use super::ra_match_dialog::show_ra_search_dialog;
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::state::SharedState;
@@ -124,9 +124,12 @@ fn populate_match_list(
                     &pid2,
                     &dlg2,
                     Some(Rc::new(move || {
-                        clear_children(&inner_update);
-                        let label = status_label(&crate::tr!("RA: matched"), CSS_SUCCESS_LABEL);
-                        inner_update.append(&label);
+                        replace_row_actions(&inner_update, |ab| {
+                            ab.append(&status_label(
+                                &crate::tr!("RA: matched"),
+                                CSS_SUCCESS_LABEL,
+                            ));
+                        });
                     })),
                 );
             });
@@ -307,10 +310,8 @@ fn start_sgdb_batch_matching(
         {
             let steam = steam.clone();
             move |item| {
-                steam
-                    .search_sgdb(&item.name)
-                    .first()
-                    .map(|(sid, name)| (sid.clone(), name.clone()))
+                let results = steam.search_sgdb(&item.name);
+                super::helpers::matching_sgdb_result(&results, &item.name)
             }
         },
         {

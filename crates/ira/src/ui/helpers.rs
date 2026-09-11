@@ -2,6 +2,7 @@ use crate::Game;
 use adw::prelude::{AdwDialogExt, AlertDialogExt, AdwWindowExt, PreferencesRowExt};
 use chrono::TimeZone;
 use gtk4::prelude::*;
+use ira_db::DbConn;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -16,6 +17,30 @@ use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 pub fn crisp_label(label: &gtk4::Label) {
     label.pango_context().set_round_glyph_positions(true);
 }
+
+/// Reads the per-game launch config, logging DB failures instead of silently
+/// defaulting — a swallowed error here launches (or stops) the game without
+/// its wine prefix, env vars, and overlay settings, or prefills an edit
+/// dialog with defaults that a save would then persist.
+pub(crate) fn logged_game_config(
+    db: &DbConn,
+    db_id: i64,
+) -> Option<(ira_models::GameLaunchConfig, ira_models::WineConfig, Option<i64>)> {
+    ira_db::get_game_config(db, db_id).unwrap_or_else(|e| {
+        eprintln!("Failed to read game config for db_id {}: {}", db_id, e);
+        None
+    })
+}
+
+/// DB reads that must not abort the surrounding UI action (group menus,
+/// charts, lists): log the failure instead of silently returning empty.
+pub(crate) fn logged_db_vec<T>(what: &str, result: Result<Vec<T>, String>) -> Vec<T> {
+    result.unwrap_or_else(|e| {
+        eprintln!("{}: {}", what, e);
+        Vec::new()
+    })
+}
+
 
 pub struct DialogLayout {
     pub window: adw::Dialog,
@@ -827,7 +852,10 @@ fn fitted_height(preferred: i32, available: i32) -> i32 {
 /// Called when the game list loads and when the settings change a link.
 pub fn refresh_playtime_links(state: &SharedState) {
     let db = state.borrow().db.clone();
-    let links = ira_db::playtime_links(&db).unwrap_or_default();
+    let links = ira_db::playtime_links(&db).unwrap_or_else(|e| {
+        eprintln!("Failed to read playtime links: {e}");
+        Vec::new()
+    });
     let mut by_group: HashMap<i64, Vec<i64>> = HashMap::new();
     for (game_id, group) in links {
         by_group.entry(group).or_default().push(game_id);
@@ -866,7 +894,13 @@ pub fn display_playtime(state: &SharedState, game: &Game) -> f64 {
     let db = state.borrow().db.clone();
     members
         .iter()
-        .filter_map(|id| ira_db::find_by_db_id(&db, *id).ok().flatten())
+        .filter_map(|id| {
+            ira_db::find_by_db_id(&db, *id)
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to read linked game {id}: {e}");
+                    None
+                })
+        })
         .map(|entry| entry.playtime)
         .sum()
 }

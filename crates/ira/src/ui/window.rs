@@ -48,7 +48,10 @@ pub fn build_ui(
         let group_members: HashMap<i64, HashSet<i64>> = groups
             .iter()
             .map(|g| {
-                let ids = ira_db::get_game_ids_in_group(&ctx.db, g.id).unwrap_or_default();
+                let ids = ira_db::get_game_ids_in_group(&ctx.db, g.id).unwrap_or_else(|e| {
+                    eprintln!("Failed to load members of group {}: {}", g.id, e);
+                    Vec::new()
+                });
                 (g.id, ids.into_iter().collect())
             })
             .collect();

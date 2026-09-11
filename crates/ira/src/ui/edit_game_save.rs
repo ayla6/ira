@@ -439,8 +439,13 @@ fn save_dlc_config(params: &SaveGameSettingsParams) {
         }
     }
     let path = ira_parser::data_dir(&params.save_dir, &params.app_id).join("dlc_config.json");
-    if let Ok(b) = serde_json::to_vec(&details) {
-        let _ = std::fs::write(&path, b);
+    match serde_json::to_vec(&details) {
+        Ok(b) => {
+            if let Err(e) = std::fs::write(&path, b) {
+                eprintln!("Failed to write {}: {e}", path.display());
+            }
+        }
+        Err(e) => eprintln!("Failed to serialize dlc_config.json: {e}"),
     }
     ira_platforms::api_emulators::write_dlc_configs(
         params.trophy_source,
@@ -586,7 +591,9 @@ fn spawn_image_copy_thread(
                 PendingImage::Path(src_path) => {
                     if ira_parser::is_ico_data(&std::fs::read(src_path).unwrap_or_default()) {
                         let ico_path = cloud_dir.join(format!("{}.ico", base_name));
-                        let _ = std::fs::copy(src_path, &ico_path);
+                        if let Err(e) = std::fs::copy(src_path, &ico_path) {
+                            eprintln!("Failed to copy {}: {e}", ico_path.display());
+                        }
                         ico_path
                     } else {
                         let ext = std::path::Path::new(src_path)

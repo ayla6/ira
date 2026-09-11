@@ -36,7 +36,10 @@ pub fn show_create_group_dialog(state: &SharedState) {
         let db = state_clone.borrow().db.clone();
         match ira_db::create_group(&db, &name) {
             Ok(_) => {
-                let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+                let groups = super::helpers::logged_db_vec(
+                    "Failed to read groups",
+                    ira_db::get_all_groups(&db),
+                );
                 state_clone.borrow_mut().groups = groups;
                 rebuild_sidebar(&state_clone);
             }
@@ -83,7 +86,10 @@ pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name
         let db = state_clone.borrow().db.clone();
         match ira_db::rename_group(&db, group_id, &name) {
             Ok(_) => {
-                let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+                let groups = super::helpers::logged_db_vec(
+                    "Failed to read groups",
+                    ira_db::get_all_groups(&db),
+                );
                 state_clone.borrow_mut().groups = groups;
                 rebuild_sidebar(&state_clone);
             }
@@ -120,7 +126,10 @@ pub fn show_delete_group_dialog(state: &SharedState, group_id: i64, name: &str) 
         let db = state_clone.borrow().db.clone();
         match ira_db::delete_group(&db, group_id) {
             Ok(_) => {
-                let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+                let groups = super::helpers::logged_db_vec(
+                    "Failed to read groups",
+                    ira_db::get_all_groups(&db),
+                );
                 state_clone.borrow_mut().groups = groups;
                 state_clone.borrow_mut().group_members.remove(&group_id);
                 state_clone.borrow_mut().selected_group = ira_models::GroupSelection::AllGames;

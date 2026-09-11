@@ -279,7 +279,8 @@ pub(super) fn setup_toggle_group_action(
     toggle_group.connect_activate(move |_, param| {
         let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
         let db = state.borrow().db.clone();
-        let existing = ira_db::get_groups_for_game(&db, game.db_id).unwrap_or_default();
+        let existing =
+            super::helpers::logged_db_vec("Failed to read game groups", ira_db::get_groups_for_game(&db, game.db_id));
         if existing.iter().any(|g| g.id == group_id) {
             if let Err(e) = ira_db::remove_game_from_group(&db, game.db_id, group_id) {
                 eprintln!("Failed to remove game from group: {}", e);
@@ -332,7 +333,10 @@ pub(super) fn setup_multi_toggle_group_action(
         let db = state.borrow().db.clone();
 
         let all_in = ids.iter().all(|&db_id| {
-            let game_groups = ira_db::get_groups_for_game(&db, db_id).unwrap_or_default();
+            let game_groups = super::helpers::logged_db_vec(
+                "Failed to read game groups",
+                ira_db::get_groups_for_game(&db, db_id),
+            );
             game_groups.iter().any(|g| g.id == group_id)
         });
 
@@ -445,8 +449,12 @@ pub(super) fn show_collection_name_dialog(
         match ira_db::create_group(&db, &name) {
             Ok(group_id) => {
                 add_games(&db, group_id);
-                let groups = ira_db::get_all_groups(&db).unwrap_or_default();
-                let members = ira_db::get_game_ids_in_group(&db, group_id).unwrap_or_default();
+                let groups =
+                    super::helpers::logged_db_vec("Failed to read groups", ira_db::get_all_groups(&db));
+                let members = super::helpers::logged_db_vec(
+                    "Failed to read group members",
+                    ira_db::get_game_ids_in_group(&db, group_id),
+                );
                 state.borrow_mut().groups = groups;
                 state
                     .borrow_mut()

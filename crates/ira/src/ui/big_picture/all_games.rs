@@ -700,7 +700,11 @@ impl AllSoftwareUi {
     /// Pull the shared groups list back from the database.
     fn sync_groups(&self, state: &SharedState) {
         let db = state.borrow().db.clone();
-        state.borrow_mut().groups = ira_db::get_all_groups(&db).unwrap_or_default();
+        let groups = crate::ui::helpers::logged_db_vec(
+            "Failed to read groups",
+            ira_db::get_all_groups(&db),
+        );
+        state.borrow_mut().groups = groups;
     }
 
     /// After a create, rename, or delete: sync the tiles and land the

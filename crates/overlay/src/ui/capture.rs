@@ -1071,5 +1071,7 @@ fn encode_webp(mut rgba: Vec<u8>, width: u32, height: u32) {
     let webp_data = encoder.encode_lossless();
     let path = screenshot_path();
     eprintln!("ira-overlay: saving screenshot to {:?}", path);
-    let _ = std::fs::write(&path, &*webp_data);
+    if let Err(e) = std::fs::write(&path, &*webp_data) {
+        eprintln!("ira-overlay: failed to save screenshot: {e}");
+    }
 }

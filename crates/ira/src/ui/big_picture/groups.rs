@@ -188,7 +188,10 @@ impl GroupsGrid {
         let mut entries: Vec<(usize, &Group, Vec<&Game>)> = groups
             .iter()
             .map(|group| {
-                let members = ira_db::get_game_ids_in_group(&db, group.id).unwrap_or_default();
+                let members = super::super::helpers::logged_db_vec(
+                    "Failed to read group members",
+                    ira_db::get_game_ids_in_group(&db, group.id),
+                );
                 let covers: Vec<&Game> = members
                     .iter()
                     .filter_map(|id| visible_games.iter().find(|g| g.db_id == *id))

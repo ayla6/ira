@@ -472,7 +472,8 @@ pub(super) fn rename_group(state: &SharedState, group_id: i64, current: &str) {
 /// change, landing the selection on the touched group.
 fn finish_group_change(state: &SharedState, group_id: i64) {
     let db = state.borrow().db.clone();
-    let groups = ira_db::get_all_groups(&db).unwrap_or_default();
+    let groups =
+        super::super::helpers::logged_db_vec("Failed to read groups", ira_db::get_all_groups(&db));
     state.borrow_mut().groups = groups;
     // Clone out of the borrow: sync_and_focus_group mutably borrows the
     // state to store the refreshed list, and an if-let keeps its

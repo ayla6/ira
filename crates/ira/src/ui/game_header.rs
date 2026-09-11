@@ -147,7 +147,7 @@ fn check_wine_enabled(game: &Game, state: &SharedState) -> bool {
         return false;
     }
     let s = state.borrow();
-    let config = ira_db::get_game_config(&s.db, game.db_id).ok().flatten();
+    let config = super::helpers::logged_game_config(&s.db, game.db_id);
     let app_default = s.cfg.default_wine_config.clone();
     let (_, mut wine, profile_id) = config.unwrap_or_default();
     if let Some(pid) = profile_id {
@@ -521,7 +521,7 @@ fn get_wine_cmd_env(
     db_id: i64,
 ) -> (Option<String>, String, Vec<(String, String)>) {
     let s = state.borrow();
-    let config = ira_db::get_game_config(&s.db, db_id).ok().flatten();
+    let config = super::helpers::logged_game_config(&s.db, db_id);
     let app_default = s.cfg.default_wine_config.clone();
     let (_, mut wine, profile_id) = config.unwrap_or_default();
     if let Some(pid) = profile_id {

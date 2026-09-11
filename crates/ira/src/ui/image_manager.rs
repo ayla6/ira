@@ -304,7 +304,9 @@ fn build_steam_icon_button(
                 if ico_bytes.is_empty() {
                     eprintln!("steam icon download failed for {id_c}: no bytes from any source");
                 } else if let Some(webp) = ira_parser::convert_bytes_to_lossless_webp(&ico_bytes) {
-                    let _ = std::fs::write(&dest_webp, &webp);
+                    if let Err(e) = std::fs::write(&dest_webp, &webp) {
+                        eprintln!("Failed to write steam icon {}: {e}", dest_webp.display());
+                    }
                 } else {
                     eprintln!("steam icon download failed for {id_c}: undecodable icon bytes");
                 }

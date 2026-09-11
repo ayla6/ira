@@ -134,7 +134,7 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
             let s = state.borrow();
             let game = s.games.iter().find(|g| g.db_id == game_id);
             let db_id = game.map(|g| g.db_id).unwrap_or(0);
-            let config = ira_db::get_game_config(&s.db, db_id).ok().flatten();
+            let config = super::helpers::logged_game_config(&s.db, db_id);
             let app_default = s.cfg.default_wine_config.clone();
             let (exe, prefix, env_vars) = if let Some((_, mut wine, _)) = config {
                 wine = wine.merge_with_default(&app_default);
@@ -193,17 +193,7 @@ pub fn launch_game(
     ) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == game_id);
-        let source_id = game.and_then(|g| match g.kind {
-            ira_models::GameKind::Steam => Some("steam"),
-            ira_models::GameKind::Retro => Some(g.platform_id.as_str()),
-            ira_models::GameKind::Ps4 => Some("ps4"),
-            ira_models::GameKind::Ps3 => Some("ps3"),
-            ira_models::GameKind::PsVita => Some("psvita"),
-            ira_models::GameKind::WiiU => Some("wiiu"),
-            ira_models::GameKind::ThreeDS => Some("3ds"),
-            ira_models::GameKind::Switch => Some("switch"),
-            _ => None,
-        });
+        let source_id = game.and_then(|g| g.overlay_source_id());
         let overlay_global_enabled =
             source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
         let mut system_defaults = s.cfg.default_system.clone();
@@ -463,17 +453,7 @@ pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), Stri
     ) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == db_id);
-        let source_id = game.and_then(|g| match g.kind {
-            ira_models::GameKind::Steam => Some("steam"),
-            ira_models::GameKind::Retro => Some(g.platform_id.as_str()),
-            ira_models::GameKind::Ps4 => Some("ps4"),
-            ira_models::GameKind::Ps3 => Some("ps3"),
-            ira_models::GameKind::PsVita => Some("psvita"),
-            ira_models::GameKind::WiiU => Some("wiiu"),
-            ira_models::GameKind::ThreeDS => Some("3ds"),
-            ira_models::GameKind::Switch => Some("switch"),
-            _ => None,
-        });
+        let source_id = game.and_then(|g| g.overlay_source_id());
         let overlay_global_enabled =
             source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
         let mut system_defaults = s.cfg.default_system.clone();
@@ -575,8 +555,14 @@ pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> 
         (s.sender.clone(), s.db.clone())
     };
 
-    let variants = ira_db::get_variants(&db, db_id).unwrap_or_default();
-    let discs = ira_db::get_discs(&db, db_id).unwrap_or_default();
+    let variants = ira_db::get_variants(&db, db_id).unwrap_or_else(|e| {
+        eprintln!("Failed to read variants for db_id {}: {}", db_id, e);
+        Vec::new()
+    });
+    let discs = ira_db::get_discs(&db, db_id).unwrap_or_else(|e| {
+        eprintln!("Failed to read discs for db_id {}: {}", db_id, e);
+        Vec::new()
+    });
     let has_variants = !variants.is_empty();
     let has_discs = !discs.is_empty();
 

@@ -80,11 +80,9 @@ fn shift_expander(
     shift: &ModeShift,
 ) -> adw::ExpanderRow {
     let expander = adw::ExpanderRow::new();
-    expander.set_title(&esc(&format!(
-        "{} {}",
-        crate::tr!("While holding"),
-        source_label(shift.trigger)
-    )));
+    expander.set_title(&esc(
+        &crate::tr!("While holding {}").replacen("{}", &source_label(shift.trigger), 1),
+    ));
     let is_trigger = is_trigger_axis(base.source);
     expander.set_subtitle(&esc(&match &shift.mode {
         Some(mode) => mode_label(&Some(mode.clone()), is_trigger),
@@ -142,11 +140,9 @@ fn plain_shift_row(
     shift: &ModeShift,
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
-    row.set_title(&esc(&format!(
-        "{} {}",
-        crate::tr!("While holding"),
-        source_label(shift.trigger)
-    )));
+    row.set_title(&esc(
+        &crate::tr!("While holding {}").replacen("{}", &source_label(shift.trigger), 1),
+    ));
     row.set_subtitle(&esc(&crate::tr!("Shifted activators")));
     row.add_suffix(&remove_shift_button(base, reopen, shift_index));
     row

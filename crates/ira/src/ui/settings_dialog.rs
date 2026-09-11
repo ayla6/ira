@@ -73,6 +73,8 @@ struct SettingsDialogParams {
     steam: Arc<SteamDataClient>,
     state: SharedState,
     rom_platforms_with_games: HashSet<String>,
+    /// Sidebar page to land on (the row's widget name, e.g. "3ds").
+    open_page: Option<String>,
 }
 
 pub fn show_settings_dialog(
@@ -80,6 +82,28 @@ pub fn show_settings_dialog(
     cfg: Config,
     steam: Arc<SteamDataClient>,
     state: &SharedState,
+) {
+    open_settings_dialog(parent, cfg, steam, state, None);
+}
+
+/// Like [`show_settings_dialog`], but lands on the sidebar page with this
+/// widget name; unknown page ids fall back to the first page.
+pub fn show_settings_dialog_on_page(
+    parent: &adw::ApplicationWindow,
+    cfg: Config,
+    steam: Arc<SteamDataClient>,
+    state: &SharedState,
+    page_id: &str,
+) {
+    open_settings_dialog(parent, cfg, steam, state, Some(page_id.to_string()));
+}
+
+fn open_settings_dialog(
+    parent: &adw::ApplicationWindow,
+    cfg: Config,
+    steam: Arc<SteamDataClient>,
+    state: &SharedState,
+    open_page: Option<String>,
 ) {
     let layout = settings_window_layout(parent);
     layout.sidebar_area.set_size_request(180, -1);
@@ -113,10 +137,24 @@ pub fn show_settings_dialog(
         steam,
         state: state.clone(),
         rom_platforms_with_games,
+        open_page,
     };
     glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
         finish_settings_dialog(params)
     });
+}
+
+/// The sidebar row whose widget name is `page_id` (see
+/// [`super::settings_pages::settings_sidebar_row`]).
+fn sidebar_row_with_name(sidebar: &gtk4::ListBox, page_id: &str) -> Option<gtk4::ListBoxRow> {
+    let mut index = 0;
+    while let Some(row) = sidebar.row_at_index(index) {
+        if row.widget_name() == page_id {
+            return Some(row);
+        }
+        index += 1;
+    }
+    None
 }
 
 fn finish_settings_dialog(params: SettingsDialogParams) {
@@ -129,6 +167,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         steam,
         state,
         rom_platforms_with_games,
+        open_page,
     } = params;
     let pages = build_settings_pages(&cfg, &win, &state);
     register_settings_pages(&pages, &sidebar, &stack);
@@ -237,8 +276,12 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         }
     });
 
-    if let Some(first) = sidebar.row_at_index(0) {
-        sidebar.select_row(Some(&first));
+    let target_row = open_page
+        .as_deref()
+        .and_then(|page_id| sidebar_row_with_name(&sidebar, page_id))
+        .or_else(|| sidebar.row_at_index(0));
+    if let Some(row) = target_row {
+        sidebar.select_row(Some(&row));
     }
 
     let btn_row = super::helpers::dialog_button_row_with_escape(&win);

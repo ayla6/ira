@@ -502,15 +502,60 @@ pub(super) fn launch_retro(
     spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
 
-/// Per-game override → integration-global setting → well-known binary name.
-fn resolve_emulator_exe<'a>(per_game: &'a str, global: &'a str, fallback: &'a str) -> &'a str {
-    if !per_game.is_empty() {
-        per_game
-    } else if !global.is_empty() {
-        global
-    } else {
-        fallback
+/// Per-game override, then the integration-global setting. `None` means no
+/// emulator is configured: launches are blocked with an alert that opens the
+/// matching settings page instead of guessing a well-known binary name.
+fn resolve_emulator_exe<'a>(per_game: &'a str, global: &'a str) -> Option<&'a str> {
+    [per_game, global]
+        .into_iter()
+        .find(|candidate| !candidate.is_empty())
+}
+
+/// The settings sidebar page that configures this game's emulator: the
+/// emulator-integration pages are keyed by kind, ROM-library consoles by
+/// their display name.
+fn emulator_settings_page(kind: ira_models::GameKind, platform_id: &str) -> String {
+    match kind {
+        ira_models::GameKind::Ps4 => "ps4".to_string(),
+        ira_models::GameKind::Ps3 => "ps3".to_string(),
+        ira_models::GameKind::PsVita => "psvita".to_string(),
+        ira_models::GameKind::WiiU => "wiiu".to_string(),
+        ira_models::GameKind::ThreeDS => "3ds".to_string(),
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch => {
+            ira_models::find_console(platform_id)
+                .map(|def| def.display_name.to_lowercase())
+                .unwrap_or_else(|| platform_id.to_string())
+        }
+        _ => String::new(),
     }
+}
+
+/// The settings page to offer when this game's emulator is not configured,
+/// or `None` when launch can proceed (or the game doesn't run through an
+/// emulator). shadPS4 counts as configured when a version still resolves
+/// from its Qt launcher or the PATH.
+pub(super) fn missing_emulator_page(
+    cfg: &Config,
+    exes: &EmulatorExes<'_>,
+    kind: ira_models::GameKind,
+) -> Option<String> {
+    let configured = match kind {
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch => {
+            !exes.per_game_emu.is_empty() || !cfg.console(exes.platform_id).executable.is_empty()
+        }
+        ira_models::GameKind::Ps4 => ira_platforms::ps4::shadps4_executable_available(
+            &ira_platforms::ps4::resolve_shadps4_executable(exes.per_game_version, exes.shadps4),
+        ),
+        ira_models::GameKind::Ps3 => resolve_emulator_exe(exes.per_game_emu, exes.rpcs3).is_some(),
+        ira_models::GameKind::PsVita => resolve_emulator_exe("", exes.vita3k).is_some(),
+        ira_models::GameKind::WiiU => resolve_emulator_exe(exes.per_game_emu, exes.cemu).is_some(),
+        ira_models::GameKind::ThreeDS => {
+            resolve_emulator_exe(exes.per_game_emu, exes.azahar).is_some()
+        }
+        // Steam/Wine/Linux/Other games don't run through an emulator.
+        _ => return None,
+    };
+    (!configured).then(|| emulator_settings_page(kind, exes.platform_id))
 }
 
 /// The shared emulator-launch pipeline: fullscreen flags, filesystem
@@ -585,7 +630,8 @@ pub(super) fn launch_ps3(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = resolve_emulator_exe(per_game_emu, global_rpcs3_exe, "rpcs3");
+    let exe = resolve_emulator_exe(per_game_emu, global_rpcs3_exe)
+        .ok_or_else(|| format!("No emulator configured for {}", ctx.game_name))?;
     // RPCS3 parses option flags until the positional game path, so the
     // fullscreen flag must come before it.
     launch_emulator(
@@ -611,7 +657,8 @@ pub(super) fn launch_vita3k(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = resolve_emulator_exe("", global_executable, "vita3k");
+    let exe = resolve_emulator_exe("", global_executable)
+        .ok_or_else(|| format!("No emulator configured for {}", ctx.game_name))?;
     launch_emulator(
         ctx,
         ira_models::GameKind::PsVita,
@@ -636,7 +683,8 @@ pub(super) fn launch_cemu(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = resolve_emulator_exe(per_game_emu, global_executable, "cemu");
+    let exe = resolve_emulator_exe(per_game_emu, global_executable)
+        .ok_or_else(|| format!("No emulator configured for {}", ctx.game_name))?;
     launch_emulator(
         ctx,
         ira_models::GameKind::WiiU,
@@ -661,7 +709,8 @@ pub(super) fn launch_azahar(
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
 ) -> Result<(), String> {
-    let exe = resolve_emulator_exe(per_game_emu, global_executable, "azahar");
+    let exe = resolve_emulator_exe(per_game_emu, global_executable)
+        .ok_or_else(|| format!("No emulator configured for {}", ctx.game_name))?;
     // Azahar takes the ROM or installed title content file positionally.
     launch_emulator(
         ctx,
@@ -708,35 +757,40 @@ pub(super) fn launch_emulator_no_game(
             ctx.game_name
         ));
     }
+    if let Some(page_id) = missing_emulator_page(cfg, exes, ctx.game_kind) {
+        let _ = ctx.sender.send(ira_models::AppMessage::EmulatorMissing {
+            game_name: ctx.game_name.to_string(),
+            page_id,
+        });
+        return Ok(());
+    }
 
     let exe = match ctx.game_kind {
         // Switch games launch like the ROM library's: through the console's
         // configured emulator, per-game override first.
         ira_models::GameKind::Retro | ira_models::GameKind::Switch => {
-            let cc = cfg.console(platform_id);
             if !per_game_emu.is_empty() {
                 per_game_emu.to_string()
-            } else if cc.executable.is_empty() {
-                return Err(format!("No emulator configured for {platform_id}"));
             } else {
-                cc.executable.clone()
+                cfg.console(platform_id).executable.clone()
             }
         }
         ira_models::GameKind::Ps4 => {
-            let exe =
-                ira_platforms::ps4::resolve_shadps4_executable(exes.per_game_version, exes.shadps4);
-            if !ira_platforms::ps4::shadps4_executable_available(&exe) {
-                return Err(format!(
-                    "shadPS4 executable was not found: {exe}. Install shadPS4 or select an available version in Settings."
-                ));
-            }
-            exe
+            ira_platforms::ps4::resolve_shadps4_executable(exes.per_game_version, exes.shadps4)
         }
         // Per-game overrides first, then the integration-wide default.
-        ira_models::GameKind::Ps3 => pick(per_game_emu, exes.rpcs3, "rpcs3"),
-        ira_models::GameKind::PsVita => pick("", exes.vita3k, "vita3k"),
-        ira_models::GameKind::WiiU => pick(per_game_emu, exes.cemu, "cemu"),
-        ira_models::GameKind::ThreeDS => pick(per_game_emu, exes.azahar, "azahar"),
+        ira_models::GameKind::Ps3 => resolve_emulator_exe(per_game_emu, exes.rpcs3)
+            .ok_or_else(|| format!("No emulator configured for {platform_id}"))?
+            .to_string(),
+        ira_models::GameKind::PsVita => resolve_emulator_exe("", exes.vita3k)
+            .ok_or_else(|| format!("No emulator configured for {platform_id}"))?
+            .to_string(),
+        ira_models::GameKind::WiiU => resolve_emulator_exe(per_game_emu, exes.cemu)
+            .ok_or_else(|| format!("No emulator configured for {platform_id}"))?
+            .to_string(),
+        ira_models::GameKind::ThreeDS => resolve_emulator_exe(per_game_emu, exes.azahar)
+            .ok_or_else(|| format!("No emulator configured for {platform_id}"))?
+            .to_string(),
         _ => return Err("not an emulated game".to_string()),
     };
 
@@ -771,15 +825,6 @@ fn console_controller_input(
         cc.controller_mode,
         (!cc.controller_profile.is_empty()).then_some(cc.controller_profile.clone()),
     )
-}
-
-/// First non-empty of two candidates with a final fallback.
-fn pick(preferred: &str, secondary: &str, fallback: &str) -> String {
-    [preferred, secondary]
-        .into_iter()
-        .find(|candidate| !candidate.is_empty())
-        .unwrap_or(fallback)
-        .to_string()
 }
 
 pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String> {
@@ -1013,10 +1058,10 @@ pub(super) fn update_last_played(
 mod tests {
     use super::{
         apply_emulator_gpu_policy, apply_system_defaults, console_input_mode,
-        ordered_disc_paths, resolved_input_mode,
+        ordered_disc_paths, resolved_input_mode, EmulatorExes,
     };
-    use ira_config::SystemDefaults;
-    use ira_models::{ControllerInputMode, GameDisc};
+    use ira_config::{Config, SystemDefaults};
+    use ira_models::{ControllerInputMode, GameDisc, GameKind};
 
     fn disc(id: i64, number: i32, rom_path: &str) -> GameDisc {
         GameDisc {
@@ -1070,10 +1115,91 @@ mod tests {
     }
 
     #[test]
-    fn test_pick_prefers_then_secondary_then_fallback() {
-        assert_eq!(super::pick("per-game", "global", "fallback"), "per-game");
-        assert_eq!(super::pick("", "global", "fallback"), "global");
-        assert_eq!(super::pick("", "", "fallback"), "fallback");
+    fn test_missing_emulator_page_flags_unset_integrations() {
+        let cfg = Config::default();
+        let exes = |azahar: &'static str, per_game: &'static str| EmulatorExes {
+            platform_id: "3ds",
+            per_game_version: "",
+            per_game_emu: per_game,
+            shadps4: "",
+            rpcs3: "",
+            vita3k: "",
+            cemu: "",
+            azahar,
+        };
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes("", ""), GameKind::ThreeDS).as_deref(),
+            Some("3ds")
+        );
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes("/usr/bin/azahar", ""), GameKind::ThreeDS),
+            None
+        );
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes("", "/opt/azahar"), GameKind::ThreeDS),
+            None
+        );
+    }
+
+    #[test]
+    fn test_missing_emulator_page_reads_console_executable_for_retro() {
+        let mut cfg = Config::default();
+        let exes = |per_game: &'static str| EmulatorExes {
+            platform_id: "saturn",
+            per_game_version: "",
+            per_game_emu: per_game,
+            shadps4: "",
+            rpcs3: "",
+            vita3k: "",
+            cemu: "",
+            azahar: "",
+        };
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes(""), GameKind::Retro).as_deref(),
+            Some("saturn")
+        );
+        cfg.console_mut("saturn").executable = "/usr/bin/yabause".to_string();
+        assert_eq!(super::missing_emulator_page(&cfg, &exes(""), GameKind::Retro), None);
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes("/opt/mednafen"), GameKind::Retro),
+            None
+        );
+    }
+
+    #[test]
+    fn test_missing_emulator_page_maps_switch_to_its_settings_page() {
+        let cfg = Config::default();
+        let exes = EmulatorExes {
+            platform_id: "switch",
+            per_game_version: "",
+            per_game_emu: "",
+            shadps4: "",
+            rpcs3: "",
+            vita3k: "",
+            cemu: "",
+            azahar: "",
+        };
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes, GameKind::Switch).as_deref(),
+            Some("nintendo switch")
+        );
+    }
+
+    #[test]
+    fn test_missing_emulator_page_ignores_non_emulated_kinds() {
+        let cfg = Config::default();
+        let exes = EmulatorExes {
+            platform_id: "wine",
+            per_game_version: "",
+            per_game_emu: "",
+            shadps4: "",
+            rpcs3: "",
+            vita3k: "",
+            cemu: "",
+            azahar: "",
+        };
+        assert_eq!(super::missing_emulator_page(&cfg, &exes, GameKind::Wine), None);
+        assert_eq!(super::missing_emulator_page(&cfg, &exes, GameKind::Steam), None);
     }
 
     #[test]

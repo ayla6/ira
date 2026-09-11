@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-11 16:34-0300\n"
+"POT-Creation-Date: 2026-09-11 20:51-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -214,6 +214,7 @@ msgstr ""
 #: crates/ira/src/ui/input_profile_output_capture.rs:55
 #: crates/ira/src/ui/input_profile_settings.rs:938
 #: crates/ira/src/ui/installer_add_dialog.rs:643
+#: crates/ira/src/ui/message_handler.rs:126
 #: crates/ira/src/ui/play_history.rs:222
 #: crates/ira/src/ui/profile_dialog.rs:198
 #: crates/ira/src/ui/profile_dialog.rs:446
@@ -558,7 +559,7 @@ msgstr ""
 #: crates/ira/src/ui/big_picture/all_games.rs:755
 #: crates/ira/src/ui/big_picture/keyboard.rs:405
 #: crates/ira/src/ui/mass_match_dialog.rs:252
-#: crates/ira/src/ui/message_handler.rs:113
+#: crates/ira/src/ui/message_handler.rs:103
 msgid "OK"
 msgstr ""
 
@@ -980,7 +981,7 @@ msgstr ""
 #: crates/ira/src/ui/input_profile_editor.rs:140
 #: crates/ira/src/ui/input_profile_editor_save.rs:123
 #: crates/ira/src/ui/profile_dialog.rs:452
-#: crates/ira/src/ui/settings_dialog.rs:246
+#: crates/ira/src/ui/settings_dialog.rs:289
 msgid "Save"
 msgstr ""
 
@@ -1051,15 +1052,15 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:25
 #: crates/ira/src/ui/settings_dialog_console.rs:502
-#: crates/ira/src/ui/settings_dialog.rs:143
-#: crates/ira/src/ui/settings_dialog.rs:164
+#: crates/ira/src/ui/settings_dialog.rs:182
+#: crates/ira/src/ui/settings_dialog.rs:203
 msgid "In-game overlay"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:26
 #: crates/ira/src/ui/settings_dialog_console.rs:503
-#: crates/ira/src/ui/settings_dialog.rs:144
-#: crates/ira/src/ui/settings_dialog.rs:165
+#: crates/ira/src/ui/settings_dialog.rs:183
+#: crates/ira/src/ui/settings_dialog.rs:204
 msgid "Achievements, screenshots, and recording"
 msgstr ""
 
@@ -1322,16 +1323,16 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:68
 #: crates/ira/src/ui/settings_dialog_console.rs:508
-#: crates/ira/src/ui/settings_dialog.rs:149
-#: crates/ira/src/ui/settings_dialog.rs:170
+#: crates/ira/src/ui/settings_dialog.rs:188
+#: crates/ira/src/ui/settings_dialog.rs:209
 #: crates/ira/src/ui/settings_pages.rs:316
 msgid "Gamescope"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:69
 #: crates/ira/src/ui/settings_dialog_console.rs:509
-#: crates/ira/src/ui/settings_dialog.rs:150
-#: crates/ira/src/ui/settings_dialog.rs:171
+#: crates/ira/src/ui/settings_dialog.rs:189
+#: crates/ira/src/ui/settings_dialog.rs:210
 #: crates/ira/src/ui/settings_pages.rs:317
 msgid "Valve Gamescope compositor"
 msgstr ""
@@ -1529,7 +1530,7 @@ msgid "View log"
 msgstr ""
 
 #: crates/ira/src/ui/game_header.rs:337
-#: crates/ira/src/ui/play_button.rs:881
+#: crates/ira/src/ui/play_button.rs:901
 msgid "Open emulator without game"
 msgstr ""
 
@@ -2179,9 +2180,9 @@ msgstr ""
 #: crates/ira/src/ui/input_output_keys.rs:232
 #: crates/ira/src/ui/input_output_keys.rs:371
 #: crates/ira/src/ui/play_button.rs:44
-#: crates/ira/src/ui/play_button.rs:608
-#: crates/ira/src/ui/play_button.rs:665
-#: crates/ira/src/ui/play_button.rs:765
+#: crates/ira/src/ui/play_button.rs:628
+#: crates/ira/src/ui/play_button.rs:685
+#: crates/ira/src/ui/play_button.rs:785
 msgid "Stop"
 msgstr ""
 
@@ -4359,8 +4360,24 @@ msgstr ""
 msgid "Mark as unlocked"
 msgstr ""
 
-#: crates/ira/src/ui/message_handler.rs:112
+#: crates/ira/src/ui/message_handler.rs:102
 msgid "Couldn't add game"
+msgstr ""
+
+#: crates/ira/src/ui/message_handler.rs:118
+#: crates/ira/src/ui/open_emulator_row.rs:97
+msgid "No emulator configured"
+msgstr ""
+
+#: crates/ira/src/ui/message_handler.rs:121
+#, rust-format
+msgid ""
+"\"{}\" needs an emulator, but none is set up. Open the settings to choose "
+"one?"
+msgstr ""
+
+#: crates/ira/src/ui/message_handler.rs:127
+msgid "Open Settings"
 msgstr ""
 
 #: crates/ira/src/ui/open_emulator_row.rs:26
@@ -4374,28 +4391,24 @@ msgid ""
 "Start {name} without loading a game, using the current controller mapping"
 msgstr ""
 
-#: crates/ira/src/ui/open_emulator_row.rs:97
-msgid "No emulator configured"
-msgstr ""
-
-#: crates/ira/src/ui/play_button.rs:432
+#: crates/ira/src/ui/play_button.rs:452
 msgid "Stop the running game before opening its emulator"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:659
+#: crates/ira/src/ui/play_button.rs:679
 msgid "Select disc"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:699
+#: crates/ira/src/ui/play_button.rs:719
 #, rust-format
 msgid "Disc {}"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:759
+#: crates/ira/src/ui/play_button.rs:779
 msgid "Select variant"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:811
+#: crates/ira/src/ui/play_button.rs:831
 msgid "Base game"
 msgstr ""
 
@@ -4810,11 +4823,11 @@ msgstr ""
 msgid "Wine controller"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog.rs:88
+#: crates/ira/src/ui/settings_dialog.rs:112
 msgid "Loading Settings"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog.rs:90
+#: crates/ira/src/ui/settings_dialog.rs:114
 msgid "Checking installed emulators and controller profiles"
 msgstr ""
 

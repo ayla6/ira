@@ -6,6 +6,13 @@ pub enum AppMessage {
     NewGame(Game),
     WatcherGameUpdated(Game),
     AddGameError(String),
+    /// A launch was blocked because no emulator is configured for the game.
+    /// `page_id` names the settings sidebar page that configures one, so the
+    /// alert can offer to open it directly.
+    EmulatorMissing {
+        game_name: String,
+        page_id: String,
+    },
     GameStopped(i64, Option<i64>),
     GameStarted(i64, Option<i64>),
     /// Fired by the ShadPS4Watcher when play_time.txt changes.

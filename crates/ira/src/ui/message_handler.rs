@@ -24,6 +24,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             refresh(state);
         }
         AppMessage::AddGameError(e) => handle_add_game_error(state, e),
+        AppMessage::EmulatorMissing { game_name, page_id } => {
+            handle_emulator_missing(state, &game_name, &page_id);
+        }
         AppMessage::GameStopped(db_id, _) => {
             handle_game_stopped(state, db_id);
             refresh(state);
@@ -96,10 +99,55 @@ fn handle_square_ready(state: &SharedState, db_id: i64) {
 
 fn handle_add_game_error(state: &SharedState, e: String) {
     let window = state.borrow().window.clone();
-    // Present over whichever toplevel is currently active so the dialog is
-    // never hidden behind the window the user is looking at (e.g. the
-    // settings window when an emulator-open or add fails).
-    let parent = gtk4::Window::list_toplevels()
+    let dialog = adw::AlertDialog::new(Some(&crate::tr!("Couldn't add game")), Some(&e));
+    dialog.add_response("ok", &crate::tr!("OK"));
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(&active_toplevel_or(&window)));
+}
+
+/// A launch was blocked because the game's emulator is not configured: offer
+/// to open the settings page that configures one instead of just reporting
+/// the failure.
+fn handle_emulator_missing(state: &SharedState, game_name: &str, page_id: &str) {
+    let (window, cfg, steam) = {
+        let s = state.borrow();
+        (s.window.clone(), s.cfg.clone(), s.steam.clone())
+    };
+    let dialog = adw::AlertDialog::new(
+        Some(&crate::tr!("No emulator configured")),
+        Some(
+            &crate::tr!(
+                "\"{}\" needs an emulator, but none is set up. Open the settings to choose one?"
+            )
+            .replacen("{}", game_name, 1),
+        ),
+    );
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("open-settings", &crate::tr!("Open Settings"));
+    dialog.set_response_appearance("open-settings", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("open-settings"));
+    dialog.set_close_response("cancel");
+    let state = state.clone();
+    let page_id = page_id.to_string();
+    let parent = active_toplevel_or(&window);
+    dialog.connect_response(Some("open-settings"), move |_, _| {
+        super::settings_dialog::show_settings_dialog_on_page(
+            &window,
+            cfg.clone(),
+            steam.clone(),
+            &state,
+            &page_id,
+        );
+    });
+    dialog.present(Some(&parent));
+}
+
+/// The currently active toplevel, so dialogs are never hidden behind the
+/// window the user is looking at (e.g. the settings window when an
+/// emulator-open or add fails).
+fn active_toplevel_or(fallback: &adw::ApplicationWindow) -> gtk4::Widget {
+    gtk4::Window::list_toplevels()
         .into_iter()
         .find_map(|widget| {
             widget
@@ -108,12 +156,7 @@ fn handle_add_game_error(state: &SharedState, e: String) {
                 .filter(|toplevel| toplevel.is_active())
         })
         .map(|toplevel| toplevel.upcast::<gtk4::Widget>())
-        .unwrap_or_else(|| window.clone().upcast::<gtk4::Widget>());
-    let dialog = adw::AlertDialog::new(Some(&crate::tr!("Couldn't add game")), Some(&e));
-    dialog.add_response("ok", &crate::tr!("OK"));
-    dialog.set_default_response(Some("ok"));
-    dialog.set_close_response("ok");
-    dialog.present(Some(&parent));
+        .unwrap_or_else(|| fallback.clone().upcast::<gtk4::Widget>())
 }
 
 fn handle_game_stopped(state: &SharedState, db_id: i64) {

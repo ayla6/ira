@@ -313,6 +313,26 @@ pub fn launch_game(
         controller_input_profile,
     };
 
+    // An emulated game with no emulator configured never reaches the spawn:
+    // the alert offers to open the settings page that configures one.
+    let exes = play_button_helpers::EmulatorExes {
+        platform_id: &platform_id,
+        per_game_version: &per_game_version,
+        per_game_emu: &per_game_emu,
+        shadps4: &global_shadps4_exe,
+        rpcs3: &global_rpcs3_exe,
+        vita3k: &global_vita3k_exe,
+        cemu: &global_cemu_exe,
+        azahar: &global_azahar_exe,
+    };
+    if let Some(page_id) = play_button_helpers::missing_emulator_page(&cfg_clone, &exes, kind) {
+        let _ = sender.send(crate::AppMessage::EmulatorMissing {
+            game_name: game_name.clone(),
+            page_id,
+        });
+        return Ok(false);
+    }
+
     let in_big_picture = super::big_picture::is_big_picture();
     if matches!(
         kind,

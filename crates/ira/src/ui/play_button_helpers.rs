@@ -187,9 +187,9 @@ fn with_fullscreen_args(
         .collect()
 }
 
-/// Session bookkeeping for a directly spawned process: playtime counting is
-/// the caller's policy (emulators count, Steam does not — Steam records
-/// playtime in its own appmanifests, which Ira reads back).
+/// Session bookkeeping for a directly spawned process. Emulator launches
+/// count from spawn; the Steam supervisor counts from the moment the game's
+/// own process appears and disables counting when it never did.
 fn monitor_context(
     ctx: &LaunchCtx,
     cmd: &[String],
@@ -811,9 +811,10 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String
     // Steam hands the launch to its client (or boots one), so the spawned
     // process is never the game. Mark the session as running immediately —
     // a placeholder pid until the supervisor sees the game's real
-    // processes — and let it watch for the game's exit.
+    // processes — and let it watch for the game's exit. Sessions count
+    // from when the game actually runs, not from this spawn.
     ctx.running_games.lock().unwrap().insert(ctx.game_id, 0);
-    let mc = monitor_context(ctx, &cmd, &env, false);
+    let mc = monitor_context(ctx, &cmd, &env, true);
     ira_launcher::steam_watch::monitor_steam_launch(child, app_id.to_string(), mc);
     Ok(true)
 }

@@ -4,13 +4,16 @@
 //! watches /proc for the game's real processes (see `ira_input::steam`) and
 //! drives the same session bookkeeping as every other launch: the
 //! running-games registry, the in-app log buffer, and the end-of-session
-//! messages. Steam records playtime in its own appmanifests, which Ira
-//! reads back — so sessions are never counted here.
+//! messages. The session's clock starts when the game's processes actually
+//! appear — Steam booting, updating or downloading is not playtime — and a
+//! launch whose game never ran records nothing. The playtime *field* is not
+//! touched here: Steam's localconfig.vdf stays the authority and Ira reads
+//! it back on GameStopped.
 
 use std::collections::HashSet;
 use std::process::Child;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ira_input::steam::{ProcessIdentity, SteamProcessScanner};
 
@@ -26,6 +29,17 @@ const EXIT_GRACE: Duration = Duration::from_secs(2);
 /// appeared, nothing will: stop tracking so the game does not stay marked
 /// as running after a failed launch.
 const START_TIMEOUT: Duration = Duration::from_secs(60);
+/// After `stop_game` asked Steam to stop a running game, the session ends
+/// when its processes are actually gone — but a game that ignores
+/// steam://stop cannot hold the session open forever.
+const STOP_EXIT_CAP: Duration = Duration::from_secs(60);
+
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
 
 /// Session state for one tracked Steam launch. The game counts as running
 /// from the first poll on which any matching process exists — including
@@ -81,11 +95,12 @@ impl SteamLaunchSession {
 /// spawned `steam` (or `xdg-open` fallback) process — its output streams
 /// into the game log and its exit marks the launcher as handed off.
 ///
-/// The session ends — running-games cleanup and the `GameStopped` message,
-/// no playtime — when the game's processes have been gone for the exit
-/// grace, when the launch is abandoned, or when `stop_game` drops the game
-/// from the running registry (it has already asked Steam to stop the app).
-pub fn monitor_steam_launch(child: Option<Child>, app_id: String, ctx: MonitorContext) {
+/// The session ends — running-games cleanup, play session recording and the
+/// `GameStopped` message — when the game's processes have been gone for the
+/// exit grace, when the launch is abandoned, or when `stop_game` drops the
+/// game from the running registry (it has already asked Steam to stop the
+/// app; the session then waits out the game's actual exit, capped).
+pub fn monitor_steam_launch(child: Option<Child>, app_id: String, mut ctx: MonitorContext) {
     thread::spawn(move || {
         let game_id = ctx.game_id;
         clear_game_log(game_id);
@@ -100,12 +115,15 @@ pub fn monitor_steam_launch(child: Option<Child>, app_id: String, ctx: MonitorCo
 
         let mut scanner = SteamProcessScanner::default();
         let mut session = SteamLaunchSession::new();
-        let started_at = Instant::now();
+        let launched_at = Instant::now();
+        let mut first_seen_at: Option<i64> = None;
+        let mut stop_deadline: Option<Instant> = None;
         loop {
-            if !ctx.running_games.lock().unwrap().contains_key(&game_id) {
-                // stop_game removed us: it asked Steam to stop the app, so
-                // report the session over instead of waiting for processes
-                // that may never have started.
+            let stopped = !ctx.running_games.lock().unwrap().contains_key(&game_id);
+            if stopped && !session.seen {
+                // stop_game removed us before the game ever ran: it asked
+                // Steam to stop the app, so report the session over instead
+                // of waiting for processes that may never have started.
                 break;
             }
             let launcher_exited = child
@@ -115,16 +133,33 @@ pub fn monitor_steam_launch(child: Option<Child>, app_id: String, ctx: MonitorCo
             let matched = !snapshot.processes.is_empty();
             if matched {
                 adopt_game_pid(&ctx, &snapshot.processes);
+                if !session.seen {
+                    first_seen_at = Some(unix_now());
+                }
             }
             let now = Instant::now();
             if session.poll(snapshot.complete, matched, now)
-                || session.launch_abandoned(started_at, launcher_exited, now)
+                || session.launch_abandoned(launched_at, launcher_exited, now)
             {
                 break;
+            }
+            if stopped {
+                let deadline = *stop_deadline.get_or_insert(now);
+                if now.duration_since(deadline) >= STOP_EXIT_CAP {
+                    break;
+                }
             }
             thread::sleep(POLL_INTERVAL);
         }
 
+        match first_seen_at {
+            // The session only counts from the moment the game actually
+            // ran — the wait for Steam to boot/update it is not playtime.
+            Some(seen_at) => ctx.started_at = seen_at,
+            // The game never ran (abandoned launch or a stop during boot):
+            // nothing to record, no matter how long the attempt took.
+            None => ctx.count_playtime = false,
+        }
         finalize_game(&ctx, &log_buf, None, None);
         // The Steam client typically outlives the game; reap the launcher
         // whenever it exits so it never sits around as a zombie.

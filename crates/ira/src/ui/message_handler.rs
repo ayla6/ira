@@ -228,6 +228,13 @@ fn handle_session_recorded(
         let mut var_pt: Option<(i64, f64)> = None;
         for g in &mut s.games {
             if g.db_id == game_id && g.variant_id.is_none() {
+                if g.kind == ira_models::GameKind::Steam {
+                    // Steam's localconfig.vdf is the authority for a Steam
+                    // game's playtime (seeded at load, re-read on
+                    // GameStopped right after this); the session lands in
+                    // the history but must not be added on top.
+                    continue;
+                }
                 g.playtime += hours;
                 base_pt = g.playtime;
             } else if g.db_id == game_id && g.variant_id == variant_id && variant_id.is_some() {

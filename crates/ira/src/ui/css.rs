@@ -522,7 +522,7 @@ fn big_picture_css(s: f64) -> String {
     box-shadow: none;
 }}
 .bp-shoulder {{
-    padding: {shoulder_pad_y} {shoulder_pad_x};
+    padding: {shoulder_pad_y} {shoulder_pad_x} {shoulder_pad_bottom};
     border: {shoulder_ring} solid alpha(@theme_fg_color, 0.55);
     border-radius: {shoulder_radius};
     font-size: {small};
@@ -596,6 +596,10 @@ fn big_picture_css(s: f64) -> String {
         row_radius = px(10),
         shoulder_pad_y = pxs(2),
         shoulder_pad_x = px(10),
+        // The badge rides the same optical center as the tab pill: the
+        // bundled font's glyph mass sits low in its line box, and the same
+        // extra bottom padding lifts the badge letters to match the tabs.
+        shoulder_pad_bottom = pxs(7),
         shoulder_ring = pxs(2),
         shoulder_radius = px(8),
         key_radius = px(8),

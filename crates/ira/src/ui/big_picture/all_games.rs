@@ -132,10 +132,10 @@ impl ShoulderBadge {
     }
 
     fn refresh(&self, button: ira_input::GamepadButton, family: ira_input::ControllerFamily, scale: f64) {
-        self.slot.set_size_request(
-            (46.0 * scale).round().max(12.0) as i32,
-            (38.0 * scale).round().max(10.0) as i32,
-        );
+        // One slot width keeps the tab picker from sliding when the glyph
+        // art replaces the letter badge; the height follows the content so
+        // the badge and the pill center on the same line.
+        self.slot.set_size_request((46.0 * scale).round().max(12.0) as i32, -1);
         self.glyph.set_pixel_size((34.0 * scale).round().max(8.0) as i32);
         self.fallback.set_text(&crate::ui::input_profile_assets::source_badge(
             ira_input::InputSource::Button(button),
@@ -184,6 +184,8 @@ pub(super) struct AllSoftwareUi {
     header: gtk4::CenterBox,
     header_start: gtk4::Box,
     header_center: gtk4::Box,
+    /// The sort button's icon, scaled with the viewport like the rails'.
+    sort_icon: gtk4::Image,
     tabs: adw::ToggleGroup,
     /// The L/R shoulder badges flanking the tabs.
     shoulder_l: ShoulderBadge,
@@ -222,7 +224,9 @@ pub(super) fn build(
     crate::ui::helpers::crisp_label(&ordering);
     // The sort button opens the sort menu (Options does the same when no
     // game is focused); on the Groups tab it orders the tiles instead.
-    let sort_btn = gtk4::Button::from_icon_name("view-sort-descending-symbolic");
+    let sort_icon = gtk4::Image::from_icon_name("view-sort-descending-symbolic");
+    let sort_btn = gtk4::Button::new();
+    sort_btn.set_child(Some(&sort_icon));
     sort_btn.add_css_class(CSS_FLAT);
     sort_btn.set_focusable(false);
     sort_btn.set_valign(gtk4::Align::Center);
@@ -433,6 +437,7 @@ pub(super) fn build(
         header,
         header_start: start,
         header_center: center,
+        sort_icon,
         tabs,
         shoulder_l,
         shoulder_r,
@@ -496,20 +501,17 @@ impl AllSoftwareUi {
         self.tab.get() == Tab::Groups && self.groups_view.get().is_none()
     }
 
-    /// Scale the header's shoulder badges with the viewport (1.0 = 1920
-    /// wide), like the rails' icons.
+    /// Scale the header's chrome with the viewport (1.0 = 1920 wide), like
+    /// the rails' icons.
     pub(super) fn set_icon_scale(&self, scale: f64) {
         self.shoulder_scale.set(scale);
         self.refresh_shoulders();
         self.scale_tab_icons(scale);
-        self.header
-            .set_margin_top(scaled_px(18.0));
-        self.header
-            .set_margin_bottom(scaled_px(6.0));
-        self.header
-            .set_margin_start(scaled_px(28.0));
-        self.header
-            .set_margin_end(scaled_px(28.0));
+        self.sort_icon.set_pixel_size(scaled_px(22.0));
+        self.header.set_margin_top(scaled_px(18.0));
+        self.header.set_margin_bottom(scaled_px(6.0));
+        self.header.set_margin_start(scaled_px(28.0));
+        self.header.set_margin_end(scaled_px(28.0));
         self.header_start.set_spacing(scaled_px(10.0));
         self.header_center.set_spacing(scaled_px(14.0));
     }
@@ -547,7 +549,7 @@ impl AllSoftwareUi {
 
     fn refresh_shoulders(&self) {
         let family = self.shoulder_family.get();
-        let scale = self.shoulder_scale.get().max(1.0);
+        let scale = self.shoulder_scale.get();
         self.shoulder_l
             .refresh(ira_input::GamepadButton::LeftShoulder, family, scale);
         self.shoulder_r

@@ -580,12 +580,11 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         pending_copies,
         sgdb_cache,
     } = params;
-    // The Steam fetch buttons need a Steam app id, and that is exactly what
-    // app_id holds for Goldberg, native Steam and hand-entered ids on plain
-    // PC games. A GOG product id is not a Steam id, so Nge games keep the
-    // buttons off.
-    let is_steam =
-        game.trophy_source != ira_models::TrophySource::Nge && !game.app_id.is_empty();
+    // The Steam fetch buttons need a Steam app id: app_id holds one for
+    // Goldberg and native Steam games, but a retro, Switch or Lutris id is
+    // not a Steam id, and neither is a GOG product id (Nge) — those keep
+    // the buttons off.
+    let is_steam = game.trophy_source.has_steam_app_id() && !game.app_id.is_empty();
     let id = game.app_id.clone();
     let save_dir = state.borrow().save_dir.clone();
 

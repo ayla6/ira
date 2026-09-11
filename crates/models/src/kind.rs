@@ -153,6 +153,13 @@ impl TrophySource {
             TrophySource::Gse | TrophySource::Nge | TrophySource::SteamNative
         )
     }
+
+    /// True when this source's id is a real Steam app id the Steam CDN
+    /// fetch buttons can use. Nge carries a GOG product id — not a Steam
+    /// id — and other sources hold RA, title or serial ids.
+    pub fn has_steam_app_id(self) -> bool {
+        matches!(self, TrophySource::Gse | TrophySource::SteamNative)
+    }
 }
 
 impl std::fmt::Display for TrophySource {
@@ -252,6 +259,15 @@ mod tests {
     #[test]
     fn test_has_steam_enrichment_empty() {
         assert!(!TrophySource::Empty.has_steam_enrichment());
+    }
+
+    #[test]
+    fn test_has_steam_app_id_excludes_nge_and_other_sources() {
+        assert!(TrophySource::Gse.has_steam_app_id());
+        assert!(TrophySource::SteamNative.has_steam_app_id());
+        assert!(!TrophySource::Nge.has_steam_app_id());
+        assert!(!TrophySource::Ra.has_steam_app_id());
+        assert!(!TrophySource::Empty.has_steam_app_id());
     }
 
     #[test]

@@ -96,56 +96,93 @@ pub(super) fn build_shadps4_settings_page(
     (page, ps4_enable_row, version_dropdown)
 }
 
-pub(super) fn build_rpcs3_settings_page(
-    cfg: &Config,
-    win: &impl IsA<gtk4::Widget>,
-) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
-    let page = settings_page_container();
+/// The enable-switch strings and state for [`build_integration_page`].
+struct IntegrationEnable<'a> {
+    title: &'a str,
+    subtitle: &'a str,
+    enabled: bool,
+}
 
+/// Shared skeleton for the emulator integration pages: an enable switch,
+/// the detected-emulator picker with a manual path entry, then the
+/// caller's install-directory rows. Returns the enable switch and the
+/// executable entry, plus the resolved initial executable.
+fn build_integration_page(
+    page: &gtk4::Box,
+    win: &impl IsA<gtk4::Widget>,
+    enable: IntegrationEnable,
+    detect: impl FnOnce() -> Vec<ira_platforms::emulator_detect::DetectedEmulator>,
+    exe_title: &str,
+    configured_exe: &str,
+    build_dirs: impl FnOnce(&adw::PreferencesGroup, &str),
+) -> (adw::SwitchRow, adw::EntryRow) {
     let enable_group = adw::PreferencesGroup::new();
     let enable_row = adw::SwitchRow::new();
-    enable_row.set_title(&crate::tr!("Enable PS3 integration"));
-    enable_row.set_subtitle(&crate::tr!("Scan RPCS3's dev_hdd0 for installed PS3 games"));
-    enable_row.set_active(cfg.rpcs3_enabled);
+    enable_row.set_title(enable.title);
+    enable_row.set_subtitle(enable.subtitle);
+    enable_row.set_active(enable.enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
     let emu_group = adw::PreferencesGroup::new();
     emu_group.set_title(&crate::tr!("Emulator"));
-
-    let detected = ira_platforms::emulator_detect::detect_emulator_choices(
-        &["rpcs3", "rpcs3-emu"],
-        &[(ira_platforms::ps3::RPCS3_FLATPAK_ID, "RPCS3")],
-        "RPCS3",
-    );
-
+    let detected = detect();
     let exe_row = adw::EntryRow::new();
-    exe_row.set_title(&crate::tr!("RPCS3 executable path"));
-
-    let initial_exe = if cfg.rpcs3_executable.is_empty() {
+    exe_row.set_title(exe_title);
+    let initial_exe = if configured_exe.is_empty() {
         detected
             .first()
             .map(|e| e.launch_command.clone())
             .unwrap_or_default()
     } else {
-        cfg.rpcs3_executable.clone()
+        configured_exe.to_string()
     };
     exe_row.set_text(&initial_exe);
-
     add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
     add_executable_actions(&exe_row, win, &detected, &crate::tr!("Select executable"));
     emu_group.add(&exe_row);
     page.append(&emu_group);
 
     let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title(&crate::tr!("Install directories"));
-    dirs_group.set_description(Some(&crate::tr!("Managed by RPCS3 (dev_hdd0/game)")));
-    let games_dir = ira_platforms::ps3::games_dir_for(&initial_exe);
-    let dir_row = adw::ActionRow::new();
-    dir_row.set_title(&esc(&games_dir.display().to_string()));
-    dir_row.set_sensitive(false);
-    dirs_group.add(&dir_row);
+    build_dirs(&dirs_group, &initial_exe);
     page.append(&dirs_group);
+
+    (enable_row, exe_row)
+}
+
+pub(super) fn build_rpcs3_settings_page(
+    cfg: &Config,
+    win: &impl IsA<gtk4::Widget>,
+) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
+    let page = settings_page_container();
+
+    let (enable_row, exe_row) = build_integration_page(
+        &page,
+        win,
+        IntegrationEnable {
+            title: &crate::tr!("Enable PS3 integration"),
+            subtitle: &crate::tr!("Scan RPCS3's dev_hdd0 for installed PS3 games"),
+            enabled: cfg.rpcs3_enabled,
+        },
+        || {
+            ira_platforms::emulator_detect::detect_emulator_choices(
+                &["rpcs3", "rpcs3-emu"],
+                &[(ira_platforms::ps3::RPCS3_FLATPAK_ID, "RPCS3")],
+                "RPCS3",
+            )
+        },
+        &crate::tr!("RPCS3 executable path"),
+        &cfg.rpcs3_executable,
+        |dirs_group, initial_exe| {
+            dirs_group.set_title(&crate::tr!("Install directories"));
+            dirs_group.set_description(Some(&crate::tr!("Managed by RPCS3 (dev_hdd0/game)")));
+            let games_dir = ira_platforms::ps3::games_dir_for(initial_exe);
+            let dir_row = adw::ActionRow::new();
+            dir_row.set_title(&esc(&games_dir.display().to_string()));
+            dir_row.set_sensitive(false);
+            dirs_group.add(&dir_row);
+        },
+    );
 
     (page, enable_row, exe_row)
 }
@@ -156,52 +193,39 @@ pub(super) fn build_vita3k_settings_page(
 ) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
     let page = settings_page_container();
 
-    let enable_group = adw::PreferencesGroup::new();
-    let enable_row = adw::SwitchRow::new();
-    enable_row.set_title(&crate::tr!("Enable PS Vita integration"));
-    enable_row.set_subtitle(&crate::tr!(
-        "Scan Vita3K's installed applications for PS Vita games"
-    ));
-    enable_row.set_active(cfg.vita3k_enabled);
-    enable_group.add(&enable_row);
-    page.append(&enable_group);
-
-    let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title(&crate::tr!("Emulator"));
-    let detected = ira_platforms::emulator_detect::detect_emulator_choices(
-        &["vita3k", "Vita3K"],
-        &[],
-        "Vita3K",
+    let (enable_row, exe_row) = build_integration_page(
+        &page,
+        win,
+        IntegrationEnable {
+            title: &crate::tr!("Enable PS Vita integration"),
+            subtitle: &crate::tr!("Scan Vita3K's installed applications for PS Vita games"),
+            enabled: cfg.vita3k_enabled,
+        },
+        || {
+            ira_platforms::emulator_detect::detect_emulator_choices(
+                &["vita3k", "Vita3K"],
+                &[],
+                "Vita3K",
+            )
+        },
+        &crate::tr!("Vita3K executable path"),
+        &cfg.vita3k_executable,
+        |dirs_group, initial_exe| {
+            dirs_group.set_title(&crate::tr!("Install directory"));
+            dirs_group.set_description(Some(&crate::tr!(
+                "Vita3K stores installed applications below ux0/app"
+            )));
+            let dir_row = adw::ActionRow::new();
+            dir_row.set_title(&esc(
+                &ira_platforms::vita3k::vita_fs_path_for(initial_exe)
+                    .join("ux0/app")
+                    .display()
+                    .to_string(),
+            ));
+            dir_row.set_sensitive(false);
+            dirs_group.add(&dir_row);
+        },
     );
-    let exe_row = adw::EntryRow::new();
-    exe_row.set_title(&crate::tr!("Vita3K executable path"));
-    let initial_exe = if cfg.vita3k_executable.is_empty() {
-        detected
-            .first()
-            .map(|emu| emu.launch_command.clone())
-            .unwrap_or_default()
-    } else {
-        cfg.vita3k_executable.clone()
-    };
-    exe_row.set_text(&initial_exe);
-    add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(&exe_row, win, &detected, &crate::tr!("Select executable"));
-    emu_group.add(&exe_row);
-    page.append(&emu_group);
-
-    let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title(&crate::tr!("Install directory"));
-    dirs_group.set_description(Some(&crate::tr!(
-        "Vita3K stores installed applications below ux0/app"
-    )));
-    let dir_row = adw::ActionRow::new();
-    dir_row.set_title(&esc(&ira_platforms::vita3k::vita_fs_path_for(&initial_exe)
-        .join("ux0/app")
-        .display()
-        .to_string()));
-    dir_row.set_sensitive(false);
-    dirs_group.add(&dir_row);
-    page.append(&dirs_group);
 
     (page, enable_row, exe_row)
 }
@@ -212,53 +236,38 @@ pub(super) fn build_cemu_settings_page(
 ) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
     let page = settings_page_container();
 
-    let enable_group = adw::PreferencesGroup::new();
-    let enable_row = adw::SwitchRow::new();
-    enable_row.set_title(&crate::tr!("Enable Wii U integration"));
-    enable_row.set_subtitle(&crate::tr!(
-        "Scan Cemu's configured game paths and installed titles"
-    ));
-    enable_row.set_active(cfg.cemu_enabled);
-    enable_group.add(&enable_row);
-    page.append(&enable_group);
-
-    let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title(&crate::tr!("Emulator"));
-    let detected = ira_platforms::emulator_detect::cemu_choices();
-    let exe_row = adw::EntryRow::new();
-    exe_row.set_title(&crate::tr!("Cemu executable path"));
-    let initial_exe = if cfg.cemu_executable.is_empty() {
-        detected
-            .first()
-            .map(|emu| emu.launch_command.clone())
-            .unwrap_or_default()
-    } else {
-        cfg.cemu_executable.clone()
-    };
-    exe_row.set_text(&initial_exe);
-    add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(&exe_row, win, &detected, &crate::tr!("Select executable"));
-    emu_group.add(&exe_row);
-    page.append(&emu_group);
-
-    let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title(&crate::tr!("Install directories"));
-    dirs_group.set_description(Some(&crate::tr!("Managed by Cemu")));
-    let mlc_row = adw::ActionRow::new();
-    mlc_row.set_title(&esc(&ira_platforms::cemu::mlc_path_for(&initial_exe)
-        .display()
-        .to_string()));
-    mlc_row.set_subtitle(&crate::tr!("MLC path"));
-    mlc_row.set_sensitive(false);
-    dirs_group.add(&mlc_row);
-    for path in ira_platforms::cemu::configured_game_paths_for(&initial_exe) {
-        let row = adw::ActionRow::new();
-        row.set_title(&esc(&path.display().to_string()));
-        row.set_subtitle(&crate::tr!("Configured game path"));
-        row.set_sensitive(false);
-        dirs_group.add(&row);
-    }
-    page.append(&dirs_group);
+    let (enable_row, exe_row) = build_integration_page(
+        &page,
+        win,
+        IntegrationEnable {
+            title: &crate::tr!("Enable Wii U integration"),
+            subtitle: &crate::tr!("Scan Cemu's configured game paths and installed titles"),
+            enabled: cfg.cemu_enabled,
+        },
+        ira_platforms::emulator_detect::cemu_choices,
+        &crate::tr!("Cemu executable path"),
+        &cfg.cemu_executable,
+        |dirs_group, initial_exe| {
+            dirs_group.set_title(&crate::tr!("Install directories"));
+            dirs_group.set_description(Some(&crate::tr!("Managed by Cemu")));
+            let mlc_row = adw::ActionRow::new();
+            mlc_row.set_title(&esc(
+                &ira_platforms::cemu::mlc_path_for(initial_exe)
+                    .display()
+                    .to_string(),
+            ));
+            mlc_row.set_subtitle(&crate::tr!("MLC path"));
+            mlc_row.set_sensitive(false);
+            dirs_group.add(&mlc_row);
+            for path in ira_platforms::cemu::configured_game_paths_for(initial_exe) {
+                let row = adw::ActionRow::new();
+                row.set_title(&esc(&path.display().to_string()));
+                row.set_subtitle(&crate::tr!("Configured game path"));
+                row.set_sensitive(false);
+                dirs_group.add(&row);
+            }
+        },
+    );
 
     (page, enable_row, exe_row)
 }
@@ -269,62 +278,45 @@ pub(super) fn build_azahar_settings_page(
 ) -> (gtk4::Box, adw::SwitchRow, adw::EntryRow) {
     let page = settings_page_container();
 
-    let enable_group = adw::PreferencesGroup::new();
-    let enable_row = adw::SwitchRow::new();
-    enable_row.set_title(&crate::tr!("Enable Nintendo 3DS integration"));
-    enable_row.set_subtitle(&crate::tr!(
-        "Scan Azahar's game folders and installed 3DS titles"
-    ));
-    enable_row.set_active(cfg.azahar_enabled);
-    enable_group.add(&enable_row);
-    page.append(&enable_group);
-
-    let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title(&crate::tr!("Emulator"));
-    let detected = ira_platforms::emulator_detect::azahar_choices();
-    let exe_row = adw::EntryRow::new();
-    exe_row.set_title(&crate::tr!("Azahar executable path"));
-    let initial_exe = if cfg.azahar_executable.is_empty() {
-        detected
-            .first()
-            .map(|emu| emu.launch_command.clone())
-            .unwrap_or_default()
-    } else {
-        cfg.azahar_executable.clone()
-    };
-    exe_row.set_text(&initial_exe);
-    add_detected_emulator_dropdown(&emu_group, &exe_row, &detected);
-    add_executable_actions(&exe_row, win, &detected, &crate::tr!("Select executable"));
-    emu_group.add(&exe_row);
-    page.append(&emu_group);
-
-    let dirs_group = adw::PreferencesGroup::new();
-    dirs_group.set_title(&crate::tr!("Game locations"));
-    dirs_group.set_description(Some(&crate::tr!("Managed by Azahar")));
-    let paths = ira_platforms::azahar::read_paths_for_executable(&initial_exe);
-    for (path, deep_scan) in paths.game_dirs {
-        let row = adw::ActionRow::new();
-        row.set_title(&esc(&path.display().to_string()));
-        let subtitle = if deep_scan {
-            crate::tr!("Game folder (deep scan)")
-        } else {
-            crate::tr!("Game folder")
-        };
-        row.set_subtitle(&subtitle);
-        row.set_sensitive(false);
-        dirs_group.add(&row);
-    }
-    for (path, label) in [
-        (paths.nand_dir, crate::tr!("NAND")),
-        (paths.sdmc_dir, crate::tr!("SD card")),
-    ] {
-        let row = adw::ActionRow::new();
-        row.set_title(&esc(&path.display().to_string()));
-        row.set_subtitle(&label);
-        row.set_sensitive(false);
-        dirs_group.add(&row);
-    }
-    page.append(&dirs_group);
+    let (enable_row, exe_row) = build_integration_page(
+        &page,
+        win,
+        IntegrationEnable {
+            title: &crate::tr!("Enable Nintendo 3DS integration"),
+            subtitle: &crate::tr!("Scan Azahar's game folders and installed 3DS titles"),
+            enabled: cfg.azahar_enabled,
+        },
+        ira_platforms::emulator_detect::azahar_choices,
+        &crate::tr!("Azahar executable path"),
+        &cfg.azahar_executable,
+        |dirs_group, initial_exe| {
+            dirs_group.set_title(&crate::tr!("Game locations"));
+            dirs_group.set_description(Some(&crate::tr!("Managed by Azahar")));
+            let paths = ira_platforms::azahar::read_paths_for_executable(initial_exe);
+            for (path, deep_scan) in paths.game_dirs {
+                let row = adw::ActionRow::new();
+                row.set_title(&esc(&path.display().to_string()));
+                let subtitle = if deep_scan {
+                    crate::tr!("Game folder (deep scan)")
+                } else {
+                    crate::tr!("Game folder")
+                };
+                row.set_subtitle(&subtitle);
+                row.set_sensitive(false);
+                dirs_group.add(&row);
+            }
+            for (path, label) in [
+                (paths.nand_dir, crate::tr!("NAND")),
+                (paths.sdmc_dir, crate::tr!("SD card")),
+            ] {
+                let row = adw::ActionRow::new();
+                row.set_title(&esc(&path.display().to_string()));
+                row.set_subtitle(&label);
+                row.set_sensitive(false);
+                dirs_group.add(&row);
+            }
+        },
+    );
 
     (page, enable_row, exe_row)
 }

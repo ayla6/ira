@@ -85,22 +85,6 @@ pub fn write_game_shm(
     Some(shm_path(game.db_id))
 }
 
-/// Pushes an achievement-unlocked notification to the SHM ring buffer.
-/// Called by the watcher when it detects a newly unlocked achievement.
-pub fn push_achievement_notification(db_id: i64, achievement_index: u32) {
-    let Ok(mut shm) = MappedShm::open_rw(&shm_path(db_id)) else {
-        return;
-    };
-    shm.push_notification(ira_overlay_ipc::NotificationEntry {
-        notification_type: 0,
-        achievement_index,
-        timestamp: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-    });
-}
-
 fn write_str(dst: &mut [u8], src: &str) {
     let bytes = src.as_bytes();
     let len = bytes.len().min(dst.len() - 1);

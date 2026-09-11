@@ -727,14 +727,6 @@ impl VirtualGrid {
         self.imp().dirty.set(true);
         self.queue_allocate();
     }
-
-    pub fn clear_recycle_pool(&self) {
-        let imp = self.imp();
-        let mut pool = imp.recycle_pool.borrow_mut();
-        for widget in pool.drain(..) {
-            widget.unparent();
-        }
-    }
 }
 
 fn clear_visible(imp: &imp::VirtualGrid) {

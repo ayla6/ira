@@ -191,7 +191,8 @@ fn add_analog_gate_rows(
                 }
             }
         });
-        (base_for_threshold.on_changed)();
+        // A SpinButton fires per keystroke and arrow press; no rebuild.
+        (base_for_threshold.on_adjusted)();
     });
 
     expander.add_row(&axis_row);

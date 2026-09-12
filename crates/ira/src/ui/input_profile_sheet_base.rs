@@ -32,6 +32,9 @@ pub(crate) struct SheetBase {
     pub(crate) device: Option<ira_input::DeviceInfo>,
     pub(crate) backend: ira_input::VirtualGamepadBackend,
     pub(crate) on_changed: OnChanged,
+    /// Continuous edits (slider drags): refreshes the editor's Save/Apply
+    /// state without rebuilding, so the dragged slider survives the gesture.
+    pub(crate) on_adjusted: OnChanged,
     /// Coalesces deferred rebuilds so a burst of change notifications only
     /// rebuilds once.
     pub(crate) rebuild_pending: Rc<std::cell::Cell<bool>>,

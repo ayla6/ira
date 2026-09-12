@@ -218,9 +218,7 @@ pub(crate) fn mode_setting_rows(
             // Steam's shared angle calibration: pixels per full 360° sweep
             // at 1x. Lives on the shared live Gyro config — the same copy
             // the Gyro page's Dots Per 360° row edits — so read it back
-            // from there too: this row rebuilds on every edit, and reading
-            // the profile snapshot instead made the slider snap back to
-            // the value the editor opened with.
+            // from there too.
             let initial_dots = base.gyro.borrow().dots_per_360;
             let calibration_base = base.clone();
             rows.push(slider_row_with_scale(
@@ -231,7 +229,7 @@ pub(crate) fn mode_setting_rows(
                 &SliderSpec(500.0, 30_000.0, 5.0, f64::from(initial_dots)),
                 move |value| {
                     calibration_base.gyro.borrow_mut().dots_per_360 = value as f32;
-                    (calibration_base.on_changed)();
+                    (calibration_base.on_adjusted)();
                 })
             .0);
             rows.push(mode_slider_row(
@@ -324,7 +322,7 @@ pub(crate) fn curve_slider_row(
                     settings.processing.curve = value as f32;
                 }
             });
-            (base_for_change.on_changed)();
+            (base_for_change.on_adjusted)();
         })
 }
 
@@ -351,6 +349,9 @@ pub(crate) fn mode_writer(
 }
 
 /// One slider row bound to a field of the targeted SourceMode.
+/// One slider row bound to a numeric field of the targeted SourceMode.
+/// Slider drags fire continuously; they route through `on_adjusted` so the
+/// page is never rebuilt under the pointer mid-gesture.
 pub(crate) fn mode_slider_row(
     base: &SheetBase,
     target: ModeTarget,
@@ -363,7 +364,7 @@ pub(crate) fn mode_slider_row(
     slider_row(title, subtitle, spec, move |value| {
         let write = mode_writer(&base, target);
         write(&mut |mode| mutate(mode, value));
-        (base.on_changed)();
+        (base.on_adjusted)();
     })
 }
 

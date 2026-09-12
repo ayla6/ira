@@ -143,14 +143,26 @@ pub(super) fn show_input_profile_editor(
     save.set_sensitive(false);
     apply.set_sensitive(false);
 
-    // Two-phase wiring: pages need an on_dirty hook, the hook needs the
-    // pages. The indirection cell resolves the cycle.
-    type DirtyHook = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
-    let dirty_hook: DirtyHook = Rc::new(RefCell::new(None));
+    // Two-phase wiring: pages need the edit hooks, the hooks need the
+    // pages. The indirection cells resolve the cycle.
+    type EditorHook = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+    let dirty_hook: EditorHook = Rc::new(RefCell::new(None));
+    let adjust_hook: EditorHook = Rc::new(RefCell::new(None));
     let on_dirty: Rc<dyn Fn()> = {
         let dirty_hook = dirty_hook.clone();
         Rc::new(move || {
             if let Some(hook) = dirty_hook.borrow().as_ref() {
+                hook();
+            }
+        })
+    };
+    // Continuous edits (slider drags, name typing) never rebuild pages; they
+    // only refresh the Save/Apply sensitivity, so the dragged widget — and
+    // every other page — stays alive through the gesture.
+    let on_adjusted: Rc<dyn Fn()> = {
+        let adjust_hook = adjust_hook.clone();
+        Rc::new(move || {
+            if let Some(hook) = adjust_hook.borrow().as_ref() {
                 hook();
             }
         })
@@ -169,6 +181,7 @@ pub(super) fn show_input_profile_editor(
         indicator: indicator.clone(),
         device,
         on_dirty: on_dirty.clone(),
+        on_adjusted: on_adjusted.clone(),
         gyro: gyro.clone(),
         expansion: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
     };
@@ -183,6 +196,20 @@ pub(super) fn show_input_profile_editor(
         game_id,
     };
     {
+        // The adjust hook shares the dirty check without the rebuild: slider
+        // drags fire it at pointer-move rate and it must stay cheap. Cloned
+        // before the dirty hook moves its own copies into its closure.
+        let adjust_form = form.clone();
+        let adjust_baseline = baseline.clone();
+        let adjust_unsaved = unsaved.clone();
+        let adjust_save = save.clone();
+        let adjust_apply = apply.clone();
+        *adjust_hook.borrow_mut() = Some(Rc::new(move || {
+            let dirty = is_dirty(adjust_unsaved.get(), &adjust_form, &adjust_baseline.borrow());
+            adjust_save.set_sensitive(dirty);
+            adjust_apply.set_sensitive(dirty);
+        }));
+
         let ctx = ctx.clone();
         let pages = pages.clone();
         let form = form.clone();
@@ -312,8 +339,19 @@ fn build_pages(
             &crate::tr!("Gyro"),
             "gyro",
         ));
-    add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_dirty);
-    super::input_profile_gyro_motion::add_gyro_motion_groups(&gyro_box, gyro, &ctx.on_dirty);
+    add_gyro_group(
+        &gyro_box,
+        gyro,
+        ctx.device.as_ref(),
+        &ctx.on_dirty,
+        &ctx.on_adjusted,
+    );
+    super::input_profile_gyro_motion::add_gyro_motion_groups(
+        &gyro_box,
+        gyro,
+        &ctx.on_dirty,
+        &ctx.on_adjusted,
+    );
 
     let (sets_scroll, sets_box) = scrolling_page();
     layout.stack.add_named(&sets_scroll, Some("sets"));

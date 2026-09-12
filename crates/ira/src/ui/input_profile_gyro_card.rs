@@ -48,6 +48,7 @@ pub(super) fn add_gyro_group(
     gyro: &Rc<RefCell<GyroConfig>>,
     device: Option<&DeviceInfo>,
     on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
 ) {
     let group = SettingGroup::new(
         Some(&crate::tr!("Gyro")),
@@ -82,22 +83,22 @@ pub(super) fn add_gyro_group(
     let initial_rotate = f64::from(gyro.borrow().rotate_output);
     let dots_per_360 = {
         let gyro = gyro.clone();
-        let on_dirty = on_dirty.clone();
+        let on_adjusted = on_adjusted.clone();
         slider_entry_row(
-            &crate::tr!("Gyro Angles to Mouse Pixels (Dots Per 360°)"),
+            &crate::tr!("Gyro Angles to mouse Pixels (Dots Per 360°)"),
             Some(&crate::tr!(
                 "One full 360° turn of the gyro moves the mouse this many pixels at 1x sensitivity. Shared with the Flick Stick so both calibrate against the same in-game angle."
             )),
             &SliderSpec(500.0, 30_000.0, 5.0, initial_dots),
             move |value| {
                 gyro.borrow_mut().dots_per_360 = value as f32;
-                on_dirty();
+                on_adjusted();
             },
         )
     };
     let rotate_output = {
         let gyro = gyro.clone();
-        let on_dirty = on_dirty.clone();
+        let on_adjusted = on_adjusted.clone();
         slider_row_with_scale(
             &crate::tr!("Rotate Output"),
             Some(&crate::tr!(
@@ -106,13 +107,13 @@ pub(super) fn add_gyro_group(
             &SliderSpec(0.0, 360.0, 1.0, initial_rotate),
             move |value| {
                 gyro.borrow_mut().rotate_output = value as f32;
-                on_dirty();
+                on_adjusted();
             })
         .0
     };
     let stick_max_output = {
         let gyro = gyro.clone();
-        let on_dirty = on_dirty.clone();
+        let on_adjusted = on_adjusted.clone();
         slider_row_with_scale(
             &crate::tr!("Maximum Joystick Output"),
             Some(&crate::tr!(
@@ -121,7 +122,7 @@ pub(super) fn add_gyro_group(
             &SliderSpec(0.1, 1.0, 0.01, f64::from(stick.max_output)),
             move |value| {
                 gyro.borrow_mut().stick.max_output = value as f32;
-                on_dirty();
+                on_adjusted();
             })
         .0
     };
@@ -148,7 +149,7 @@ pub(super) fn add_gyro_group(
     };
     let stick_power_curve = {
         let gyro = gyro.clone();
-        let on_dirty = on_dirty.clone();
+        let on_adjusted = on_adjusted.clone();
         slider_row_with_scale(
             &crate::tr!("Joystick Power Curve"),
             Some(&crate::tr!(
@@ -157,7 +158,7 @@ pub(super) fn add_gyro_group(
             &SliderSpec(0.1, 4.0, 0.1, f64::from(stick.power_curve)),
             move |value| {
                 gyro.borrow_mut().stick.power_curve = value as f32;
-                on_dirty();
+                on_adjusted();
             })
         .0
     };
@@ -178,7 +179,7 @@ pub(super) fn add_gyro_group(
     );
     let stick_deadzone = {
         let gyro = gyro.clone();
-        let on_dirty = on_dirty.clone();
+        let on_adjusted = on_adjusted.clone();
         slider_row_with_scale(
             &crate::tr!("Gyro Speed Deadzone"),
             Some(&crate::tr!(
@@ -187,7 +188,7 @@ pub(super) fn add_gyro_group(
             &SliderSpec(0.0, 20.0, 0.1, f64::from(stick.deadzone_dps)),
             move |value| {
                 gyro.borrow_mut().stick.deadzone_dps = value as f32;
-                on_dirty();
+                on_adjusted();
             })
         .0
     };
@@ -207,7 +208,7 @@ pub(super) fn add_gyro_group(
         orientation: orientation_row(gyro, on_dirty, gyro.borrow().orientation),
         sensitivity: {
             let gyro = gyro.clone();
-            let on_dirty = on_dirty.clone();
+            let on_adjusted = on_adjusted.clone();
             let initial = f64::from(gyro.borrow().sensitivity);
             slider_entry_row(
                 &crate::tr!("Sensitivity"),
@@ -215,7 +216,7 @@ pub(super) fn add_gyro_group(
                 &SliderSpec(0.05, 20.0, 0.05, initial),
                 move |value| {
                     gyro.borrow_mut().sensitivity = value as f32;
-                    on_dirty();
+                    on_adjusted();
                 },
             )
         },

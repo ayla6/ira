@@ -19,7 +19,9 @@ pub(crate) fn build_general_page(ctx: &PagesCtx, name: &Rc<RefCell<String>>) -> 
     let ctx_for_name = ctx.clone();
     name_row.connect_changed(move |entry| {
         *name_for_change.borrow_mut() = entry.text().to_string();
-        (ctx_for_name.on_dirty)();
+        // One notification per keystroke: only the dirty state changes, no
+        // page shows the name.
+        (ctx_for_name.on_adjusted)();
     });
     identity.add(&name_row);
     page.append(&identity);

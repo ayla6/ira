@@ -30,7 +30,13 @@ pub(crate) struct PagesCtx {
     /// that moves the editing target.
     pub indicator: Rc<super::input_profile_set_indicator::SetIndicator>,
     pub device: Option<ira_input::DeviceInfo>,
+    /// Structural edits (mode swaps, rebinds, set changes) that change what
+    /// the pages show: refreshes Save/Apply and rebuilds every region page.
     pub on_dirty: Rc<dyn Fn()>,
+    /// Continuous edits (slider drags, keystrokes) that only change stored
+    /// values: refreshes Save/Apply alone. A drag must not rebuild the page
+    /// it is happening in — the recreated slider would lose the gesture.
+    pub on_adjusted: Rc<dyn Fn()>,
     /// The editor's live gyro config: per-input sheets that touch shared
     /// calibration (the flick stick's dots per 360°) must write the same
     /// store the Gyro page edits, or the next save stomps their value.
@@ -428,6 +434,7 @@ mod gtk_repro {
             ),
             device: None,
             on_dirty: std::rc::Rc::new(|| {}),
+            on_adjusted: std::rc::Rc::new(|| {}),
             gyro: std::rc::Rc::new(std::cell::RefCell::new(
                 InputProfile::default().gyro,
             )),

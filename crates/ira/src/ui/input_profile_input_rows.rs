@@ -266,6 +266,10 @@ pub(crate) fn input_expander_row(
             let ctx = ctx.clone();
             Rc::new(move || (ctx.on_dirty)())
         },
+        on_adjusted: {
+            let ctx = ctx.clone();
+            Rc::new(move || (ctx.on_adjusted)())
+        },
         rebuild_pending: Rc::new(std::cell::Cell::new(false)),
     };
     let reopen: Reopen = {

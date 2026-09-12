@@ -15,14 +15,19 @@ pub(super) fn add_gyro_motion_groups(
     page: &gtk4::Box,
     gyro: &Rc<RefCell<GyroConfig>>,
     on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
 ) {
-    page.append(&momentum_group(gyro, on_dirty));
-    page.append(&dampening_group(gyro, on_dirty));
+    page.append(&momentum_group(gyro, on_dirty, on_adjusted));
+    page.append(&dampening_group(gyro, on_dirty, on_adjusted));
 }
 
 /// Momentum: after the gyro deactivates, its last motion keeps outputting
 /// while friction bleeds it off — Steam's "Enable Momentum" panel.
-fn momentum_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> gtk4::Box {
+fn momentum_group(
+    gyro: &Rc<RefCell<GyroConfig>>,
+    on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
+) -> gtk4::Box {
     let group = SettingGroup::new(
         Some(&crate::tr!("Momentum")),
         Some(&crate::tr!(
@@ -42,10 +47,10 @@ fn momentum_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> gt
         &SliderSpec(0.5, 10.0, 0.1, f64::from(initial_friction)),
         {
             let gyro = gyro.clone();
-            let on_dirty = on_dirty.clone();
+            let on_adjusted = on_adjusted.clone();
             move |value| {
                 gyro.borrow_mut().momentum.friction = value as f32;
-                on_dirty();
+                on_adjusted();
             }
         });
     let enable = switch_row(
@@ -74,7 +79,11 @@ fn momentum_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> gt
 
 /// Trigger dampening: gyro mouse output scales down while the chosen
 /// trigger is held, so aiming steadies while shooting.
-fn dampening_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> gtk4::Box {
+fn dampening_group(
+    gyro: &Rc<RefCell<GyroConfig>>,
+    on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
+) -> gtk4::Box {
     let group = SettingGroup::new(
         Some(&crate::tr!("Trigger dampening")),
         Some(&crate::tr!(
@@ -96,10 +105,10 @@ fn dampening_group(gyro: &Rc<RefCell<GyroConfig>>, on_dirty: &Rc<dyn Fn()>) -> g
         &SliderSpec(0.0, 1.0, 0.05, f64::from(gyro.borrow().dampening_amount)),
         {
             let gyro = gyro.clone();
-            let on_dirty = on_dirty.clone();
+            let on_adjusted = on_adjusted.clone();
             move |value| {
                 gyro.borrow_mut().dampening_amount = value as f32;
-                on_dirty();
+                on_adjusted();
             }
         });
     amount.set_sensitive(gyro.borrow().trigger_dampening != TriggerDampening::Off);

@@ -274,14 +274,15 @@ fn set_soft_pull_threshold(kind: &mut ActivatorKind, value: f64) {
 }
 
 /// Writes one activator's kind-specific field from a slider and reports
-/// the change.
+/// the change. Sliders fire continuously, so this routes through the
+/// rebuild-free adjust hook.
 fn write_kind_value(base: &SheetBase, index: usize, value: f64, set: fn(&mut ActivatorKind, f64)) {
     with_mapping(base, |input| {
         if let Some(activator) = input.activators.get_mut(index) {
             set(&mut activator.kind, value);
         }
     });
-    (base.on_changed)();
+    (base.on_adjusted)();
 }
 
 fn activator_output_rows(
@@ -415,7 +416,7 @@ fn activator_setting_controls(
                         };
                     }
                 });
-                (base_for_repeat.on_changed)();
+                (base_for_repeat.on_adjusted)();
             }));
     }
 }

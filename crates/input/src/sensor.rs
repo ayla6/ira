@@ -194,16 +194,22 @@ pub struct Sdl3SensorBackend {
 /// daemon supports, so a genuinely new-but-identical sample (a steady
 /// spin) still gets through at a reduced, integration-correct rate.
 const DUPLICATE_SAMPLE_HOLD_US: u64 = 25_000;
+/// How long [`Sdl3SensorBackend::open`] waits for the enabled gyro to prove
+/// it actually streams before trusting it. SDL pairs sensor nodes with pads
+/// by UNIQ string, and empty UNIQs match everything, so a gyroless pad can
+/// inherit a dead or unrelated sensor; a real IMU reports nonzero noise
+/// within a few report cycles, a phantom one never produces data at all.
+const GYRO_VERIFY_WINDOW: Duration = Duration::from_millis(250);
+const GYRO_VERIFY_POLL: Duration = Duration::from_millis(10);
 
 fn select_gyro_id<F>(gyro_ids: &[i32], matches: F) -> Option<i32>
 where
     F: Fn(i32) -> bool,
 {
-    gyro_ids
-        .iter()
-        .find(|&&id| matches(id))
-        .copied()
-        .or_else(|| (gyro_ids.len() == 1).then(|| gyro_ids[0]))
+    // No single-sensor fallback: a lone system gyro (a laptop IMU, a sensor
+    // hub) must never be claimed for a controller that reports no matching
+    // name — that is how gyroless pads end up with phantom motion.
+    gyro_ids.iter().find(|&&id| matches(id)).copied()
 }
 
 impl Sdl3SensorBackend {
@@ -212,56 +218,60 @@ impl Sdl3SensorBackend {
             return Ok(None);
         };
 
-        let ids = gamepad_ids(&api);
+        let gamepad_sensor = gamepad_sensor_source(&api, device);
+        let (source, accel_on_gamepad) = match gamepad_sensor {
+            Some((source, accel)) => (source, accel),
+            None => match global_sensor_source(&api, device) {
+                Some(source) => (source, false),
+                None => {
+                    unsafe {
+                        (api.quit)();
+                        libc::dlclose(handle);
+                    }
+                    return Ok(None);
+                }
+            },
+        };
+        let mut backend = Self {
+            handle,
+            api,
+            source,
+            accel_on_gamepad,
+            last_gyro_time_ns: 0,
+            last_accepted: None,
+            last_accepted_fallback_us: 0,
+        };
+        if !backend.verify_gyro_streams() {
+            eprintln!(
+                "ira-input: SDL reported a gyro for '{}' but it never streamed a sample; \
+                 treating it as motion-less",
+                device.name
+            );
+            drop(backend);
+            return Ok(None);
+        }
+        Ok(Some(backend))
+    }
 
-        for id in ids {
-            let gamepad = unsafe { (api.open_gamepad)(id) };
-            if gamepad.is_null() {
-                continue;
+    /// Polls the enabled gyro until a plausible sample arrives. A real IMU
+    /// at rest still reports nonzero bias and sensor noise; a phantom one
+    /// (paired by SDL's empty-UNIQ rule, or advertised by a mapping for a
+    /// model without hardware) returns nothing or exact zeros forever.
+    fn verify_gyro_streams(&mut self) -> bool {
+        let deadline = Instant::now() + GYRO_VERIFY_WINDOW;
+        while Instant::now() < deadline {
+            match self.read_raw(0) {
+                Ok(Some(sample)) => {
+                    if gyro_sample_plausible(&sample) {
+                        return true;
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => return false,
             }
-            if matches_device(&api, gamepad, device)
-                && unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_GYRO) }
-                && unsafe { (api.set_sensor_enabled)(gamepad, SDL_SENSOR_GYRO, true) }
-            {
-                let accel_on_gamepad = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_ACCEL) }
-                    && unsafe { (api.set_sensor_enabled)(gamepad, SDL_SENSOR_ACCEL, true) };
-                return Ok(Some(Self {
-                    handle,
-                    api,
-                    source: SensorSource::Gamepad(gamepad),
-                    accel_on_gamepad,
-                    last_gyro_time_ns: 0,
-                    last_accepted: None,
-                    last_accepted_fallback_us: 0,
-                }));
-            }
-            unsafe { (api.close_gamepad)(gamepad) };
+            thread::sleep(GYRO_VERIFY_POLL);
         }
-
-        let gyro_ids = sensor_ids(&api)
-            .into_iter()
-            .filter(|id| unsafe { (api.get_sensor_type_for_id)(*id) } == SDL_SENSOR_GYRO)
-            .collect::<Vec<_>>();
-        let sensor_id = select_gyro_id(&gyro_ids, |id| sensor_matches_device(&api, id, device));
-        if let Some(sensor_id) = sensor_id {
-            let sensor = unsafe { (api.open_sensor)(sensor_id) };
-            if !sensor.is_null() {
-                return Ok(Some(Self {
-                    handle,
-                    api,
-                    source: SensorSource::Global(sensor),
-                    accel_on_gamepad: false,
-                    last_gyro_time_ns: 0,
-                    last_accepted: None,
-                    last_accepted_fallback_us: 0,
-                }));
-            }
-        }
-        unsafe {
-            (api.quit)();
-            libc::dlclose(handle);
-        }
-        Ok(None)
+        false
     }
 
     pub fn read(&mut self, timestamp_us: u64) -> Result<Option<SensorSample>, String> {
@@ -441,6 +451,48 @@ fn readings_differ(
     gyro_differs || accel_differs
 }
 
+/// Opens the matched SDL gamepad's own gyro when the pad advertises one.
+/// On success the gamepad handle stays open inside the returned source; on
+/// any mismatch the probe closes the handle again and returns `None`.
+fn gamepad_sensor_source(api: &Sdl3Api, device: &DeviceInfo) -> Option<(SensorSource, bool)> {
+    for id in gamepad_ids(api) {
+        let gamepad = unsafe { (api.open_gamepad)(id) };
+        if gamepad.is_null() {
+            continue;
+        }
+        let matched = matches_device(api, gamepad, device)
+            && unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_GYRO) }
+            && unsafe { (api.set_sensor_enabled)(gamepad, SDL_SENSOR_GYRO, true) };
+        if !matched {
+            unsafe { (api.close_gamepad)(gamepad) };
+            continue;
+        }
+        let accel_on_gamepad = unsafe { (api.has_sensor)(gamepad, SDL_SENSOR_ACCEL) }
+            && unsafe { (api.set_sensor_enabled)(gamepad, SDL_SENSOR_ACCEL, true) };
+        return Some((SensorSource::Gamepad(gamepad), accel_on_gamepad));
+    }
+    None
+}
+
+/// Opens a global SDL gyro whose name matches the device — never a lone
+/// unmatched sensor, which could belong to anything on the system.
+fn global_sensor_source(api: &Sdl3Api, device: &DeviceInfo) -> Option<SensorSource> {
+    let gyro_ids = sensor_ids(api)
+        .into_iter()
+        .filter(|id| unsafe { (api.get_sensor_type_for_id)(*id) } == SDL_SENSOR_GYRO)
+        .collect::<Vec<_>>();
+    let sensor_id = select_gyro_id(&gyro_ids, |id| sensor_matches_device(api, id, device))?;
+    let sensor = unsafe { (api.open_sensor)(sensor_id) };
+    (!sensor.is_null()).then_some(SensorSource::Global(sensor))
+}
+
+/// A resting IMU still reports small nonzero rates and noise; a phantom
+/// sensor (empty-UNIQ pairing, a gyroless model whose mapping claims
+/// motion) reads exact zeros or nothing at all.
+fn gyro_sample_plausible(sample: &SensorSample) -> bool {
+    sample.gyro.iter().any(|rate| rate.abs() > f32::EPSILON)
+}
+
 pub fn discover_sdl_gamepads() -> Result<Vec<SdlGamepadInfo>, String> {
     let Some((handle, api)) = load_sdl()? else {
         return Ok(Vec::new());
@@ -593,19 +645,21 @@ mod tests {
     }
 
     #[test]
-    fn test_select_gyro_id_empty_without_match_returns_none() {
+    fn test_select_gyro_id_requires_a_name_match() {
         assert_eq!(select_gyro_id(&[], |_| true), None);
+        assert_eq!(select_gyro_id(&[1, 2, 3], |id| id == 2), Some(2));
+        // A lone unmatched sensor must never be claimed: it could belong to
+        // any device on the system, not the pad being probed.
+        assert_eq!(select_gyro_id(&[5], |_| false), None);
     }
 
     #[test]
-    fn test_select_gyro_id_prefers_matching_device() {
-        let ids = [1, 2, 3];
-        assert_eq!(select_gyro_id(&ids, |id| id == 2), Some(2));
-    }
-
-    #[test]
-    fn test_select_gyro_id_falls_back_to_only_sensor() {
-        assert_eq!(select_gyro_id(&[5], |_| false), Some(5));
+    fn test_gyro_sample_plausibility_rejects_phantom_zeros() {
+        use super::gyro_sample_plausible;
+        // A resting-but-real IMU reports small nonzero bias.
+        assert!(gyro_sample_plausible(&sample([0.01, -0.02, 0.003], 1)));
+        // Exact zeros across all axes are a phantom pairing.
+        assert!(!gyro_sample_plausible(&sample([0.0; 3], 1)));
     }
 
     #[test]

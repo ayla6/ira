@@ -99,7 +99,7 @@ impl DeviceInfo {
             || name.contains("xinput")
             || name.contains("x-input")
             || name.contains("xbox")
-            || is_ultimate_2(self.vendor, self.product)
+            || is_ultimate_2(self.vendor, self.product, &self.name)
         {
             ReportedInputMode::XInput
         } else {
@@ -213,6 +213,9 @@ pub struct PhysicalGamepad {
     /// they enter the mapping engine, mirroring Steam's per-controller
     /// toggle.
     nintendo_layout: bool,
+    /// Whether the device currently holds an exclusive grab, so the hub can
+    /// hand the pad back to the desktop when the last session leaves.
+    grabbed: bool,
 }
 
 impl PhysicalGamepad {
@@ -244,6 +247,7 @@ impl PhysicalGamepad {
             left_trigger_clicked: false,
             right_trigger_clicked: false,
             nintendo_layout: false,
+            grabbed: grab,
         })
     }
 
@@ -266,7 +270,28 @@ impl PhysicalGamepad {
                 "failed to grab {} exclusively: {error}",
                 self.info.path.display()
             )
-        })
+        })?;
+        self.grabbed = true;
+        Ok(())
+    }
+
+    /// Releases an exclusive grab so other programs can read the pad again.
+    pub fn ungrab(&mut self) {
+        if let Some(device) = self.device.as_mut() {
+            if self.grabbed {
+                if let Err(error) = device.ungrab() {
+                    eprintln!(
+                        "failed to release grab on {}: {error}",
+                        self.info.path.display()
+                    );
+                }
+            }
+        }
+        self.grabbed = false;
+    }
+
+    pub fn is_grabbed(&self) -> bool {
+        self.grabbed
     }
 
     pub fn is_connected(&self) -> bool {
@@ -627,7 +652,7 @@ pub enum ButtonLayout {
 /// gets its paddle table, Nintendo-family pads get theirs, everything else
 /// the positional standard.
 fn button_layout(vendor: u16, product: u16, name: &str) -> ButtonLayout {
-    if is_ultimate_2(vendor, product) {
+    if is_ultimate_2(vendor, product, name) {
         ButtonLayout::Ultimate2DInput
     } else if is_nintendo(vendor, name) {
         ButtonLayout::Nintendo
@@ -778,6 +803,7 @@ mod tests {
             left_trigger_clicked: false,
             right_trigger_clicked: false,
             nintendo_layout: false,
+            grabbed: false,
         }
     }
 
@@ -836,7 +862,16 @@ mod tests {
 
     #[test]
     fn test_map_ultimate_2_buttons() {
-        assert!(is_ultimate_2(0x2dc8, 0x6012));
+        assert!(is_ultimate_2(
+            0x2dc8,
+            0x6012,
+            "8BitDo Ultimate 2 Wireless Controller"
+        ));
+        assert!(!is_ultimate_2(
+            0x2dc8,
+            0x6012,
+            "8BitDo Ultimate C"
+        ), "a shared id without the Ultimate 2 name keeps the standard layout");
         assert_eq!(
             map_button_for_device(evdev::KeyCode::BTN_NORTH, ButtonLayout::Ultimate2DInput),
             Some(GamepadButton::X)
@@ -874,7 +909,7 @@ mod tests {
             ),
             None
         );
-        assert!(!is_ultimate_2(0x2dc8, 0x310b));
+        assert!(!is_ultimate_2(0x2dc8, 0x310b, "Ultimate 2 Wireless Controller"));
     }
 
     #[test]

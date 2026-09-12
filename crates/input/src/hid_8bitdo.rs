@@ -30,8 +30,23 @@ pub const ULTIMATE_3: u16 = 0x202f;
 
 /// True for the Ultimate 2 Wireless in DInput mode, whose button map
 /// follows SDL's HIDAPI driver rather than evdev's positional standard.
-pub fn is_ultimate_2(vendor: u16, product: u16) -> bool {
-    vendor == VENDOR_8BITDO && product == ULTIMATE_2_WIRELESS
+///
+/// The product id alone is not proof: 8BitDo reuses ids across models and
+/// firmware updates rename them, so the reported evdev name must agree —
+/// a pad that only *claims* the Ultimate 2's identity keeps the positional
+/// standard instead of inheriting its paddle table.
+pub fn is_ultimate_2(vendor: u16, product: u16, name: &str) -> bool {
+    vendor == VENDOR_8BITDO
+        && product == ULTIMATE_2_WIRELESS
+        && matches_ultimate_2_name(name)
+}
+
+/// The name gate for [`is_ultimate_2`]: "Ultimate 2" is the paddle-equipped
+/// model; "Ultimate 2C" and "Ultimate C" are cheaper pads the id may be
+/// shared with, and every other name simply is not this controller.
+pub fn matches_ultimate_2_name(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    name.contains("ultimate 2") && !name.contains("ultimate 2c") && !name.contains("ultimate c")
 }
 
 /// _IOC(_IOC_READ|_IOC_WRITE, 'H', 0x07, 64): HIDIOCGFEATURE(64).
@@ -103,7 +118,7 @@ impl EightBitDoBatteryReader {
     /// device. `None` for every other pad, including the same hardware in
     /// XInput mode.
     pub fn open(pad: &DeviceInfo) -> Option<Self> {
-        if !is_ultimate_2(pad.vendor, pad.product) {
+        if !is_ultimate_2(pad.vendor, pad.product, &pad.name) {
             return None;
         }
         for node in sibling_hidraw_nodes(&pad.path) {
@@ -167,13 +182,31 @@ fn parse_state_report(report: &[u8], powerstate_supported: &mut bool) -> Option<
 
 #[cfg(test)]
 mod tests {
-    use super::{is_ultimate_2, needs_enable_handshake, parse_state_report, rumble_report_8bitdo, PadBattery};
+    use super::{
+        is_ultimate_2, matches_ultimate_2_name, needs_enable_handshake, parse_state_report,
+        rumble_report_8bitdo, PadBattery,
+    };
 
     #[test]
-    fn test_is_ultimate_2_matches_dinput_identity_only() {
-        assert!(is_ultimate_2(0x2dc8, 0x6012));
-        assert!(!is_ultimate_2(0x2dc8, 0x310b), "XInput mode is a different product");
-        assert!(!is_ultimate_2(0x057e, 0x2009), "Switch-mode twins are not this protocol");
+    fn test_is_ultimate_2_matches_dinput_identity_and_name() {
+        assert!(is_ultimate_2(
+            0x2dc8,
+            0x6012,
+            "8BitDo 8BitDo Ultimate 2 Wireless Controller for PC"
+        ));
+        assert!(!is_ultimate_2(0x2dc8, 0x310b, "Ultimate 2 Wireless Controller"), "XInput mode is a different product");
+        assert!(!is_ultimate_2(0x057e, 0x2009, "8BitDo Ultimate 2 Wireless Controller"), "Switch-mode twins are not this protocol");
+    }
+
+    #[test]
+    fn test_ultimate_2_name_gate_rejects_other_models() {
+        // The C and 2C lines are cheaper pads without the paddle hardware,
+        // and the "Ultimate Wireless / Pro 2 Wired" name belongs to xpad's
+        // positional table — none of them may inherit this layout.
+        assert!(!matches_ultimate_2_name("8BitDo Ultimate C Wireless Controller"));
+        assert!(!matches_ultimate_2_name("8BitDo Ultimate 2C Wireless Controller"));
+        assert!(!matches_ultimate_2_name("8BitDo Ultimate Wireless / Pro 2 Wired Controller"));
+        assert!(matches_ultimate_2_name("Ultimate 2 Wireless Controller"));
     }
 
     #[test]

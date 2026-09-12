@@ -158,26 +158,35 @@ impl VirtualGamepad {
     /// Queues one output event. The kernel write happens in `flush`, once
     /// per loop pass, so a full report batch costs a single syscall.
     pub fn emit(&mut self, event: &OutputEvent) -> io::Result<()> {
-        let input = match event {
+        match event {
             OutputEvent::GamepadButton { button, pressed } => {
                 if let Some(input) = self.hat_dpad_event(*button, *pressed) {
-                    input
-                } else {
-                    let Some(code) = button_code(self.backend, *button) else {
-                        return Ok(());
-                    };
-                    InputEvent::new(EventType::KEY.0, code.0, i32::from(*pressed))
+                    // Switch Pro and Sony pads report the d-pad only as
+                    // hat 0.
+                    self.pending.push(input);
+                    return Ok(());
+                }
+                let Some(code) = button_code(self.backend, *button) else {
+                    return Ok(());
+                };
+                self.pending
+                    .push(InputEvent::new(EventType::KEY.0, code.0, i32::from(*pressed)));
+                if let Some(input) = self.direct_input_hat_event(*button, *pressed) {
+                    // DirectInput declares hat 0 beside the d-pad keys:
+                    // SDL3's auto-mapping binds the d-pad to the hat, while
+                    // DirectInput-era games read the keys.
+                    self.pending.push(input);
                 }
             }
             OutputEvent::GamepadAxis { axis, value } => {
                 let Some(code) = axis_code(self.backend, *axis) else {
                     return Ok(());
                 };
-                InputEvent::new(EventType::ABSOLUTE.0, code.0, axis_value(*axis, *value))
+                let input = InputEvent::new(EventType::ABSOLUTE.0, code.0, axis_value(*axis, *value));
+                self.pending.push(input);
             }
-            _ => return Ok(()),
-        };
-        self.pending.push(input);
+            _ => {}
+        }
         Ok(())
     }
 
@@ -240,6 +249,27 @@ impl VirtualGamepad {
         ) {
             return None;
         }
+        let (code, value) = self.update_hat(button, pressed)?;
+        Some(InputEvent::new(EventType::ABSOLUTE.0, code.0, value))
+    }
+
+    /// The DirectInput d-pad's hat half; the keys are emitted by `emit`
+    /// beside it.
+    fn direct_input_hat_event(&mut self, button: GamepadButton, pressed: bool) -> Option<InputEvent> {
+        if self.backend != VirtualGamepadBackend::DirectInput {
+            return None;
+        }
+        let (code, value) = self.update_hat(button, pressed)?;
+        Some(InputEvent::new(EventType::ABSOLUTE.0, code.0, value))
+    }
+
+    /// Records one d-pad direction in the hat state and returns the axis
+    /// event that reflects it.
+    fn update_hat(
+        &mut self,
+        button: GamepadButton,
+        pressed: bool,
+    ) -> Option<(AbsoluteAxisCode, i32)> {
         let index = match button {
             GamepadButton::DpadUp => 0,
             GamepadButton::DpadDown => 1,
@@ -252,10 +282,9 @@ impl VirtualGamepad {
         let value = hat_value(self.hat_dpad, horizontal);
         let code = match button {
             GamepadButton::DpadUp | GamepadButton::DpadDown => AbsoluteAxisCode::ABS_HAT0Y,
-            GamepadButton::DpadLeft | GamepadButton::DpadRight => AbsoluteAxisCode::ABS_HAT0X,
-            _ => unreachable!(),
+            _ => AbsoluteAxisCode::ABS_HAT0X,
         };
-        Some(InputEvent::new(EventType::ABSOLUTE.0, code.0, value))
+        Some((code, value))
     }
 }
 
@@ -444,6 +473,13 @@ fn axis_setups(backend: VirtualGamepadBackend) -> Vec<UinputAbsSetup> {
         axis_setup(AbsoluteAxisCode::ABS_RX, -32768, 32767),
         axis_setup(AbsoluteAxisCode::ABS_RY, -32768, 32767),
     ]);
+    if backend == VirtualGamepadBackend::DirectInput {
+        // Standard DirectInput d-pad: hat 0 beside the d-pad keys.
+        setups.extend([
+            axis_setup(AbsoluteAxisCode::ABS_HAT0X, -1, 1),
+            axis_setup(AbsoluteAxisCode::ABS_HAT0Y, -1, 1),
+        ]);
+    }
     if backend != VirtualGamepadBackend::SwitchPro {
         setups.extend([
             axis_setup(AbsoluteAxisCode::ABS_Z, 0, 255),
@@ -757,6 +793,34 @@ mod tests {
         ));
         assert!(VirtualGamepad::dual_sense_sdl_mapping()
             .starts_with("030000004c050000e60c000011010000,Sony Interactive Entertainment DualSense Wireless Controller,"));
+    }
+
+    #[test]
+    fn test_direct_input_emits_hat_beside_dpad_keys() {
+        let mut pad = VirtualGamepad::shadow_only(DirectInput);
+        pad.emit(&OutputEvent::GamepadButton {
+            button: GamepadButton::DpadUp,
+            pressed: true,
+        })
+        .unwrap();
+        let queued = std::mem::take(&mut pad.pending);
+        assert_eq!(
+            queued.len(),
+            2,
+            "the d-up key and its hat 0 movement both ship"
+        );
+        assert!(
+            queued.iter().any(|event| event.event_type() == evdev::EventType::ABSOLUTE
+                && event.code() == evdev::AbsoluteAxisCode::ABS_HAT0Y.0
+                && event.value() == -1),
+            "hat 0 moves up"
+        );
+        assert!(
+            queued.iter().any(|event| event.event_type() == evdev::EventType::KEY
+                && event.code() == KeyCode::BTN_DPAD_UP.0
+                && event.value() == 1),
+            "the d-up key ships beside the hat"
+        );
     }
 
     #[test]

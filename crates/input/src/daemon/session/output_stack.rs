@@ -117,9 +117,14 @@ pub(crate) fn build_virtual_stack(
             }
         }
     };
-    // The cemuhook stream exists only as the DSU backend itself: picking
-    // that output mode always streams, nothing toggles it.
-    let motion_enabled = motion_allowed && backend == VirtualGamepadBackend::Dsu;
+    // The cemuhook stream exists as the DSU backend itself — picking that
+    // output mode always streams — and doubles as a motion-only companion
+    // next to a real virtual pad: XInput and DirectInput carry no motion of
+    // their own, so a native-motion profile streams to emulators over
+    // cemuhook instead.
+    let motion_enabled = motion_allowed
+        && (backend == VirtualGamepadBackend::Dsu
+            || (motion_available && profile.native_motion));
     let motion = if motion_enabled {
         MotionServer::bind()
     } else {

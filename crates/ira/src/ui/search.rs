@@ -1,19 +1,31 @@
-//! Library search box queries: bare words match accent-insensitively in any
-//! order, "quoted phrases" match exactly with accents intact.
+//! Library search box queries: bare words match loosely — accents, word
+//! order and punctuation don't matter. "Quoted phrases" stay contiguous
+//! and accent-sensitive, but punctuation doesn't matter there either.
 
 use crate::Game;
-use ira_models::fold_accents;
+use ira_models::{normalize_name, normalize_phrase};
 
 /// A parsed search query.
 ///
 /// Every bare word must appear in the name, sort title or platform —
-/// case- and accent-insensitively, in any position. Every quoted phrase
-/// must appear as a case-insensitive substring with accents preserved, so
-/// `pokemon` finds "Pokémon" but `"pokémon"` only pins the accented form.
+/// case-, accent- and punctuation-insensitively, in any position. Every
+/// quoted phrase must appear contiguously; accents count inside quotes,
+/// punctuation still doesn't. Between letters, a separator run is
+/// equivalent to nothing or to any other separator run, so lets, let's,
+/// let`s and let s all find "Let's Go".
 #[derive(Default)]
 pub struct SearchQuery {
-    phrases: Vec<String>,
     words: Vec<String>,
+    phrases: Vec<Phrase>,
+}
+
+/// A quoted phrase in both comparison forms: separators as spaces and
+/// separators removed — so `"let s go"` and `"let's go"` find the same
+/// titles.
+#[derive(Default)]
+struct Phrase {
+    spaced: String,
+    joined: String,
 }
 
 impl SearchQuery {
@@ -41,47 +53,61 @@ impl SearchQuery {
 
     /// True when nothing was parsed, i.e. the query matches every game.
     pub fn is_empty(&self) -> bool {
-        self.phrases.is_empty() && self.words.is_empty()
+        self.words.is_empty() && self.phrases.is_empty()
     }
 
     pub fn matches(&self, game: &Game) -> bool {
         if self.is_empty() {
             return true;
         }
-        let sort_title = game.sort_title.to_lowercase();
-        let platform = game.platform_id.to_lowercase();
-        let haystacks = [game.name_lower.as_str(), sort_title.as_str(), platform.as_str()];
-
-        if !self
-            .phrases
-            .iter()
-            .all(|p| haystacks.iter().any(|h| h.contains(p)))
-        {
-            return false;
+        let fields = [&game.name, &game.sort_title, &game.platform_id];
+        if !self.words.is_empty() {
+            let spaced: Vec<String> = fields.iter().map(|f| normalize_name(f)).collect();
+            let joined: Vec<String> = spaced.iter().map(|h| joined_form(h)).collect();
+            if !self
+                .words
+                .iter()
+                .all(|w| contains_any(w, &spaced) || contains_any(w, &joined))
+            {
+                return false;
+            }
         }
-        if self.words.is_empty() {
+        if self.phrases.is_empty() {
             return true;
         }
-        let folded: Vec<String> = haystacks.iter().map(|h| fold_accents(h)).collect();
-        self.words
-            .iter()
-            .all(|w| folded.iter().any(|h| h.contains(w)))
+        let spaced: Vec<String> = fields.iter().map(|f| normalize_phrase(f)).collect();
+        let joined: Vec<String> = spaced.iter().map(|h| joined_form(h)).collect();
+        self.phrases.iter().all(|p| {
+            contains_any(&p.spaced, &spaced) || contains_any(&p.joined, &joined)
+        })
     }
+}
+
+/// normalize_* output separates tokens with single spaces; dropping them
+/// gives the "separator = nothing" comparison form.
+fn joined_form(spaced: &str) -> String {
+    spaced.replace(' ', "")
+}
+
+fn contains_any(needle: &str, haystacks: &[String]) -> bool {
+    haystacks.iter().any(|h| h.contains(needle))
 }
 
 fn push_words(words: &mut Vec<String>, text: &str) {
     words.extend(
         text.split_whitespace()
-            .map(fold_accents)
+            .map(|w| joined_form(&normalize_name(w)))
             .filter(|w| !w.is_empty()),
     );
 }
 
-fn push_phrase(phrases: &mut Vec<String>, text: &str) {
-    let phrase = text.trim().to_lowercase();
-    if !phrase.is_empty() {
-        phrases.push(phrase);
+fn push_phrase(phrases: &mut Vec<Phrase>, text: &str) {
+    let spaced = normalize_phrase(text.trim());
+    if spaced.is_empty() {
+        return;
     }
+    let joined = joined_form(&spaced);
+    phrases.push(Phrase { spaced, joined });
 }
 
 #[cfg(test)]
@@ -113,6 +139,45 @@ mod tests {
     }
 
     #[test]
+    fn test_matches_ignores_punctuation() {
+        let g = game("Dr. Mario World");
+        assert!(SearchQuery::parse("dr mario").matches(&g));
+        let g = game("Final Fantasy VII");
+        assert!(SearchQuery::parse("final, fantasy!!").matches(&g));
+    }
+
+    #[test]
+    fn test_apostrophe_variants_all_find_lets_go() {
+        let accented = game("Pokémon: Let's Go, Eevee!");
+        for query in ["lets", "let's", "let`s", "letʼs", "let s"] {
+            assert!(
+                SearchQuery::parse(query).matches(&accented),
+                "query {query:?} should find {:?}",
+                accented.name
+            );
+        }
+        // The title side may use a different variant than the query.
+        let plain = game("Pokemon Lets Go Eevee");
+        assert!(SearchQuery::parse("let's go").matches(&plain));
+        let spaced_title = game("Pokemon Let s Go Eevee");
+        assert!(SearchQuery::parse("let's go").matches(&spaced_title));
+    }
+
+    #[test]
+    fn test_matches_ampersand_as_and() {
+        let g = game("Mario & Luigi: Superstar Saga");
+        assert!(SearchQuery::parse("mario and luigi").matches(&g));
+        assert!(SearchQuery::parse("mario luigi superstar").matches(&g));
+    }
+
+    #[test]
+    fn test_matches_ignores_bracketed_tags() {
+        let g = game("Emerald (USA) (Rev 1)");
+        assert!(SearchQuery::parse("emerald").matches(&g));
+        assert!(!SearchQuery::parse("usa").matches(&g));
+    }
+
+    #[test]
     fn test_quoted_phrase_requires_exact_accents() {
         let plain = game("Pokemon Emerald");
         let accented = game("Pokémon Emerald");
@@ -129,6 +194,18 @@ mod tests {
         let g = game("Super Mario Kart");
         assert!(SearchQuery::parse("\"mario kart\"").matches(&g));
         assert!(!SearchQuery::parse("\"kart mario\"").matches(&g));
+    }
+
+    #[test]
+    fn test_quoted_phrase_ignores_punctuation() {
+        let accented = game("Pokémon: Let's Go, Eevee!");
+        assert!(SearchQuery::parse("\"pokémon: lets go\"").matches(&accented));
+        // Separator run in the quote vs apostrophe in the title.
+        assert!(SearchQuery::parse("\"let s go\"").matches(&accented));
+        let spaced_title = game("Pokemon: Let s Go Eevee");
+        assert!(SearchQuery::parse("\"let's go\"").matches(&spaced_title));
+        let plain = game("Pokemon: Lets Go, Eevee!");
+        assert!(!SearchQuery::parse("\"pokémon: lets go\"").matches(&plain));
     }
 
     #[test]
@@ -151,6 +228,7 @@ mod tests {
         assert!(SearchQuery::parse("").matches(&g));
         assert!(SearchQuery::parse("   ").matches(&g));
         assert!(SearchQuery::parse("\"\"").matches(&g));
+        assert!(SearchQuery::parse("!!!").matches(&g));
     }
 
     #[test]

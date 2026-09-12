@@ -31,7 +31,7 @@ pub use fullscreen::fullscreen_args;
 pub use game::parse_db_id;
 pub use game::Game;
 pub use game_entry::GameEntry;
-pub use title::{fold_accents, normalize_name};
+pub use title::{normalize_name, normalize_phrase};
 pub use group::{Group, GroupSelection};
 pub use kind::*;
 pub use launch_config::{ControllerInputMode, GameLaunchConfig, WineConfig, WineProfile};

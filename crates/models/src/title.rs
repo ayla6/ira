@@ -9,7 +9,17 @@
 /// "Pokémon" and "Pokemon", "World Ends With You, The" and "The World Ends
 /// With You" land on the same key.
 pub fn normalize_name(s: &str) -> String {
-    let s = front_load_article(s);
+    normalize_key(&front_load_article(s), true)
+}
+
+/// normalize_name's punctuation rules without accent folding: search quotes
+/// must ignore punctuation but still count accents, so "Pokémon" and
+/// "pokemon" stay distinct keys here.
+pub fn normalize_phrase(s: &str) -> String {
+    normalize_key(&front_load_article(s), false)
+}
+
+fn normalize_key(s: &str, fold: bool) -> String {
     // "&" and "and" must land on the same key: titles use either.
     let s = s.replace('&', " and ");
     let mut result = String::with_capacity(s.len());
@@ -25,10 +35,13 @@ pub fn normalize_name(s: &str) -> String {
                 }
             }
             _ if in_brackets > 0 => {}
+            // Apostrophes join instead of split so Let's, lets and
+            // letʼs share a key.
+            '\'' | '’' | 'ʼ' => {}
             _ => {
                 let c = if c == '_' || c == '.' { ' ' } else { c };
                 for lc in c.to_lowercase() {
-                    let lc = fold_accent(lc);
+                    let lc = if fold { fold_accent(lc) } else { lc };
                     if lc.is_alphanumeric() {
                         result.push(lc);
                         prev_space = false;
@@ -45,16 +58,6 @@ pub fn normalize_name(s: &str) -> String {
         result.pop();
     }
     result
-}
-
-/// Lowercases `s` and folds accented Latin letters onto their base letter
-/// ("Pokémon" → "pokemon") so a typed query can match a title regardless of
-/// accents. Other scripts pass through unchanged.
-pub fn fold_accents(s: &str) -> String {
-    s.chars()
-        .flat_map(char::to_lowercase)
-        .map(fold_accent)
-        .collect()
 }
 
 /// Accented Latin letters fold onto their base letter so "Pokémon" and
@@ -122,7 +125,7 @@ fn ends_main_title(rest: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{fold_accents, normalize_name};
+    use super::{normalize_name, normalize_phrase};
 
     #[test]
     fn test_normalize_name_basic() {
@@ -201,12 +204,17 @@ mod tests {
     }
 
     #[test]
-    fn test_fold_accents_lowercases_and_strips_diacritics() {
-        assert_eq!(fold_accents("Pokémon"), "pokemon");
-        assert_eq!(fold_accents("ÉLITE FORCE"), "elite force");
-        assert_eq!(fold_accents("SØREN"), "soren");
-        // Non-Latin scripts pass through.
-        assert_eq!(fold_accents("カービィ"), "カービィ");
+    fn test_normalize_name_deletes_apostrophes() {
+        assert_eq!(normalize_name("Let's Go, Eevee!"), "lets go eevee");
+        assert_eq!(normalize_name("Bowser’s Fury"), "bowsers fury");
+        assert_eq!(normalize_name("letʼs go"), "lets go");
+    }
+
+    #[test]
+    fn test_normalize_phrase_keeps_accents_ignores_punctuation() {
+        assert_eq!(normalize_phrase("Pokémon: Let's Go"), "pokémon lets go");
+        assert_eq!(normalize_phrase("Dr. Mario"), "dr mario");
+        assert_eq!(normalize_phrase("Pokémon"), "pokémon");
     }
 
     #[test]

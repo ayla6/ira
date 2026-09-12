@@ -15,9 +15,12 @@ use ira_config::Config;
 use ira_input::{discover_gamepads, DeviceInfo};
 use ira_models::ControllerInputMode;
 
-/// How often the wish is re-evaluated (config file, hotplug) and the
-/// daemon's event stream is drained.
+/// How often the wish is re-evaluated (config file, hotplug).
 const TICK: Duration = Duration::from_secs(2);
+/// How often the daemon's event stream is drained. Game output lines are
+/// broadcast to every client, so a slow reader could back up the daemon's
+/// broadcast and stall its loop; drain far more often than that.
+const DRAIN: Duration = Duration::from_millis(250);
 
 /// Starts the background thread; failures are logged, never fatal — the
 /// desktop behaviour is a default, not a requirement.
@@ -41,6 +44,7 @@ fn run(save_dir: String) {
     let calibration = ira_input::calibration_store_path(&save_dir);
     let mut client: Option<ira_launcher::input_daemon::DaemonClient> = None;
     let mut sent: Option<Desired> = None;
+    let mut next_tick = std::time::Instant::now();
     loop {
         if client.is_none() {
             client = ira_launcher::input_daemon::desktop_client().ok();
@@ -50,37 +54,41 @@ fn run(save_dir: String) {
             }
             // A fresh daemon knows nothing about the previous wish.
             sent = None;
+            next_tick = std::time::Instant::now();
         }
-        // A broken config file falls back to defaults inside load_config,
-        // which would disable the desktop behaviour; that is the honest
-        // reading of an unreadable configuration.
-        let desired = desired_for(&load_config(), &save_dir);
-        if sent.as_ref() != Some(&desired) {
-            let delivered = client
-                .as_mut()
-                .map(|client| {
-                    ira_launcher::input_daemon::send_desktop_default(
-                        client,
-                        desired.enabled,
-                        desired.profile.as_deref(),
-                        Some(calibration.to_string_lossy().as_ref()),
-                    )
-                })
-                .unwrap_or_else(|| Err("no daemon connection".to_string()));
-            match delivered {
-                Ok(()) => sent = Some(desired),
-                Err(error) => {
-                    eprintln!("ira-input: desktop wish failed; will reconnect: {error}");
-                    client = None;
-                    continue;
+        if std::time::Instant::now() >= next_tick {
+            next_tick = std::time::Instant::now() + TICK;
+            // A broken config file falls back to defaults inside
+            // load_config, which would disable the desktop behaviour; that
+            // is the honest reading of an unreadable configuration.
+            let desired = desired_for(&load_config(), &save_dir);
+            if sent.as_ref() != Some(&desired) {
+                let delivered = client
+                    .as_mut()
+                    .map(|client| {
+                        ira_launcher::input_daemon::send_desktop_default(
+                            client,
+                            desired.enabled,
+                            desired.profile.as_deref(),
+                            Some(calibration.to_string_lossy().as_ref()),
+                        )
+                    })
+                    .unwrap_or_else(|| Err("no daemon connection".to_string()));
+                match delivered {
+                    Ok(()) => sent = Some(desired),
+                    Err(error) => {
+                        eprintln!("ira-input: desktop wish failed; will reconnect: {error}");
+                        client = None;
+                        continue;
+                    }
                 }
             }
         }
         // Drain the daemon's broadcasts so the socket never backs up; the
-        // wait doubles as the tick cadence.
+        // short wait keeps the reconnect and tick cadence responsive.
         let idle = client
             .as_mut()
-            .map(|client| client.wait_event_timeout(TICK, |_| {}).is_ok())
+            .map(|client| client.wait_event_timeout(DRAIN, |_| {}).is_ok())
             .unwrap_or(false);
         if !idle {
             client = None;

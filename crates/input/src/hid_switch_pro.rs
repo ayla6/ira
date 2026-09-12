@@ -1,10 +1,8 @@
 //! A virtual *real* Nintendo Switch Pro Controller built on
-//! [`super::uhid`], presenting the same surface as the 8BitDo dongles in
-//! Switch mode that the kernel's `hid-nintendo` driver leaves alone: one
-//! hidraw node for SDL's hidapi Switch driver, one procon-shaped evdev
-//! node from `hid-generic`, and nothing else — no driver-generated IMU
-//! companion that SDL would list as a joystick. Motion rides inside the
-//! 0x30 standard reports, exactly where SDL reads it for real hardware.
+//! [`super::uhid`], talking the same protocol the 8BitDo dongles speak in
+//! Switch mode: one hidraw node SDL's hidapi Switch driver claims, with
+//! motion riding inside the 0x30 standard reports — the only motion path
+//! that reaches a hidapi-claimed pad.
 //!
 //! Consumers talk the controller protocol instead of the descriptor: SDL
 //! handshakes over USB ([`0x80, cmd`] answered by [`0x81, cmd`]), then
@@ -12,6 +10,13 @@
 //! device info, SPI flash reads for stick and IMU calibration, report
 //! mode, IMU enable, vibration. This module answers all of them and then
 //! streams 0x30 standard reports.
+//!
+//! The USB bus identity is load-bearing: SDL2's bundled hidapi skips any
+//! hidraw whose bus is neither USB nor Bluetooth, so a virtual-bus device
+//! vanishes from every SDL2 game. `hid-nintendo` therefore binds too —
+//! exactly as it does for a wired real Pro Controller — and its evdev
+//! nodes carry the pad's identity, which SDL hides while its hidapi
+//! driver holds the device.
 //!
 //! The crafted calibration makes both calibration readers an identity:
 //! SDL reads the *offset* words (bytes 0–6 accel, 12–18 gyro) into
@@ -27,7 +32,7 @@ use std::io;
 
 use crate::motion_udp::PadState;
 use crate::rumble::RumbleCommand;
-use crate::uhid::{UhidDevice, UhidEvent, BUS_VIRTUAL};
+use crate::uhid::{UhidDevice, UhidEvent, BUS_USB};
 
 pub const VENDOR_ID: u32 = 0x057e;
 pub const PRODUCT_ID: u32 = 0x2009;
@@ -54,8 +59,12 @@ const BTN_ZL: u32 = 1 << 23;
 
 const STICK_CENTER: u16 = 2048;
 const STICK_RANGE: u16 = 1500;
-/// A battery/connection byte reading "full, wired".
-const BAT_FULL_USB: u8 = 0x8E;
+/// The battery/connection byte a real USB-wired pad streams (battery
+/// nibble 4, not charging); SDL decodes it as a full battery.
+const BAT_WIRED_USB: u8 = 0x40;
+/// Real pads pad every USB packet to the interrupt endpoint's 64 bytes;
+/// hidraw readers see the same shape from us.
+const USB_REPORT_LEN: usize = 64;
 
 /// The authentic Pro Controller USB report descriptor, transcribed from an
 /// `usbhid-dump` of real hardware (bus 001:004, VID 057e). Nintendo ships
@@ -173,21 +182,18 @@ pub struct SwitchProUhidDevice {
     /// The last report sent, minus the always-different timer byte: a tick
     /// whose state is identical to the last one skips the wire write. Pads
     /// stream at up to 1000 Hz and idle state resends are pure waste.
-    last_report: Option<[u8; 49]>,
+    last_report: Option<[u8; USB_REPORT_LEN]>,
 }
 
 impl SwitchProUhidDevice {
     /// `uniq` becomes the serial of the hidraw and evdev twins, which is
-    /// how SDL attaches sensor nodes to a pad by serial. BUS_VIRTUAL keeps
-    /// `hid-nintendo` from claiming the device: the driver would add its
-    /// own IMU evdev companion, and a real dongle-mode pad shows no such
-    /// node — faithfulness here is what keeps SDL listing one controller.
+    /// how SDL attaches sensor nodes to a pad by serial.
     pub fn create(uniq: &str) -> io::Result<Self> {
         let device = UhidDevice::create(
             DEVICE_NAME,
             uniq,
             REPORT_DESCRIPTOR,
-            BUS_VIRTUAL,
+            BUS_USB,
             VENDOR_ID,
             PRODUCT_ID,
         )?;
@@ -228,7 +234,7 @@ impl SwitchProUhidDevice {
         if unchanged {
             return Ok(());
         }
-        self.last_report = Some(report.clone().try_into().expect("49 bytes"));
+        self.last_report = Some(report.clone().try_into().expect("64 bytes"));
         self.device.send_input_report(&report)
     }
 
@@ -315,14 +321,18 @@ fn nintendo_device_frame(values: [f32; 3]) -> [f32; 3] {
 /// for device info and SPI flash reads. Empty for reports we ignore.
 pub fn handshake_reply(request: &[u8]) -> Vec<u8> {
     match request.first() {
-        Some(&0x80) => vec![0x81, *request.get(1).unwrap_or(&0)],
+        Some(&0x80) => {
+            let mut reply = vec![0x81, *request.get(1).unwrap_or(&0)];
+            reply.resize(USB_REPORT_LEN, 0);
+            reply
+        }
         Some(&0x01) => {
             let subcmd = request.get(10).copied().unwrap_or(0);
             let payload = subcmd_payload(subcmd, request.get(11..).unwrap_or(&[]));
             let mut reply = vec![
                 0x21, // subcommand reply
                 0x00, // timer (patched by caller? no: kernel ignores)
-                BAT_FULL_USB,
+                BAT_WIRED_USB,
                 0,
                 0,
                 0, // buttons
@@ -337,8 +347,7 @@ pub fn handshake_reply(request: &[u8]) -> Vec<u8> {
                 subcmd,
             ];
             reply.extend_from_slice(&payload);
-            // The kernel drops replies smaller than a full input report.
-            reply.resize(49, 0);
+            reply.resize(USB_REPORT_LEN, 0);
             reply
         }
         _ => Vec::new(),
@@ -500,10 +509,9 @@ pub fn standard_report(
         buttons |= BTN_ZR;
     }
 
-    let mut report = Vec::with_capacity(49);
-    report.push(0x30);
+    let mut report = vec![0x30];
     report.push(timer);
-    report.push(BAT_FULL_USB);
+    report.push(BAT_WIRED_USB);
     report.extend_from_slice(&buttons.to_le_bytes()[..3]);
     report.extend_from_slice(&stick_bytes(pad.lx, pad.ly));
     report.extend_from_slice(&stick_bytes(pad.rx, pad.ry));
@@ -518,6 +526,7 @@ pub fn standard_report(
             report.extend_from_slice(&raw.to_le_bytes());
         }
     }
+    report.resize(USB_REPORT_LEN, 0);
     report
 }
 
@@ -585,8 +594,11 @@ mod tests {
 
     #[test]
     fn test_usb_commands_ack_with_matching_reply() {
-        assert_eq!(handshake_reply(&[0x80, 0x02]), vec![0x81, 0x02]);
-        assert_eq!(handshake_reply(&[0x80, 0x03]), vec![0x81, 0x03]);
+        // USB packets are padded to the endpoint size like real pads do.
+        let ack = handshake_reply(&[0x80, 0x02]);
+        assert_eq!(&ack[..2], &[0x81, 0x02]);
+        assert_eq!(ack.len(), 64);
+        assert!(ack[2..].iter().all(|&byte| byte == 0));
         assert!(handshake_reply(&[0x10]).is_empty());
     }
 
@@ -631,12 +643,29 @@ mod tests {
         let report = standard_report(7, &pad, [0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
         assert_eq!(report[0], 0x30);
         assert_eq!(report[1], 7);
+        // The battery byte a real USB-wired pad streams.
+        assert_eq!(report[2], 0x40);
         assert_eq!(report[3], 1 << 2); // south (B) in the first button byte
         assert_eq!(report[5], 1 << 7); // ZL in the third button byte
-                                       // Third IMU sample's accel Z lands as 1g x 4096.
+        assert_eq!(report.len(), 64); // endpoint-sized like real hardware
+                                     // Third IMU sample's accel Z lands as 1g x 4096.
         let offset = 13 + 2 * 12 + 4; // skip 2 samples, accel z slot
         let raw = i16::from_le_bytes([report[offset], report[offset + 1]]);
         assert_eq!(raw, 4096);
+    }
+
+    #[test]
+    fn test_standard_report_matches_a_real_idle_capture() {
+        // Byte-for-byte shape of the real wired pad idling (usbhid-dump):
+        // battery 0x40, no buttons, both sticks centered packed as
+        // 00 08 80 — 12-bit 2048 in the driver's LSB-first fields.
+        let report = standard_report(0x10, &PadState::default(), [0.0, 0.0, 1.0], [0.0; 3]);
+        assert_eq!(report[0], 0x30);
+        assert_eq!(report[1], 0x10);
+        assert_eq!(report[2], 0x40);
+        assert_eq!(&report[3..6], &[0x00, 0x00, 0x00]);
+        assert_eq!(&report[6..9], &[0x00, 0x08, 0x80]);
+        assert_eq!(&report[9..12], &[0x00, 0x08, 0x80]);
     }
 
     #[test]

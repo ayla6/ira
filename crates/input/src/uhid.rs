@@ -23,11 +23,6 @@ const UHID_SET_REPORT: u32 = 13;
 
 /// BUS_USB from linux/input.h: hidapi treats USB devices as wired.
 pub const BUS_USB: u16 = 0x03;
-/// BUS_VIRTUAL from linux/hid.h: no kernel protocol driver claims the
-/// device (their id tables match USB/Bluetooth buses), leaving the hidraw
-/// node to the consumers who talk the protocol themselves — SDL's hidapi
-/// drivers, mostly. It also keeps hid-generic as the only evdev producer.
-pub const BUS_VIRTUAL: u16 = 0x06;
 /// enum uhid_report_type: feature reports carry configuration both ways.
 pub const FEATURE_REPORT: u8 = 0;
 

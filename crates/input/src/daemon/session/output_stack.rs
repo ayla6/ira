@@ -173,14 +173,15 @@ pub(crate) fn build_virtual_stack(
             }
         }
     }
-    // A virtual *real* Switch Pro: one hidraw node SDL's hidapi Switch
-    // driver claims (motion included, read straight from the 0x30
-    // reports), one procon-shaped evdev twin from hid-generic, nothing
-    // else. No paired IMU here: its motion cannot reach a hidapi-claimed
-    // pad, while the node itself gets udev's accelerometer tag — which
-    // SDL2 lists as a second joystick whose axes barely move, the exact
-    // "gyro as a second analog stick" confusion this backend exists not
-    // to cause.
+    // A virtual *real* Switch Pro over USB identity: SDL2's hidapi skips
+    // hidraw devices on any other bus, so USB is the only surface its
+    // Switch driver can claim — motion included, read straight from the
+    // 0x30 reports (the only motion path that reaches a hidapi-claimed
+    // pad). hid-nintendo binds alongside, exactly as for a wired real Pro
+    // Controller, and SDL hides its evdev nodes by the pad's identity. No
+    // paired IMU: it gets udev's accelerometer tag, which SDL2 lists as a
+    // second joystick whose axes barely move — the exact "gyro as a
+    // second analog stick" confusion this backend exists not to cause.
     if native_switch_pro {
         match SwitchProUhidDevice::create(&twin_uniq()) {
             Ok(device) => {

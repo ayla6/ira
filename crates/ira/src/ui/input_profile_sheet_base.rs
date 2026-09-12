@@ -26,6 +26,9 @@ pub(crate) struct SheetBase {
     pub(crate) child_expander: RefCell<Option<adw::ExpanderRow>>,
     /// The rows currently added to the expander, for removal on rebuild.
     pub(crate) live_children: RefCell<Vec<gtk4::Widget>>,
+    /// The expander header's summary label, so behavior swaps can refresh it
+    /// in place instead of rebuilding every page for one word.
+    pub(crate) header_summary: RefCell<Option<gtk4::Label>>,
     pub(crate) profile: ProfileRc,
     pub(crate) active_target: EditingTarget,
     pub(crate) source: InputSource,

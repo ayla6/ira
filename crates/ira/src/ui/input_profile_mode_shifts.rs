@@ -118,7 +118,9 @@ fn shift_expander(
                 shift.mode = mode;
             }
         });
-        (base_for_combo.on_changed)();
+        // The swapped mode's rows live in this same expander; the refill
+        // covers them without reloading the page.
+        (base_for_combo.on_adjusted)();
         reopen_for_combo();
     });
     expander.add_row(&combo);

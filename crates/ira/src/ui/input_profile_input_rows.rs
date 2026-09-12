@@ -126,8 +126,10 @@ fn is_trigger_axis(source: InputSource) -> bool {
     )
 }
 
-/// The behavior picker as an expander child; changing it updates the
-/// header's summary through the rebuild.
+/// The behavior picker as an expander child. Swapping the behavior only
+/// touches this expander — the header summary updates in place and the
+/// children refill — so the rest of the editor keeps its scroll and
+/// expansion state instead of reloading.
 fn behavior_row(ctx: &PagesCtx, base: &SheetBase, reopen: &Reopen) -> adw::ComboRow {
     let picker = adw::ComboRow::new();
     picker.set_title(&crate::tr!("Behavior"));
@@ -148,12 +150,69 @@ fn behavior_row(ctx: &PagesCtx, base: &SheetBase, reopen: &Reopen) -> adw::Combo
     picker.connect_selected_notify(move |picker| {
         let mode = modes.get(picker.selected() as usize).cloned().flatten();
         with_mapping(&base_for_change, |input| {
-            input.mode = mode;
+            input.mode = mode.clone();
         });
-        (ctx_for_change.on_dirty)();
+        sync_dpad_directions(&base_for_change, mode.as_ref());
+        refresh_header_summary(&base_for_change);
+        (ctx_for_change.on_adjusted)();
         (reopen_for_change)();
     });
     picker
+}
+
+/// Steam seeds a stick's Dpad behavior with the matching d-pad buttons: the
+/// four direction slots carry their virtual button instead of sitting
+/// empty, and the engine output is identical either way. Switching away
+/// removes only the untouched seeds — custom direction commands survive.
+fn sync_dpad_directions(base: &SheetBase, mode: Option<&SourceMode>) {
+    let mut profile = base.profile.borrow_mut();
+    let Some(inputs) = base.active_target.inputs_mut(&mut profile) else {
+        return;
+    };
+    sync_stick_dpad_directions(inputs, base.source, mode);
+}
+
+/// The seeding itself, on the target's input list: `source` is the stick's
+/// X axis (the pair's canonical mapping slot).
+pub(crate) fn sync_stick_dpad_directions(
+    inputs: &mut Vec<InputMapping>,
+    source: InputSource,
+    mode: Option<&SourceMode>,
+) {
+    let (x_axis, y_axis) = stick_axis_pair(source);
+    let directions = [
+        (GamepadButton::DpadUp, y_axis, AxisDirection::Negative),
+        (GamepadButton::DpadDown, y_axis, AxisDirection::Positive),
+        (GamepadButton::DpadLeft, x_axis, AxisDirection::Negative),
+        (GamepadButton::DpadRight, x_axis, AxisDirection::Positive),
+    ];
+    let seeding = matches!(mode, Some(SourceMode::Dpad { .. }));
+    for (button, axis, direction) in directions {
+        let source = InputSource::AxisDirection { axis, direction };
+        let seed = InputMapping::simple(
+            source,
+            ira_input::OutputAction::GamepadButton(button),
+        );
+        match (seeding, inputs.iter().position(|input| input.source == source)) {
+            (true, None) => inputs.push(seed),
+            (true, Some(index)) => {
+                if inputs[index].activators.is_empty() {
+                    inputs[index] = seed;
+                }
+            }
+            (false, Some(index)) if inputs[index] == seed => {
+                inputs.remove(index);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Refresh the expander header's summary label from the current mapping.
+fn refresh_header_summary(base: &SheetBase) {
+    if let Some(label) = base.header_summary.borrow().as_ref() {
+        label.set_text(&summary_text(base.source, find_mapping(base).as_ref()));
+    }
 }
 
 /// The digital input's command slot as an expander child: shows the current
@@ -257,6 +316,7 @@ pub(crate) fn input_expander_row(
         gyro: ctx.gyro.clone(),
         child_expander: RefCell::new(Some(expander.clone())),
         live_children: RefCell::new(Vec::new()),
+        header_summary: RefCell::new(Some(value_label.clone())),
         profile: ctx.profile.clone(),
         active_target: ctx.active_target.get(),
         source,
@@ -451,4 +511,97 @@ pub(crate) fn is_stick_source(source: InputSource) -> bool {
         source,
         InputSource::Axis(GamepadAxis::LeftX | GamepadAxis::RightX)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sync_stick_dpad_directions, InputMapping, InputSource, SourceMode};
+    use ira_input::{AxisDirection, GamepadAxis, GamepadButton, OutputAction};
+
+    fn direction_of(
+        inputs: &[InputMapping],
+        axis: GamepadAxis,
+        direction: AxisDirection,
+    ) -> Option<&InputMapping> {
+        inputs
+            .iter()
+            .find(|input| input.source == InputSource::AxisDirection { axis, direction })
+    }
+
+    #[test]
+    fn test_switching_to_dpad_seeds_all_four_direction_buttons() {
+        let mut inputs = vec![InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))];
+        sync_stick_dpad_directions(
+            &mut inputs,
+            InputSource::Axis(GamepadAxis::LeftX),
+            Some(&SourceMode::Dpad { threshold: 0.5 }),
+        );
+        let expected = [
+            (GamepadAxis::LeftY, AxisDirection::Negative, GamepadButton::DpadUp),
+            (GamepadAxis::LeftY, AxisDirection::Positive, GamepadButton::DpadDown),
+            (GamepadAxis::LeftX, AxisDirection::Negative, GamepadButton::DpadLeft),
+            (GamepadAxis::LeftX, AxisDirection::Positive, GamepadButton::DpadRight),
+        ];
+        for (axis, direction, button) in expected {
+            let mapping = direction_of(&inputs, axis, direction)
+                .unwrap_or_else(|| panic!("{button:?} direction was not seeded"));
+            assert_eq!(
+                mapping.activators.first().and_then(|a| a.outputs.first()),
+                Some(&OutputAction::GamepadButton(button))
+            );
+        }
+    }
+
+    #[test]
+    fn test_switching_away_removes_untouched_seeds_only() {
+        let mut inputs = vec![InputMapping::new(InputSource::Axis(GamepadAxis::LeftX))];
+        sync_stick_dpad_directions(
+            &mut inputs,
+            InputSource::Axis(GamepadAxis::LeftX),
+            Some(&SourceMode::Dpad { threshold: 0.5 }),
+        );
+        // Rebind one direction to a keyboard key: a custom command.
+        let up = InputSource::AxisDirection {
+            axis: GamepadAxis::LeftY,
+            direction: AxisDirection::Negative,
+        };
+        let index = inputs.iter().position(|input| input.source == up).unwrap();
+        inputs[index] = InputMapping::simple(up, OutputAction::Keyboard { keycode: 17 });
+
+        sync_stick_dpad_directions(
+            &mut inputs,
+            InputSource::Axis(GamepadAxis::LeftX),
+            Some(&SourceMode::joystick(ira_input::StickOutput::Left)),
+        );
+        // The custom up survives, the untouched seeds are gone.
+        assert!(direction_of(&inputs, GamepadAxis::LeftY, AxisDirection::Negative).is_some());
+        assert!(direction_of(&inputs, GamepadAxis::LeftY, AxisDirection::Positive).is_none());
+        assert!(direction_of(&inputs, GamepadAxis::LeftX, AxisDirection::Negative).is_none());
+        assert!(direction_of(&inputs, GamepadAxis::LeftX, AxisDirection::Positive).is_none());
+    }
+
+    #[test]
+    fn test_seeding_fills_empty_direction_slots_not_custom_ones() {
+        // An existing but empty direction mapping (cleared via the picker)
+        // gets the default button back; a bound one is left alone.
+        let down = InputSource::AxisDirection {
+            axis: GamepadAxis::LeftY,
+            direction: AxisDirection::Positive,
+        };
+        let mut inputs = vec![
+            InputMapping::new(InputSource::Axis(GamepadAxis::RightX)),
+            InputMapping::new(down),
+        ];
+        sync_stick_dpad_directions(
+            &mut inputs,
+            InputSource::Axis(GamepadAxis::RightX),
+            Some(&SourceMode::Dpad { threshold: 0.5 }),
+        );
+        let mapping = direction_of(&inputs, GamepadAxis::RightY, AxisDirection::Positive)
+            .expect("empty slot must be filled");
+        assert_eq!(
+            mapping.activators.first().and_then(|a| a.outputs.first()),
+            Some(&OutputAction::GamepadButton(GamepadButton::DpadDown))
+        );
+    }
 }

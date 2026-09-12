@@ -4,7 +4,8 @@
 //! cannot be reached or refuses, every caller falls back to the classic
 //! wrapper spawn — the game itself must always start.
 
-use ira_input_ipc::{DaemonClient, LaunchRequest, Request, Response};
+use ira_input_ipc::{LaunchRequest, Request, Response};
+pub use ira_input_ipc::DaemonClient;
 use ira_models::ControllerInputMode;
 
 /// The input-related slice of a launch config, resolved for the daemon.
@@ -49,6 +50,37 @@ pub fn launch_via_daemon(
         tag: Some(tag),
     })?;
     Ok(client)
+}
+
+/// Connects to the input daemon for the app's long-lived desktop presence,
+/// spawning one on demand. `Err` means no daemon is reachable and the idle
+/// controller keeps its native behaviour.
+pub fn desktop_client() -> Result<DaemonClient, String> {
+    let binary = super::env_builder::input_binary_path()
+        .ok_or_else(|| "ira-input binary was not found".to_string())?;
+    DaemonClient::connect_daemon(&binary)
+}
+
+/// Updates the daemon's standing desktop-default wish: while the app is
+/// open, an idle controller runs its default layout through the daemon
+/// (`enabled`) instead of going silent under the hub's grab. The daemon
+/// supersedes the wish for game launches and resumes it afterwards.
+pub fn send_desktop_default(
+    client: &mut DaemonClient,
+    enabled: bool,
+    profile: Option<&str>,
+    calibration: Option<&str>,
+) -> Result<(), String> {
+    match client.request(Request::DesktopDefault {
+        enabled,
+        profile: profile.map(str::to_string),
+        calibration: calibration.map(str::to_string),
+        motion_port: None,
+    })? {
+        Response::Applied => Ok(()),
+        Response::Error { message } => Err(message),
+        _ => Err("unexpected response to the desktop-default wish".to_string()),
+    }
 }
 
 /// Tells the daemon running `tag`'s game session to switch to the layout at

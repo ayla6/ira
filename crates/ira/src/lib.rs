@@ -2,6 +2,7 @@ pub mod activate;
 pub mod bench;
 pub mod game_list;
 pub mod game_loader;
+mod input_desktop;
 pub mod i18n;
 pub mod overlay;
 pub mod ui;

@@ -62,6 +62,9 @@ pub(crate) enum PadEvent {
     /// The game's controller layout was switched in the app; the session
     /// reloads from the new profile path. Server-routed, focus-independent.
     ReloadProfile(PathBuf),
+    /// The server told this session (a desktop-default one) to finish.
+    /// Server-routed, focus-independent.
+    Stop,
 }
 
 /// The pad's state at subscribe time, so a session can build its output
@@ -92,6 +95,9 @@ pub(crate) enum HubCommand {
     Rumble { id: u64, command: RumbleCommand },
     /// Server-routed layout switch for one session, regardless of focus.
     ReloadProfile { id: u64, path: PathBuf },
+    /// Ask one session to finish cleanly (a desktop-default session being
+    /// replaced or released).
+    Stop(u64),
 }
 
 struct RouteEntry {
@@ -152,6 +158,10 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
             // private hub has no reason to outlive it.
             return;
         }
+        // With no sessions subscribed, the pad stays untouched: ungrabbed
+        // and unread, so the desktop keeps full native use of it. The hub
+        // still watches for hotplug so a later subscribe is instant.
+        let subscribed = !routes.is_empty();
         if pad
             .gamepad
             .as_ref()
@@ -161,9 +171,26 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
             let _ = controller_events.send((false, String::new(), String::new()));
             pad.drop_pad();
         }
+        if subscribed
+            && pad
+                .gamepad
+                .as_ref()
+                .is_some_and(|gamepad| !gamepad.is_grabbed())
+        {
+            // The first subscribe after an idle stretch claims the pad for
+            // routed sessions again.
+            if let Err(error) = pad.grab() {
+                eprintln!("hub: failed to grab controller: {error}");
+            }
+        }
+        if !subscribed && pad.gamepad.as_ref().is_some_and(|pad| pad.is_grabbed()) {
+            // The last session went away: hand the controller back to the
+            // desktop instead of holding it dead in the void.
+            pad.ungrab();
+        }
         if pad.gamepad.is_none() && pad.reconnect_at.elapsed() >= RECONNECT_INTERVAL {
             pad.reconnect_at = Instant::now();
-            if let Some((name, path, vendor, product)) = pad.try_open() {
+            if let Some((name, path, vendor, product)) = pad.try_open(subscribed) {
                 let _ = controller_events.send((true, name.clone(), path.clone()));
                 // Sessions that subscribed before the pad existed (the normal
                 // case: opening the pad probes the motion source for ~200 ms)
@@ -183,22 +210,30 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
         // cadence. The connect-time probe races udev and SDL's enumeration,
         // so a controller switched on after the daemon is ready would
         // otherwise stay motion-less until it reconnects.
-        if pad.gamepad.is_some()
+        if subscribed
+            && pad.gamepad.is_some()
             && !pad.motion_alive()
             && pad.motion_retry_at.elapsed() >= pad.motion_retry_delay
         {
             pad.retry_motion(&routes);
         }
-        if pad.gamepad.is_some() {
+        if subscribed && pad.gamepad.is_some() {
             read_pad(&mut pad, &routes, &routed);
+        } else if let Some(switch) = pad.switch_hidraw.as_mut() {
+            // A Switch-protocol takeover needs its periodic servicing even
+            // while nothing is routed; that path reads hidraw passively, so
+            // the desktop's evdev view of the pad is unaffected.
+            switch.service();
         }
         retarget(&mut routes, &mut routed);
-        park(&pad);
+        park(&pad, subscribed);
     }
 }
 
 /// Parks until the pad has evdev input or the cadence timeout elapses.
-fn park(pad: &PhysicalPad) {
+/// Without subscribed sessions the pad is not being read, so its descriptor
+/// must not be polled — it would report ready forever and spin the loop.
+fn park(pad: &PhysicalPad, subscribed: bool) {
     let timeout = if pad.switch_hidraw.is_some() {
         SWITCH_POLL
     } else if pad.sensor.is_some() {
@@ -206,6 +241,10 @@ fn park(pad: &PhysicalPad) {
     } else {
         IDLE_POLL
     };
+    if !subscribed {
+        std::thread::sleep(timeout);
+        return;
+    }
     match pad.gamepad.as_ref().and_then(PhysicalGamepad::device_fd) {
         Some(fd) => {
             let mut descriptor = libc::pollfd {
@@ -348,6 +387,11 @@ fn drain_commands(
             Ok(HubCommand::ReloadProfile { id, path }) => {
                 if let Some(entry) = routes.get(&id) {
                     let _ = entry.events.send(PadEvent::ReloadProfile(path));
+                }
+            }
+            Ok(HubCommand::Stop(id)) => {
+                if let Some(entry) = routes.get(&id) {
+                    let _ = entry.events.send(PadEvent::Stop);
                 }
             }
         }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking message change; the daemon answers `status` with
 /// its version so a stale client can bail out cleanly.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -21,6 +21,18 @@ pub enum Request {
     /// by the launch `tag`, so the sender needs no connection to the
     /// session's launch.
     ReloadProfile { tag: i64, profile: String },
+    /// While the app is open it keeps this wish on file: the daemon runs a
+    /// no-game session that routes an idle controller through its default
+    /// layout, so the pad behaves as configured on the desktop. `enabled:
+    /// false` (or the app disconnecting) releases the controller back to
+    /// native input. A game launch always supersedes it and the desktop
+    /// session resumes when the last game ends.
+    DesktopDefault {
+        enabled: bool,
+        profile: Option<String>,
+        calibration: Option<String>,
+        motion_port: Option<u16>,
+    },
 }
 
 /// A game session handed to the daemon. `command` is the fully built game
@@ -54,6 +66,8 @@ pub enum Response {
     Status(DaemonStatus),
     /// A reload request reached its session.
     Reloaded,
+    /// A desktop-default wish was accepted.
+    Applied,
     Bye,
     /// A named-field variant on purpose: serde cannot serialize an
     /// internally tagged newtype variant that holds a bare string, so the
@@ -159,6 +173,31 @@ mod tests {
         match serde_json::from_str::<Wire>(&line).unwrap() {
             Wire::Response(Response::Error { message }) => {
                 assert_eq!(message, "no running session for game 41");
+            }
+            other => panic!("wrong wire message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_wire_desktop_default_roundtrip() {
+        let request = Wire::Request(Request::DesktopDefault {
+            enabled: true,
+            profile: Some("/profiles/default.json".into()),
+            calibration: Some("/calibration.json".into()),
+            motion_port: Some(26760),
+        });
+        let line = serde_json::to_string(&request).unwrap();
+        match serde_json::from_str::<Wire>(&line).unwrap() {
+            Wire::Request(Request::DesktopDefault {
+                enabled,
+                profile,
+                calibration,
+                motion_port,
+            }) => {
+                assert!(enabled);
+                assert_eq!(profile.as_deref(), Some("/profiles/default.json"));
+                assert_eq!(calibration.as_deref(), Some("/calibration.json"));
+                assert_eq!(motion_port, Some(26760));
             }
             other => panic!("wrong wire message: {other:?}"),
         }

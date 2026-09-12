@@ -47,6 +47,29 @@ struct SessionHandle {
     tag: Option<i64>,
     events: Receiver<SessionEvent>,
     done: Receiver<Result<i32, String>>,
+    /// A no-game session giving an idle controller its default behaviour
+    /// while the app is open. It holds no child process and never blocks a
+    /// shutdown.
+    desktop: bool,
+    /// The desktop session's layout path, so a changed wish can replace it.
+    desktop_profile: Option<String>,
+}
+
+/// The app's standing request for how an idle controller should behave
+/// while it is open. Games supersede it; it resumes when they end.
+#[derive(Debug, Clone, PartialEq)]
+struct DesktopWish {
+    profile: Option<String>,
+    calibration: Option<String>,
+    motion_port: Option<u16>,
+}
+
+/// Every live session plus the state sessions are created from.
+#[derive(Default)]
+struct SessionTable {
+    sessions: Vec<SessionHandle>,
+    next_session_id: u64,
+    desktop_wish: Option<DesktopWish>,
 }
 
 pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
@@ -74,8 +97,7 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
     // and routes them to whichever session holds focus.
     let (controller_tx, controller_rx) = std::sync::mpsc::channel();
     let hub = hub::spawn(controller_tx);
-    let mut sessions: Vec<SessionHandle> = Vec::new();
-    let mut next_session_id: u64 = 0;
+    let mut table = SessionTable::default();
     let mut shutdown = false;
     let mut idle_since: Option<Instant> = None;
 
@@ -83,35 +105,37 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
         if STOP_REQUESTED.load(Ordering::Relaxed) {
             shutdown = true;
         }
-        if shutdown && sessions.is_empty() {
+        if shutdown && table.sessions.is_empty() {
             break;
         }
-        pump_sessions(&mut sessions, &mut clients, &hub);
+        pump_sessions(&mut table, &mut clients, &hub, shutdown);
         drain_controller_presence(&controller_rx, &mut clients);
-        let timeout = loop_timeout(!sessions.is_empty(), idle_since);
+        let timeout = loop_timeout(!table.sessions.is_empty(), idle_since);
         let ready = poll_sockets(&listener, &clients, timeout)?;
         if ready[0] {
             accept(&listener, &mut clients);
         }
         for index in (0..clients.len()).rev() {
-            let requests = read_client(&mut clients, index);
+            let (requests, disconnected) = read_client(&mut clients, index);
             for request in requests {
                 process_request(
                     &mut clients,
                     index,
                     &hub,
-                    &mut sessions,
-                    &mut next_session_id,
+                    &mut table,
                     &mut shutdown,
                     request,
                 );
             }
-            if index >= clients.len() {
-                // The client was dropped while its requests were processed.
-                continue;
+            if disconnected && clients.is_empty() {
+                // The last app went away: the desktop behaviour was theirs.
+                // Releasing the desktop session also lets the daemon idle
+                // out instead of holding the pad forever.
+                table.desktop_wish = None;
+                stop_desktop_session(&hub, &table.sessions);
             }
         }
-        if clients.is_empty() && sessions.is_empty() {
+        if clients.is_empty() && table.sessions.is_empty() {
             let since = *idle_since.get_or_insert_with(Instant::now);
             if since.elapsed() >= IDLE_EXIT {
                 eprintln!("ira-input: idle with no clients or sessions; exiting");
@@ -122,7 +146,7 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
         }
     }
 
-    stop_running_sessions(&mut sessions);
+    stop_running_sessions(&mut table.sessions);
     let _ = std::fs::remove_file(path);
     eprintln!("ira-input: daemon exited");
     Ok(0)
@@ -142,24 +166,68 @@ fn loop_timeout(session_active: bool, idle_since: Option<Instant>) -> Duration {
 }
 
 /// Drains every live session's event channel, broadcasts new events, and
-/// removes sessions that ended.
-fn pump_sessions(
-    sessions: &mut Vec<SessionHandle>,
-    clients: &mut Vec<Client>,
-    hub: &HubHandle,
-) {
-    for index in (0..sessions.len()).rev() {
-        while let Ok(event) = sessions[index].events.try_recv() {
-            broadcast(clients, &session_event_to_protocol(sessions[index].id, &event));
+/// removes sessions that ended. When the last session ends while an app
+/// still holds a desktop wish, the desktop-default session resumes.
+fn pump_sessions(table: &mut SessionTable, clients: &mut Vec<Client>, hub: &HubHandle, shutdown: bool) {
+    for index in (0..table.sessions.len()).rev() {
+        while let Ok(event) = table.sessions[index].events.try_recv() {
+            broadcast(
+                clients,
+                &session_event_to_protocol(table.sessions[index].id, &event),
+            );
         }
-        if let Ok(result) = sessions[index].done.try_recv() {
-            let handle = sessions.remove(index);
+        if let Ok(result) = table.sessions[index].done.try_recv() {
+            let handle = table.sessions.remove(index);
             let code = result.unwrap_or(-1);
             eprintln!("ira-input: session {} ended with code {}", handle.id, code);
             hub.send(HubCommand::Unsubscribe(handle.id));
             broadcast(clients, &Event::SessionEnded { session: handle.id, code });
         }
     }
+    if table.sessions.is_empty() && !shutdown {
+        if let Some(wish) = table.desktop_wish.clone() {
+            if !clients.is_empty() {
+                start_desktop_session(&wish, hub, table);
+            }
+        }
+    }
+}
+
+fn start_desktop_session(wish: &DesktopWish, hub: &HubHandle, table: &mut SessionTable) {
+    table.next_session_id += 1;
+    let launch = LaunchRequest {
+        command: Vec::new(),
+        device: None,
+        env: Vec::new(),
+        working_dir: None,
+        profile: wish.profile.clone(),
+        calibration: wish.calibration.clone(),
+        pause_unfocused: false,
+        trace: false,
+        motion_port: wish.motion_port,
+        steam_app_id: None,
+        tag: None,
+    };
+    match start_session(launch, table.next_session_id, hub.clone(), true) {
+        Ok(handle) => {
+            eprintln!(
+                "ira-input: desktop session {} running the controller's default behaviour",
+                handle.id
+            );
+            table.sessions.push(handle);
+        }
+        Err(error) => eprintln!("ira-input: desktop session failed to start: {error}"),
+    }
+}
+
+/// Asks the desktop-default session, if any, to finish. Returns whether one
+/// was running.
+fn stop_desktop_session(hub: &HubHandle, sessions: &[SessionHandle]) -> bool {
+    let Some(session) = sessions.iter().find(|session| session.desktop) else {
+        return false;
+    };
+    hub.send(HubCommand::Stop(session.id));
+    true
 }
 
 /// Forwards controller presence changes from the hub to every client.
@@ -248,22 +316,22 @@ fn accept(listener: &UnixListener, clients: &mut Vec<Client>) {
 }
 
 /// Reads everything currently available from one client and returns the
-/// complete requests found. The client is dropped from the list on EOF or
-/// socket error.
-fn read_client(clients: &mut Vec<Client>, index: usize) -> Vec<Request> {
+/// complete requests found, plus whether the client was dropped (EOF or
+/// socket error).
+fn read_client(clients: &mut Vec<Client>, index: usize) -> (Vec<Request>, bool) {
     let mut chunk = [0u8; 4096];
     loop {
         match clients[index].stream.read(&mut chunk) {
             Ok(0) => {
                 eprintln!("ira-input: client disconnected");
                 clients.remove(index);
-                return Vec::new();
+                return (Vec::new(), true);
             }
             Ok(read) => clients[index].buffer.extend_from_slice(&chunk[..read]),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
             Err(_) => {
                 clients.remove(index);
-                return Vec::new();
+                return (Vec::new(), true);
             }
         }
     }
@@ -278,15 +346,14 @@ fn read_client(clients: &mut Vec<Client>, index: usize) -> Vec<Request> {
             requests.push(request);
         }
     }
-    requests
+    (requests, false)
 }
 
 fn process_request(
     clients: &mut Vec<Client>,
     index: usize,
     hub: &HubHandle,
-    sessions: &mut Vec<SessionHandle>,
-    next_session_id: &mut u64,
+    table: &mut SessionTable,
     shutdown: &mut bool,
     request: Request,
 ) {
@@ -297,21 +364,68 @@ fn process_request(
             Response::Status(DaemonStatus {
                 pid: std::process::id(),
                 protocol_version: PROTOCOL_VERSION,
-                session_active: !sessions.is_empty(),
+                session_active: table.sessions.iter().any(|session| !session.desktop),
             }),
         ),
         Request::Launch(launch) => {
-            *next_session_id += 1;
-            match start_session(launch, *next_session_id, hub.clone()) {
+            // A game supersedes the desktop behaviour; the wish stays on
+            // file so the idle behaviour resumes when the last game ends.
+            stop_desktop_session(hub, &table.sessions);
+            table.next_session_id += 1;
+            match start_session(launch, table.next_session_id, hub.clone(), false) {
                 Ok(handle) => {
-                    sessions.push(handle);
-                    respond(clients, index, Response::Launched { session: *next_session_id });
+                    table.sessions.push(handle);
+                    respond(
+                        clients,
+                        index,
+                        Response::Launched {
+                            session: table.next_session_id,
+                        },
+                    );
                 }
                 Err(error) => respond(clients, index, Response::Error { message: error }),
             }
         }
+        Request::DesktopDefault {
+            enabled,
+            profile,
+            calibration,
+            motion_port,
+        } => {
+            table.desktop_wish = enabled.then_some(DesktopWish {
+                profile,
+                calibration,
+                motion_port,
+            });
+            match table.desktop_wish.clone() {
+                None => {
+                    stop_desktop_session(hub, &table.sessions);
+                }
+                Some(wish) => {
+                    // A running desktop session with a different layout gets
+                    // replaced; a matching one just keeps running. When no
+                    // game holds the pad, the session starts right away —
+                    // otherwise the wish resumes after the games end.
+                    let running_layout = table
+                        .sessions
+                        .iter()
+                        .find(|session| session.desktop)
+                        .map(|session| session.desktop_profile.clone());
+                    if running_layout.as_ref() != Some(&wish.profile) {
+                        if table.sessions.iter().all(|session| session.desktop) {
+                            stop_desktop_session(hub, &table.sessions);
+                        }
+                        if table.sessions.is_empty() && !clients.is_empty() {
+                            start_desktop_session(&wish, hub, table);
+                        }
+                    }
+                }
+            }
+            respond(clients, index, Response::Applied);
+        }
         Request::ReloadProfile { tag, profile } => {
-            let session = sessions
+            let session = table
+                .sessions
                 .iter()
                 .find(|session| session.tag == Some(tag))
                 .map(|session| session.id);
@@ -333,7 +447,7 @@ fn process_request(
             }
         }
         Request::Shutdown { stop_running } => {
-            if !sessions.is_empty() && !stop_running {
+            if !stop_running && table.sessions.iter().any(|session| !session.desktop) {
                 respond(
                     clients,
                     index,
@@ -343,11 +457,14 @@ fn process_request(
                 );
                 return;
             }
-            if !sessions.is_empty() {
+            if table.sessions.iter().any(|session| !session.desktop) {
                 // Every session loop watches this flag and stops its game
                 // the same way a SIGTERM to the old wrapper did.
                 STOP_REQUESTED.store(true, Ordering::Relaxed);
             }
+            // The desktop session holds no game: release it immediately.
+            table.desktop_wish = None;
+            stop_desktop_session(hub, &table.sessions);
             *shutdown = true;
             respond(clients, index, Response::Bye);
         }
@@ -358,8 +475,9 @@ fn start_session(
     launch: LaunchRequest,
     session_id: u64,
     hub: HubHandle,
+    desktop: bool,
 ) -> Result<SessionHandle, String> {
-    if launch.command.is_empty() {
+    if launch.command.is_empty() && !desktop {
         return Err("launch request has an empty command".to_string());
     }
     let (event_tx, event_rx) = std::sync::mpsc::channel();
@@ -406,6 +524,8 @@ fn start_session(
         tag: launch.tag,
         events: event_rx,
         done: done_rx,
+        desktop,
+        desktop_profile: if desktop { launch.profile } else { None },
     })
 }
 

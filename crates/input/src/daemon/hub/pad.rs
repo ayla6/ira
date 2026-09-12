@@ -60,9 +60,26 @@ impl PhysicalPad {
         self.sensor.is_some() || self.switch_hidraw.is_some()
     }
 
+    /// Claims the open pad exclusively for routed sessions.
+    pub(super) fn grab(&mut self) -> Result<(), String> {
+        match self.gamepad.as_mut() {
+            Some(gamepad) => gamepad.grab(),
+            None => Ok(()),
+        }
+    }
+
+    /// Hands the pad back to the desktop when the last session leaves.
+    pub(super) fn ungrab(&mut self) {
+        if let Some(gamepad) = self.gamepad.as_mut() {
+            gamepad.ungrab();
+        }
+    }
+
     /// Opens the first pad or reopens the previous one, re-establishing the
-    /// motion source, the Switch-protocol takeover, and rumble.
-    pub(super) fn try_open(&mut self) -> Option<(String, String, u16, u16)> {
+    /// motion source, the Switch-protocol takeover, and rumble. The pad is
+    /// grabbed only when sessions are subscribed: an idle hub must leave
+    /// the controller to the desktop.
+    pub(super) fn try_open(&mut self, grab: bool) -> Option<(String, String, u16, u16)> {
         // The motion probe below races udev and SDL's first enumeration;
         // schedule retries so a lost race heals itself while the pad stays
         // connected.
@@ -76,8 +93,10 @@ impl PhysicalPad {
                 return None;
             }
         }
-        if let Err(error) = self.gamepad.as_mut().unwrap().grab() {
-            eprintln!("hub: failed to grab controller: {error}");
+        if grab {
+            if let Err(error) = self.gamepad.as_mut().unwrap().grab() {
+                eprintln!("hub: failed to grab controller: {error}");
+            }
         }
         apply_controller_layout(&mut self.gamepad, self.calibration.as_deref());
         self.sensor = self

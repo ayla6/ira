@@ -126,3 +126,7 @@ pub use message_helpers::switch_to_game;
 pub use state::{malloc_trim, AppState, SharedState};
 pub use virtual_grid::VirtualGrid;
 pub use window::{build_ui, AppContext};
+
+/// The profile store serves non-UI callers too: the startup migration sweep
+/// and the desktop-input wish resolve stored layouts by device.
+pub(crate) use input_profile_store::{find_controller_default_profile, migrate_profile_files};

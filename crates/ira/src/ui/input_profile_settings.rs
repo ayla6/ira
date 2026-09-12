@@ -434,22 +434,41 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
     let mut rebuilt = Vec::new();
     for device in devices {
         let key = ira_config::Config::controller_key(device.vendor, device.product);
-        let config = params
-            .configured_defaults
-            .get(&key)
-            .cloned()
-            .unwrap_or_default();
-        let configured =
-            (!config.profile.is_empty()).then(|| std::path::PathBuf::from(&config.profile));
-        let default_path = configured
-            .filter(|path| path.is_file())
-            .or_else(|| find_controller_default_profile(&params.save_dir, &key))
-            .unwrap_or_else(|| controller_default_path(&params.save_dir, &key));
-        let default_state = ControllerDefaultState {
-            config,
-            profile_path: default_path.is_file().then_some(default_path),
+        let state = match params.configured_defaults.get(&key) {
+            Some(config) => {
+                let configured =
+                    (!config.profile.is_empty()).then(|| std::path::PathBuf::from(&config.profile));
+                let default_path = configured
+                    .filter(|path| path.is_file())
+                    .or_else(|| find_controller_default_profile(&params.save_dir, &key))
+                    .unwrap_or_else(|| controller_default_path(&params.save_dir, &key));
+                ControllerDefaultState {
+                    config: config.clone(),
+                    profile_path: default_path.is_file().then_some(default_path),
+                }
+            }
+            None => {
+                // An unconfigured controller is managed by default: make sure
+                // its auto layout exists so the picker names a real file
+                // instead of showing a bare Disabled entry.
+                let profile_path = ensure_controller_default_profile(
+                    &params.save_dir,
+                    &key,
+                    &device.name,
+                    &device.supported_buttons,
+                )
+                .ok()
+                .filter(|path| path.is_file());
+                ControllerDefaultState {
+                    config: ControllerInputConfig {
+                        mode: ControllerInputMode::Enabled,
+                        profile: String::new(),
+                    },
+                    profile_path,
+                }
+            }
         };
-        let state = previous.get(&key).cloned().unwrap_or(default_state);
+        let state = previous.get(&key).cloned().unwrap_or(state);
         rebuilt.push(add_controller_row(
             &params.group,
             &params.parent,

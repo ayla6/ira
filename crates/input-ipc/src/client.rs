@@ -2,6 +2,7 @@
 //! demand), send requests, and wait out a game session.
 
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -159,6 +160,49 @@ impl DaemonClient {
                 Wire::Response(_) => {}
                 Wire::Request(_) => {}
             }
+        }
+    }
+
+    /// Waits up to `timeout` for the next event, draining it to `on_event`
+    /// and returning whether one arrived. `Ok(None)` on timeout means the
+    /// connection is idle and healthy — a long-lived client uses this to
+    /// keep the daemon's event stream flowing while doing periodic work.
+    /// A connection error surfaces as `Err` for the caller to reconnect.
+    pub fn wait_event_timeout(
+        &mut self,
+        timeout: Duration,
+        mut on_event: impl FnMut(Event),
+    ) -> Result<bool, String> {
+        let fd = self.stream.as_raw_fd();
+        let mut descriptor = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let timeout_ms = timeout
+            .as_millis()
+            .min(libc::c_int::MAX as u128) as libc::c_int;
+        // EINTR just means a signal arrived during the wait; retry once by
+        // reporting idle so the caller's next tick re-polls.
+        let ready = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
+        if ready < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                return Ok(false);
+            }
+            return Err(format!("daemon poll failed: {error}"));
+        }
+        if ready == 0 {
+            return Ok(false);
+        }
+        match self.read()? {
+            Wire::Event(event) => {
+                on_event(event);
+                Ok(true)
+            }
+            // A response this client did not ask for cannot happen (each
+            // request reads its own response); treat anything else as idle.
+            _ => Ok(false),
         }
     }
 

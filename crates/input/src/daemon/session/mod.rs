@@ -255,6 +255,19 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                         }
                     }
                 }
+                PadEvent::Stop => {
+                    // The server replaced this session (or released it): wind
+                    // down like a finished game, but with no exit code to
+                    // report.
+                    eprintln!("ira-input: session {} stopping on request", arguments.session_id);
+                    if let Err(error) = release_outputs(
+                        &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
+                        &mut pad_state, &mut trace,
+                    ) {
+                        eprintln!("ira-input: failed to release outputs on stop: {error}");
+                    }
+                    return Ok(0);
+                }
             }
         }
 

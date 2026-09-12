@@ -173,17 +173,19 @@ pub(crate) fn build_virtual_stack(
             }
         }
     }
-    // A virtual *real* Switch Pro: hid-nintendo claims it, completes its
-    // handshake against our answers and builds an IMU input node itself.
-    // That kernel IMU carries no usable serial though, so SDL cannot pair
-    // it with anything — the paired twin below is what delivers gyro.
+    // A virtual *real* Switch Pro: one hidraw node SDL's hidapi Switch
+    // driver claims (motion included, read straight from the 0x30
+    // reports), one procon-shaped evdev twin from hid-generic, nothing
+    // else. No paired IMU here: its motion cannot reach a hidapi-claimed
+    // pad, while the node itself gets udev's accelerometer tag — which
+    // SDL2 lists as a second joystick whose axes barely move, the exact
+    // "gyro as a second analog stick" confusion this backend exists not
+    // to cause.
     if native_switch_pro {
-        let uniq = twin_uniq();
-        match SwitchProUhidDevice::create(&uniq) {
+        match SwitchProUhidDevice::create(&twin_uniq()) {
             Ok(device) => {
-                eprintln!("ira-input: virtual Switch Pro claimed by hid-nintendo");
+                eprintln!("ira-input: virtual Switch Pro exposed over hidraw");
                 switch_pro_hid = Some(device);
-                imu_hid = spawn_paired_imu(&uniq);
             }
             Err(error) => {
                 eprintln!("ira-input: failed to create virtual Switch Pro: {error}");

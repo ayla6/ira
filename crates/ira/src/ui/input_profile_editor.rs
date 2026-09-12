@@ -143,6 +143,12 @@ pub(super) fn show_input_profile_editor(
     save.set_sensitive(false);
     apply.set_sensitive(false);
 
+    // The header names the layout being edited and follows renames, instead
+    // of sitting empty above every page.
+    let title = gtk4::Label::new(Some(profile_name.borrow().as_str()));
+    title.add_css_class("title");
+    layout.header.set_title_widget(Some(&title));
+
     // Two-phase wiring: pages need the edit hooks, the hooks need the
     // pages. The indirection cells resolve the cycle.
     type EditorHook = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
@@ -204,7 +210,9 @@ pub(super) fn show_input_profile_editor(
         let adjust_unsaved = unsaved.clone();
         let adjust_save = save.clone();
         let adjust_apply = apply.clone();
+        let adjust_title = title.clone();
         *adjust_hook.borrow_mut() = Some(Rc::new(move || {
+            adjust_title.set_text(adjust_form.name.borrow().as_str());
             let dirty = is_dirty(adjust_unsaved.get(), &adjust_form, &adjust_baseline.borrow());
             adjust_save.set_sensitive(dirty);
             adjust_apply.set_sensitive(dirty);
@@ -234,6 +242,7 @@ pub(super) fn show_input_profile_editor(
             let unsaved = unsaved.clone();
             let save = save.clone();
             let apply = apply.clone();
+            let title = title.clone();
             let rebuild_pending = rebuild_pending.clone();
             gtk4::glib::idle_add_local_once(move || {
                 // Rebuilding the pages makes their widgets emit change
@@ -244,6 +253,7 @@ pub(super) fn show_input_profile_editor(
                 // memory without bound and took the session down.
                 rebuild_pending.set(true);
                 rebuild_region_pages(&ctx, &pages);
+                title.set_text(form.name.borrow().as_str());
                 let dirty = is_dirty(unsaved.get(), &form, &baseline.borrow());
                 save.set_sensitive(dirty);
                 apply.set_sensitive(dirty);
@@ -371,12 +381,18 @@ fn scrolling_page() -> (gtk4::ScrolledWindow, gtk4::Box) {
     let scroll = gtk4::ScrolledWindow::new();
     scroll.set_vexpand(true);
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+    // Settings pages clamp to a readable width instead of stretching rows
+    // across the whole dialog, the way libadwaita preference windows do.
+    let clamp = adw::Clamp::new();
+    clamp.set_maximum_size(720);
+    clamp.set_tightening_threshold(600);
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 10);
     content.set_margin_top(12);
     content.set_margin_bottom(12);
     content.set_margin_start(12);
     content.set_margin_end(12);
-    scroll.set_child(Some(&content));
+    clamp.set_child(Some(&content));
+    scroll.set_child(Some(&clamp));
     (scroll, content)
 }
 
@@ -440,7 +456,10 @@ fn add_editor_footer(
     actions.append(&cancel);
     actions.append(apply);
     actions.append(save);
+    // A flat bottom bar under the page area, separated from the content the
+    // way libadwaita footer bars are.
     let footer = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+    footer.add_css_class("toolbar");
     footer.set_margin_start(16);
     footer.set_margin_end(16);
     footer.append(status);

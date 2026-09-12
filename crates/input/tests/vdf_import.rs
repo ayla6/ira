@@ -180,8 +180,12 @@ fn test_joystick_move_imports_deadzone_settings() {
     let Some(SourceMode::Joystick(settings)) = right.mode.as_ref() else {
         panic!("expected a joystick mode");
     };
-    // No deadzone setting: raw input, Steam's default.
-    assert_eq!(settings.processing.deadzone, ira_input::StickDeadzone::None);
+    // No deadzone setting: the app default (the controller's calibration)
+    // instead of Steam's raw passthrough.
+    assert_eq!(
+        settings.processing.deadzone,
+        ira_input::StickDeadzone::Controller
+    );
     profile.validate().unwrap();
 }
 

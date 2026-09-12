@@ -57,8 +57,11 @@ fn test_default_mapping_gives_axes_their_natural_modes() {
         panic!("expected a joystick mode");
     };
     assert_eq!(settings.output, StickOutput::Right);
-    // Fresh sticks start with no deadzone: raw input passes through.
-    assert_eq!(settings.processing.deadzone, ira_input::StickDeadzone::None);
+    // Fresh sticks start on the controller-preference deadzone.
+    assert_eq!(
+        settings.processing.deadzone,
+        ira_input::StickDeadzone::Controller
+    );
     assert!(stick.activators.is_empty());
     let trigger = super::super::input_profile_input_rows::default_mapping(InputSource::Axis(
         GamepadAxis::LeftTrigger,

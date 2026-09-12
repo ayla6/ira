@@ -360,10 +360,13 @@ fn import_stick(
                 });
             SourceMode::Joystick(JoystickSettings {
                 processing: StickProcessing {
+                    // A Steam template without its own deadzone falls back
+                    // to the app default (the controller's calibration),
+                    // keeping imports aligned with freshly made layouts.
                     deadzone: if deadzone.is_some() {
                         StickDeadzone::Custom
                     } else {
-                        StickDeadzone::None
+                        StickDeadzone::default()
                     },
                     deadzone_inner: deadzone.unwrap_or(0.1),
                     ..StickProcessing::default()

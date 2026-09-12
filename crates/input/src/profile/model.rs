@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROFILE_VERSION: u32 = 1;
+/// Version 2 changed the default deadzone source from raw passthrough to
+/// the per-controller calibration; `from_json` migrates older files.
+pub const PROFILE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -189,11 +191,11 @@ pub struct ControllerCalibration {
 #[serde(rename_all = "snake_case")]
 pub enum StickDeadzone {
     /// No deadzone: the raw input of the joystick is sent.
-    #[default]
     None,
     /// The deadzone value comes from this controller's calibration.
+    #[default]
     Controller,
-    /// Use the profile's own inner/outer radii.
+    /// Use the profile's own radii.
     Custom,
 }
 
@@ -738,8 +740,8 @@ pub struct JoystickSettings {
 }
 
 impl JoystickSettings {
-    /// Neutral settings targeting `output`: raw passthrough with no
-    /// deadzone and a linear curve.
+    /// Neutral settings targeting `output`: controller-preference deadzone
+    /// with a linear curve.
     pub fn new(output: StickOutput) -> Self {
         Self {
             output,
@@ -1846,8 +1848,9 @@ mod tests {
     #[test]
     fn test_old_joystick_mode_json_gets_steam_defaults() {
         // Profiles written before the stick rework carry no deadzone source,
-        // per-axis sensitivity, or rotation; they must load as raw
-        // passthrough instead of silently keeping a hidden deadzone.
+        // per-axis sensitivity, or rotation; the missing deadzone source now
+        // loads as the controller-preference default, not a hidden raw
+        // passthrough.
         let profile = InputProfile::from_json(
             r#"{"name":"old","action_sets":[{"name":"Default","inputs":[
                 {"source":{"axis":"left_x"},
@@ -1859,12 +1862,60 @@ mod tests {
         else {
             panic!("expected a joystick mode");
         };
-        assert_eq!(settings.processing.deadzone, StickDeadzone::None);
+        assert_eq!(settings.processing.deadzone, StickDeadzone::Controller);
         assert_eq!(settings.processing.output_axis, StickOutputAxis::Both);
         assert_eq!(settings.processing.rotation, 0.0);
         assert!((settings.processing.sensitivity_x - 1.0).abs() < f32::EPSILON);
         assert!((settings.processing.sensitivity_y - 1.0).abs() < f32::EPSILON);
         assert!(!settings.processing.invert_x && !settings.processing.invert_y);
+    }
+
+    #[test]
+    fn test_version1_raw_deadzone_migrates_to_controller() {
+        // Version 1 files serialized the un-chosen default as an explicit
+        // "none"; loading them must flip that to the controller preference
+        // while leaving a deliberate Custom choice and version alone.
+        let json = r#"{"version":1,"name":"v1","action_sets":[{"name":"Default","inputs":[
+            {"source":{"axis":"left_x"},
+             "mode":{"joystick":{"output":"left","deadzone":"none","deadzone_inner":0.1,"deadzone_outer":0.95}}},
+            {"source":{"axis":"right_x"},
+             "mode":{"joystick":{"output":"right","deadzone":"custom","deadzone_inner":0.05,"deadzone_outer":0.9}}}
+        ]}]}"#;
+        let profile = InputProfile::from_json(json).unwrap();
+        assert_eq!(profile.version, PROFILE_VERSION);
+        let deadzone = |axis: GamepadAxis| {
+            let Some(SourceMode::Joystick(settings)) = profile.action_sets[0]
+                .inputs
+                .iter()
+                .find(|input| input.source == InputSource::Axis(axis))
+                .and_then(|input| input.mode.as_ref())
+            else {
+                panic!("expected a joystick mode on {axis:?}");
+            };
+            settings.processing.deadzone
+        };
+        assert_eq!(deadzone(GamepadAxis::LeftX), StickDeadzone::Controller);
+        assert_eq!(deadzone(GamepadAxis::RightX), StickDeadzone::Custom);
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn test_missing_deadzone_source_defaults_to_controller_preference() {
+        let settings = StickProcessing::default();
+        assert_eq!(settings.deadzone, StickDeadzone::Controller);
+        let profile = InputProfile::from_json(
+            r#"{"name":"new","action_sets":[{"name":"Default","inputs":[
+                {"source":{"axis":"left_x"},
+                 "mode":{"joystick":{"output":"left","deadzone_inner":0.1,"deadzone_outer":0.95}}}
+            ]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(profile.version, PROFILE_VERSION);
+        let Some(SourceMode::Joystick(settings)) = profile.action_sets[0].inputs[0].mode.as_ref()
+        else {
+            panic!("expected a joystick mode");
+        };
+        assert_eq!(settings.processing.deadzone, StickDeadzone::Controller);
     }
 
     #[test]

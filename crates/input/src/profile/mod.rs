@@ -16,15 +16,53 @@ pub use model::{
 
 impl InputProfile {
     /// Parse a profile from JSON and normalize shapes older editors wrote:
-    /// per-axis stick mappings collapse onto their X axis. Profiles from
-    /// before the action-set model carry a flat `bindings` list serde
-    /// ignores — Ira is pre-release, those simply start empty.
+    /// per-axis stick mappings collapse onto their X axis, and version-1
+    /// profiles — whose deadzone source defaulted to raw passthrough —
+    /// switch to the controller-preference default. Profiles from before
+    /// the action-set model carry a flat `bindings` list serde ignores —
+    /// Ira is pre-release, those simply start empty.
     pub fn from_json(json: &str) -> Result<Self, String> {
         let mut profile: InputProfile =
             serde_json::from_str(json).map_err(|error| format!("invalid profile: {error}"))?;
         normalize_stick_mappings(&mut profile);
         normalize_gyro_orientation(&mut profile);
+        if profile.version < 2 {
+            migrate_raw_deadzone_to_controller(&mut profile);
+            profile.version = PROFILE_VERSION;
+        }
         Ok(profile)
+    }
+}
+
+/// Version 1 shipped with `StickDeadzone::None` as the default, so every
+/// stick serialized `deadzone: "none"` even though the user never chose it.
+/// The product default is now the controller's calibrated deadzone: flip
+/// every un-chosen raw passthrough over, leaving explicit Custom alone.
+fn migrate_raw_deadzone_to_controller(profile: &mut InputProfile) {
+    let processing_lists = profile
+        .action_sets
+        .iter_mut()
+        .map(|set| set.inputs.iter_mut().filter_map(inputs_processing_mut))
+        .chain(
+            profile
+                .action_layers
+                .iter_mut()
+                .map(|layer| layer.inputs.iter_mut().filter_map(inputs_processing_mut)),
+        )
+        .flatten();
+    for processing in processing_lists {
+        if processing.deadzone == StickDeadzone::None {
+            processing.deadzone = StickDeadzone::Controller;
+        }
+    }
+}
+
+/// The stick processing a mapping carries, for the modes that have one.
+fn inputs_processing_mut(input: &mut InputMapping) -> Option<&mut StickProcessing> {
+    match &mut input.mode {
+        Some(SourceMode::Joystick(settings)) => Some(&mut settings.processing),
+        Some(SourceMode::Mouse { stick, .. }) => Some(stick),
+        _ => None,
     }
 }
 

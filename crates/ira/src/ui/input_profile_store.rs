@@ -28,7 +28,7 @@ const LEGACY_DEFAULT_SUFFIXES: [&str; 5] =
 
 /// First default layout that already exists for this device, legacy
 /// backend-keyed files included. Used when the stored path is missing.
-pub(super) fn find_controller_default_profile(save_dir: &str, key: &str) -> Option<PathBuf> {
+pub(crate) fn find_controller_default_profile(save_dir: &str, key: &str) -> Option<PathBuf> {
     let directory = Path::new(save_dir).join(CONTROLLER_DEFAULT_DIRECTORY);
     std::iter::once(String::new())
         .chain(LEGACY_DEFAULT_SUFFIXES.iter().map(|suffix| suffix.to_string()))
@@ -120,7 +120,65 @@ pub(super) fn read_profile(path: &Path) -> Result<InputProfile, String> {
 fn read_profile_data(path: &Path) -> Result<InputProfile, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| format!("Could not read controller profile: {error}"))?;
-    InputProfile::from_json(&text)
+    let profile = InputProfile::from_json(&text)?;
+    // from_json migrates older file versions in memory; persist the migrated
+    // form so the file on disk is up to date too (a failed rewrite costs
+    // nothing — the next read migrates again).
+    if stored_version(&text) != profile.version {
+        let _ = write_profile(path, &profile);
+    }
+    Ok(profile)
+}
+
+/// The `version` field a raw profile file carries, if any. A file without a
+/// version never matches the current one, so it gets normalized on rewrite.
+fn stored_version(text: &str) -> u32 {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| value.get("version")?.as_u64())
+        .and_then(|version| u32::try_from(version).ok())
+        .unwrap_or(u32::MAX)
+}
+
+/// Re-reads and rewrites every stored profile once at startup so version
+/// migrations land in the files themselves, not just in memory.
+pub(crate) fn migrate_profile_files(save_dir: &str) -> usize {
+    let mut migrated = 0;
+    for directory in [
+        profile_directory(save_dir),
+        Path::new(save_dir).join(CONTROLLER_DEFAULT_DIRECTORY),
+    ] {
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                eprintln!("Could not read controller profiles for migration: {error}");
+                continue;
+            }
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            match InputProfile::from_json(&text) {
+                Ok(profile) if stored_version(&text) != profile.version => {
+                    if write_profile(&path, &profile).is_ok() {
+                        migrated += 1;
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => eprintln!("Skipping invalid controller profile {:?}: {error}", path),
+            }
+        }
+    }
+    if migrated > 0 {
+        eprintln!("Migrated {migrated} controller profile(s) to the current layout format");
+    }
+    migrated
 }
 
 pub(super) fn write_profile(path: &Path, profile: &InputProfile) -> Result<(), String> {
@@ -202,12 +260,43 @@ fn profile_slug(name: &str) -> String {
 mod tests {
     use super::{
         add_game_compatibility, ensure_controller_default_profile, find_controller_default_profile,
-        managed_profile_path, new_managed_profile_path, profile_matches_game,
+        managed_profile_path, migrate_profile_files, new_managed_profile_path,
+        profile_matches_game, read_profile,
     };
     use ira_input::{
         ActionSet, ControllerCalibration, GamepadButton, InputMapping, InputProfile, InputSource,
-        OutputAction,
+        OutputAction, StickDeadzone,
     };
+
+    #[test]
+    fn test_migrate_profile_files_rewrites_old_deadzone_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().to_str().unwrap();
+        let path = managed_profile_path(save_dir, "Old");
+        // A version-1 file with the serialized raw-passthrough default.
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"version":1,"name":"Old","action_sets":[{"name":"Default","inputs":[
+                {"source":{"axis":"left_x"},
+                 "mode":{"joystick":{"output":"left","deadzone":"none","deadzone_inner":0.1,"deadzone_outer":0.95}}}
+            ]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(migrate_profile_files(save_dir), 1);
+        let saved = read_profile(&path).unwrap();
+        let Some(ira_input::SourceMode::Joystick(settings)) =
+            saved.action_sets[0].inputs[0].mode.as_ref()
+        else {
+            panic!("expected a joystick mode");
+        };
+        assert_eq!(settings.processing.deadzone, StickDeadzone::Controller);
+        // The file itself now carries the current version.
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"version\": 2"));
+        // A second sweep finds nothing left to migrate.
+        assert_eq!(migrate_profile_files(save_dir), 0);
+    }
 
     #[test]
     fn test_new_managed_profile_path_uses_unique_name() {

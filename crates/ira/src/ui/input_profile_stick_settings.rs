@@ -14,10 +14,7 @@ use super::input_profile_stick_indices::{
     axis_style_from_index, axis_style_index, deadzone_from_index, deadzone_source_index,
     output_axis_from_index, output_axis_index, output_from_index, output_index,
 };
-use super::input_profile_widgets::{
-    option_picker_popover, picker_button, switch_row, OptionChoice,
-    SliderSpec,
-};
+use super::input_profile_widgets::{switch_row, SliderSpec};
 use adw::prelude::*;
 use ira_input::{ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput, StickProcessing};
 
@@ -338,51 +335,42 @@ fn deadzone_rows(
     rows
 }
 
-/// The Deadzone Source row: Steam's described option popup over No Deadzone
-/// / Controller Preference / Custom.
+/// The Deadzone Source combo: Controller Preference / Custom / No Deadzone.
+/// Choosing Custom reveals the inner/outer sliders, so every change rebuilds
+/// the sheet through `reopen`.
 fn deadzone_source_row(
     base: &SheetBase,
     target: ModeTarget,
     reopen: &Reopen,
     deadzone: StickDeadzone,
-) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
-    row.set_title(&crate::tr!("Deadzone Source"));
-    let choices = vec![
-        OptionChoice {
-            title: crate::tr!("No Deadzone"),
-            description: Some(crate::tr!("The raw input of the joystick will be sent.")),
-        },
-        OptionChoice {
-            title: crate::tr!("Controller Preference"),
-            description: Some(crate::tr!(
-                "The deadzone value comes from this specific controller's calibration, which you can set in the controller settings."
-            )),
-        },
-        OptionChoice {
-            title: crate::tr!("Custom"),
-            description: Some(crate::tr!(
-                "Set up a custom deadzone for this profile's configuration."
-            )),
-        },
-    ];
-    let current = deadzone_source_index(deadzone);
-    let current_label = choices[current].title.clone();
-    let base_for_pick = base.clone();
-    let reopen_for_pick = reopen.clone();
-    let picker = option_picker_popover(&choices, current, move |index| {
-        let write = mode_writer(&base_for_pick, target);
+) -> adw::ComboRow {
+    let combo = combo_row(
+        &[
+            crate::tr!("Controller Preference"),
+            crate::tr!("Custom"),
+            crate::tr!("No Deadzone"),
+        ],
+        deadzone_source_index(deadzone) as u32,
+    );
+    combo.set_title(&crate::tr!("Deadzone Source"));
+    combo.set_subtitle(&crate::tr!(
+        "Controller Preference reads the deadzone calibrated for this controller in the controller settings"
+    ));
+    let base = std::rc::Rc::new(base.clone());
+    let reopen = reopen.clone();
+    combo.connect_selected_notify(move |combo| {
+        let write = mode_writer(&base, target);
+        let index = combo.selected() as usize;
         write(&mut |mode| {
             if let Some(processing) = processing_of(mode) {
                 processing.deadzone = deadzone_from_index(index);
             }
         });
-        (base_for_pick.on_changed)();
+        (base.on_changed)();
         // The rebuild reveals or removes the inner/outer sliders.
-        reopen_for_pick();
+        reopen();
     });
-    row.add_suffix(&picker_button(&current_label, &picker));
-    row
+    combo
 }
 
 pub(super) fn write_processing(

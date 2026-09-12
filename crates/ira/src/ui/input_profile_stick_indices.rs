@@ -5,17 +5,17 @@ use ira_input::{ResponseAxisStyle, StickDeadzone, StickOutput, StickOutputAxis};
 
 pub(super) fn deadzone_source_index(deadzone: StickDeadzone) -> usize {
     match deadzone {
-        StickDeadzone::None => 0,
-        StickDeadzone::Controller => 1,
-        StickDeadzone::Custom => 2,
+        StickDeadzone::Controller => 0,
+        StickDeadzone::Custom => 1,
+        StickDeadzone::None => 2,
     }
 }
 
 pub(super) fn deadzone_from_index(index: usize) -> StickDeadzone {
     match index {
-        1 => StickDeadzone::Controller,
-        2 => StickDeadzone::Custom,
-        _ => StickDeadzone::None,
+        1 => StickDeadzone::Custom,
+        2 => StickDeadzone::None,
+        _ => StickDeadzone::Controller,
     }
 }
 

@@ -1,27 +1,33 @@
 //! A virtual *real* Nintendo Switch Pro Controller built on
-//! [`super::uhid`]: unlike every other flavor, this one is claimed by the
-//! kernel's own `hid-nintendo` driver, so games and flatpaks see exactly
-//! the hardware a real pad produces — including the driver-generated IMU
-//! input node SDL pairs by serial.
+//! [`super::uhid`], presenting the same surface as the 8BitDo dongles in
+//! Switch mode that the kernel's `hid-nintendo` driver leaves alone: one
+//! hidraw node for SDL's hidapi Switch driver, one procon-shaped evdev
+//! node from `hid-generic`, and nothing else — no driver-generated IMU
+//! companion that SDL would list as a joystick. Motion rides inside the
+//! 0x30 standard reports, exactly where SDL reads it for real hardware.
 //!
-//! hid-nintendo talks to the device instead of parsing a descriptor: on
-//! connect it handshakes over USB ([`0x80, cmd`] answered by
-//! [`0x81, cmd`]), then issues subcommands (report 0x01) it expects
-//! answered by 0x21 replies — device info, SPI flash reads for stick and
-//! IMU calibration, report mode, IMU enable. This module answers all of
-//! them and then streams 0x30 standard reports.
+//! Consumers talk the controller protocol instead of the descriptor: SDL
+//! handshakes over USB ([`0x80, cmd`] answered by [`0x81, cmd`]), then
+//! issues subcommands (report 0x01) it expects answered by 0x21 replies —
+//! device info, SPI flash reads for stick and IMU calibration, report
+//! mode, IMU enable, vibration. This module answers all of them and then
+//! streams 0x30 standard reports.
 //!
-//! The crafted calibration makes the driver's math an identity: every
-//! cal scale equals its divisor, so accelerometer samples arrive as
-//! g × 4096 and gyroscope samples as deg/s × 14247/1000 — the exact
-//! units behind the resolutions the driver publishes
-//! (`JC_IMU_ACCEL_RES_PER_G`, `JC_IMU_GYRO_RES_PER_DPS`).
+//! The crafted calibration makes both calibration readers an identity:
+//! SDL reads the *offset* words (bytes 0–6 accel, 12–18 gyro) into
+//! `mult / (offset − raw)` — zeros land on the documented default scale —
+//! while hid-nintendo reads the *sensitivity* words (bytes 6–12, 18–24)
+//! as divisors, so 16384 divides the fixed-point samples back out. Every
+//! cal scale equals its divisor: accelerometer samples arrive as g × 4096
+//! and gyroscope samples as deg/s × 14247/1000 — the exact units behind
+//! the resolutions the driver publishes (`JC_IMU_ACCEL_RES_PER_G`,
+//! `JC_IMU_GYRO_RES_PER_DPS`).
 
 use std::io;
 
 use crate::motion_udp::PadState;
 use crate::rumble::RumbleCommand;
-use crate::uhid::{UhidDevice, UhidEvent, BUS_USB};
+use crate::uhid::{UhidDevice, UhidEvent, BUS_VIRTUAL};
 
 pub const VENDOR_ID: u32 = 0x057e;
 pub const PRODUCT_ID: u32 = 0x2009;
@@ -51,16 +57,110 @@ const STICK_RANGE: u16 = 1500;
 /// A battery/connection byte reading "full, wired".
 const BAT_FULL_USB: u8 = 0x8E;
 
-/// Anything hid parse accepts; hid-nintendo consumes raw reports only.
+/// The authentic Pro Controller USB report descriptor, transcribed from an
+/// `usbhid-dump` of real hardware (bus 001:004, VID 057e). Nintendo ships
+/// it loosely fitting the wire — the d-pad is described as buttons 11–14
+/// while the 0x30 report carries it in the third button byte, and the
+/// sticks are described as 16-bit fields at offsets the report only
+/// loosely honors — which is exactly why hid-nintendo hard-codes its own
+/// parsing and why SDL's hidapi driver reads raw bytes. Both ignore the
+/// descriptor; it only shapes the `hid-generic` evdev twin, so shipping
+/// the genuine bytes keeps that twin indistinguishable from the real
+/// controller's. The IMU bytes ride undescribed (52 constant tail bytes),
+/// the same choice Nintendo made — a described accelerometer would get
+/// the evdev node tagged `ID_INPUT_ACCELEROMETER`, which SDL2 lists as a
+/// joystick by default.
 const REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x01, // Usage Page (Generic Desktop)
-    0x09, 0x05, // Usage (Gamepad)
+    0x15, 0x00, // Logical Minimum (0)
+    0x09, 0x04, // Usage (Joystick)
     0xA1, 0x01, // Collection (Application)
+    0x85, 0x30, //   Report ID (0x30 standard input)
+    0x05, 0x01, //   Usage Page (Generic Desktop), restated on the wire
+    0x05, 0x09, //   Usage Page (Button)
+    0x19, 0x01, //   Usage Minimum (Button 1)
+    0x29, 0x0A, //   Usage Maximum (Button 10)
     0x15, 0x00, //   Logical Minimum (0)
     0x25, 0x01, //   Logical Maximum (1)
     0x75, 0x01, //   Report Size (1)
+    0x95, 0x0A, //   Report Count (10)
+    0x55, 0x00, //   Unit Exponent (0)
+    0x65, 0x00, //   Unit (None)
+    0x81, 0x02, //   Input (Data, Variable, Absolute)
+    0x05, 0x09, //   Usage Page (Button)
+    0x19, 0x0B, //   Usage Minimum (Button 11)
+    0x29, 0x0E, //   Usage Maximum (Button 14)
+    0x15, 0x00, //   Logical Minimum (0)
+    0x25, 0x01, //   Logical Maximum (1)
+    0x75, 0x01, //   Report Size (1)
+    0x95, 0x04, //   Report Count (4)
+    0x81, 0x02, //   Input (Data, Variable, Absolute)
+    0x75, 0x01, //   Report Size (1)
+    0x95, 0x02, //   Report Count (2)
+    0x81, 0x03, //   Input (Constant) — 2 bits padding
+    0x0B, 0x01, 0x00, 0x01, 0x00, //   Usage (Generic Desktop: Pointer)
+    0xA1, 0x00, //   Collection (Physical)
+    0x0B, 0x30, 0x00, 0x01, 0x00, //     Usage (X)
+    0x0B, 0x31, 0x00, 0x01, 0x00, //     Usage (Y)
+    0x0B, 0x32, 0x00, 0x01, 0x00, //     Usage (Z)
+    0x0B, 0x35, 0x00, 0x01, 0x00, //     Usage (Rz)
+    0x15, 0x00, //     Logical Minimum (0)
+    0x27, 0xFF, 0xFF, 0x00, 0x00, //     Logical Maximum (65535)
+    0x75, 0x10, //     Report Size (16)
+    0x95, 0x04, //     Report Count (4)
+    0x81, 0x02, //     Input (Data, Variable, Absolute)
+    0xC0, //   End Collection
+    0x0B, 0x39, 0x00, 0x01, 0x00, //   Usage (Hat switch)
+    0x15, 0x00, //   Logical Minimum (0)
+    0x25, 0x07, //   Logical Maximum (7)
+    0x35, 0x00, //   Physical Minimum (0)
+    0x46, 0x3B, 0x01, //   Physical Maximum (315)
+    0x65, 0x14, //   Unit (Degrees)
+    0x75, 0x04, //   Report Size (4)
     0x95, 0x01, //   Report Count (1)
+    0x81, 0x02, //   Input (Data, Variable, Absolute)
+    0x05, 0x09, //   Usage Page (Button)
+    0x19, 0x0F, //   Usage Minimum (Button 15)
+    0x29, 0x12, //   Usage Maximum (Button 18)
+    0x15, 0x00, //   Logical Minimum (0)
+    0x25, 0x01, //   Logical Maximum (1)
+    0x75, 0x01, //   Report Size (1)
+    0x95, 0x04, //   Report Count (4)
+    0x81, 0x02, //   Input (Data, Variable, Absolute)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x34, //   Report Count (52) — vibration byte + undescribed IMU
     0x81, 0x03, //   Input (Constant)
+    0x06, 0x00, 0xFF, //   Usage Page (Vendor Defined 0xFF00)
+    0x85, 0x21, //   Report ID (0x21 subcommand reply)
+    0x09, 0x01, //   Usage (1)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x3F, //   Report Count (63)
+    0x81, 0x03, //   Input (Constant)
+    0x85, 0x81, //   Report ID (0x81 USB status)
+    0x09, 0x02, //   Usage (2)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x3F, //   Report Count (63)
+    0x81, 0x03, //   Input (Constant)
+    0x85, 0x01, //   Report ID (0x01 subcommand)
+    0x09, 0x03, //   Usage (3)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x3F, //   Report Count (63)
+    0x91, 0x83, //   Output (Constant, Volatile)
+    0x85, 0x10, //   Report ID (0x10 rumble)
+    0x09, 0x04, //   Usage (4)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x3F, //   Report Count (63)
+    0x91, 0x83, //   Output (Constant, Volatile)
+    0x85, 0x80, //   Report ID (0x80 proprietary)
+    0x09, 0x05, //   Usage (5)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x3F, //   Report Count (63)
+    0x91, 0x83, //   Output (Constant, Volatile)
+    0x85, 0x82, //   Report ID (0x82 vendor)
+    0x09, 0x06, //   Usage (6)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x3F, //   Report Count (63)
+    0x91, 0x83, //   Output (Constant, Volatile)
     0xC0, // End Collection
 ];
 
@@ -77,14 +177,17 @@ pub struct SwitchProUhidDevice {
 }
 
 impl SwitchProUhidDevice {
-    /// The uniq joins the pad to its paired IMU for SDL's evdev sensor
-    /// pairing; hid-nintendo's own IMU node cannot carry a usable serial.
+    /// `uniq` becomes the serial of the hidraw and evdev twins, which is
+    /// how SDL attaches sensor nodes to a pad by serial. BUS_VIRTUAL keeps
+    /// `hid-nintendo` from claiming the device: the driver would add its
+    /// own IMU evdev companion, and a real dongle-mode pad shows no such
+    /// node — faithfulness here is what keeps SDL listing one controller.
     pub fn create(uniq: &str) -> io::Result<Self> {
         let device = UhidDevice::create(
             DEVICE_NAME,
             uniq,
             REPORT_DESCRIPTOR,
-            BUS_USB,
+            BUS_VIRTUAL,
             VENDOR_ID,
             PRODUCT_ID,
         )?;
@@ -96,9 +199,9 @@ impl SwitchProUhidDevice {
         })
     }
 
-    /// Answers kernel requests (the hid-nintendo handshake) and streams one
-    /// 0x30 standard report. Call per tick; motion arrives in the SDL
-    /// frame and leaves in the Nintendo device frame.
+    /// Answers consumer requests (the SDL/hid-nintendo handshake) and
+    /// streams one 0x30 standard report. Call per tick; motion arrives in
+    /// the SDL frame and leaves in the Nintendo device frame.
     pub fn tick(
         &mut self,
         pad: &PadState,
@@ -131,9 +234,10 @@ impl SwitchProUhidDevice {
 
     /// Drains kernel events and answers them without sending a state
     /// report. Must run every daemon pass regardless of pause or tick
-    /// cadence: hid-nintendo's connect handshake waits at most one or two
-    /// scheduling periods per step, and an unanswered step fails the probe
-    /// and takes force feedback down with it.
+    /// cadence: a protocol step SDL waits on (handshake, calibration SPI
+    /// reads, mode switches) times out after 100 ms — an unanswered step
+    /// fails the driver's open and takes the pad's rumble and sensors down
+    /// with it.
     pub fn service(&mut self) -> io::Result<()> {
         for event in self.device.poll()? {
             match event {
@@ -448,8 +552,36 @@ fn unpack_fields(bytes: [u8; 3]) -> (u16, u16) {
 #[cfg(test)]
 mod tests {
     use super::{
-        handshake_reply, spi_flash, standard_report, stick_bytes, unpack_fields, PadState,
+        handshake_reply, spi_flash, standard_report, stick_bytes, unpack_fields,
+        PadState, REPORT_DESCRIPTOR,
     };
+
+    #[test]
+    fn test_descriptor_matches_the_real_controller_dump() {
+        // usbhid-dump of genuine hardware: Joystick collection, seven
+        // report IDs across input and output, a hat-switch usage.
+        assert_eq!(REPORT_DESCRIPTOR.len(), 203);
+        assert_eq!(
+            &REPORT_DESCRIPTOR[..10],
+            &[0x05, 0x01, 0x15, 0x00, 0x09, 0x04, 0xA1, 0x01, 0x85, 0x30]
+        );
+        assert_eq!(*REPORT_DESCRIPTOR.last().unwrap(), 0xC0);
+        for id in [0x21u8, 0x81, 0x01, 0x10, 0x80, 0x82] {
+            assert!(
+                REPORT_DESCRIPTOR.windows(2).any(|w| w == [0x85, id]),
+                "missing report id {id:#04x}"
+            );
+        }
+        assert!(REPORT_DESCRIPTOR
+            .windows(5)
+            .any(|w| w == [0x0B, 0x39, 0x00, 0x01, 0x00]));
+        // No accelerometer usages: they ride the constant tail like on the
+        // real pad, so the evdev twin never gains the accelerometer tag
+        // SDL2 presents as a joystick.
+        assert!(!REPORT_DESCRIPTOR
+            .windows(5)
+            .any(|w| w == [0x0B, 0x33, 0x00, 0x01, 0x00]));
+    }
 
     #[test]
     fn test_usb_commands_ack_with_matching_reply() {

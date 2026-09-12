@@ -229,13 +229,14 @@ pub fn apply_launch_overrides(env: &mut Vec<(String, String)>, launch: &GameLaun
 /// The returned pairs are re-applied to the game command past Gamescope's
 /// `--` separator via `apply_game_env_inside_gamescope`.
 fn take_gamescope_game_env(env: &mut Vec<(String, String)>) -> Vec<(String, String)> {
-    const GAME_KEYS: [&str; 9] = [
+    const GAME_KEYS: [&str; 10] = [
         "DRI_PRIME",
         "__NV_PRIME_RENDER_OFFLOAD",
         "__GLX_VENDOR_LIBRARY_NAME",
         "__VK_LAYER_NV_optimus",
         "VK_ICD_FILENAMES",
         "VK_DRIVER_FILES",
+        "MESA_VK_DEVICE_SELECT",
         "DXVK_FILTER_DEVICE_UUID",
         "DXVK_FILTER_DEVICE_NAME",
         "LD_PRELOAD",

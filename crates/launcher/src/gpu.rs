@@ -224,11 +224,12 @@ pub fn build_gpu_env(gpu_card: &str) -> Vec<(String, String)> {
     } else {
         env.push(("DRI_PRIME".to_string(), gpu.pci_id.clone()));
     }
-    let icd_files = find_icd_files(&gpu.driver);
-    if !icd_files.is_empty() {
-        env.push(("VK_ICD_FILENAMES".to_string(), icd_files.clone()));
-        env.push(("VK_DRIVER_FILES".to_string(), icd_files));
-    }
+    // Soft-select the GPU for native Vulkan: Mesa filters its physical
+    // devices down to this PCI ID (proprietary NVIDIA ignores it). Do NOT
+    // hard-pin VK_ICD_FILENAMES instead — hiding every other device makes
+    // some emulators (Azahar) abort before their window opens, because they
+    // misbehave when the loader exposes a single physical device.
+    env.push(("MESA_VK_DEVICE_SELECT".to_string(), gpu.pci_id.clone()));
     // Pin the selected GPU in DXVK by device UUID (matches Lutris). Required on
     // multi-GPU (Optimus) systems where pressure-vessel injects both drivers —
     // otherwise DXVK may pick the iGPU, which breaks GPU-sensitive games.
@@ -240,43 +241,6 @@ pub fn build_gpu_env(gpu_card: &str) -> Vec<(String, String)> {
         env.push(("DXVK_FILTER_DEVICE_UUID".to_string(), uuid));
     }
     env
-}
-
-fn find_icd_files(driver: &str) -> String {
-    let loader = match driver {
-        "amdgpu" => "radeon",
-        "vc4-drm" => "broadcom",
-        "v3d" => "broadcom",
-        "virtio-pci" => "lvp",
-        "i915" => "intel",
-        "xe" => "intel",
-        other => other,
-    };
-    let search_dirs = [
-        "/usr/local/etc/vulkan/icd.d",
-        "/usr/local/share/vulkan/icd.d",
-        "/etc/vulkan/icd.d",
-        "/usr/share/vulkan/icd.d",
-        "/usr/lib/x86_64-linux-gnu/vulkan/icd.d",
-        "/usr/lib64/vulkan/icd.d",
-        "/opt/amdgpu-pro/etc/vulkan/icd.d",
-    ];
-    let mut files = Vec::new();
-    for dir in &search_dirs {
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "json") {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if name.contains(loader) {
-                            files.push(path.to_string_lossy().to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    files.join(":")
 }
 
 #[cfg(test)]

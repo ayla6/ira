@@ -110,6 +110,7 @@ mod matching;
 mod play_history;
 mod play_history_chart;
 mod profile_dialog;
+mod search;
 mod system_settings;
 mod wine_config_env_dll;
 mod wine_config_helpers;

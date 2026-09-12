@@ -592,7 +592,7 @@ fn connect_search_signals(
     let state_clone = state.clone();
     let search_gen: Rc<Cell<u32>> = Rc::new(Cell::new(0));
     search_entry.connect_search_changed(move |entry| {
-        state_clone.borrow_mut().search_query = entry.text().trim().to_lowercase();
+        state_clone.borrow_mut().search_query = entry.text().trim().to_string();
         let gen = search_gen.get() + 1;
         search_gen.set(gen);
         let gen_cell = search_gen.clone();

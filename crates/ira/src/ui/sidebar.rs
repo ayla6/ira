@@ -1,8 +1,8 @@
 use super::context_menu::{show_game_context_menu, show_multi_game_context_menu};
 use super::css::*;
-use super::filter::matches_search;
 use super::grid_view::show_grid_view;
 use super::helpers::clear_children;
+use super::search::SearchQuery;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use super::state::SharedState;
 use crate::Game;
@@ -201,14 +201,14 @@ pub fn rebuild_sidebar(state: &SharedState) {
         let (search, sort_mode, sort_descending) = {
             let s = state.borrow();
             (
-                s.search_query.to_lowercase(),
+                SearchQuery::parse(&s.search_query),
                 s.cfg.sort_mode,
                 s.cfg.sort_descending,
             )
         };
         let mut filtered: Vec<&Game> = visible_games
             .iter()
-            .filter(|g| matches_search(g, &search))
+            .filter(|g| search.matches(g))
             .copied()
             .collect();
         filtered.sort_by(|a, b| {

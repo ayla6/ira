@@ -47,6 +47,16 @@ pub fn normalize_name(s: &str) -> String {
     result
 }
 
+/// Lowercases `s` and folds accented Latin letters onto their base letter
+/// ("Pokémon" → "pokemon") so a typed query can match a title regardless of
+/// accents. Other scripts pass through unchanged.
+pub fn fold_accents(s: &str) -> String {
+    s.chars()
+        .flat_map(char::to_lowercase)
+        .map(fold_accent)
+        .collect()
+}
+
 /// Accented Latin letters fold onto their base letter so "Pokémon" and
 /// "Pokemon" normalize the same; other scripts are left alone.
 fn fold_accent(c: char) -> char {
@@ -112,7 +122,7 @@ fn ends_main_title(rest: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_name;
+    use super::{fold_accents, normalize_name};
 
     #[test]
     fn test_normalize_name_basic() {
@@ -188,6 +198,15 @@ mod tests {
             normalize_name("Pocket Monsters: Élite"),
             "pocket monsters elite"
         );
+    }
+
+    #[test]
+    fn test_fold_accents_lowercases_and_strips_diacritics() {
+        assert_eq!(fold_accents("Pokémon"), "pokemon");
+        assert_eq!(fold_accents("ÉLITE FORCE"), "elite force");
+        assert_eq!(fold_accents("SØREN"), "soren");
+        // Non-Latin scripts pass through.
+        assert_eq!(fold_accents("カービィ"), "カービィ");
     }
 
     #[test]

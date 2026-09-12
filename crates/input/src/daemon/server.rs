@@ -715,33 +715,64 @@ mod tests {
         });
         let mut client = wait_for_server(&path);
 
-        // Rewrite the profile with a different controller kind mid-session.
-        // The first write happens once the session is live; a second flip
-        // back exercises a rebuild in the other direction. Establishing the
-        // watch also triggers one same-content reload, hence the >= 2 bar.
-        let rewrites = profile_path.clone();
+        // Rewrite the profile with a different controller kind only after
+        // the previous reload was observed: the monitor coalesces writes
+        // that land while a reload is pending, and the first loop pass can
+        // lag seconds behind the launch when a switch-protocol pad must be
+        // probed first. Fixed sleeps used to race that probe and miss the
+        // swaps entirely. The stage cell hands the first write a fallback
+        // in case the watch-establishment reload never fires.
+        let rewrites = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let rewrites_for_timer = rewrites.clone();
+        let timer_profile = profile_path.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(300));
-            write_profile(&rewrites, crate::VirtualGamepadBackend::DirectInput);
-            std::thread::sleep(Duration::from_millis(300));
-            write_profile(&rewrites, crate::VirtualGamepadBackend::XInput);
+            std::thread::sleep(Duration::from_millis(700));
+            if rewrites_for_timer
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                write_profile(&timer_profile, crate::VirtualGamepadBackend::DirectInput);
+            }
         });
 
-        let mut reloads = 0;
+        let reloads = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let code = client
             .launch_and_wait(
                 session_request(
-                    vec!["sleep".into(), "2".into()],
+                    vec!["sleep".into(), "5".into()],
                     Some(profile_path.display().to_string()),
                 ),
-                |event| {
-                    if matches!(event, Event::ProfileReloaded { .. }) {
-                        reloads += 1;
+                {
+                    let rewrites = rewrites.clone();
+                    let reloads = reloads.clone();
+                    let profile_path = profile_path.clone();
+                    move |event| {
+                        if matches!(event, Event::ProfileReloaded { .. }) {
+                            reloads.fetch_add(1, Ordering::SeqCst);
+                            if rewrites
+                                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                                .is_ok()
+                            {
+                                write_profile(
+                                    &profile_path,
+                                    crate::VirtualGamepadBackend::DirectInput,
+                                );
+                            } else if rewrites
+                                .compare_exchange(1, 2, Ordering::SeqCst, Ordering::SeqCst)
+                                .is_ok()
+                            {
+                                write_profile(
+                                    &profile_path,
+                                    crate::VirtualGamepadBackend::XInput,
+                                );
+                            }
+                        }
                     }
                 },
             )
             .unwrap();
         assert_eq!(code, 0);
+        let reloads = reloads.load(Ordering::SeqCst);
         assert!(
             reloads >= 2,
             "controller-kind changes must hot-reload, not refuse (saw {reloads})"

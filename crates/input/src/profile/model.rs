@@ -1400,7 +1400,25 @@ fn default_action_set_inputs(
             ..InputMapping::new(InputSource::Axis(x_axis))
         });
     }
-    if backend != VirtualGamepadBackend::SwitchPro {
+    if backend == VirtualGamepadBackend::SwitchPro {
+        // The virtual pad's triggers are digital clicks. Keep them mapped
+        // even when the physical pad reports no trigger button (8BitDo
+        // DInput turns L2/R2 into paddles): the analog axis thresholds
+        // into the click instead.
+        for (axis, button) in [
+            (GamepadAxis::LeftTrigger, GamepadButton::LeftTrigger),
+            (GamepadAxis::RightTrigger, GamepadButton::RightTrigger),
+        ] {
+            if !supported_buttons.contains(&button) {
+                let mut mapping = InputMapping::simple(
+                    InputSource::Axis(axis),
+                    OutputAction::GamepadButton(button),
+                );
+                mapping.mode = Some(SourceMode::Trigger { threshold: 0.5 });
+                inputs.push(mapping);
+            }
+        }
+    } else {
         for axis in [GamepadAxis::LeftTrigger, GamepadAxis::RightTrigger] {
             inputs.push(InputMapping {
                 mode: Some(SourceMode::Trigger { threshold: 0.5 }),
@@ -1613,6 +1631,32 @@ mod tests {
                 InputSource::Axis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
             )
         }));
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
+    fn test_switch_pro_defaults_threshold_triggers_when_device_lacks_the_button() {
+        // A physical pad without digital trigger buttons (8BitDo DInput
+        // reports L2/R2 as paddles) must still produce working trigger
+        // mappings for the virtual pad: the analog axis thresholds into
+        // the digital click.
+        let profile = InputProfile::default_gamepad_for_backend_and_buttons(
+            VirtualGamepadBackend::SwitchPro,
+            &[GamepadButton::A, GamepadButton::B],
+        );
+        let inputs = &profile.action_sets[0].inputs;
+        for button in [GamepadButton::LeftTrigger, GamepadButton::RightTrigger] {
+            let mapping = inputs
+                .iter()
+                .find(|input| input.activators.iter().any(|activator| {
+                    activator
+                        .outputs
+                        .contains(&OutputAction::GamepadButton(button))
+                }))
+                .unwrap_or_else(|| panic!("no trigger mapping for {button:?}"));
+            assert_eq!(mapping.mode, Some(SourceMode::Trigger { threshold: 0.5 }));
+            assert!(matches!(mapping.source, InputSource::Axis(_)));
+        }
         assert!(profile.validate().is_ok());
     }
 

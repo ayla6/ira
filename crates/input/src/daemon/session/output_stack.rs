@@ -98,7 +98,13 @@ pub(crate) fn build_virtual_stack(
         }
     };
     let backend = profile.backend;
-    let native_transport = motion_available && profile.wants_native_controller();
+    // The native twin exists whenever the profile wants one, motion or not:
+    // gating it on a live motion source left sessions with a fully visible
+    // physical pad (its hidraw unheld, its buttons raw) and no virtual pad
+    // at all whenever the motion probe had not attached yet. Motion-less
+    // twins stream zero IMU until the source attaches, which still beats
+    // losing the remapped pad entirely.
+    let native_transport = profile.wants_native_controller();
     let native_ds4 = native_transport && backend == VirtualGamepadBackend::DualShock4;
     let native_switch_pro = native_transport && backend == VirtualGamepadBackend::SwitchPro;
     let native_dualsense = native_transport && backend == VirtualGamepadBackend::DualSense;

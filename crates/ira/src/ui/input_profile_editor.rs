@@ -200,6 +200,7 @@ pub(super) fn show_input_profile_editor(
         gyro,
         compatible_game_ids,
         game_id,
+        scopes_to_game: current_path.borrow().is_none(),
     };
     {
         // The adjust hook shares the dirty check without the rebuild: slider

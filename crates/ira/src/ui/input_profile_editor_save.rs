@@ -18,6 +18,12 @@ pub(super) struct EditorForm {
     pub(super) gyro: Rc<RefCell<GyroConfig>>,
     pub(super) compatible_game_ids: Vec<i64>,
     pub(super) game_id: Option<i64>,
+    /// True while the layout has never been written to disk: a profile
+    /// created from a game's page starts scoped to that game, while edits
+    /// to an existing profile must never silently re-scope it (a global
+    /// profile edited from a game would otherwise vanish from every other
+    /// game's picker).
+    pub(super) scopes_to_game: bool,
 }
 pub(super) fn build_profile(form: &EditorForm) -> Result<InputProfile, String> {
     let mut profile = form.profile.borrow().clone();
@@ -25,9 +31,11 @@ pub(super) fn build_profile(form: &EditorForm) -> Result<InputProfile, String> {
     profile.gyro = form.gyro.borrow().clone();
     profile.controller_calibration = *form.calibration.borrow();
     let mut ids = form.compatible_game_ids.clone();
-    if let Some(game_id) = form.game_id {
-        if !ids.contains(&game_id) {
-            ids.push(game_id);
+    if form.scopes_to_game {
+        if let Some(game_id) = form.game_id {
+            if !ids.contains(&game_id) {
+                ids.push(game_id);
+            }
         }
     }
     profile.compatible_game_ids = ids;

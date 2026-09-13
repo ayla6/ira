@@ -91,6 +91,7 @@ fn dirty_form(profile: InputProfile) -> (EditorForm, InputProfile) {
         gyro: Rc::new(RefCell::new(profile.gyro.clone())),
         compatible_game_ids: profile.compatible_game_ids.clone(),
         game_id: None,
+        scopes_to_game: false,
     };
     (form, profile)
 }
@@ -114,4 +115,42 @@ fn test_is_dirty_flags_modified_form() {
     *form.name.borrow_mut() = renamed;
     assert!(is_dirty(false, &form, &baseline));
     assert!(is_dirty(true, &form, &baseline));
+}
+
+#[test]
+fn test_build_profile_scopes_new_layouts_but_not_edits() {
+    use crate::ui::input_profile_editor_save::build_profile;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    fn form_with(profile: &InputProfile, scopes: bool) -> EditorForm {
+        EditorForm {
+            name: Rc::new(RefCell::new(profile.name.clone())),
+            profile: Rc::new(RefCell::new(profile.clone())),
+            calibration: Rc::new(RefCell::new(profile.controller_calibration)),
+            gyro: Rc::new(RefCell::new(profile.gyro.clone())),
+            compatible_game_ids: profile.compatible_game_ids.clone(),
+            game_id: Some(7),
+            scopes_to_game: scopes,
+        }
+    }
+
+    // A brand-new layout created from a game's page starts scoped to it.
+    let fresh = InputProfile::default();
+    let built = build_profile(&form_with(&fresh, true)).unwrap();
+    assert_eq!(built.compatible_game_ids, vec![7]);
+
+    // Editing a global layout through that same page must keep it global:
+    // silently scoping it hid the profile from every other game's picker.
+    let global = InputProfile::default();
+    let rebuilt = build_profile(&form_with(&global, false)).unwrap();
+    assert!(rebuilt.compatible_game_ids.is_empty());
+
+    // An already-scoped layout keeps its scope across edits.
+    let scoped = InputProfile {
+        compatible_game_ids: vec![3],
+        ..InputProfile::default()
+    };
+    let rebuilt = build_profile(&form_with(&scoped, false)).unwrap();
+    assert_eq!(rebuilt.compatible_game_ids, vec![3]);
 }

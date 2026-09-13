@@ -74,14 +74,16 @@ pub fn load_config() -> Config {
         Err(_) => None,
     }
     .unwrap_or_default();
-    let (steam_key, sgdb_key, ra_web_api_key) = std::thread::scope(|s| {
+    let (steam_key, sgdb_key, ra_web_api_key, screenscraper_password) = std::thread::scope(|s| {
         let steam_key = s.spawn(|| secrets::get_secret("steam"));
         let sgdb_key = s.spawn(|| secrets::get_secret("steamgriddb"));
         let ra_web_api_key = s.spawn(|| secrets::get_secret("ra_web_api_key"));
+        let screenscraper_password = s.spawn(|| secrets::get_secret("screenscraper"));
         (
             steam_key.join().unwrap_or_default(),
             sgdb_key.join().unwrap_or_default(),
             ra_web_api_key.join().unwrap_or_default(),
+            screenscraper_password.join().unwrap_or_default(),
         )
     });
     if !steam_key.is_empty() {
@@ -92,6 +94,9 @@ pub fn load_config() -> Config {
     }
     if !ra_web_api_key.is_empty() {
         c.ra_web_api_key = ra_web_api_key;
+    }
+    if !screenscraper_password.is_empty() {
+        c.screenscraper_password = screenscraper_password;
     }
     c
 }

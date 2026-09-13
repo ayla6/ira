@@ -257,10 +257,9 @@ pub struct Config {
     pub ra_username: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_web_api_key: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub screenscraper_dev_id: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub screenscraper_dev_password: String,
+    /// Personal ScreenScraper account, for quota attribution on top of the
+    /// developer identity baked into the binary; the password lives in the
+    /// keyring.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub screenscraper_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -343,8 +342,6 @@ impl Default for Config {
             ra_enabled: false,
             ra_username: String::new(),
             ra_web_api_key: String::new(),
-            screenscraper_dev_id: String::new(),
-            screenscraper_dev_password: String::new(),
             screenscraper_id: String::new(),
             screenscraper_password: String::new(),
             consoles,
@@ -440,24 +437,29 @@ impl Config {
         Ok(())
     }
 
+    /// Stash one secret in the keyring and return what the config file
+    /// should carry: empty on success, the plaintext itself when the
+    /// keyring write failed, so the setting survives on disk instead of
+    /// vanishing.
+    fn stashed(key: &str, value: &str) -> String {
+        if let Err(err) = secrets::set_secret(key, value) {
+            eprintln!("keyring store failed for {key}: {err}; keeping the value in the config file");
+            return value.to_string();
+        }
+        String::new()
+    }
+
     pub fn save(&self) -> Result<(), String> {
         let _guard = crate::load::config_io_lock();
-        let steam_err = secrets::set_secret("steam", &self.steam_api_key);
-        let sgdb_err = secrets::set_secret("steamgriddb", &self.steam_griddb_api_key);
-        let ra_web_err = secrets::set_secret("ra_web_api_key", &self.ra_web_api_key);
+        let steam = Self::stashed("steam", &self.steam_api_key);
+        let sgdb = Self::stashed("steamgriddb", &self.steam_griddb_api_key);
+        let ra_web = Self::stashed("ra_web_api_key", &self.ra_web_api_key);
+        let screenscraper = Self::stashed("screenscraper", &self.screenscraper_password);
         let mut plaintext = self.clone();
-        plaintext.steam_api_key = String::new();
-        plaintext.steam_griddb_api_key = String::new();
-        plaintext.ra_web_api_key = String::new();
-        if steam_err.is_err() {
-            plaintext.steam_api_key = self.steam_api_key.clone();
-        }
-        if sgdb_err.is_err() {
-            plaintext.steam_griddb_api_key = self.steam_griddb_api_key.clone();
-        }
-        if ra_web_err.is_err() {
-            plaintext.ra_web_api_key = self.ra_web_api_key.clone();
-        }
+        plaintext.steam_api_key = steam;
+        plaintext.steam_griddb_api_key = sgdb;
+        plaintext.ra_web_api_key = ra_web;
+        plaintext.screenscraper_password = screenscraper;
 
         let path = config_path();
         if let Some(parent) = path.parent() {

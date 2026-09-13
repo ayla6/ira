@@ -62,7 +62,10 @@ pub(super) struct IdentifiedGame {
 
 /// Guess whether a folder holds a Windows game and pick its most likely
 /// executable. Walks two levels deep, prefers names that match the folder,
-/// and ignores installers/redistributables. Returns `(is_windows, exe)`.
+/// and ignores installers/redistributables. A `start.sh` (GOG Linux games)
+/// beats everything, native ELF binaries beat Windows exes — the Windows
+/// exe is only used when the install has no native build at all.
+/// Returns `(is_windows, exe)`.
 fn detect_game_exe(folder: &Path) -> (bool, String) {
     let basename = folder
         .file_name()
@@ -70,6 +73,7 @@ fn detect_game_exe(folder: &Path) -> (bool, String) {
         .unwrap_or_default();
     let mut windows: Vec<(i32, String)> = Vec::new();
     let mut native: Vec<(i32, String)> = Vec::new();
+    let mut start_sh: Option<String> = None;
 
     let mut stack = vec![(folder.to_path_buf(), 0i32)];
     while let Some((dir, depth)) = stack.pop() {
@@ -89,6 +93,14 @@ fn detect_game_exe(folder: &Path) -> (bool, String) {
                 continue;
             }
             let lower = name.to_lowercase();
+            if lower == "start.sh" {
+                // GOG Linux games launch through start.sh; it wins over
+                // everything, shallowest match first.
+                if start_sh.is_none() {
+                    start_sh = Some(name);
+                }
+                continue;
+            }
             let ext = path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -111,10 +123,12 @@ fn detect_game_exe(folder: &Path) -> (bool, String) {
         }
     }
 
-    if let Some((_, exe)) = windows.into_iter().max_by_key(|(score, _)| *score) {
-        (true, exe)
+    if let Some(exe) = start_sh {
+        (false, exe)
     } else if let Some((_, exe)) = native.into_iter().max_by_key(|(score, _)| *score) {
         (false, exe)
+    } else if let Some((_, exe)) = windows.into_iter().max_by_key(|(score, _)| *score) {
+        (true, exe)
     } else {
         (false, String::new())
     }
@@ -483,19 +497,22 @@ fn finish_identify(
 
     let launches = info.launches;
     let default = launches.first();
-    let exe = default.map(|l| l.executable.clone()).unwrap_or_default();
-    let is_windows = default
+    let steam_exe = default.map(|l| l.executable.clone()).unwrap_or_default();
+    let steam_is_windows = default
         .map(|l| l.oslist.contains("windows") || l.oslist.is_empty())
         .unwrap_or(info.oslist.contains("windows") || info.oslist.is_empty());
 
-    let target_os = if is_windows { "windows" } else { "linux" };
-    let variants: Vec<String> = launches
+    let target_os = if steam_is_windows { "windows" } else { "linux" };
+    let steam_variants: Vec<String> = launches
         .iter()
         .skip(1)
         .filter(|l| l.oslist.contains(target_os) || l.oslist.is_empty())
         .filter(|l| !l.oslist.contains("macos"))
         .map(|l| l.executable.clone())
         .collect();
+
+    let (is_windows, exe, variants) =
+        reconcile_steam_exe_with_folder(&folder, steam_is_windows, steam_exe, steam_variants);
 
     let _ = tx.send(WizardEvent::Identified(Box::new(IdentifiedGame {
         app_id,
@@ -507,6 +524,26 @@ fn finish_identify(
         logo_position: info.logo_position,
         logo_size: info.logo_size,
     })));
+}
+
+/// Steam launch configs describe the Steam install layout; a GOG Linux
+/// install keeps the real executable directly in the game folder, so Steam's
+/// paths don't apply. Local native evidence (start.sh or an ELF) wins; the
+/// Steam exe is only kept when it actually exists on disk here.
+fn reconcile_steam_exe_with_folder(
+    folder: &Path,
+    steam_is_windows: bool,
+    steam_exe: String,
+    steam_variants: Vec<String>,
+) -> (bool, String, Vec<String>) {
+    let (local_windows, local_exe) = detect_game_exe(folder);
+    if !local_windows && !local_exe.is_empty() {
+        return (false, local_exe, Vec::new());
+    }
+    if steam_exe.is_empty() || !folder.join(&steam_exe).is_file() {
+        return (local_windows, local_exe, Vec::new());
+    }
+    (steam_is_windows, steam_exe, steam_variants)
 }
 
 fn resolve_final_folder(
@@ -1772,6 +1809,87 @@ mod tests {
 
         assert!(is_windows);
         assert_eq!(exe, "HollowKnight.exe");
+    }
+
+    #[test]
+    fn test_detect_game_exe_prefers_native_over_windows_exe() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("HollowKnight");
+        write(&game_dir, "HollowKnight.exe");
+        write(&game_dir, "HollowKnight.x86_64");
+
+        let (is_windows, exe) = detect_game_exe(&game_dir);
+
+        assert!(!is_windows);
+        assert_eq!(exe, "HollowKnight.x86_64");
+    }
+
+    #[test]
+    fn test_detect_game_exe_prefers_start_sh_over_everything() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("SomeGOGGame");
+        write(&game_dir, "start.sh");
+        write(&game_dir, "SomeGOGGame.exe");
+        write(&game_dir, "SomeGOGGame.x86_64");
+
+        let (is_windows, exe) = detect_game_exe(&game_dir);
+
+        assert!(!is_windows);
+        assert_eq!(exe, "start.sh");
+    }
+
+    #[test]
+    fn test_reconcile_native_folder_wins_over_steam_windows_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("GOGGame");
+        write(&game_dir, "start.sh");
+
+        let (is_windows, exe, variants) = reconcile_steam_exe_with_folder(
+            &game_dir,
+            true,
+            "Double/Game.exe".to_string(),
+            vec!["Other.exe".to_string()],
+        );
+
+        assert!(!is_windows);
+        assert_eq!(exe, "start.sh");
+        assert!(variants.is_empty());
+    }
+
+    #[test]
+    fn test_reconcile_keeps_steam_exe_when_it_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("Game");
+        write(&game_dir, "Bin/Game.exe");
+
+        let (is_windows, exe, variants) = reconcile_steam_exe_with_folder(
+            &game_dir,
+            true,
+            "Bin/Game.exe".to_string(),
+            vec!["Alt.exe".to_string()],
+        );
+
+        assert!(is_windows);
+        assert_eq!(exe, "Bin/Game.exe");
+        assert_eq!(variants, vec!["Alt.exe".to_string()]);
+    }
+
+    #[test]
+    fn test_reconcile_falls_back_to_local_when_steam_path_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("GOGGame");
+        write(&game_dir, "GOGGame.exe");
+
+        let (is_windows, exe, variants) = reconcile_steam_exe_with_folder(
+            &game_dir,
+            true,
+            "Double/Game.exe".to_string(),
+            Vec::new(),
+        );
+
+        assert!(is_windows);
+        assert_eq!(exe, "GOGGame.exe");
+        assert!(variants.is_empty());
     }
 
     #[test]

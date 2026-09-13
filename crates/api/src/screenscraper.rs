@@ -4,48 +4,12 @@
 //! synopses, plus the media URLs (PS1 squares use them); everything else
 //! keeps coming from Steam, SGDB, and RetroAchievements.
 
+use crate::screenscraper_creds::{ScraperCreds, SOFT_NAME};
 use crate::SteamDataClient;
 use ira_models::screenscraper_system_id;
 use serde::Deserialize;
 
 const API_URL_BASE: &str = "https://www.screenscraper.fr/api2";
-/// Reported to ScreenScraper so they can attribute the traffic.
-const SOFT_NAME: &str = "ira";
-
-/// ScreenScraper credentials, in the API's own two-pair model: the
-/// per-application developer pair every request must carry, plus the
-/// caller's own ScreenScraper account (`ssid`/`sspassword`), which is
-/// optional and only attributes the request to that account's quota.
-#[derive(Clone, Debug, Default)]
-pub struct ScraperCreds {
-    pub dev_id: String,
-    pub dev_password: String,
-    pub user: String,
-    pub password: String,
-}
-
-impl ScraperCreds {
-    pub fn is_configured(&self) -> bool {
-        !self.dev_id.is_empty() && !self.dev_password.is_empty()
-    }
-
-    /// The `devid`/`devpassword` pair plus the account login when set.
-    fn auth_params(&self) -> String {
-        let mut auth = format!(
-            "devid={}&devpassword={}",
-            urlencode(&self.dev_id),
-            urlencode(&self.dev_password)
-        );
-        if !self.user.is_empty() && !self.password.is_empty() {
-            auth.push_str(&format!(
-                "&ssid={}&sspassword={}",
-                urlencode(&self.user),
-                urlencode(&self.password)
-            ));
-        }
-        auth
-    }
-}
 
 /// A game candidate as ScreenScraper answered it: every region's date,
 /// every language's synopsis, and id-referenced companies and genres —

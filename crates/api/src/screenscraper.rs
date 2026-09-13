@@ -1,7 +1,8 @@
 //! ScreenScraper.fr metadata search, following the ES-DE client
 //! (`references/emulationstation-de/es-app/src/scrapers/ScreenScraper.cpp`).
 //! Metadata only — names, dates, credits, genres, players, ratings,
-//! synopses, plus the media URLs (PS1 squares use them); everything else
+//! synopses, plus the media URLs (PS1 squares and the title-screen
+//! fallback use them); everything else
 //! keeps coming from Steam, SGDB, and RetroAchievements.
 
 use crate::screenscraper_creds::{ScraperCreds, SOFT_NAME};
@@ -37,6 +38,9 @@ pub struct ScrapedGame {
     pub screenshot: Option<String>,
     /// Region-picked 2D box URL — the PS1 square's source.
     pub box2d: Option<String>,
+    /// Region-picked title screen URL — the fallback for consoles whose
+    /// cover art runs ugly, 3DS above all.
+    pub title_screen: Option<String>,
 }
 
 impl ScrapedGame {
@@ -400,6 +404,7 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
     let medias = jeu.medias.as_ref();
     let screenshot = medias.and_then(|m| media_url(&m.media, "ss", &regions));
     let box2d = medias.and_then(|m| media_url(&m.media, "box-2D", &regions));
+    let title_screen = medias.and_then(|m| media_url(&m.media, "sstitle", &regions));
     ScrapedGame {
         ss_id: jeu.id.clone(),
         name,
@@ -420,6 +425,7 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
         synopses,
         screenshot,
         box2d,
+        title_screen,
     }
 }
 
@@ -627,6 +633,7 @@ mod tests {
             <media type="ss" region="us" format="png">https://ss.example/dq2_us.png</media>
             <media type="ss" region="wor" format="png">https://ss.example/dq2_wor.png</media>
             <media type="box-2D" region="us" format="png">https://ss.example/dq2_box.png</media>
+            <media type="sstitle" region="us" format="png">https://ss.example/dq2_title.png</media>
           </medias>
         </jeu>
         <jeu id="2124">
@@ -699,6 +706,10 @@ mod tests {
         // Region preference for media: us is preferred over wor.
         assert_eq!(game.screenshot.as_deref(), Some("https://ss.example/dq2_us.png"));
         assert_eq!(game.box2d.as_deref(), Some("https://ss.example/dq2_box.png"));
+        assert_eq!(
+            game.title_screen.as_deref(),
+            Some("https://ss.example/dq2_title.png")
+        );
     }
 
     #[test]

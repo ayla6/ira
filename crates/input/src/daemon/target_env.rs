@@ -54,6 +54,11 @@ pub(crate) fn target_env_for(
             | VirtualGamepadBackend::DualSense
     );
     if native_twin {
+        // SDL2's default treats accelerometer nodes as joysticks, which
+        // would list the twin's motion sensor as a second controller with
+        // gyro-shaped axes AND stop it from ever being a sensor (SDL keeps
+        // a node in one list only). The hint turns it sensor-only.
+        envs.push(("SDL_ACCELEROMETER_AS_JOYSTICK".to_string(), "0".to_string()));
         if let (Some(vendor), Some(product)) = (vendor, product) {
             let ignored = format!("0x{vendor:04x}/0x{product:04x}");
             envs.push((

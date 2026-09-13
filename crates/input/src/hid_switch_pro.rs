@@ -84,78 +84,43 @@ const BAT_WIRED_USB: u8 = 0x40;
 /// hidraw readers see the same shape from us.
 const USB_REPORT_LEN: usize = 64;
 
-/// The authentic Pro Controller USB report descriptor, transcribed from an
-/// `usbhid-dump` of real hardware (bus 001:004, VID 057e). Nintendo ships
-/// it loosely fitting the wire — the d-pad is described as buttons 11–14
-/// while the 0x30 report carries it in the third button byte, and the
-/// sticks are described as 16-bit fields at offsets the report only
-/// loosely honors — which is exactly why hid-nintendo hard-codes its own
-/// parsing and why SDL's hidapi driver reads raw bytes. Both ignore the
-/// descriptor; it only shapes the `hid-generic` evdev twin, so shipping
-/// the genuine bytes keeps that twin indistinguishable from the real
-/// controller's. The IMU bytes ride undescribed (52 constant tail bytes),
-/// the same choice Nintendo made — a described accelerometer would get
-/// the evdev node tagged `ID_INPUT_ACCELEROMETER`, which SDL2 lists as a
-/// joystick by default.
+/// The twin's HID report descriptor, describing the 0x30 report the way
+/// the wire actually lays it out — 24 button bits, a vibration byte, then
+/// the two sticks as four 12-bit fields — so the kernel's `hid-generic`
+/// driver produces a clean evdev gamepad (centered sticks, standard
+/// gamepad-namespace buttons). The IMU bytes ride undescribed: motion
+/// reaches games through SDL's hidapi driver reading the raw report, and
+/// an accelerometer node of our own would only risk being listed as a
+/// phantom joystick. The subcommand/rumble report IDs stay declared so
+/// hidraw consumers can see them.
 const REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x01, // Usage Page (Generic Desktop)
-    0x15, 0x00, // Logical Minimum (0)
-    0x09, 0x04, // Usage (Joystick)
+    0x09, 0x05, // Usage (Game Pad)
     0xA1, 0x01, // Collection (Application)
     0x85, 0x30, //   Report ID (0x30 standard input)
-    0x05, 0x01, //   Usage Page (Generic Desktop), restated on the wire
     0x05, 0x09, //   Usage Page (Button)
     0x19, 0x01, //   Usage Minimum (Button 1)
-    0x29, 0x0A, //   Usage Maximum (Button 10)
+    0x29, 0x18, //   Usage Maximum (Button 24)
     0x15, 0x00, //   Logical Minimum (0)
     0x25, 0x01, //   Logical Maximum (1)
     0x75, 0x01, //   Report Size (1)
-    0x95, 0x0A, //   Report Count (10)
-    0x55, 0x00, //   Unit Exponent (0)
-    0x65, 0x00, //   Unit (None)
+    0x95, 0x18, //   Report Count (24)
     0x81, 0x02, //   Input (Data, Variable, Absolute)
-    0x05, 0x09, //   Usage Page (Button)
-    0x19, 0x0B, //   Usage Minimum (Button 11)
-    0x29, 0x0E, //   Usage Maximum (Button 14)
-    0x15, 0x00, //   Logical Minimum (0)
-    0x25, 0x01, //   Logical Maximum (1)
-    0x75, 0x01, //   Report Size (1)
-    0x95, 0x04, //   Report Count (4)
-    0x81, 0x02, //   Input (Data, Variable, Absolute)
-    0x75, 0x01, //   Report Size (1)
-    0x95, 0x02, //   Report Count (2)
-    0x81, 0x03, //   Input (Constant) — 2 bits padding
-    0x0B, 0x01, 0x00, 0x01, 0x00, //   Usage (Generic Desktop: Pointer)
-    0xA1, 0x00, //   Collection (Physical)
-    0x0B, 0x30, 0x00, 0x01, 0x00, //     Usage (X)
-    0x0B, 0x31, 0x00, 0x01, 0x00, //     Usage (Y)
-    0x0B, 0x32, 0x00, 0x01, 0x00, //     Usage (Z)
-    0x0B, 0x35, 0x00, 0x01, 0x00, //     Usage (Rz)
-    0x15, 0x00, //     Logical Minimum (0)
-    0x27, 0xFF, 0xFF, 0x00, 0x00, //     Logical Maximum (65535)
-    0x75, 0x10, //     Report Size (16)
-    0x95, 0x04, //     Report Count (4)
-    0x81, 0x02, //     Input (Data, Variable, Absolute)
-    0xC0, //   End Collection
-    0x0B, 0x39, 0x00, 0x01, 0x00, //   Usage (Hat switch)
-    0x15, 0x00, //   Logical Minimum (0)
-    0x25, 0x07, //   Logical Maximum (7)
-    0x35, 0x00, //   Physical Minimum (0)
-    0x46, 0x3B, 0x01, //   Physical Maximum (315)
-    0x65, 0x14, //   Unit (Degrees)
-    0x75, 0x04, //   Report Size (4)
+    0x75, 0x08, //   Report Size (8)
     0x95, 0x01, //   Report Count (1)
-    0x81, 0x02, //   Input (Data, Variable, Absolute)
-    0x05, 0x09, //   Usage Page (Button)
-    0x19, 0x0F, //   Usage Minimum (Button 15)
-    0x29, 0x12, //   Usage Maximum (Button 18)
+    0x81, 0x03, //   Input (Constant) — vibration byte
+    0x05, 0x01, //   Usage Page (Generic Desktop)
+    0x09, 0x30, //   Usage (X)
+    0x09, 0x31, //   Usage (Y)
+    0x09, 0x33, //   Usage (Rx)
+    0x09, 0x34, //   Usage (Ry)
     0x15, 0x00, //   Logical Minimum (0)
-    0x25, 0x01, //   Logical Maximum (1)
-    0x75, 0x01, //   Report Size (1)
+    0x26, 0xFF, 0x0F, //   Logical Maximum (4095)
+    0x75, 0x0C, //   Report Size (12)
     0x95, 0x04, //   Report Count (4)
     0x81, 0x02, //   Input (Data, Variable, Absolute)
     0x75, 0x08, //   Report Size (8)
-    0x95, 0x34, //   Report Count (52) — vibration byte + undescribed IMU
+    0x95, 0x24, //   Report Count (36) — undescribed IMU samples
     0x81, 0x03, //   Input (Constant)
     0x06, 0x00, 0xFF, //   Usage Page (Vendor Defined 0xFF00)
     0x85, 0x21, //   Report ID (0x21 subcommand reply)
@@ -585,14 +550,12 @@ mod tests {
     };
 
     #[test]
-    fn test_descriptor_matches_the_real_controller_dump() {
-        // usbhid-dump of genuine hardware: Joystick collection, seven
-        // report IDs across input and output, a hat-switch usage.
-        assert_eq!(REPORT_DESCRIPTOR.len(), 203);
-        assert_eq!(
-            &REPORT_DESCRIPTOR[..10],
-            &[0x05, 0x01, 0x15, 0x00, 0x09, 0x04, 0xA1, 0x01, 0x85, 0x30]
-        );
+    fn test_descriptor_describes_the_wire_layout() {
+        // Game Pad collection, 24 button bits at the start of the 0x30
+        // report, the two sticks as four 12-bit fields right after the
+        // vibration byte, and the seven protocol report IDs declared.
+        assert_eq!(REPORT_DESCRIPTOR[6], 0x85); // report id item
+        assert_eq!(REPORT_DESCRIPTOR[7], 0x30);
         assert_eq!(*REPORT_DESCRIPTOR.last().unwrap(), 0xC0);
         for id in [0x21u8, 0x81, 0x01, 0x10, 0x80, 0x82] {
             assert!(
@@ -600,15 +563,18 @@ mod tests {
                 "missing report id {id:#04x}"
             );
         }
+        // 24 declared button bits (Usage Min 1 / Max 24).
         assert!(REPORT_DESCRIPTOR
-            .windows(5)
-            .any(|w| w == [0x0B, 0x39, 0x00, 0x01, 0x00]));
-        // No accelerometer usages: they ride the constant tail like on the
-        // real pad, so the evdev twin never gains the accelerometer tag
-        // SDL2 presents as a joystick.
-        assert!(!REPORT_DESCRIPTOR
-            .windows(5)
-            .any(|w| w == [0x0B, 0x33, 0x00, 0x01, 0x00]));
+            .windows(4)
+            .any(|w| w == [0x19, 0x01, 0x29, 0x18]));
+        // Sticks described as X/Y/Rx/Ry twelve-bit fields.
+        assert!(REPORT_DESCRIPTOR.windows(2).any(|w| w == [0x09, 0x30]));
+        assert!(REPORT_DESCRIPTOR.windows(2).any(|w| w == [0x09, 0x34]));
+        assert!(REPORT_DESCRIPTOR.windows(3).any(|w| w == [0x75, 0x0C, 0x95]));
+        // No accelerometer usages: motion rides the undescribed constant
+        // tail and the paired sensor twin, never a phantom axis set here.
+        assert!(!REPORT_DESCRIPTOR.windows(2).any(|w| w == [0x09, 0x33]
+            && REPORT_DESCRIPTOR.windows(2).any(|w2| w2 == [0x09, 0x32])));
     }
 
     #[test]

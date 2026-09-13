@@ -34,20 +34,19 @@ use crate::motion_udp::PadState;
 use crate::rumble::RumbleCommand;
 use crate::uhid::{UhidDevice, UhidEvent, BUS_USB};
 
-/// The dongle-mode name: identical to what the 8BitDo Switch-mode dongles
-/// report, so every consumer treats us exactly like the real thing.
-/// Critically, SDL ignores any "Nintendo … IMU"-named evdev node as a
-/// controller (`SDL_ShouldIgnoreGameController`), so the IMU companion
-/// `hid-nintendo` creates next to this pad can never surface as the
-/// phantom second joystick whose right stick is the gyroscope; SDL2 and
-/// SDL3 pair that same node as the pad's motion sensors by the shared
-/// serial instead.
+/// Distinct from the dongle's own identity so the two pads are tellable
+/// apart in a game's controller list, while keeping the "Nintendo "
+/// prefix that makes SDL ignore the IMU companion node (`hid-nintendo`
+/// names it "<pad> (IMU)", and SDL2/SDL3 both skip any "Nintendo … IMU"
+/// node as a controller — pairing it as the pad's motion sensors over the
+/// shared serial instead). Without that prefix the IMU node surfaces as a
+/// second gamepad whose right stick is the gyroscope.
 pub const VENDOR_ID: u32 = 0x057e;
 pub const PRODUCT_ID: u32 = 0x2009;
 /// The version a real wired Pro Controller reports; SDL's identity
 /// heuristics and mapping GUIDs include it.
 pub const DEVICE_VERSION: u16 = 0x8111;
-pub const DEVICE_NAME: &str = "Nintendo Co., Ltd. Pro Controller";
+pub const DEVICE_NAME: &str = "Nintendo Switch Pro Controller (Ira)";
 
 /// Switch Pro buttons, positional (A/B are Nintendo labels).
 const BTN_WEST_Y: u32 = 1 << 0;

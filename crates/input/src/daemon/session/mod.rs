@@ -44,6 +44,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         pad_events,
         mut mapper,
         mut profile_monitor,
+        pad_hidraw_grab: _pad_hidraw_grab,
         mut keyboard,
         mut mouse,
         mut virtual_gamepad,

@@ -24,6 +24,9 @@ pub(crate) struct SessionSetup {
     pub(crate) pad_events: Receiver<PadEvent>,
     pub(crate) mapper: MappingEngine,
     pub(crate) profile_monitor: Option<ProfileMonitor>,
+    /// Held for the session's lifetime: keeps SDL's hidapi from claiming
+    /// the physical pad while the virtual twin is the pad the game sees.
+    pub(crate) pad_hidraw_grab: Option<crate::hidraw_grab::PadHidrawGrab>,
     pub(crate) keyboard: Option<VirtualKeyboard>,
     pub(crate) mouse: Option<VirtualMouse>,
     pub(crate) virtual_gamepad: VirtualGamepad,
@@ -210,6 +213,22 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         pad_vendor,
         pad_product,
     );
+    // While the virtual Switch Pro twin is the pad the game should see,
+    // hold the physical pad's hidraw exclusively: SDL's hidapi would
+    // otherwise claim the hardware and hide the twin (identical 057e:2009
+    // identities). Released when the session ends.
+    let pad_hidraw_grab = if stack.switch_pro_hid.is_some() {
+        snapshot.pad.as_ref().and_then(|(_, path, _, _)| {
+            crate::hidraw_grab::grab_pad_hidraw(std::path::Path::new(path)).inspect(|grab| {
+                eprintln!(
+                    "ira-input: holding {} exclusively; the virtual Switch Pro is the pad SDL sees",
+                    grab.path().display()
+                );
+            })
+        })
+    } else {
+        None
+    };
     let last_sensor_us: Option<u64> = None;
     let pipeline = SensorPipeline {
         motion_available,
@@ -294,6 +313,7 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         pad_events: pad_events_rx,
         mapper,
         profile_monitor,
+        pad_hidraw_grab,
         keyboard: stack.keyboard,
         mouse: stack.mouse,
         virtual_gamepad: stack.gamepad,

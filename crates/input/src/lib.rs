@@ -2,6 +2,7 @@ pub mod daemon;
 mod calibration;
 mod gyro;
 mod hid_ds4;
+mod hidraw_grab;
 mod hid_dualsense;
 mod mapping;
 mod physical;

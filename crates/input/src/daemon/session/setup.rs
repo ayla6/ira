@@ -49,6 +49,32 @@ pub(crate) struct SessionSetup {
 }
 
 
+/// Whether the session must virtualize the pad at all: `false` when the
+/// physical pad already speaks the backend's native protocol, so the game
+/// can use it directly. Switch-protocol detection comes from the hub's
+/// hidraw probe; the Sony protocols are identity-based, since every real
+/// Sony pad speaks its protocol by construction.
+fn native_passthrough_for(
+    backend: VirtualGamepadBackend,
+    switch_protocol: bool,
+    pad: Option<(u16, u16)>,
+) -> bool {
+    match backend {
+        VirtualGamepadBackend::SwitchPro => switch_protocol,
+        VirtualGamepadBackend::DualSense => {
+            pad.is_some_and(|(vendor, product)| crate::physical::is_dualsense_identity(vendor, product))
+        }
+        VirtualGamepadBackend::DualShock4 => pad
+            .is_some_and(|(vendor, product)| {
+                crate::physical::is_dualshock4_identity(vendor, product)
+            }),
+        VirtualGamepadBackend::XInput
+        | VirtualGamepadBackend::DirectInput
+        | VirtualGamepadBackend::SteamInput
+        | VirtualGamepadBackend::Dsu => false,
+    }
+}
+
 /// Spawns the game process. The legacy wrapper passes nothing but the
 /// command line: the child inherits the wrapper's environment (which the
 /// launcher already built). A daemon session carries the full environment
@@ -187,13 +213,19 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         .map_err(|_| "pad hub is gone".to_string())?;
     let motion_available = snapshot.motion;
     // A pad that already speaks the profile's native protocol (an 8BitDo
-    // dongle or real pad in Switch mode, for a Switch Pro profile) needs no
-    // virtualization: passthrough leaves it fully native — grab-free, with
-    // its own hidapi-claimed buttons and gyro — instead of fighting it.
-    let native_passthrough =
-        snapshot.switch_protocol && mapper.profile().backend == VirtualGamepadBackend::SwitchPro;
+    // dongle or real pad in Switch mode for a Switch Pro profile, a real
+    // DualSense for a DualSense profile) needs no virtualization:
+    // passthrough leaves it fully native — grab-free, with its own
+    // hidapi-claimed buttons and gyro — instead of fighting it.
+    let native_passthrough = native_passthrough_for(
+        mapper.profile().backend,
+        snapshot.switch_protocol,
+        snapshot.pad.as_ref().map(|(_, _, vendor, product)| (*vendor, *product)),
+    );
     if native_passthrough {
-        eprintln!("ira-input: pad speaks Switch protocol natively; passing it through untouched");
+        eprintln!(
+            "ira-input: pad speaks the profile's native protocol; passing it through untouched"
+        );
         hub.send(HubCommand::SetPassthrough {
             id: arguments.session_id,
             passthrough: true,
@@ -348,3 +380,35 @@ fn profile_wake_pump(fd: libc::c_int, events: std::sync::mpsc::Sender<PadEvent>)
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::native_passthrough_for;
+    use crate::profile::VirtualGamepadBackend as Backend;
+
+    #[test]
+    fn test_native_passthrough_follows_the_backend_protocol() {
+        let dualsense = Some((0x054c, 0x0ce6));
+        // A real DualSense passes through on the DualSense backend only.
+        assert!(native_passthrough_for(Backend::DualSense, false, dualsense));
+        assert!(!native_passthrough_for(Backend::DualShock4, false, dualsense));
+        assert!(!native_passthrough_for(Backend::SwitchPro, false, dualsense));
+        // A real DualShock 4 passes through on its own backend.
+        assert!(native_passthrough_for(Backend::DualShock4, false, Some((0x054c, 0x09cc))));
+        // Switch pads follow the hub's wire-protocol probe instead of
+        // identity: the dongle can enumerate before its mode is known.
+        assert!(native_passthrough_for(Backend::SwitchPro, true, None));
+        assert!(!native_passthrough_for(Backend::SwitchPro, false, Some((0x057e, 0x2009))));
+        // No pad, or an unrelated pad: virtualize as usual.
+        assert!(!native_passthrough_for(Backend::DualSense, false, None));
+        assert!(!native_passthrough_for(
+            Backend::DualSense,
+            false,
+            Some((0x0f0d, 0x0163))
+        ));
+        // The uinput backends never pass through.
+        assert!(!native_passthrough_for(Backend::XInput, true, dualsense));
+        assert!(!native_passthrough_for(Backend::SteamInput, false, dualsense));
+    }
+}
+

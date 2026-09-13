@@ -765,17 +765,47 @@ fn is_ira_virtual_device(name: &str) -> bool {
     name.starts_with("Ira Virtual ") || name.ends_with("(Ira)")
 }
 
+/// Real Sony pad identities, by the kernel drivers that bind them
+/// (hid-sony: DualShock 4 and its dongle; hid-playstation: DualSense and
+/// DualSense Edge). A pad with one of these identities speaks the Sony
+/// wire protocol natively, so a matching-profile session can leave it
+/// untouched instead of virtualizing it.
+pub(crate) fn is_dualshock4_identity(vendor: u16, product: u16) -> bool {
+    vendor == 0x054c && matches!(product, 0x05c4 | 0x09cc | 0x0ba0)
+}
+
+pub(crate) fn is_dualsense_identity(vendor: u16, product: u16) -> bool {
+    vendor == 0x054c && matches!(product, 0x0ce6 | 0x0df2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        button_layout, device_gone, is_ira_virtual_device, map_button, map_button_for_device,
-        normalize_signed, normalize_trigger, poll_timeout_ms, same_device, swap_face_buttons,
+        button_layout, device_gone, is_dualsense_identity, is_dualshock4_identity,
+        is_ira_virtual_device, map_button, map_button_for_device, normalize_signed,
+        normalize_trigger, poll_timeout_ms, same_device, swap_face_buttons,
         synthesized_trigger_click, ButtonLayout, ControllerFamily, DeviceInfo, ReportedInputMode,
     };
     use crate::hid_8bitdo::{is_ultimate_2, VENDOR_8BITDO, ULTIMATE_2_WIRELESS};
     use crate::GamepadButton;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[test]
+    fn test_sony_identity_sets_cover_the_real_drivers_pads() {
+        // hid-sony binds the DualShock 4 revisions and its USB adapter.
+        assert!(is_dualshock4_identity(0x054c, 0x05c4));
+        assert!(is_dualshock4_identity(0x054c, 0x09cc));
+        assert!(is_dualshock4_identity(0x054c, 0x0ba0));
+        // hid-playstation binds the DualSense and the DualSense Edge.
+        assert!(is_dualsense_identity(0x054c, 0x0ce6));
+        assert!(is_dualsense_identity(0x054c, 0x0df2));
+        // The sets do not overlap and reject other vendors.
+        assert!(!is_dualshock4_identity(0x054c, 0x0ce6));
+        assert!(!is_dualsense_identity(0x054c, 0x09cc));
+        assert!(!is_dualsense_identity(0x045e, 0x0ce6));
+        assert!(!is_dualshock4_identity(0x0f0d, 0x00ee));
+    }
 
     fn test_pad() -> super::PhysicalGamepad {
         super::PhysicalGamepad {

@@ -10,6 +10,9 @@ const DUAL_SHOCK_4_VENDOR: u16 = 0x054c;
 const DUAL_SHOCK_4_PRODUCT: u16 = 0x09cc;
 const DUAL_SENSE_VENDOR: u16 = 0x054c;
 const DUAL_SENSE_PRODUCT: u16 = 0x0ce6;
+// Valve's Steam Input output identity (see virtual_gamepad.rs).
+const STEAM_INPUT_VENDOR: u16 = 0x28de;
+const STEAM_INPUT_PRODUCT: u16 = 0x11ff;
 
 pub(crate) fn inject_flatpak_env(program: &str, args: &mut Vec<String>, key: &str, value: &str) {
     let program = std::path::Path::new(program)
@@ -104,6 +107,10 @@ pub(crate) fn sdl_mapping_for_backend(backend: VirtualGamepadBackend) -> Option<
         VirtualGamepadBackend::SwitchPro => Some(VirtualGamepad::switch_pro_sdl_mapping()),
         VirtualGamepadBackend::DualShock4 => Some(VirtualGamepad::dual_shock_4_sdl_mapping()),
         VirtualGamepadBackend::DualSense => Some(VirtualGamepad::dual_sense_sdl_mapping()),
+        // Valve's identity is in no SDL database of its own: the game only
+        // maps the pad through this env mapping, the same way Steam itself
+        // hands games its controller configuration.
+        VirtualGamepadBackend::SteamInput => Some(VirtualGamepad::steam_input_sdl_mapping()),
         // The DSU backend presents no kernel device, so there is nothing to
         // map in SDL; the emulator binds to the cemuhook stream instead.
         VirtualGamepadBackend::Dsu => None,
@@ -121,6 +128,7 @@ pub(crate) fn ignored_device_for_target(
         VirtualGamepadBackend::SwitchPro => Some((SWITCH_PRO_VENDOR, SWITCH_PRO_PRODUCT)),
         VirtualGamepadBackend::DualShock4 => Some((DUAL_SHOCK_4_VENDOR, DUAL_SHOCK_4_PRODUCT)),
         VirtualGamepadBackend::DualSense => Some((DUAL_SENSE_VENDOR, DUAL_SENSE_PRODUCT)),
+        VirtualGamepadBackend::SteamInput => Some((STEAM_INPUT_VENDOR, STEAM_INPUT_PRODUCT)),
         // Private identities: the physical pad is hidden so only Ira's
         // carrier shows up in the game.
         VirtualGamepadBackend::DirectInput | VirtualGamepadBackend::Dsu => None,
@@ -266,6 +274,29 @@ mod tests {
         let envs =
             target_env_for(VirtualGamepadBackend::SwitchPro, Some(0x057e), Some(0x2009), true);
         assert!(envs.is_empty());
+    }
+
+    #[test]
+    fn test_steam_input_backend_maps_and_hides_the_physical_pad() {
+        // The Steam Input identity exists in no SDL database, so the game
+        // maps the pad through the env mapping; the physical pad is hidden
+        // because it never shares Valve's identity.
+        assert!(sdl_mapping_for_backend(VirtualGamepadBackend::SteamInput)
+            .unwrap()
+            .starts_with("03000000de280000ff11000010010000,Steam Virtual Gamepad,"));
+        assert_eq!(
+            ignored_device_for_target(0x2dc8, 0x3106, VirtualGamepadBackend::SteamInput),
+            Some("0x2dc8/0x3106".to_string())
+        );
+        let envs = target_env_for(VirtualGamepadBackend::SteamInput, Some(0x2dc8), Some(0x3106), false);
+        assert!(envs.contains(&(
+            "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
+            "0".to_string()
+        )));
+        assert!(envs.iter().any(
+            |(key, value)| key == "SDL_GAMECONTROLLERCONFIG"
+                && value.starts_with("03000000de280000ff11000010010000")
+        ));
     }
 
     #[test]

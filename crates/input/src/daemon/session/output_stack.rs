@@ -37,6 +37,7 @@ pub(crate) fn motion_outputs_missing(
         VirtualGamepadBackend::DualSense => pipeline.dualsense_hid.is_none(),
         VirtualGamepadBackend::XInput
         | VirtualGamepadBackend::DirectInput
+        | VirtualGamepadBackend::SteamInput
         | VirtualGamepadBackend::Dsu => false,
     };
     profile.wants_native_controller() && twin_missing

@@ -13,6 +13,10 @@ pub enum VirtualGamepadBackend {
     SwitchPro,
     DualShock4,
     DualSense,
+    /// Valve's Steam Input output identity (28de:11ff, "Steam Virtual
+    /// Gamepad"): the controller games already expect to find when a
+    /// remapper sits between them and the hardware.
+    SteamInput,
     /// No kernel device at all: the whole controller is presented over the
     /// cemuhook DSU stream (the flatpak-friendly path Cemu binds as one
     /// provider for buttons and motion).
@@ -551,7 +555,7 @@ impl OutputAction {
 
     pub fn is_supported_by(&self, backend: VirtualGamepadBackend) -> bool {
         match backend {
-            VirtualGamepadBackend::XInput => {
+            VirtualGamepadBackend::XInput | VirtualGamepadBackend::SteamInput => {
                 !matches!(self, Self::GamepadButton(button) if button.is_paddle())
             }
             VirtualGamepadBackend::DirectInput | VirtualGamepadBackend::Dsu => true,
@@ -1567,6 +1571,18 @@ mod tests {
     fn test_profile_missing_backend_defaults_to_xinput() {
         let profile: InputProfile = serde_json::from_str("{}").unwrap();
         assert_eq!(profile.backend, VirtualGamepadBackend::XInput);
+    }
+
+    #[test]
+    fn test_steam_input_backend_round_trips_through_its_snake_case_name() {
+        let profile = InputProfile {
+            backend: VirtualGamepadBackend::SteamInput,
+            ..InputProfile::default()
+        };
+        let encoded = serde_json::to_string(&profile).unwrap();
+        assert!(encoded.contains("\"backend\":\"steam_input\""));
+        let decoded: InputProfile = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, profile);
     }
 
     #[test]

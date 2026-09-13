@@ -730,6 +730,7 @@ fn update_controller_subtitle(
         }
         Some(VirtualGamepadBackend::DualShock4) => crate::tr!("DualShock 4 Controller layout"),
         Some(VirtualGamepadBackend::DualSense) => crate::tr!("DualSense Controller layout"),
+        Some(VirtualGamepadBackend::SteamInput) => crate::tr!("Steam Input Controller layout"),
         Some(VirtualGamepadBackend::Dsu) => crate::tr!("DSU (cemuhook) controller layout"),
     };
     row.set_subtitle(

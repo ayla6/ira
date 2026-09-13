@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-12 18:34-0300\n"
+"POT-Creation-Date: 2026-09-13 02:44-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -174,7 +174,7 @@ msgid "Add game"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_dialog.rs:53
-#: crates/ira/src/ui/input_profile_editor.rs:316
+#: crates/ira/src/ui/input_profile_editor.rs:317
 #: crates/ira/src/ui/input_profile_stick_settings.rs:62
 #: crates/ira/src/ui/settings_dialog_pages.rs:177
 msgid "General"
@@ -209,10 +209,10 @@ msgstr ""
 #: crates/ira/src/ui/helpers.rs:80
 #: crates/ira/src/ui/helpers.rs:533
 #: crates/ira/src/ui/helpers.rs:867
-#: crates/ira/src/ui/input_profile_editor.rs:449
-#: crates/ira/src/ui/input_profile_editor_save.rs:121
+#: crates/ira/src/ui/input_profile_editor.rs:450
+#: crates/ira/src/ui/input_profile_editor_save.rs:129
 #: crates/ira/src/ui/input_profile_output_capture.rs:55
-#: crates/ira/src/ui/input_profile_settings.rs:957
+#: crates/ira/src/ui/input_profile_settings.rs:958
 #: crates/ira/src/ui/installer_add_dialog.rs:643
 #: crates/ira/src/ui/message_handler.rs:126
 #: crates/ira/src/ui/play_history.rs:222
@@ -660,7 +660,7 @@ msgstr ""
 #: crates/ira/src/ui/group_dialog.rs:116
 #: crates/ira/src/ui/input_output_keys.rs:104
 #: crates/ira/src/ui/input_output_keys.rs:219
-#: crates/ira/src/ui/input_profile_settings.rs:958
+#: crates/ira/src/ui/input_profile_settings.rs:959
 #: crates/ira/src/ui/installer_add_dialog.rs:799
 #: crates/ira/src/ui/play_history.rs:223
 #: crates/ira/src/ui/profile_dialog.rs:199
@@ -916,7 +916,7 @@ msgid "Current layout"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:409
-#: crates/ira/src/ui/input_profile_settings.rs:901
+#: crates/ira/src/ui/input_profile_settings.rs:902
 #: crates/ira/src/ui/profile_dialog.rs:160
 #: crates/ira/src/ui/profile_dialog.rs:254
 #: crates/ira/src/ui/wine_profile_picker.rs:66
@@ -925,7 +925,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:412
 #: crates/ira/src/ui/edit_game_controller.rs:439
-#: crates/ira/src/ui/input_profile_settings.rs:902
+#: crates/ira/src/ui/input_profile_settings.rs:903
 #: crates/ira/src/ui/profile_dialog.rs:187
 #: crates/ira/src/ui/profile_dialog.rs:195
 msgid "Delete profile"
@@ -979,7 +979,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_dialog.rs:495
 #: crates/ira/src/ui/input_profile_editor.rs:140
-#: crates/ira/src/ui/input_profile_editor_save.rs:123
+#: crates/ira/src/ui/input_profile_editor_save.rs:131
 #: crates/ira/src/ui/profile_dialog.rs:452
 #: crates/ira/src/ui/settings_dialog.rs:289
 msgid "Save"
@@ -2236,7 +2236,7 @@ msgstr ""
 
 #: crates/ira/src/ui/input_output_picker.rs:49
 #: crates/ira/src/ui/input_profile_action_sets.rs:71
-#: crates/ira/src/ui/input_profile_editor.rs:372
+#: crates/ira/src/ui/input_profile_editor.rs:373
 msgid "Action Sets"
 msgstr ""
 
@@ -2692,21 +2692,21 @@ msgstr ""
 msgid "Apply"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_editor.rs:349
+#: crates/ira/src/ui/input_profile_editor.rs:350
 #: crates/ira/src/ui/input_profile_gyro_card.rs:54
 #: crates/ira/src/ui/input_profile_search_filters.rs:54
 msgid "Gyro"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_editor_save.rs:118
+#: crates/ira/src/ui/input_profile_editor_save.rs:126
 msgid "Unsaved changes"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_editor_save.rs:119
+#: crates/ira/src/ui/input_profile_editor_save.rs:127
 msgid "Save this layout before closing?"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_editor_save.rs:122
+#: crates/ira/src/ui/input_profile_editor_save.rs:130
 msgid "Discard"
 msgstr ""
 
@@ -2751,10 +2751,14 @@ msgid "DualSense"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_general_page.rs:46
+msgid "Steam Input"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_general_page.rs:47
 msgid "DSU (cemuhook)"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_general_page.rs:52
+#: crates/ira/src/ui/input_profile_general_page.rs:53
 msgid "Backend"
 msgstr ""
 
@@ -3726,7 +3730,7 @@ msgid "Only layouts published for this game"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_search.rs:97
-#: crates/ira/src/ui/input_profile_settings.rs:814
+#: crates/ira/src/ui/input_profile_settings.rs:815
 msgid "Import layout from Steam"
 msgstr ""
 
@@ -3848,25 +3852,29 @@ msgid "DualSense Controller layout"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_settings.rs:733
+msgid "Steam Input Controller layout"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_settings.rs:734
 msgid "DSU (cemuhook) controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:736
+#: crates/ira/src/ui/input_profile_settings.rs:737
 #, rust-format
 msgid "{} | Linux reports {}"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:848
+#: crates/ira/src/ui/input_profile_settings.rs:849
 #: crates/ira/src/ui/profile_dialog.rs:63
 #: crates/ira/src/ui/profile_dialog.rs:256
 msgid "Create profile"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:954
+#: crates/ira/src/ui/input_profile_settings.rs:955
 msgid "Delete layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:955
+#: crates/ira/src/ui/input_profile_settings.rs:956
 msgid "This removes the game layout from Ira."
 msgstr ""
 

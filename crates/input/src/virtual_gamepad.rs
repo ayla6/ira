@@ -46,6 +46,22 @@ const DUAL_SENSE_PRODUCT: u16 = 0x0ce6;
 const DUAL_SENSE_VERSION: u16 = 0x0111;
 const DUAL_SENSE_NAME: &str = "Sony Interactive Entertainment DualSense Wireless Controller";
 const DUAL_SENSE_GUID: &str = "030000004c050000e60c000011010000";
+// Valve's Steam Input output identity: the 28de:11ff pair SDL special-cases
+// as USB_PRODUCT_STEAM_VIRTUAL_GAMEPAD, and the name games see when a
+// remapper stands between them and the hardware. The evdev node keeps an
+// Ira-prefixed name (like every backend) so the hub never routes our own
+// pad as a physical controller; the mapping string below is what renames it
+// "Steam Virtual Gamepad" inside SDL games. A non-zero version keeps SDL's
+// GUID CRC bytes zeroed, matching that mapping's GUID.
+const STEAM_INPUT_VENDOR: u16 = 0x28de;
+const STEAM_INPUT_PRODUCT: u16 = 0x11ff;
+const STEAM_INPUT_VERSION: u16 = 0x0110;
+const STEAM_INPUT_NAME: &str = "Ira Virtual Steam Input Controller";
+const STEAM_INPUT_GUID: &str = "03000000de280000ff11000010010000";
+/// The name the SDL mapping carries: games ask SDL for the controller's
+/// name, and SDL answers with the mapping's.
+const STEAM_INPUT_SDL_NAME: &str = "Steam Virtual Gamepad";
+const STEAM_INPUT_SDL_BINDINGS: &str = "a:b0,b:b1,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:a2,righttrigger:a5,back:b8,start:b9,guide:b10,leftstick:b11,rightstick:b12,dpup:b13,dpdown:b14,dpleft:b15,dpright:b16,leftx:a0,lefty:a1,rightx:a3,righty:a4,platform:Linux";
 
 fn sony_sdl_bindings() -> &'static str {
     "a:b0,b:b1,x:b2,y:b3,back:b8,start:b9,guide:b12,leftstick:b10,rightstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a5,lefttrigger:a3,righttrigger:a4,misc1:b13,platform:Linux"
@@ -238,6 +254,15 @@ impl VirtualGamepad {
         )
     }
 
+    pub fn steam_input_sdl_mapping() -> String {
+        format!(
+            "{},{},{}",
+            STEAM_INPUT_GUID,
+            STEAM_INPUT_SDL_NAME,
+            STEAM_INPUT_SDL_BINDINGS
+        )
+    }
+
     /// Backends whose d-pad is reported as hat 0 movements instead of
     /// BTN_DPAD_* keys (Nintendo Switch Pro and both Sony pads).
     fn hat_dpad_event(&mut self, button: GamepadButton, pressed: bool) -> Option<InputEvent> {
@@ -409,6 +434,7 @@ fn device_name(backend: VirtualGamepadBackend) -> &'static str {
         VirtualGamepadBackend::SwitchPro => SWITCH_PRO_NAME,
         VirtualGamepadBackend::DualShock4 => DUAL_SHOCK_4_NAME,
         VirtualGamepadBackend::DualSense => DUAL_SENSE_NAME,
+        VirtualGamepadBackend::SteamInput => STEAM_INPUT_NAME,
         VirtualGamepadBackend::Dsu => "Ira DSU Controller",
     }
 }
@@ -444,6 +470,12 @@ fn device_id(backend: VirtualGamepadBackend) -> InputId {
             DUAL_SENSE_VENDOR,
             DUAL_SENSE_PRODUCT,
             DUAL_SENSE_VERSION,
+        ),
+        VirtualGamepadBackend::SteamInput => InputId::new(
+            BusType::BUS_USB,
+            STEAM_INPUT_VENDOR,
+            STEAM_INPUT_PRODUCT,
+            STEAM_INPUT_VERSION,
         ),
         VirtualGamepadBackend::Dsu => InputId::new(BusType::BUS_VIRTUAL, 0, 0, 0),
     }
@@ -837,6 +869,40 @@ mod tests {
                 DIRECT_INPUT_VERSION,
             )
         );
+    }
+
+    #[test]
+    fn test_steam_input_matches_valve_identity_and_layout() {
+        use crate::VirtualGamepadBackend::SteamInput;
+        // The identity SDL special-cases as the Steam virtual gamepad; the
+        // evdev name stays Ira-prefixed so the hub ignores our own pad.
+        assert_eq!(device_name(SteamInput), "Ira Virtual Steam Input Controller");
+        assert_eq!(
+            device_id(SteamInput),
+            InputId::new(evdev::BusType::BUS_USB, 0x28de, 0x11ff, 0x0110)
+        );
+        // XInput-style layout: d-pad keys, analog triggers on ABS_Z/ABS_RZ.
+        assert_eq!(
+            button_code(SteamInput, GamepadButton::DpadUp),
+            Some(KeyCode::BTN_DPAD_UP)
+        );
+        assert_eq!(button_code(SteamInput, GamepadButton::Paddle1), None);
+        assert_eq!(
+            axis_code(SteamInput, GamepadAxis::LeftTrigger),
+            Some(evdev::AbsoluteAxisCode::ABS_Z)
+        );
+        assert_eq!(
+            axis_code(SteamInput, GamepadAxis::RightY),
+            Some(evdev::AbsoluteAxisCode::ABS_RY)
+        );
+        // The env mapping must carry the exact GUID the uinput node gets:
+        // bus USB, vendor/product/version little-endian, zero CRC.
+        let mapping = VirtualGamepad::steam_input_sdl_mapping();
+        assert!(mapping.starts_with(
+            "03000000de280000ff11000010010000,Steam Virtual Gamepad,a:b0,b:b1"
+        ));
+        assert!(mapping.contains("dpup:b13,dpdown:b14,dpleft:b15,dpright:b16"));
+        assert!(mapping.contains("lefttrigger:a2,righttrigger:a5"));
     }
 
     #[test]

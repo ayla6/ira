@@ -74,6 +74,13 @@ pub(crate) fn target_env_for(
         return envs;
     }
     envs.push(("SDL_JOYSTICK_HIDAPI".to_string(), "0".to_string()));
+    // The uinput backends' native motion is an accelerometer-class evdev
+    // node; SDL2's default hint lists such nodes as joysticks with
+    // gyro-shaped axes instead of the sensors they are.
+    envs.push((
+        "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
+        "0".to_string(),
+    ));
     if let Some(mapping) = sdl_mapping_for_backend(backend) {
         envs.push(("SDL_GAMECONTROLLERCONFIG".to_string(), mapping));
     }
@@ -240,6 +247,25 @@ mod tests {
         assert!(!args
             .iter()
             .any(|argument| argument.starts_with("--env=SDL_JOYSTICK_HIDAPI=")));
+    }
+
+    #[test]
+    fn test_target_env_keeps_the_motion_node_off_joystick_lists() {
+        // The uinput backends' native motion rides an accelerometer-class
+        // evdev node; the game's SDL must classify it as a sensor, not as a
+        // second controller with gyro-shaped axes.
+        let envs = target_env_for(VirtualGamepadBackend::XInput, Some(0x2dc8), Some(0x3106), false);
+        assert!(envs.contains(&(
+            "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
+            "0".to_string()
+        )));
+    }
+
+    #[test]
+    fn test_passthrough_target_env_stays_empty() {
+        let envs =
+            target_env_for(VirtualGamepadBackend::SwitchPro, Some(0x057e), Some(0x2009), true);
+        assert!(envs.is_empty());
     }
 
     #[test]

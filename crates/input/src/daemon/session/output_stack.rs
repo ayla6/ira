@@ -42,6 +42,20 @@ pub(crate) fn motion_outputs_missing(
     profile.wants_native_controller() && twin_missing
 }
 
+/// Whether the session's native motion rides a uinput sensor node beside
+/// the virtual pad. A passthrough never wants one: the pad's own IMU node
+/// already pairs with the pad, and a second motion device would show up in
+/// the game as one more evdev node — under SDL2's default
+/// accelerometer-as-joystick hint, as a phantom second controller whose
+/// axes are raw motion (the "sticks go haywire with native gyro" report).
+pub(crate) fn wants_uinput_motion_node(
+    motion_available: bool,
+    profile: &InputProfile,
+    native_passthrough: bool,
+) -> bool {
+    motion_available && profile.native_motion && !native_passthrough
+}
+
 pub(crate) struct VirtualStack {
     pub(crate) gamepad: VirtualGamepad,
     pub(crate) keyboard: Option<VirtualKeyboard>,
@@ -82,6 +96,7 @@ pub(crate) fn build_virtual_stack(
     motion_available: bool,
     motion_allowed: bool,
     profile: &InputProfile,
+    native_passthrough: bool,
 ) -> VirtualStack {
     let keyboard = match create_keyboard(profile.keyboard_keycodes()) {
         Ok(keyboard) => keyboard,
@@ -103,12 +118,18 @@ pub(crate) fn build_virtual_stack(
     // physical pad (its hidraw unheld, its buttons raw) and no virtual pad
     // at all whenever the motion probe had not attached yet. Motion-less
     // twins stream zero IMU until the source attaches, which still beats
-    // losing the remapped pad entirely.
-    let native_transport = profile.wants_native_controller();
+    // losing the remapped pad entirely. Passthrough flips this around: a
+    // pad that already speaks the profile's native protocol is left
+    // completely untouched — no virtual devices at all.
+    let native_transport = profile.wants_native_controller() && !native_passthrough;
+    let gamepad_passthrough = native_passthrough;
     let native_ds4 = native_transport && backend == VirtualGamepadBackend::DualShock4;
     let native_switch_pro = native_transport && backend == VirtualGamepadBackend::SwitchPro;
     let native_dualsense = native_transport && backend == VirtualGamepadBackend::DualSense;
-    let gamepad = if native_ds4 || native_switch_pro || native_dualsense {
+    let gamepad = if gamepad_passthrough {
+        eprintln!("ira-input: passthrough session; the physical pad is the controller");
+        VirtualGamepad::shadow_only(backend)
+    } else if native_ds4 || native_switch_pro || native_dualsense {
         eprintln!("ira-input: uinput gamepad suppressed; the uhid controller is the controller");
         VirtualGamepad::shadow_only(backend)
     } else {
@@ -150,7 +171,8 @@ pub(crate) fn build_virtual_stack(
     // The motion node must exist before the game opens the virtual pad:
     // SDL pairs sensor nodes with a pad at open time only. A node built
     // during a mid-session reload waits for the game's next pad (re)open.
-    let motion_device = if motion_available && profile.native_motion {
+    let motion_device = if wants_uinput_motion_node(motion_available, profile, native_passthrough)
+    {
         open_motion_node(backend)
     } else {
         None
@@ -274,6 +296,19 @@ mod tests {
         let direct_input = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
         assert!(reload_needs_full_rebuild(&base, &direct_input));
         assert!(reload_needs_full_rebuild(&direct_input, &base));
+    }
+
+    #[test]
+    fn test_passthrough_never_spawns_a_uinput_motion_node() {
+        let motion = motion_profile(VirtualGamepadBackend::XInput);
+        // A uinput-backed session builds the sensor node beside its pad.
+        assert!(wants_uinput_motion_node(true, &motion, false));
+        // A passthrough leaves motion to the pad's own sensor node.
+        assert!(!wants_uinput_motion_node(true, &motion, true));
+        // No motion source or no native-motion request, no node either way.
+        assert!(!wants_uinput_motion_node(false, &motion, false));
+        let plain = InputProfile::default_gamepad();
+        assert!(!wants_uinput_motion_node(true, &plain, false));
     }
 
     #[test]

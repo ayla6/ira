@@ -114,6 +114,11 @@ fn rebuild_output_devices(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState)
 /// the reload path, that swap only reaches games that re-open their pad.
 /// Returns whether the stack now carries the wanted motion outputs.
 pub(crate) fn attach_motion_outputs(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState) -> bool {
+    if outputs.native_passthrough {
+        // Motion rides the pad's own sensor node; there are no virtual
+        // motion outputs to attach, now or after any rebuild.
+        return false;
+    }
     let profile = outputs.mapper.profile();
     if !super::output_stack::motion_outputs_missing(outputs.pipeline, profile) {
         return false;

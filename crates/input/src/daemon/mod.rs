@@ -39,7 +39,5 @@ pub enum SessionEvent {
 
 pub(crate) use profile_monitor::ProfileMonitor;
 pub(crate) use steam::SteamWatcher;
-pub(crate) use target_env::{
-    ignored_device_for_target, inject_flatpak_target_env, sdl_mapping_for_backend,
-};
+pub(crate) use target_env::{inject_flatpak_env, target_env_for};
 pub(crate) use trace::TraceState;

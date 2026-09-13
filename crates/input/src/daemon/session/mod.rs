@@ -44,7 +44,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         pad_events,
         mut mapper,
         mut profile_monitor,
-        pad_hidraw_grab: _pad_hidraw_grab,
+        native_passthrough,
         mut keyboard,
         mut mouse,
         mut virtual_gamepad,
@@ -181,6 +181,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                             pad: &mut pad_state,
                             pipeline: &mut pipeline,
                             motion_enabled,
+                            native_passthrough,
                         };
                         if attach_motion_outputs(&mut outputs, &mut trace) {
                             eprintln!("ira-input: motion outputs attached");
@@ -422,6 +423,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                             pad: &mut pad_state,
                             pipeline: &mut pipeline,
                             motion_enabled,
+                            native_passthrough,
                         };
                         reload_profile(&mut outputs, monitor.path(), &mut trace)
                     };

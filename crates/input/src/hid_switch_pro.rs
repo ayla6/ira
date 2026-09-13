@@ -41,8 +41,16 @@ use crate::uhid::{UhidDevice, UhidEvent, BUS_USB};
 /// node as a controller — pairing it as the pad's motion sensors over the
 /// shared serial instead). Without that prefix the IMU node surfaces as a
 /// second gamepad whose right stick is the gyroscope.
-pub const VENDOR_ID: u32 = 0x057e;
-pub const PRODUCT_ID: u32 = 0x2009;
+/// The PDP Afterglow Wireless identity: SDL2 (2.26-era Valve tables
+/// through 2.30.x) and SDL3 both type it as a Switch Pro controller with
+/// full protocol support — handshake, subcommands, rumble and IMU — so
+/// SDL's hidapi Switch driver claims our pad on every SDL build. Being a
+/// different vendor from the real hardware (057e) is the point: the
+/// kernel's hid-nintendo driver cannot bind the twin (no surprise evdev
+/// nodes), and SDL's claim-suppression can no longer hide our pad behind
+/// the physical one when both share the wire.
+pub const VENDOR_ID: u32 = 0x0e6f;
+pub const PRODUCT_ID: u32 = 0x0186;
 /// The version a real wired Pro Controller reports; SDL's identity
 /// heuristics and mapping GUIDs include it.
 pub const DEVICE_VERSION: u16 = 0x8111;

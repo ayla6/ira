@@ -18,6 +18,9 @@ pub(crate) struct LiveOutputs<'a> {
     pub(crate) pad: &'a mut crate::PadState,
     pub(crate) pipeline: &'a mut SensorPipeline,
     pub(crate) motion_enabled: bool,
+    /// The session passes the physical pad through untouched; rebuilds keep
+    /// the passthrough decision instead of materializing virtual devices.
+    pub(crate) native_passthrough: bool,
 }
 
 pub(crate) fn reload_profile(
@@ -75,6 +78,7 @@ fn rebuild_output_devices(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState)
         outputs.pipeline.motion_alive(),
         outputs.motion_enabled,
         outputs.mapper.profile(),
+        outputs.native_passthrough,
     );
     emit_outputs(
         outputs.mapper.reset(),

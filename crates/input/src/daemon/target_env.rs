@@ -29,28 +29,61 @@ pub(crate) fn inject_flatpak_env(program: &str, args: &mut Vec<String>, key: &st
     args.insert(run_index + 1, format!("--env={key}={value}"));
 }
 
-pub(crate) fn inject_flatpak_target_env(
-    program: &str,
-    args: &mut Vec<String>,
+/// The SDL environment a spawned game needs for the session's backend.
+/// Native-twin backends (Switch Pro, DS4, DualSense) keep hidapi enabled —
+/// it is what claims the twin and delivers its motion sensors — and hide
+/// the physical pad from every SDL layer instead. The remaining backends
+/// keep the raw-evdev setup: hidapi off, the backend's mapping, and the
+/// physical pad ignored at the gamecontroller layer.
+pub(crate) fn target_env_for(
     backend: VirtualGamepadBackend,
     vendor: Option<u16>,
     product: Option<u16>,
-) {
-    inject_flatpak_env(program, args, "SDL_JOYSTICK_HIDAPI", "0");
+    passthrough: bool,
+) -> Vec<(String, String)> {
+    // A passthrough session leaves the physical pad fully native: no SDL
+    // environment tampering at all.
+    if passthrough {
+        return Vec::new();
+    }
+    let mut envs = Vec::new();
+    let native_twin = matches!(
+        backend,
+        VirtualGamepadBackend::DualShock4
+            | VirtualGamepadBackend::SwitchPro
+            | VirtualGamepadBackend::DualSense
+    );
+    if native_twin {
+        if let (Some(vendor), Some(product)) = (vendor, product) {
+            let ignored = format!("0x{vendor:04x}/0x{product:04x}");
+            envs.push((
+                "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
+                ignored.clone(),
+            ));
+            envs.push((
+                "SDL_JOYSTICK_BLACKLIST_DEVICES".to_string(),
+                ignored.clone(),
+            ));
+            envs.push(("SDL_HIDAPI_IGNORE_DEVICES".to_string(), ignored));
+        }
+        return envs;
+    }
+    envs.push(("SDL_JOYSTICK_HIDAPI".to_string(), "0".to_string()));
     if let Some(mapping) = sdl_mapping_for_backend(backend) {
-        inject_flatpak_env(program, args, "SDL_GAMECONTROLLERCONFIG", &mapping);
+        envs.push(("SDL_GAMECONTROLLERCONFIG".to_string(), mapping));
     }
     if let (Some(vendor), Some(product)) = (vendor, product) {
         if let Some(ignored_device) = ignored_device_for_target(vendor, product, backend) {
-            inject_flatpak_env(
-                program,
-                args,
-                "SDL_GAMECONTROLLER_IGNORE_DEVICES",
-                &ignored_device,
-            );
+            envs.push((
+                "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
+                ignored_device,
+            ));
         }
     }
+    envs
 }
+
+
 
 pub(crate) fn sdl_mapping_for_backend(backend: VirtualGamepadBackend) -> Option<String> {
     match backend {
@@ -183,22 +216,25 @@ mod tests {
 
     #[test]
     fn test_inject_flatpak_target_env_configures_switch_pro_isolation() {
-        let mut args = vec!["run".to_string(), "com.example.Game".to_string()];
-        inject_flatpak_target_env(
-            "/usr/bin/flatpak",
-            &mut args,
-            VirtualGamepadBackend::SwitchPro,
-            Some(SWITCH_PRO_VENDOR),
-            Some(SWITCH_PRO_PRODUCT),
-        );
+        // The Switch Pro twin keeps hidapi enabled (it is what claims the
+        // twin and delivers its sensors) while the physical pad is hidden
+        // from every SDL layer.
+        let args = {
+            let mut args = vec!["run".to_string(), "com.example.Game".to_string()];
+            for (key, value) in
+                target_env_for(VirtualGamepadBackend::SwitchPro, Some(0x057e), Some(0x2009), false)
+            {
+                inject_flatpak_env("/usr/bin/flatpak", &mut args, &key, &value);
+            }
+            args
+        };
 
-        assert!(args.contains(&"--env=SDL_JOYSTICK_HIDAPI=0".to_string()));
-        assert!(args.iter().any(|argument| {
-            argument.starts_with("--env=SDL_GAMECONTROLLERCONFIG=030000007e0500000920000011810000,")
-        }));
+        assert!(args.contains(&"--env=SDL_GAMECONTROLLER_IGNORE_DEVICES=0x057e/0x2009".to_string()));
+        assert!(args.contains(&"--env=SDL_JOYSTICK_BLACKLIST_DEVICES=0x057e/0x2009".to_string()));
+        assert!(args.contains(&"--env=SDL_HIDAPI_IGNORE_DEVICES=0x057e/0x2009".to_string()));
         assert!(!args
             .iter()
-            .any(|argument| argument.starts_with("--env=SDL_GAMECONTROLLER_IGNORE_DEVICES=")));
+            .any(|argument| argument.starts_with("--env=SDL_JOYSTICK_HIDAPI=")));
     }
 
     #[test]

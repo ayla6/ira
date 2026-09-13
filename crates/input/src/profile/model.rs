@@ -1381,9 +1381,16 @@ fn default_action_set_inputs(
     backend: VirtualGamepadBackend,
     supported_buttons: &[GamepadButton],
 ) -> Vec<InputMapping> {
+    // The Switch pad's digital trigger clicks are always mapped: they are
+    // the pad's L2/R2, visible and rebindable in the editor, whether or
+    // not the detected physical pad happens to report a trigger button.
     let mut inputs: Vec<InputMapping> = standard_buttons(backend)
         .into_iter()
-        .filter(|button| supported_buttons.contains(button))
+        .filter(|button| {
+            supported_buttons.contains(button)
+                || (backend == VirtualGamepadBackend::SwitchPro
+                    && matches!(button, GamepadButton::LeftTrigger | GamepadButton::RightTrigger))
+        })
         .map(|button| {
             InputMapping::simple(
                 InputSource::Button(button),
@@ -1400,25 +1407,7 @@ fn default_action_set_inputs(
             ..InputMapping::new(InputSource::Axis(x_axis))
         });
     }
-    if backend == VirtualGamepadBackend::SwitchPro {
-        // The virtual pad's triggers are digital clicks. Keep them mapped
-        // even when the physical pad reports no trigger button (8BitDo
-        // DInput turns L2/R2 into paddles): the analog axis thresholds
-        // into the click instead.
-        for (axis, button) in [
-            (GamepadAxis::LeftTrigger, GamepadButton::LeftTrigger),
-            (GamepadAxis::RightTrigger, GamepadButton::RightTrigger),
-        ] {
-            if !supported_buttons.contains(&button) {
-                let mut mapping = InputMapping::simple(
-                    InputSource::Axis(axis),
-                    OutputAction::GamepadButton(button),
-                );
-                mapping.mode = Some(SourceMode::Trigger { threshold: 0.5 });
-                inputs.push(mapping);
-            }
-        }
-    } else {
+    if backend != VirtualGamepadBackend::SwitchPro {
         for axis in [GamepadAxis::LeftTrigger, GamepadAxis::RightTrigger] {
             inputs.push(InputMapping {
                 mode: Some(SourceMode::Trigger { threshold: 0.5 }),
@@ -1635,27 +1624,31 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_pro_defaults_threshold_triggers_when_device_lacks_the_button() {
-        // A physical pad without digital trigger buttons (8BitDo DInput
-        // reports L2/R2 as paddles) must still produce working trigger
-        // mappings for the virtual pad: the analog axis thresholds into
-        // the digital click.
+    fn test_switch_pro_defaults_always_map_trigger_buttons() {
+        // The digital trigger clicks are the pad's L2/R2: every new profile
+        // maps them identically, even when the detected physical pad
+        // reports no trigger button at all (8BitDo DInput turns L2/R2 into
+        // paddles) — the rows stay visible and rebindable in the editor.
         let profile = InputProfile::default_gamepad_for_backend_and_buttons(
             VirtualGamepadBackend::SwitchPro,
             &[GamepadButton::A, GamepadButton::B],
         );
         let inputs = &profile.action_sets[0].inputs;
         for button in [GamepadButton::LeftTrigger, GamepadButton::RightTrigger] {
-            let mapping = inputs
-                .iter()
-                .find(|input| input.activators.iter().any(|activator| {
-                    activator
-                        .outputs
-                        .contains(&OutputAction::GamepadButton(button))
-                }))
-                .unwrap_or_else(|| panic!("no trigger mapping for {button:?}"));
-            assert_eq!(mapping.mode, Some(SourceMode::Trigger { threshold: 0.5 }));
-            assert!(matches!(mapping.source, InputSource::Axis(_)));
+            assert!(
+                inputs.iter().any(|input| {
+                    input.source == InputSource::Button(button)
+                        && input
+                            .activators
+                            .iter()
+                            .any(|activator| {
+                                activator
+                                    .outputs
+                                    .contains(&OutputAction::GamepadButton(button))
+                            })
+                }),
+                "trigger button {button:?} unmapped by default"
+            );
         }
         assert!(profile.validate().is_ok());
     }

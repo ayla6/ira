@@ -11,9 +11,10 @@ use super::loop_io::LoopSchedule;
 use super::sensor::{tick_needed_for, SensorPipeline};
 use super::super::hub::{HubCommand, HubHandle, PadEvent, Subscribe};
 use super::super::{
-    ignored_device_for_target, inject_flatpak_target_env, sdl_mapping_for_backend, Arguments,
+    inject_flatpak_env, target_env_for, Arguments,
     ProfileMonitor, SessionEvent, SteamWatcher, TraceState,
 };
+use crate::profile::VirtualGamepadBackend;
 
 /// Everything the mapping loop needs, opened once before the event loop
 /// starts. Field names mirror the locals the loop body has always used.
@@ -24,9 +25,9 @@ pub(crate) struct SessionSetup {
     pub(crate) pad_events: Receiver<PadEvent>,
     pub(crate) mapper: MappingEngine,
     pub(crate) profile_monitor: Option<ProfileMonitor>,
-    /// Held for the session's lifetime: keeps SDL's hidapi from claiming
-    /// the physical pad while the virtual twin is the pad the game sees.
-    pub(crate) pad_hidraw_grab: Option<crate::hidraw_grab::PadHidrawGrab>,
+    /// The session passes the physical pad through untouched (it already
+    /// speaks the profile's native protocol).
+    pub(crate) native_passthrough: bool,
     pub(crate) keyboard: Option<VirtualKeyboard>,
     pub(crate) mouse: Option<VirtualMouse>,
     pub(crate) virtual_gamepad: VirtualGamepad,
@@ -57,32 +58,25 @@ fn spawn_session_child(
     arguments: &Arguments,
     mapper: &MappingEngine,
     pad_identity: Option<(u16, u16)>,
+    native_passthrough: bool,
 ) -> Option<std::process::Child> {
     if arguments.command.is_empty() {
         return None;
     }
     let mut target_args = arguments.command[1..].to_vec();
-    inject_flatpak_target_env(
-        &arguments.command[0],
-        &mut target_args,
+    let target_envs = target_env_for(
         mapper.profile().backend,
         pad_identity.map(|(vendor, _)| vendor),
         pad_identity.map(|(_, product)| product),
+        native_passthrough,
     );
+    for (key, value) in &target_envs {
+        inject_flatpak_env(&arguments.command[0], &mut target_args, key, value);
+    }
     let mut command = std::process::Command::new(&arguments.command[0]);
     command.args(target_args);
-    command.env("SDL_JOYSTICK_HIDAPI", "0");
-    if let Some(mapping) = sdl_mapping_for_backend(mapper.profile().backend) {
-        command.env("SDL_GAMECONTROLLERCONFIG", mapping);
-    }
-    if let Some((vendor, product)) = pad_identity {
-        if let Some(ignored_device) = ignored_device_for_target(
-            vendor,
-            product,
-            mapper.profile().backend,
-        ) {
-            command.env("SDL_GAMECONTROLLER_IGNORE_DEVICES", ignored_device);
-        }
+    for (key, value) in &target_envs {
+        command.env(key, value);
     }
     if let Some(env) = &arguments.env {
         // The request environment is complete: the launcher's list already
@@ -185,16 +179,31 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         live_always: !arguments.pause_unfocused,
         calibration: arguments.calibration.clone(),
         device: arguments.device.clone(),
+        native_twin: mapper.profile().wants_native_controller(),
         reply: reply_tx,
     }));
     let snapshot = reply_rx
         .recv()
         .map_err(|_| "pad hub is gone".to_string())?;
     let motion_available = snapshot.motion;
+    // A pad that already speaks the profile's native protocol (an 8BitDo
+    // dongle or real pad in Switch mode, for a Switch Pro profile) needs no
+    // virtualization: passthrough leaves it fully native — grab-free, with
+    // its own hidapi-claimed buttons and gyro — instead of fighting it.
+    let native_passthrough =
+        snapshot.switch_protocol && mapper.profile().backend == VirtualGamepadBackend::SwitchPro;
+    if native_passthrough {
+        eprintln!("ira-input: pad speaks Switch protocol natively; passing it through untouched");
+        hub.send(HubCommand::SetPassthrough {
+            id: arguments.session_id,
+            passthrough: true,
+        });
+    }
     let stack = super::output_stack::build_virtual_stack(
         motion_available,
         arguments.motion_port != Some(0),
         mapper.profile(),
+        native_passthrough,
     );
     let (pad_vendor, pad_product) = snapshot
         .pad
@@ -213,22 +222,6 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         pad_vendor,
         pad_product,
     );
-    // While the virtual Switch Pro twin is the pad the game should see,
-    // hold the physical pad's hidraw exclusively: SDL's hidapi would
-    // otherwise claim the hardware and hide the twin (identical 057e:2009
-    // identities). Released when the session ends.
-    let pad_hidraw_grab = if stack.switch_pro_hid.is_some() {
-        snapshot.pad.as_ref().and_then(|(_, path, _, _)| {
-            crate::hidraw_grab::grab_pad_hidraw(std::path::Path::new(path)).inspect(|grab| {
-                eprintln!(
-                    "ira-input: holding {} exclusively; the virtual Switch Pro is the pad SDL sees",
-                    grab.path().display()
-                );
-            })
-        })
-    } else {
-        None
-    };
     let last_sensor_us: Option<u64> = None;
     let pipeline = SensorPipeline {
         motion_available,
@@ -251,6 +244,7 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         arguments,
         &mapper,
         snapshot.pad.as_ref().map(|(_, _, vendor, product)| (*vendor, *product)),
+        native_passthrough,
     );
     let pad_state = crate::PadState::default();
     let schedule = LoopSchedule::new();
@@ -313,7 +307,7 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         pad_events: pad_events_rx,
         mapper,
         profile_monitor,
-        pad_hidraw_grab,
+        native_passthrough,
         keyboard: stack.keyboard,
         mouse: stack.mouse,
         virtual_gamepad: stack.gamepad,

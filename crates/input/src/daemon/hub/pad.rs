@@ -29,6 +29,9 @@ pub(super) struct PhysicalPad {
     pub(super) gamepad: Option<PhysicalGamepad>,
     pub(super) switch_hidraw: Option<SwitchHidrawPad>,
     pub(super) sensor: Option<GyroSource>,
+    /// Exclusive hold on the pad's hidraw while a native-twin route wants
+    /// the hardware hidden from SDL-style stacks.
+    pub(super) hidraw_grab: Option<crate::hidraw_grab::PadHidrawGrab>,
     pub(super) rumble: Option<PhysicalRumble>,
     pub(super) calibration: Option<PathBuf>,
     pub(super) device_hint: Option<PathBuf>,
@@ -44,6 +47,7 @@ impl PhysicalPad {
             gamepad: None,
             switch_hidraw: None,
             sensor: None,
+            hidraw_grab: None,
             rumble: None,
             calibration: None,
             device_hint: None,
@@ -53,6 +57,31 @@ impl PhysicalPad {
                 .unwrap_or_else(Instant::now),
             motion_retry_at: Instant::now(),
             motion_retry_delay: MOTION_RETRY_START,
+        }
+    }
+
+    /// Re-evaluates the exclusive hidraw hold that keeps SDL-style stacks
+    /// from claiming the physical pad over a native twin. Re-applied every
+    /// hub pass: reconnects create fresh hidraw nodes, and a stale hold
+    /// (its device went away) must be replaced by one on the new node.
+    pub(super) fn set_hidraw_grab(&mut self, hold: bool) {
+        if hold && self.hidraw_grab.is_none() {
+            if let Some(gamepad) = self.gamepad.as_ref() {
+                let path = gamepad.info().path.clone();
+                match crate::hidraw_grab::grab_pad_hidraw(&path) {
+                    Some(grab) => {
+                        eprintln!(
+                            "hub: holding {} exclusively; the native twin is the pad SDL sees",
+                            grab.path().display()
+                        );
+                        self.hidraw_grab = Some(grab);
+                    }
+                    None => self.hidraw_grab = None,
+                }
+            }
+        } else if !hold && self.hidraw_grab.is_some() {
+            self.hidraw_grab = None; // dropping the file releases the grab
+            eprintln!("hub: hidraw hold released; the physical pad is public again");
         }
     }
 
@@ -171,6 +200,9 @@ impl PhysicalPad {
         self.gamepad = None;
         self.switch_hidraw = None;
         self.sensor = None;
+        // The held hidraw node died with the pad connection; the next open
+        // creates a fresh one and the hub re-grabs it.
+        self.hidraw_grab = None;
         if let Some(rumble) = self.rumble.as_mut() {
             rumble.stop();
         }

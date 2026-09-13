@@ -762,7 +762,7 @@ fn format_open_error(path: &Path, error: std::io::Error) -> String {
 }
 
 fn is_ira_virtual_device(name: &str) -> bool {
-    name.starts_with("Ira Virtual ")
+    name.starts_with("Ira Virtual ") || name.ends_with("(Ira)")
 }
 
 #[cfg(test)]

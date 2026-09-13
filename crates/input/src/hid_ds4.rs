@@ -258,6 +258,7 @@ impl Ds4UhidDevice {
             BUS_USB,
             VENDOR_ID,
             PRODUCT_ID,
+            0,
         )?;
         Ok(Self {
             device,

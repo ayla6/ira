@@ -67,7 +67,10 @@ impl UhidDevice {
     /// its hidapi driver. `uniq` is the serial SDL's evdev backend compares
     /// to pair a gamepad with its sensor node — two devices created with
     /// the same uniq are joined by SDL, which is how flatpak-visible
-    /// motion works (uinput nodes cannot carry uniq at all).
+    /// motion works (uinput nodes cannot carry uniq at all). `version`
+    /// rides the device identity: SDL's gamepad-type heuristics and
+    /// mapping GUIDs include it, so clones of real hardware carry the
+    /// real device's version.
     pub fn create(
         name: &str,
         uniq: &str,
@@ -75,6 +78,7 @@ impl UhidDevice {
         bus: u16,
         vendor: u32,
         product: u32,
+        version: u16,
     ) -> io::Result<Self> {
         if descriptor.len() > UHID_DATA_MAX {
             return Err(io::Error::new(
@@ -87,7 +91,9 @@ impl UhidDevice {
             .write(true)
             .custom_flags(libc::O_NONBLOCK)
             .open("/dev/uhid")?;
-        file.write_all(&create2_event(name, uniq, descriptor, bus, vendor, product))?;
+        file.write_all(&create2_event(
+            name, uniq, descriptor, bus, vendor, product, version,
+        ))?;
         Ok(Self { file })
     }
 
@@ -142,6 +148,7 @@ fn create2_event(
     bus: u16,
     vendor: u32,
     product: u32,
+    version: u16,
 ) -> Vec<u8> {
     let mut event = vec![0u8; CREATE2_FIXED];
     event[0..4].copy_from_slice(&UHID_CREATE2.to_le_bytes());
@@ -158,7 +165,8 @@ fn create2_event(
     event[rd_size_offset + 2..rd_size_offset + 4].copy_from_slice(&bus.to_le_bytes());
     event[rd_size_offset + 4..rd_size_offset + 8].copy_from_slice(&vendor.to_le_bytes());
     event[rd_size_offset + 8..rd_size_offset + 12].copy_from_slice(&product.to_le_bytes());
-    // version/country stay zero; the descriptor carries everything else.
+    event[rd_size_offset + 12..rd_size_offset + 14].copy_from_slice(&version.to_le_bytes());
+    // country stays zero; the descriptor carries everything else.
     event.resize(CREATE2_FIXED + descriptor.len(), 0);
     event[CREATE2_FIXED..].copy_from_slice(descriptor);
     event
@@ -243,6 +251,7 @@ mod tests {
             BUS_USB,
             0x054c,
             0x09cc,
+            0x8111,
         );
         assert_eq!(u32::from_le_bytes(event[0..4].try_into().unwrap()), 11);
         let name = &event[4..4 + "Ira Virtual DS4".len()];
@@ -262,6 +271,8 @@ mod tests {
         assert_eq!(vendor, 0x054c);
         let product = u32::from_le_bytes(event[base + 8..base + 12].try_into().unwrap());
         assert_eq!(product, 0x09cc);
+        let version = u16::from_le_bytes(event[base + 12..base + 14].try_into().unwrap());
+        assert_eq!(version, 0x8111);
         assert_eq!(&event[base + 20..base + 20 + DESCRIPTOR.len()], DESCRIPTOR);
     }
 

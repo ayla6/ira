@@ -105,6 +105,7 @@ impl ImuUhidDevice {
             BUS_USB,
             VENDOR_ID,
             PRODUCT_ID,
+            0,
         )?;
         Ok(Self { device })
     }

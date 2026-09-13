@@ -35,9 +35,13 @@ pub(crate) fn inject_flatpak_env(program: &str, args: &mut Vec<String>, key: &st
 /// The SDL environment a spawned game needs for the session's backend.
 /// Native-twin backends (Switch Pro, DS4, DualSense) keep hidapi enabled —
 /// it is what claims the twin and delivers its motion sensors — and hide
-/// the physical pad from every SDL layer instead. The remaining backends
-/// keep the raw-evdev setup: hidapi off, the backend's mapping, and the
-/// physical pad ignored at the gamecontroller layer.
+/// the physical pad from every SDL layer. Each twin also ships the exact
+/// mapping for the identity its uhid device presents: no SDL database maps
+/// those GUIDs, and SDL's HIDAPI auto-mapping is signature-gated, so
+/// without it the twins appear as raw joysticks no gamecontroller-based
+/// game can open. The remaining backends keep the raw-evdev setup: hidapi
+/// off, the backend's mapping, and the physical pad ignored at the
+/// gamecontroller layer.
 pub(crate) fn target_env_for(
     backend: VirtualGamepadBackend,
     vendor: Option<u16>,
@@ -50,18 +54,25 @@ pub(crate) fn target_env_for(
         return Vec::new();
     }
     let mut envs = Vec::new();
-    let native_twin = matches!(
-        backend,
-        VirtualGamepadBackend::DualShock4
-            | VirtualGamepadBackend::SwitchPro
-            | VirtualGamepadBackend::DualSense
-    );
-    if native_twin {
+    let twin_mapping = match backend {
+        VirtualGamepadBackend::DualShock4 => Some(crate::hid_ds4::sdl_mapping()),
+        VirtualGamepadBackend::SwitchPro => Some(VirtualGamepad::switch_pro_sdl_mapping()),
+        VirtualGamepadBackend::DualSense => Some(crate::hid_dualsense::sdl_mapping()),
+        VirtualGamepadBackend::XInput
+        | VirtualGamepadBackend::DirectInput
+        | VirtualGamepadBackend::SteamInput
+        | VirtualGamepadBackend::Dsu => None,
+    };
+    if let Some(mapping) = twin_mapping {
         // SDL2's default treats accelerometer nodes as joysticks, which
         // would list the twin's motion sensor as a second controller with
         // gyro-shaped axes AND stop it from ever being a sensor (SDL keeps
         // a node in one list only). The hint turns it sensor-only.
         envs.push(("SDL_ACCELEROMETER_AS_JOYSTICK".to_string(), "0".to_string()));
+        envs.push((
+            "SDL_GAMECONTROLLERCONFIG".to_string(),
+            mapping,
+        ));
         if let (Some(vendor), Some(product)) = (vendor, product) {
             let ignored = format!("0x{vendor:04x}/0x{product:04x}");
             envs.push((
@@ -255,6 +266,43 @@ mod tests {
         assert!(!args
             .iter()
             .any(|argument| argument.starts_with("--env=SDL_JOYSTICK_HIDAPI=")));
+        // The twin ships the mapping for the identity its uhid device
+        // presents; no SDL database carries it.
+        assert!(args.iter().any(|argument| {
+            argument.starts_with("--env=SDL_GAMECONTROLLERCONFIG=030000007e0500000920000011810000,")
+        }));
+    }
+
+    #[test]
+    fn test_twin_env_maps_the_sony_twins_by_their_presented_identity() {
+        for (backend, guid_prefix) in [
+            (
+                VirtualGamepadBackend::DualShock4,
+                "030000000d0f0000ee00000000000000,Wireless Controller",
+            ),
+            (
+                VirtualGamepadBackend::DualSense,
+                "030000000d0f00006301000000000000,DualSense Wireless Controller",
+            ),
+        ] {
+            let envs = target_env_for(backend, Some(0x2dc8), Some(0x3106), false);
+            let mapping = envs
+                .iter()
+                .find(|(key, _)| key == "SDL_GAMECONTROLLERCONFIG")
+                .map(|(_, value)| value)
+                .unwrap_or_else(|| panic!("{backend:?} twin env carries no mapping"));
+            assert!(mapping.starts_with(guid_prefix));
+            // The physical pad is hidden while the sensor hint keeps the
+            // paired IMU off the joystick lists.
+            assert!(envs.contains(&(
+                "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
+                "0x2dc8/0x3106".to_string()
+            )));
+            assert!(envs.contains(&(
+                "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
+                "0".to_string()
+            )));
+        }
     }
 
     #[test]

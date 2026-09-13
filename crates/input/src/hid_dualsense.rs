@@ -1,10 +1,15 @@
-//! A virtual DualSense built on [`super::uhid`]: SDL's PS5 hidapi driver
-//! claims it through the licensed HORI VID/PID (typed PS5 in SDL's
-//! controller table, ignored by kernel drivers just like our DS4 pad) and
-//! parses raw report bytes directly. Two feature replies make the
-//! third-party path work: capabilities advertise sensor support, and a
-//! crafted identity calibration makes wire counts decode straight to
-//! degrees/s and g.
+//! A virtual DualSense built on [`super::uhid`].
+//!
+//! SDL's hidapi can never claim a uhid device (libusb enumerates USB
+//! hardware, and a uhid pad has no USB ancestor), so the twin lives
+//! entirely on the evdev side: hid-generic parses [`REPORT_DESCRIPTOR`]
+//! into a plain gamepad node, the SDL mapping shipped in the game's env
+//! ([`sdl_mapping`]) is what makes gamecontroller-based games see a
+//! mapped DualSense, and motion rides the paired IMU node. The feature
+//! replies ([`capabilities_report`], [`calibration_report`]) remain
+//! served for any direct hidraw reader; the HORI identity keeps kernel
+//! Sony drivers away, since hid-playstation would reject our condensed
+//! descriptor mid-probe and leave no nodes behind.
 
 use std::io;
 
@@ -18,6 +23,19 @@ pub const PRODUCT_ID: u32 = 0x0163;
 /// launchers whitelist by name, and SDL's PS5 classification comes from the
 /// VID/PID, not the name.
 pub const DEVICE_NAME: &str = "DualSense Wireless Controller";
+
+/// The twin's SDL GUID: bus USB, no CRC (mappings never carry one), the
+/// HORI identity little-endian, version zero — matching what SDL computes
+/// from the evdev node. SDL's databases have no entry for this identity,
+/// so [`sdl_mapping`] in the game env is the pad's only route to a
+/// gamecontroller mapping.
+pub const SDL_GUID: &str = "030000000d0f00006301000000000000";
+
+/// The mapping the game env carries for the twin: SDL matches it by GUID
+/// and renames the pad "DualSense Wireless Controller" for the game.
+pub fn sdl_mapping() -> String {
+    crate::virtual_gamepad::sony_twin_sdl_mapping(SDL_GUID, DEVICE_NAME)
+}
 
 const FEATURE_CAPABILITIES: u8 = 0x03;
 const FEATURE_CALIBRATION: u8 = 0x05;
@@ -346,9 +364,24 @@ fn calibration_report() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
-        calibration_report, capabilities_report, hat_value, usb_state_report, MotionSample,
-        PadState,
+        calibration_report, capabilities_report, hat_value, sdl_mapping, usb_state_report,
+        MotionSample, PadState, DEVICE_NAME, SDL_GUID,
     };
+
+    #[test]
+    fn test_sdl_mapping_matches_the_twin_identity() {
+        // The GUID is the evdev identity SDL computes from the uhid device:
+        // bus USB, no CRC, vendor/product little-endian, version zero.
+        assert_eq!(SDL_GUID, "030000000d0f00006301000000000000");
+        let mapping = sdl_mapping();
+        assert!(mapping.starts_with(&format!("{SDL_GUID},{DEVICE_NAME},a:b0,b:b1,x:b3,y:b2")));
+        // The twin's evdev layout: square on b3, triangle on b2, analog
+        // triggers on a3/a4, right stick on a2/a5, d-pad on hat 0.
+        assert!(mapping.contains("lefttrigger:a3,righttrigger:a4"));
+        assert!(mapping.contains("leftx:a0,lefty:a1,rightx:a2,righty:a5"));
+        assert!(mapping.contains("dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2"));
+        assert!(mapping.contains("guide:b10,leftstick:b11,rightstick:b12"));
+    }
 
     #[test]
     fn test_capabilities_match_sdl_third_party_probe() {

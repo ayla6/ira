@@ -1,15 +1,15 @@
 //! A DualShock4-compatible controller built on [`super::uhid`].
 //!
-//! The identity walks a narrow line: a vendor whose PS4 pad is in SDL's
-//! controller database (Hori) so the evdev twin carries a real PS4 mapping,
-//! while also being in SDL's PlayStation-detection vendor list so its
-//! hidapi DS4 driver probes our capabilities reply and claims the hidraw
-//! node — and the kernel side, finding no vendor driver, lets hid-generic
-//! claim it (Sony's own driver would reject our non-authentic DS4
-//! descriptor mid-probe and leave no nodes behind). The capabilities
-//! numerators (1/16 gyro degrees per second, 1/8192 accelerometer g) are
-//! exactly the units [`usb_state_report`] emits, so motion arrives
-//! correctly scaled with no calibration exchange.
+//! The identity walks a narrow line: a vendor whose PS4 pad identity is
+//! unknown to Linux kernel HID drivers (so hid-generic claims it — Sony's
+//! own driver would reject our non-authentic DS4 descriptor mid-probe and
+//! leave no nodes behind) and absent from SDL's controller database (so
+//! nothing mismaps the pad). SDL's hidapi can never claim a uhid device
+//! (libusb enumerates USB hardware; a uhid pad has no USB ancestor), so
+//! the twin lives on the evdev side: the SDL mapping shipped in the game's
+//! env ([`sdl_mapping`]) is what makes gamecontroller-based games see a
+//! mapped DualShock 4, and motion rides the paired IMU node. The
+//! capabilities reply stays served for any direct hidraw reader.
 
 use std::io;
 
@@ -17,18 +17,27 @@ use crate::motion_udp::{MotionSample, PadState};
 use crate::rumble::RumbleCommand;
 use crate::uhid::{UhidDevice, BUS_USB};
 
-/// Hori's PS4 mini pad identity: present in SDL's controller database as a
-/// PS4 controller (so the evdev twin carries a real mapping and proper
-/// type, instead of generic a/b/x/y), inside SDL's PlayStation-detection
-/// vendor list (so its hidapi DS4 driver probes our capabilities reply and
-/// claims the hidraw node), and unknown to Linux kernel HID drivers (so
+/// Hori's PS4 mini pad identity: unknown to Linux kernel HID drivers (so
 /// hid-generic owns the device rather than a Sony-specific driver rejecting
-/// our non-authentic DS4 descriptor mid-probe).
+/// our non-authentic DS4 descriptor mid-probe) and absent from SDL's
+/// controller database and type table (so only the mapping we ship in the
+/// game env decides how the twin is mapped).
 pub const VENDOR_ID: u32 = 0x0f0d;
 pub const PRODUCT_ID: u32 = 0x00ee;
 /// Real DS4 controllers literally report this product string; games and
 /// launchers whitelist by name, so the virtual pad should read identically.
 pub const DEVICE_NAME: &str = "Wireless Controller";
+
+/// The twin's SDL GUID: bus USB, no CRC (mappings never carry one), the
+/// HORI identity little-endian, version zero — matching what SDL computes
+/// from the evdev node.
+pub const SDL_GUID: &str = "030000000d0f0000ee00000000000000";
+
+/// The mapping the game env carries for the twin: SDL matches it by GUID
+/// and renames the pad "Wireless Controller" for the game.
+pub fn sdl_mapping() -> String {
+    crate::virtual_gamepad::sony_twin_sdl_mapping(SDL_GUID, DEVICE_NAME)
+}
 
 /// Feature report id SDL probes on third-party controllers to learn
 /// capabilities and motion scaling numerators.
@@ -363,10 +372,21 @@ fn hid_motor_scale(byte: u8) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::{
-        capabilities_report, hat_value, usb_state_report, ACCEL_COUNTS_PER_G, GRAVITY_MS2,
-        GYRO_COUNTS_PER_DPS, REPORT_DESCRIPTOR, REPORT_ID_USB_STATE, USB_STATE_REPORT_LEN,
+        capabilities_report, hat_value, sdl_mapping, usb_state_report, ACCEL_COUNTS_PER_G,
+        GRAVITY_MS2, GYRO_COUNTS_PER_DPS, REPORT_DESCRIPTOR, REPORT_ID_USB_STATE,
+        USB_STATE_REPORT_LEN, DEVICE_NAME, SDL_GUID,
     };
     use crate::motion_udp::{MotionSample, PadState};
+
+    #[test]
+    fn test_sdl_mapping_matches_the_twin_identity() {
+        assert_eq!(SDL_GUID, "030000000d0f0000ee00000000000000");
+        let mapping = sdl_mapping();
+        assert!(mapping.starts_with(&format!("{SDL_GUID},{DEVICE_NAME},a:b0,b:b1,x:b3,y:b2")));
+        assert!(mapping.contains("lefttrigger:a3,righttrigger:a4"));
+        assert!(mapping.contains("leftx:a0,lefty:a1,rightx:a2,righty:a5"));
+        assert!(mapping.contains("dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2"));
+    }
 
     fn resting_sample() -> MotionSample {
         MotionSample {

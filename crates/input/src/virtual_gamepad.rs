@@ -67,6 +67,23 @@ fn sony_sdl_bindings() -> &'static str {
     "a:b0,b:b1,x:b2,y:b3,back:b8,start:b9,guide:b12,leftstick:b10,rightstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a5,lefttrigger:a3,righttrigger:a4,misc1:b13,platform:Linux"
 }
 
+/// SDL bindings for the Sony uhid twins' evdev layout. Their descriptors
+/// declare the face buttons as individual Button-page usages (west/south/
+/// east/north), so the evdev indices differ from the kernel Sony drivers
+/// the mapping above was written against: square lands on b3 and triangle
+/// on b2, the guide on b10, and the stick clicks on b11/b12. Sticks and
+/// analog triggers sit on the same axes (right stick ABS_Z/ABS_RZ, L2/R2
+/// on ABS_RX/ABS_RY).
+pub(crate) const SONY_TWIN_SDL_BINDINGS: &str = "a:b0,b:b1,x:b3,y:b2,back:b8,start:b9,guide:b10,leftstick:b11,rightstick:b12,leftshoulder:b4,rightshoulder:b5,lefttrigger:a3,righttrigger:a4,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a5,platform:Linux";
+
+/// Builds the SDL_GAMECONTROLLERCONFIG mapping a Sony uhid twin ships in
+/// the game's environment. SDL matches mappings by GUID, and no SDL
+/// database maps the twins' third-party identities — without this, the
+/// twins show up as raw joysticks no gamecontroller-based game can open.
+pub(crate) fn sony_twin_sdl_mapping(guid: &str, name: &str) -> String {
+    format!("{guid},{name},{SONY_TWIN_SDL_BINDINGS}")
+}
+
 pub struct VirtualGamepad {
     /// `None` for the DSU backend: it creates no kernel device and exists
     /// only so the output pipeline has a uniform sink; the real carrier is

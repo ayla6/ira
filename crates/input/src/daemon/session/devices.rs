@@ -300,8 +300,7 @@ pub(crate) fn make_gyro_processor(
     product: u16,
     calibration_store: Option<&Path>,
 ) -> GyroProcessor {
-    // Per-controller calibration wins; the profile's stored bias is only a
-    // legacy fallback.
+    // Per-controller calibration wins; fall back to the profile's stored bias.
     let bias = calibration_store
         .and_then(|path| crate::load_calibration(path, vendor, product))
         .unwrap_or(profile.controller_calibration);

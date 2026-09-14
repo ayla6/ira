@@ -95,16 +95,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
 
     let save_dir = cfg.save_dir.clone();
 
-    // Older builds' profile files migrate in place once, off the UI thread;
-    // later reads migrate lazily, so the sweep is only a fast-forward.
-    {
-        let save_dir = save_dir.clone();
-        std::thread::Builder::new()
-            .name("ira-profile-migrate".to_string())
-            .spawn(move || crate::ui::migrate_profile_files(&save_dir))
-            .map_err(|error| eprintln!("Failed to spawn the profile migration: {error}"))
-            .ok();
-    }
     // While Ira is open, the input daemon gives idle controllers their
     // default behaviour; controllers whose settings say Disabled keep
     // native desktop input.

@@ -20,20 +20,11 @@ pub(super) fn controller_default_path(save_dir: &str, key: &str) -> PathBuf {
         .join(format!("{key}.json"))
 }
 
-/// Default layouts written while the virtual backend was still chosen on the
-/// device instead of on the layout. Kept so existing files keep resolving;
-/// new defaults are a single file per device whose layout owns the backend.
-const LEGACY_DEFAULT_SUFFIXES: [&str; 5] =
-    ["-directinput", "-switch-pro", "-dualshock4", "-dualsense", "-dsu"];
-
-/// First default layout that already exists for this device, legacy
-/// backend-keyed files included. Used when the stored path is missing.
+/// The stored default layout for a device, used when the settings entry is
+/// missing.
 pub(crate) fn find_controller_default_profile(save_dir: &str, key: &str) -> Option<PathBuf> {
-    let directory = Path::new(save_dir).join(CONTROLLER_DEFAULT_DIRECTORY);
-    std::iter::once(String::new())
-        .chain(LEGACY_DEFAULT_SUFFIXES.iter().map(|suffix| suffix.to_string()))
-        .map(|suffix| directory.join(format!("{key}{suffix}.json")))
-        .find(|path| path.is_file())
+    let path = controller_default_path(save_dir, key);
+    path.is_file().then_some(path)
 }
 
 pub(super) fn ensure_controller_default_profile(
@@ -120,65 +111,7 @@ pub(super) fn read_profile(path: &Path) -> Result<InputProfile, String> {
 fn read_profile_data(path: &Path) -> Result<InputProfile, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|error| format!("Could not read controller profile: {error}"))?;
-    let profile = InputProfile::from_json(&text)?;
-    // from_json migrates older file versions in memory; persist the migrated
-    // form so the file on disk is up to date too (a failed rewrite costs
-    // nothing — the next read migrates again).
-    if stored_version(&text) != profile.version {
-        let _ = write_profile(path, &profile);
-    }
-    Ok(profile)
-}
-
-/// The `version` field a raw profile file carries, if any. A file without a
-/// version never matches the current one, so it gets normalized on rewrite.
-fn stored_version(text: &str) -> u32 {
-    serde_json::from_str::<serde_json::Value>(text)
-        .ok()
-        .and_then(|value| value.get("version")?.as_u64())
-        .and_then(|version| u32::try_from(version).ok())
-        .unwrap_or(u32::MAX)
-}
-
-/// Re-reads and rewrites every stored profile once at startup so version
-/// migrations land in the files themselves, not just in memory.
-pub(crate) fn migrate_profile_files(save_dir: &str) -> usize {
-    let mut migrated = 0;
-    for directory in [
-        profile_directory(save_dir),
-        Path::new(save_dir).join(CONTROLLER_DEFAULT_DIRECTORY),
-    ] {
-        let entries = match std::fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                eprintln!("Could not read controller profiles for migration: {error}");
-                continue;
-            }
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            match InputProfile::from_json(&text) {
-                Ok(profile) if stored_version(&text) != profile.version => {
-                    if write_profile(&path, &profile).is_ok() {
-                        migrated += 1;
-                    }
-                }
-                Ok(_) => {}
-                Err(error) => eprintln!("Skipping invalid controller profile {:?}: {error}", path),
-            }
-        }
-    }
-    if migrated > 0 {
-        eprintln!("Migrated {migrated} controller profile(s) to the current layout format");
-    }
-    migrated
+    InputProfile::from_json(&text)
 }
 
 pub(super) fn write_profile(path: &Path, profile: &InputProfile) -> Result<(), String> {
@@ -470,21 +403,11 @@ mod tests {
     }
 
     #[test]
-    fn test_find_controller_default_profile_falls_back_to_legacy_files() {
+    fn test_find_controller_default_profile_resolves_the_per_device_file() {
         let tmp = tempfile::tempdir().unwrap();
         let save_dir = tmp.path().to_str().unwrap();
         // Nothing on disk yet.
         assert_eq!(find_controller_default_profile(save_dir, "pad"), None);
-        // A legacy backend-keyed default still resolves.
-        let legacy = super::Path::new(save_dir)
-            .join(super::CONTROLLER_DEFAULT_DIRECTORY)
-            .join("pad-directinput.json");
-        super::write_profile(&legacy, &InputProfile::default()).unwrap();
-        assert_eq!(
-            find_controller_default_profile(save_dir, "pad"),
-            Some(legacy.clone())
-        );
-        // The plain per-device default wins once it exists.
         let plain = super::controller_default_path(save_dir, "pad");
         super::write_profile(&plain, &InputProfile::default()).unwrap();
         assert_eq!(find_controller_default_profile(save_dir, "pad"), Some(plain));

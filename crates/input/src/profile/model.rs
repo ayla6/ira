@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 /// Version 2 changed the default deadzone source from raw passthrough to
-/// the per-controller calibration; `from_json` migrates older files.
+/// the per-controller calibration. `validate` rejects other versions; old
+/// files are not migrated.
 pub const PROFILE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1020,14 +1021,14 @@ pub struct InputProfile {
     pub name: String,
     #[serde(default)]
     pub backend: VirtualGamepadBackend,
-    /// Legacy fallback bias used when the controller has no stored
-    /// calibration; the field name predates per-controller stick calibration.
-    #[serde(default, alias = "gyro_calibration")]
+    /// Per-profile gyro bias, used when the controller has no stored
+    /// calibration of its own.
+    #[serde(default)]
     pub controller_calibration: ControllerCalibration,
     #[serde(default)]
     pub gyro: GyroConfig,
-    /// Action-set model. Empty while a profile still uses the flat `bindings`
-    /// form; loaders convert bindings to a single default action set.
+    /// Action-set model. Profiles from before this model carried a flat
+    /// `bindings` list that serde ignores; those simply start empty.
     #[serde(default)]
     pub action_sets: Vec<ActionSet>,
     #[serde(default)]
@@ -1899,60 +1900,6 @@ mod tests {
     }
 
     #[test]
-    fn test_old_joystick_mode_json_gets_steam_defaults() {
-        // Profiles written before the stick rework carry no deadzone source,
-        // per-axis sensitivity, or rotation; the missing deadzone source now
-        // loads as the controller-preference default, not a hidden raw
-        // passthrough.
-        let profile = InputProfile::from_json(
-            r#"{"name":"old","action_sets":[{"name":"Default","inputs":[
-                {"source":{"axis":"left_x"},
-                 "mode":{"joystick":{"output":"left","deadzone_inner":0.1,"deadzone_outer":0.95,"curve":1.0}}}
-            ]}]}"#,
-        )
-        .unwrap();
-        let Some(SourceMode::Joystick(settings)) = profile.action_sets[0].inputs[0].mode.as_ref()
-        else {
-            panic!("expected a joystick mode");
-        };
-        assert_eq!(settings.processing.deadzone, StickDeadzone::Controller);
-        assert_eq!(settings.processing.output_axis, StickOutputAxis::Both);
-        assert_eq!(settings.processing.rotation, 0.0);
-        assert!((settings.processing.sensitivity_x - 1.0).abs() < f32::EPSILON);
-        assert!((settings.processing.sensitivity_y - 1.0).abs() < f32::EPSILON);
-        assert!(!settings.processing.invert_x && !settings.processing.invert_y);
-    }
-
-    #[test]
-    fn test_version1_raw_deadzone_migrates_to_controller() {
-        // Version 1 files serialized the un-chosen default as an explicit
-        // "none"; loading them must flip that to the controller preference
-        // while leaving a deliberate Custom choice and version alone.
-        let json = r#"{"version":1,"name":"v1","action_sets":[{"name":"Default","inputs":[
-            {"source":{"axis":"left_x"},
-             "mode":{"joystick":{"output":"left","deadzone":"none","deadzone_inner":0.1,"deadzone_outer":0.95}}},
-            {"source":{"axis":"right_x"},
-             "mode":{"joystick":{"output":"right","deadzone":"custom","deadzone_inner":0.05,"deadzone_outer":0.9}}}
-        ]}]}"#;
-        let profile = InputProfile::from_json(json).unwrap();
-        assert_eq!(profile.version, PROFILE_VERSION);
-        let deadzone = |axis: GamepadAxis| {
-            let Some(SourceMode::Joystick(settings)) = profile.action_sets[0]
-                .inputs
-                .iter()
-                .find(|input| input.source == InputSource::Axis(axis))
-                .and_then(|input| input.mode.as_ref())
-            else {
-                panic!("expected a joystick mode on {axis:?}");
-            };
-            settings.processing.deadzone
-        };
-        assert_eq!(deadzone(GamepadAxis::LeftX), StickDeadzone::Controller);
-        assert_eq!(deadzone(GamepadAxis::RightX), StickDeadzone::Custom);
-        assert!(profile.validate().is_ok());
-    }
-
-    #[test]
     fn test_missing_deadzone_source_defaults_to_controller_preference() {
         let settings = StickProcessing::default();
         assert_eq!(settings.deadzone, StickDeadzone::Controller);
@@ -2002,59 +1949,6 @@ mod tests {
         .validate()
         .is_err());
         assert!(build(JoystickSettings::default()).validate().is_ok());
-    }
-
-    #[test]
-    fn test_from_json_collapses_legacy_per_axis_stick_mappings() {
-        // The per-axis editor wrote one mapping per stick axis; loading
-        // merges each Y half into its X counterpart.
-        let profile = InputProfile::from_json(
-            r#"{"name":"old","action_sets":[{"name":"Default","inputs":[
-                {"source":{"axis":"left_x"},
-                 "mode":{"joystick":{"output":"left","curve":1.0}}},
-                {"source":{"axis":"left_y"},
-                 "mode":{"joystick":{"output":"left","curve":2.0}}},
-                {"source":{"axis":"right_y"},
-                 "mode":{"joystick":{"output":"right","curve":3.0}}}
-            ]}]}"#,
-        )
-        .unwrap();
-        let inputs = &profile.action_sets[0].inputs;
-        assert_eq!(inputs.len(), 2);
-        assert!(inputs.iter().all(|input| matches!(
-            input.source,
-            InputSource::Axis(GamepadAxis::LeftX) | InputSource::Axis(GamepadAxis::RightX)
-        )));
-        // The X half's own mode wins over the Y half's.
-        let Some(SourceMode::Joystick(settings)) = inputs
-            .iter()
-            .find(|input| input.source == InputSource::Axis(GamepadAxis::LeftX))
-            .and_then(|input| input.mode.as_ref())
-        else {
-            panic!("expected a joystick mode on the left stick");
-        };
-        assert!((settings.processing.curve - 1.0).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn test_from_json_keeps_stick_y_half_carrying_activators() {
-        let profile = InputProfile::from_json(
-            r#"{"name":"old","action_sets":[{"name":"Default","inputs":[
-                {"source":{"axis":"right_x"},
-                 "mode":{"joystick":{"output":"right","curve":1.0}}},
-                {"source":{"axis":"right_y"},
-                 "mode":{"joystick":{"output":"right","curve":2.0}},
-                 "activators":[{"kind":"full_press","outputs":[{"gamepad_button":"a"}]}]}
-            ]}]}"#,
-        )
-        .unwrap();
-        let inputs = &profile.action_sets[0].inputs;
-        assert_eq!(inputs.len(), 2);
-        let y_half = inputs
-            .iter()
-            .find(|input| input.source == InputSource::Axis(GamepadAxis::RightY))
-            .unwrap();
-        assert!(!y_half.activators.is_empty());
     }
 
     #[test]

@@ -48,7 +48,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
         steam_id_entry,
         gog_id_entry,
     ) = build_general_page(&win, &profiles, state);
-    sidebar.append(&super::settings_dialog::settings_sidebar_row(
+    sidebar.append(&super::settings_pages::settings_sidebar_row(
         "emblem-system-symbolic",
         &crate::tr!("General"),
         "general",
@@ -71,24 +71,24 @@ pub fn show_add_game_dialog(state: &SharedState) {
         super::wine_config_widget::build_wine_config_pages(&cfg, Some(&dft), &save_dir)
     };
 
-    let sep1 = super::settings_dialog::sidebar_separator();
+    let sep1 = super::settings_pages::sidebar_separator();
     sidebar.append(&sep1);
 
     let mut wine_sidebar_rows: Vec<gtk4::ListBoxRow> = Vec::new();
     for wp in &wine_pages {
-        let row = super::settings_dialog::settings_sidebar_row(wp.icon, &wp.label, wp.page_id);
+        let row = super::settings_pages::settings_sidebar_row(wp.icon, &wp.label, wp.page_id);
         sidebar.append(&row);
         stack.add_named(&wp.page, Some(wp.page_id));
         wine_sidebar_rows.push(row);
     }
 
-    let sep2 = super::settings_dialog::sidebar_separator();
+    let sep2 = super::settings_pages::sidebar_separator();
     sidebar.append(&sep2);
 
     setup_wine_sidebar_visibility(&kind_row, &wine_sidebar_rows, &sep1, &sep2, &profile_row);
 
     let (env_page, env_vars_box, ld_preload_entry, ld_library_entry) = build_env_page();
-    sidebar.append(&super::settings_dialog::settings_sidebar_row(
+    sidebar.append(&super::settings_pages::settings_sidebar_row(
         "preferences-other-symbolic",
         &crate::tr!("Environment"),
         "env",

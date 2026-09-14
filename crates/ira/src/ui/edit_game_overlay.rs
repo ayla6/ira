@@ -1,5 +1,5 @@
 use super::helpers::string_list_from;
-use super::settings_dialog;
+use super::settings_pages;
 use super::system_settings::{build_override_switch_row, OverrideState};
 use adw::prelude::*;
 use ira_models::GameLaunchConfig;
@@ -73,7 +73,7 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
 
     params
         .sidebar
-        .append(&settings_dialog::settings_sidebar_row(
+        .append(&settings_pages::settings_sidebar_row(
             "layers-symbolic",
             &crate::tr!("Overlay"),
             "overlay",

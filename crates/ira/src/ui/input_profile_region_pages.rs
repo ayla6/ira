@@ -449,7 +449,7 @@ mod gtk_repro {
             scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
             scroll.set_child(Some(&content));
             stack.add_named(&scroll, Some(region.id()));
-            sidebar.append(&super::super::settings_dialog::settings_sidebar_row(
+            sidebar.append(&super::super::settings_pages::settings_sidebar_row(
                 region.icon(),
                 &region.title(),
                 region.id(),

@@ -27,11 +27,6 @@ pub(super) fn settings_page_container() -> gtk4::Box {
     b
 }
 
-// Re-exports for backward compatibility with files that use super::settings_dialog::*
-pub(super) use super::settings_pages::{
-    settings_sidebar_row, sidebar_separator,
-};
-
 struct SavedSettingsWidgets {
     steam_entry: adw::PasswordEntryRow,
 

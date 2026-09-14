@@ -30,7 +30,7 @@ pub(super) fn build_playtime_page(
     scroll.set_vexpand(true);
     scroll.set_hexpand(true);
 
-    sidebar.append(&super::settings_dialog::settings_sidebar_row(
+    sidebar.append(&super::settings_pages::settings_sidebar_row(
         "document-open-recent-symbolic",
         &crate::tr!("Playtime"),
         "playtime",

@@ -3,7 +3,7 @@ use super::input_profile_store::{
     add_game_compatibility, delete_profile, list_profiles, profile_matches_game,
     profile_matches_platform, read_profile, StoredProfile,
 };
-use super::settings_dialog;
+use super::settings_pages;
 use super::state::SharedState;
 use adw::prelude::*;
 use glib::clone::Downgrade;
@@ -703,7 +703,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     scroll.set_hexpand(true);
     params
         .sidebar
-        .append(&settings_dialog::settings_sidebar_row(
+        .append(&settings_pages::settings_sidebar_row(
             "input-gaming-symbolic",
             "Controller",
             "controller",

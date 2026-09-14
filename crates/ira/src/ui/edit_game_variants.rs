@@ -10,7 +10,7 @@ type VariantImagesSectionResult = (
 );
 use super::css::*;
 use super::helpers;
-use super::settings_dialog;
+use super::settings_pages;
 use super::state::SharedState;
 use adw::prelude::*;
 use ira_models::{AssetType, GameVariant};
@@ -485,8 +485,8 @@ pub(super) fn build_variants_page(
         && game_kind != ira_models::GameKind::Ps3
         && game_kind != ira_models::GameKind::Retro
     {
-        sidebar.append(&settings_dialog::sidebar_separator());
-        sidebar.append(&settings_dialog::settings_sidebar_row(
+        sidebar.append(&settings_pages::sidebar_separator());
+        sidebar.append(&settings_pages::settings_sidebar_row(
             "application-x-executable-symbolic",
             "Variants",
             "variants",

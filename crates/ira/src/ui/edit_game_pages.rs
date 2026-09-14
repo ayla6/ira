@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use super::css::*;
 use super::helpers;
-use super::settings_dialog;
+use super::settings_pages;
 use super::state::SharedState;
 use adw::prelude::*;
 use glib::clone::Downgrade;
@@ -135,7 +135,7 @@ pub(super) fn build_dlc_page(
             dlc_scroll.set_vexpand(true);
             dlc_scroll.set_hexpand(true);
 
-            sidebar.append(&settings_dialog::settings_sidebar_row(
+            sidebar.append(&settings_pages::settings_sidebar_row(
                 "package-x-generic-symbolic",
                 &crate::tr!("DLC"),
                 "dlc",
@@ -509,8 +509,8 @@ pub(super) fn build_api_emulator_page(
     emu_scroll.set_child(Some(&emu_page));
     emu_scroll.set_vexpand(true);
     emu_scroll.set_hexpand(true);
-    sidebar.append(&settings_dialog::sidebar_separator());
-    sidebar.append(&settings_dialog::settings_sidebar_row(
+    sidebar.append(&settings_pages::sidebar_separator());
+    sidebar.append(&settings_pages::settings_sidebar_row(
         "applications-engineering-symbolic",
         &crate::tr!("API emulator"),
         "api_emulator",

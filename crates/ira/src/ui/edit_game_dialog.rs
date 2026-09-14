@@ -206,7 +206,7 @@ fn build_launch_wine_advanced_pages(
         let (wine_pages, ww) =
             build_wine_config_pages(saved_wine, Some(app_default_wine), &save_dir);
         for wp in &wine_pages {
-            sidebar.append(&super::settings_dialog::settings_sidebar_row(
+            sidebar.append(&super::settings_pages::settings_sidebar_row(
                 wp.icon, &wp.label, wp.page_id,
             ));
             stack.add_named(&wp.page, Some(wp.page_id));
@@ -217,7 +217,7 @@ fn build_launch_wine_advanced_pages(
     };
 
     if show_launch_config || show_wine_tabs {
-        sidebar.append(&super::settings_dialog::sidebar_separator());
+        sidebar.append(&super::settings_pages::sidebar_separator());
     }
 
     LaunchWineAdvancedCtx {
@@ -315,7 +315,7 @@ fn build_dialog_contents(
         &languages,
         &pending_copies,
     );
-    sidebar.append(&super::settings_dialog::settings_sidebar_row(
+    sidebar.append(&super::settings_pages::settings_sidebar_row(
         "emblem-system-symbolic",
         "General",
         "general",
@@ -350,7 +350,7 @@ fn build_dialog_contents(
             Some(pending_copies.clone()),
             Some(sgdb_cache.clone()),
         );
-        sidebar.append(&super::settings_dialog::settings_sidebar_row(
+        sidebar.append(&super::settings_pages::settings_sidebar_row(
             "image-x-generic-symbolic",
             &crate::tr!("Images"),
             "images",
@@ -376,7 +376,7 @@ fn build_dialog_contents(
         if let Some((logo_page, selected_pos, size_adj, _modified)) =
             super::game_logo::build_game_logo_page(&game, false, steam_reset)
         {
-            sidebar.append(&super::settings_dialog::settings_sidebar_row(
+            sidebar.append(&super::settings_pages::settings_sidebar_row(
                 "preferences-desktop-wallpaper-symbolic",
                 "Logo",
                 "logo",

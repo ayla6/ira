@@ -1,5 +1,5 @@
 use super::helpers;
-use super::settings_dialog;
+use super::settings_pages;
 use super::state::SharedState;
 use adw::prelude::*;
 use ira_models::{GameLaunchConfig, WineProfile};
@@ -187,7 +187,7 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
 
     params
         .sidebar
-        .append(&settings_dialog::settings_sidebar_row(
+        .append(&settings_pages::settings_sidebar_row(
             "preferences-other-symbolic",
             &crate::tr!("Launch config"),
             "launch",

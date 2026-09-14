@@ -312,7 +312,7 @@ fn build_pages(
     layout.stack.add_named(&general_scroll, Some("general"));
     layout
         .sidebar
-        .append(&super::settings_dialog::settings_sidebar_row(
+        .append(&super::settings_pages::settings_sidebar_row(
             "emblem-system-symbolic",
             &crate::tr!("General"),
             "general",
@@ -333,7 +333,7 @@ fn build_pages(
         layout.stack.add_named(&scroll, Some(region.id()));
         layout
             .sidebar
-            .append(&super::settings_dialog::settings_sidebar_row(
+            .append(&super::settings_pages::settings_sidebar_row(
                 region.icon(),
                 &region.title(),
                 region.id(),
@@ -345,7 +345,7 @@ fn build_pages(
     layout.stack.add_named(&gyro_scroll, Some("gyro"));
     layout
         .sidebar
-        .append(&super::settings_dialog::settings_sidebar_row(
+        .append(&super::settings_pages::settings_sidebar_row(
             "view-refresh-symbolic",
             &crate::tr!("Gyro"),
             "gyro",
@@ -368,7 +368,7 @@ fn build_pages(
     layout.stack.add_named(&sets_scroll, Some("sets"));
     layout
         .sidebar
-        .append(&super::settings_dialog::settings_sidebar_row(
+        .append(&super::settings_pages::settings_sidebar_row(
             "view-grid-symbolic",
             &crate::tr!("Action Sets"),
             "sets",

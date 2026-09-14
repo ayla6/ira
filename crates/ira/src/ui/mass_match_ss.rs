@@ -69,7 +69,7 @@ pub(super) fn start_ss_batch_matching(
     rows: &[RowActions],
     dialog: &adw::Dialog,
 ) {
-    let (steam, db, creds, missed) = {
+    let (steam, db, creds, cfg, missed) = {
         let s = state.borrow();
         let missed: HashSet<i64> = match ira_db::scraper_missed_ids(&s.db) {
             Ok(ids) => ids.into_iter().collect(),
@@ -85,9 +85,30 @@ pub(super) fn start_ss_batch_matching(
                 s.cfg.screenscraper_id.clone(),
                 s.cfg.screenscraper_password.clone(),
             ),
+            s.cfg.clone(),
             missed,
         )
     };
+    // Quota management is obligatory per ScreenScraper: read the account's
+    // counters once and stand down for the day when the scrape quota is
+    // spent, instead of feeding it doomed requests.
+    match steam.screenscraper_user_infos(&creds) {
+        Ok(infos) => {
+            eprintln!(
+                "ScreenScraper batch: quota {}/{} requests today ({} not found, max {}), {}/min",
+                infos.requests_today,
+                infos.max_requests_per_day,
+                infos.requests_ko_today,
+                infos.max_requests_ko_per_day,
+                infos.max_requests_per_min
+            );
+            if infos.exhausted() {
+                eprintln!("ScreenScraper batch: daily quota exhausted, skipping the pass");
+                return;
+            }
+        }
+        Err(e) => eprintln!("ScreenScraper batch: quota unavailable: {e}"),
+    }
     let queue: Vec<BatchItem> = needs_matching
         .iter()
         .enumerate()
@@ -110,7 +131,7 @@ pub(super) fn start_ss_batch_matching(
         {
             let steam = Arc::clone(&steam);
             let db = db.clone();
-            move |item| resolve(&steam, &creds, &db, item)
+            move |item| resolve(&steam, &creds, &db, &cfg, item)
         },
         {
             let state = state.clone();
@@ -129,11 +150,17 @@ fn resolve(
     steam: &SteamDataClient,
     creds: &ScraperCreds,
     db: &ira_db::DbConn,
+    cfg: &ira_config::Config,
     item: &BatchItem,
 ) -> Option<SsOutcome> {
-    let entry = ira_db::find_by_db_id(db, item.db_id).ok().flatten()?;
+    let mut entry = ira_db::find_by_db_id(db, item.db_id).ok().flatten()?;
     let platform_id = entry.platform_id.clone();
     screenscraper_system_id(&platform_id)?;
+    // ROM paths are stored relative to the console's folder in the ROM
+    // roots; every file access resolves through the config first.
+    let abs = cfg
+        .resolve_rom_path(&platform_id, &entry.rom_path)
+        .unwrap_or_else(|| std::path::PathBuf::from(&entry.rom_path));
 
     // The exact hash search runs only on consoles where file digests are
     // the matching key — disc consoles go serial-first below, and their
@@ -142,12 +169,26 @@ fn resolve(
     // has filled it. romnom carries the real file name with extension,
     // exactly what ScreenScraper's rom index stores (ES-DE sends it the
     // same way); the stem alone loses the match.
-    if ira_models::screenscraper_hashes_content(&platform_id) && !entry.hashes.md5.is_empty() {
-        let romnom = std::path::Path::new(&entry.rom_path)
+    if ira_models::screenscraper_hashes_content(&platform_id) {
+        // Hash on demand when the scan has not filled the md5 yet, and
+        // keep it stored so this costs nothing next time.
+        if entry.hashes.md5.is_empty() {
+            let pick = rom_extension_pick(&platform_id);
+            match ira_platforms::rom_hash::content_md5(&abs, &pick) {
+                Some(hash) => {
+                    if let Err(e) = ira_db::set_hash_key(db, item.db_id, "md5", &hash) {
+                        eprintln!("SS batch: failed to store the md5: {e}");
+                    }
+                    entry.hashes.md5 = hash;
+                }
+                None => eprintln!("SS batch: could not hash {}", abs.display()),
+            }
+        }
+        let romnom = std::path::Path::new(&abs)
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| item.name.clone());
-        let size = std::fs::metadata(&entry.rom_path).ok().map(|m| m.len());
+        let size = std::fs::metadata(&abs).ok().map(|m| m.len());
         let Some(size) = size else {
             eprintln!("SS batch: '{romnom}' [{platform_id}] hash present but file missing");
             return Some(SsOutcome::Miss);
@@ -175,12 +216,17 @@ fn resolve(
         }
     }
 
-    // No hash hit: a disc serial is the next-best exact identity — it
-    // survives chd/rvz repacks that scramble every file digest. Only
-    // serial-shaped ids qualify; RA ids and title ids are plain numbers
-    // or too long.
-    if ira_models::screenscraper_matches_by_serial(&platform_id) && looks_like_serial(&entry.game_id) {
-        let serial = entry.game_id.clone();
+    // No hash hit: a disc serial read from the scan's cache is the
+    // next-best exact identity — it survives chd/rvz repacks that
+    // scramble every file digest. Normalized to ScreenScraper's dashed
+    // uppercase form: raw PS2 serials arrive as SLES_520.05 from
+    // SYSTEM.CNF. Only serial-shaped values qualify.
+    let serial = ira_models::screenscraper_matches_by_serial(&platform_id)
+        .then(|| ira_platforms::rom_serial::read_serial_cached(db, &abs))
+        .flatten()
+        .map(|s| normalize_serial(&s))
+        .filter(|s| looks_like_serial(s));
+    if let Some(serial) = serial {
         match steam.screenscraper_serial_lookup(creds, &serial, &platform_id) {
             Err(e) => {
                 eprintln!("SS batch: serial '{serial}' lookup failed: {e}");
@@ -204,7 +250,7 @@ fn resolve(
     // file name is what the scene shipped. Punctuation goes: the colon in
     // "13 Sentinels: Aegis Rim" poisons ScreenScraper's search (ES-DE
     // strips parentheses for the same reason).
-    let stem = std::path::Path::new(&entry.rom_path)
+    let stem = std::path::Path::new(&abs)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
@@ -256,6 +302,30 @@ fn looks_like_serial(game_id: &str) -> bool {
         && game_id
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
+}
+
+/// The digest pass's archive-entry filter: the inner file carrying the
+/// console's own extension.
+fn rom_extension_pick(platform_id: &str) -> impl Fn(&str) -> bool {
+    let extensions: Vec<String> = ira_models::find_console(platform_id)
+        .map(|console| {
+            console
+                .extensions
+                .iter()
+                .map(|ext| format!(".{ext}"))
+                .collect()
+        })
+        .unwrap_or_default();
+    move |name: &str| {
+        let name = name.to_lowercase();
+        extensions.iter().any(|ext| name.ends_with(ext))
+    }
+}
+
+/// Disc serials normalized to ScreenScraper's dashed uppercase form —
+/// the raw PS2 serial arrives as SLES_520.05 from SYSTEM.CNF.
+fn normalize_serial(serial: &str) -> String {
+    serial.to_uppercase().replace('_', "-").replace('.', "")
 }
 
 /// Strip the dump tags a ROM stem carries — `(USA)`, `[!]`, `(Rev 1)` —

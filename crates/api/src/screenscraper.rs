@@ -95,6 +95,67 @@ pub fn genres_list_url(creds: &ScraperCreds) -> String {
     )
 }
 
+/// The account's usage counters, from ssuserInfos.php — ScreenScraper
+/// requires clients to read and manage these.
+#[derive(Debug, Default, Clone)]
+pub struct SsUserInfos {
+    pub requests_today: i64,
+    pub max_requests_per_day: i64,
+    pub requests_ko_today: i64,
+    pub max_requests_ko_per_day: i64,
+    pub max_requests_per_min: i64,
+}
+
+impl SsUserInfos {
+    /// The daily scrape quota is spent: keep the pass off the API.
+    pub fn exhausted(&self) -> bool {
+        self.max_requests_per_day > 0 && self.requests_today >= self.max_requests_per_day
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SsUserInfosRoot {
+    #[serde(default)]
+    ssuser: Option<SsUserRaw>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SsUserRaw {
+    #[serde(default, rename = "requeststoday")]
+    requests_today: Option<i64>,
+    #[serde(default, rename = "maxrequestsperday")]
+    max_requests_per_day: Option<i64>,
+    #[serde(default, rename = "requestskotoday")]
+    requests_ko_today: Option<i64>,
+    #[serde(default, rename = "maxrequestskoperday")]
+    max_requests_ko_per_day: Option<i64>,
+    #[serde(default, rename = "maxrequestspermin")]
+    max_requests_per_min: Option<i64>,
+}
+
+pub fn user_infos_url(creds: &ScraperCreds) -> String {
+    format!(
+        "{API_URL_BASE}/ssuserInfos.php?{}&softname={}&output=xml",
+        creds.auth_params(),
+        urlencode(SOFT_NAME)
+    )
+}
+
+pub fn parse_user_infos(xml: &str) -> Result<SsUserInfos, String> {
+    let root: SsUserInfosRoot = quick_xml::de::from_str(xml)
+        .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
+    let user = root
+        .ssuser
+        .ok_or_else(|| "ScreenScraper answer carries no user info".to_string())?;
+    Ok(SsUserInfos {
+        requests_today: user.requests_today.unwrap_or(0),
+        max_requests_per_day: user.max_requests_per_day.unwrap_or(0),
+        requests_ko_today: user.requests_ko_today.unwrap_or(0),
+        max_requests_ko_per_day: user.max_requests_ko_per_day.unwrap_or(0),
+        max_requests_per_min: user.max_requests_per_min.unwrap_or(0),
+    })
+}
+
 /// The exact-match URL by disc serial: disc dumps — `SLES-52005`, chd,
 /// rvz, whatever repack — identify themselves through `serialnum` instead
 /// of any file digest.
@@ -581,6 +642,12 @@ impl SteamDataClient {
         self.screenscraper_get(&serial_lookup_url(creds, serial, platform_id))
     }
 
+    /// The account's quota counters. Best-effort: callers log failures.
+    pub fn screenscraper_user_infos(&self, creds: &ScraperCreds) -> Result<SsUserInfos, String> {
+        let body = self.http_get_text(&user_infos_url(creds))?;
+        parse_user_infos(&body)
+    }
+
     /// Re-fetch one known game by its ScreenScraper id.
     pub fn screenscraper_game(
         &self,
@@ -920,6 +987,23 @@ mod tests {
         assert!(url.contains("jeuInfos.php?devid=ira&devpassword=pw"));
         assert!(url.contains("serialnum=SLES-52005"));
         assert!(url.contains("systemeid=58"));
+    }
+
+    #[test]
+    fn test_parse_user_infos_reads_quota_counters() {
+        let xml = r#"<Data><ssuser>
+            <id>ayla</id><requeststoday>42</requeststoday>
+            <maxrequestsperday>15000</maxrequestsperday>
+            <requestskotoday>3</requestskotoday>
+            <maxrequestskoperday>500</maxrequestskoperday>
+            <maxrequestspermin>6</maxrequestspermin>
+        </ssuser></Data>"#;
+        let infos = parse_user_infos(xml).unwrap();
+        assert_eq!(infos.requests_today, 42);
+        assert_eq!(infos.max_requests_per_day, 15000);
+        assert!(!infos.exhausted());
+        let spent = SsUserInfos { requests_today: 15000, ..infos.clone() };
+        assert!(spent.exhausted());
     }
 
     #[test]

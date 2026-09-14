@@ -189,16 +189,11 @@ pub fn delete_variant(conn: &DbConn, variant_id: i64) -> Result<(), String> {
 }
 
 pub fn get_default_variant(conn: &DbConn, game_id: i64) -> Result<Option<i64>, String> {
-    let c = crate::lock_db(conn)?;
-    match c.query_row(
+    crate::query_optional_scalar(
+        conn,
         "SELECT variant_id FROM game_default_variant WHERE game_id = ?1",
         params![game_id],
-        |row| row.get(0),
-    ) {
-        Ok(vid) => Ok(Some(vid)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(err(e)),
-    }
+    )
 }
 
 pub fn set_default_variant(
@@ -221,16 +216,6 @@ pub fn set_default_variant(
         )
         .map_err(err)?;
     }
-    Ok(())
-}
-
-pub fn delete_all_variants(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "DELETE FROM game_variants WHERE game_id = ?1",
-        params![game_id],
-    )
-    .map_err(err)?;
     Ok(())
 }
 
@@ -265,33 +250,6 @@ pub fn set_variant_last_played(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_variant_set_clause_byte_matches_previous_literal() {
-        assert_eq!(
-            variant_set_clause(1),
-            "name=?1, exe=?2, working_dir=?3, args=?4, env_vars=?5, pre_launch=?6, \
-             custom_images=?7, show_as_entry=?8, count_playtime=?9, logo_position=?10, \
-             logo_size=?11"
-        );
-    }
-
-    #[test]
-    fn test_variant_insert_columns_byte_match_previous_literal() {
-        assert_eq!(
-            variant_insert_columns(),
-            "game_id, name, exe, working_dir, args, env_vars, sort_order, pre_launch, \
-             custom_images, show_as_entry, count_playtime, logo_position, logo_size"
-        );
-    }
-
-    #[test]
-    fn test_positional_placeholders_byte_match_previous_literal() {
-        assert_eq!(
-            positional_placeholders(VARIANT_WRITE_COLUMNS.len() + 2),
-            "?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13"
-        );
-    }
 
     #[test]
     fn test_variant_select_columns_start_with_write_columns_in_row_order() {

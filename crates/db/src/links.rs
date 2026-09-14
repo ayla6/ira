@@ -86,21 +86,15 @@ pub fn playtime_links(conn: &DbConn) -> Result<Vec<(i64, i64)>, String> {
 /// The members of `game_id`'s link, the game itself included; empty when
 /// it is not linked.
 pub fn link_members(conn: &DbConn, game_id: i64) -> Result<Vec<i64>, String> {
-    let c = crate::lock_db(conn)?;
-    let group: Option<i64> = c
-        .query_row(
-            &format!("SELECT group_id FROM {LINK_TABLE} WHERE game_id = ?1"),
-            params![game_id],
-            |row| row.get(0),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            e => Err(err(e)),
-        })?;
+    let group: Option<i64> = crate::query_optional_scalar(
+        conn,
+        &format!("SELECT group_id FROM {LINK_TABLE} WHERE game_id = ?1"),
+        params![game_id],
+    )?;
     let Some(group) = group else {
         return Ok(Vec::new());
     };
+    let c = crate::lock_db(conn)?;
     let mut stmt = c
         .prepare(&format!(
             "SELECT game_id FROM {LINK_TABLE} WHERE group_id = ?1 ORDER BY game_id"
@@ -110,42 +104,6 @@ pub fn link_members(conn: &DbConn, game_id: i64) -> Result<Vec<i64>, String> {
         .query_map(params![group], |row| row.get(0))
         .map_err(err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(err)
-}
-
-/// Each link's members with their titles, for management UIs: one inner
-/// vec per link, sorted by the first member's title.
-pub fn link_groups_with_titles(conn: &DbConn) -> Result<Vec<Vec<(i64, String)>>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
-            "SELECT group_id, l.game_id, title FROM {LINK_TABLE} l
-             JOIN games ON games.id = l.game_id
-             ORDER BY group_id, title COLLATE NOCASE"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(err)?;
-    let rows = rows.collect::<Result<Vec<_>, _>>().map_err(err)?;
-    // Rows arrive ordered by group, so one link's members are consecutive.
-    let mut groups: Vec<Vec<(i64, String)>> = Vec::new();
-    let mut current_group: Option<i64> = None;
-    for (group, game_id, title) in rows {
-        if current_group != Some(group) {
-            groups.push(Vec::new());
-            current_group = Some(group);
-        }
-        if let Some(members) = groups.last_mut() {
-            members.push((game_id, title));
-        }
-    }
-    Ok(groups)
 }
 
 #[cfg(test)]
@@ -247,25 +205,5 @@ mod tests {
 
         assert!(link_members(&conn, b).unwrap().is_empty());
         assert!(playtime_links(&conn).unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_groups_with_titles_orders_links_and_members() {
-        let (conn, _tmp) = setup_db();
-        let a = game(&conn, "Alpha");
-        let b = game(&conn, "Beta");
-        let c = game(&conn, "Ceres");
-        let d = game(&conn, "Delta");
-        link_games(&conn, &[b, a]).unwrap();
-        link_games(&conn, &[d, c]).unwrap();
-
-        let groups = link_groups_with_titles(&conn).unwrap();
-        assert_eq!(groups.len(), 2);
-        let titles: Vec<Vec<&str>> = groups
-            .iter()
-            .map(|g| g.iter().map(|(_, t)| t.as_str()).collect())
-            .collect();
-        assert!(titles.contains(&vec!["Alpha", "Beta"]));
-        assert!(titles.contains(&vec!["Ceres", "Delta"]));
     }
 }

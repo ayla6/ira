@@ -51,30 +51,6 @@ pub fn find_by_db_id(conn: &DbConn, db_id: i64) -> Result<Option<GameEntry>, Str
     find_game_by(conn, "id = ?1", params![db_id])
 }
 
-pub fn find_by_trophy_platform(
-    conn: &DbConn,
-    trophy_source: ira_models::TrophySource,
-    platform_id: &str,
-) -> Result<Option<GameEntry>, String> {
-    find_game_by(
-        conn,
-        "trophy_source = ?1 AND platform_id = ?2",
-        params![trophy_source.as_str(), platform_id],
-    )
-}
-
-pub fn find_by_kind_platform(
-    conn: &DbConn,
-    kind: ira_models::GameKind,
-    platform_id: &str,
-) -> Result<Option<GameEntry>, String> {
-    find_game_by(
-        conn,
-        "kind = ?1 AND platform_id = ?2",
-        params![kind.as_str(), platform_id],
-    )
-}
-
 pub fn find_by_game_folder(conn: &DbConn, game_folder: &str) -> Result<Option<GameEntry>, String> {
     find_game_by(
         conn,

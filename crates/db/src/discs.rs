@@ -82,16 +82,11 @@ pub fn delete_discs(conn: &DbConn, game_id: i64) -> Result<(), String> {
 }
 
 pub fn get_default_disc(conn: &DbConn, game_id: i64) -> Result<Option<i64>, String> {
-    let c = crate::lock_db(conn)?;
-    match c.query_row(
+    crate::query_optional_scalar(
+        conn,
         "SELECT disc_id FROM game_default_disc WHERE game_id = ?1",
         params![game_id],
-        |row| row.get(0),
-    ) {
-        Ok(did) => Ok(Some(did)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(err(e)),
-    }
+    )
 }
 
 pub fn set_default_disc(conn: &DbConn, game_id: i64, disc_id: Option<i64>) -> Result<(), String> {

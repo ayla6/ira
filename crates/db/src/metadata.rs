@@ -163,36 +163,20 @@ pub fn store_scraper_metadata(
 
 /// The company name a ScreenScraper id refers to, per the lookup table.
 pub fn scraper_company_name(conn: &DbConn, id: i64) -> Result<Option<String>, String> {
-    let c = crate::lock_db(conn)?;
-    let name: Option<String> = c
-        .query_row(
-            "SELECT name FROM scraper_companies WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            e => Err(err(e)),
-        })?;
-    Ok(name)
+    crate::query_optional_scalar(
+        conn,
+        "SELECT name FROM scraper_companies WHERE id = ?1",
+        params![id],
+    )
 }
 
 /// The genre name a ScreenScraper id refers to, per the lookup table.
 pub fn scraper_genre_name(conn: &DbConn, id: i64) -> Result<Option<String>, String> {
-    let c = crate::lock_db(conn)?;
-    let name: Option<String> = c
-        .query_row(
-            "SELECT name FROM scraper_genres WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            e => Err(err(e)),
-        })?;
-    Ok(name)
+    crate::query_optional_scalar(
+        conn,
+        "SELECT name FROM scraper_genres WHERE id = ?1",
+        params![id],
+    )
 }
 
 /// The board kind and entry name a ScreenScraper classification id
@@ -201,19 +185,12 @@ pub fn scraper_classification(
     conn: &DbConn,
     id: i64,
 ) -> Result<Option<(String, String)>, String> {
-    let c = crate::lock_db(conn)?;
-    let row: Option<(String, String)> = c
-        .query_row(
-            "SELECT kind, name FROM scraper_classifications WHERE id = ?1",
-            params![id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            e => Err(err(e)),
-        })?;
-    Ok(row)
+    crate::query_optional(
+        conn,
+        "SELECT kind, name FROM scraper_classifications WHERE id = ?1",
+        params![id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
 }
 
 /// Parse a ScreenScraper release date — `YYYY-MM-DD` or bare `YYYY` —

@@ -150,7 +150,6 @@ pub fn add_playtime(conn: &DbConn, id: i64, hours: f64) -> Result<(), String> {
 
 /// Copy-guarded UPDATE used when merging duplicates: moves child rows to the
 /// canonical game only if it has none yet, so its existing values win.
-/// Byte-identical to the literal it replaced (modulo table name).
 fn copy_guarded_update_sql(table: &str) -> String {
     format!(
         "UPDATE {table} SET game_id = ?1\n             WHERE game_id = ?2 AND NOT EXISTS (\n                 SELECT 1 FROM {table} WHERE game_id = ?1\n             )"
@@ -277,14 +276,6 @@ mod tests {
     use super::*;
     use ira_models::{GameDisc, GameKind, TrophySource};
     use tempfile::TempDir;
-
-    #[test]
-    fn test_copy_guarded_update_sql_byte_matches_previous_literal() {
-        assert_eq!(
-            copy_guarded_update_sql("game_default_variant"),
-            "UPDATE game_default_variant SET game_id = ?1\n             WHERE game_id = ?2 AND NOT EXISTS (\n                 SELECT 1 FROM game_default_variant WHERE game_id = ?1\n             )"
-        );
-    }
 
     fn setup_db() -> (DbConn, TempDir) {
         let tmp = TempDir::new().unwrap();

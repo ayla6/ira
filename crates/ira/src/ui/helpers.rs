@@ -579,7 +579,8 @@ pub fn clear_children(w: &impl Clearable) {
 /// "No results found") inside boxed lists of the match/search dialogs.
 pub(crate) fn status_row(text: &str) -> adw::ActionRow {
     let row = adw::ActionRow::new();
-    row.set_title(text);
+    // Callers hand over raw API error text, which routinely contains `&`.
+    row.set_title(&esc(text));
     row.set_sensitive(false);
     row
 }

@@ -64,3 +64,7 @@ pub fn set_rom_path(conn: &DbConn, id: i64, rom_path: &str) -> Result<(), String
 pub fn set_rom_hash(conn: &DbConn, id: i64, rom_hash: &str) -> Result<(), String> {
     update_field(conn, id, "rom_hash", &rom_hash)
 }
+
+pub fn set_content_hash(conn: &DbConn, id: i64, content_hash: &str) -> Result<(), String> {
+    update_field(conn, id, "content_hash", &content_hash)
+}

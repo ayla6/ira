@@ -68,6 +68,7 @@ pub fn init_db(db_path: &str) -> DbConn {
                 api_dll_folder TEXT NOT NULL DEFAULT '',
                 saves_centralized INTEGER NOT NULL DEFAULT 0,
                 rom_hash TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
                 vanished INTEGER NOT NULL DEFAULT 0,
                 developer TEXT NOT NULL DEFAULT '',
                 publisher TEXT NOT NULL DEFAULT '',

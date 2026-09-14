@@ -55,6 +55,9 @@ pub struct GameEntry {
     /// a full-file MD5 elsewhere. Lets a scan reattach a game whose file
     /// reappears under a new name or path (empty = unknown).
     pub rom_hash: String,
+    /// The plain full-file md5 — ScreenScraper's key — kept beside the
+    /// RA-flavored `rom_hash`, whose NDS variant hashes only ranges.
+    pub content_hash: String,
     /// The game's files are gone: the source scan that owns this row last
     /// looked and did not find it. The row stays (its playtime and trophies
     /// remain), but game loads must ignore it entirely — even when hidden
@@ -126,6 +129,7 @@ impl GameEntry {
             cached_total_count: 0,
             cached_achievement_mtime: 0,
             rom_hash: String::new(),
+            content_hash: String::new(),
             vanished: false,
             players: String::new(),
             synopsis: String::new(),
@@ -178,6 +182,7 @@ impl GameEntry {
             cached_total_count: g.total_count as i64,
             cached_achievement_mtime: 0,
             rom_hash: String::new(),
+            content_hash: String::new(),
             vanished: false,
             players: String::new(),
             synopsis: String::new(),

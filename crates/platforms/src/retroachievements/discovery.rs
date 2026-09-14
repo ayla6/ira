@@ -586,6 +586,8 @@ fn build_ra_games_for_console(
         }
     }
 
+    fill_content_hashes(db, console, unpack_roms);
+
     if console.def.id == "nds" {
         enrich_nds_roms(
             db,
@@ -717,6 +719,39 @@ fn is_archive_path(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(crate::archives::is_archive_extension)
+}
+
+/// The plain full-file md5 the ScreenScraper matcher keys on, computed
+/// once per ROM and stored beside the RA-flavored `rom_hash` (whose NDS
+/// variant hashes only the ranges RetroAchievements identifies). No
+/// account or match gating: matched, unmatched and manual rows all get
+/// one, so the pass costs nothing after its first full sweep.
+fn fill_content_hashes(
+    db: &ira_db::DbConn,
+    console: &ActiveConsole,
+    unpack_roms: bool,
+) {
+    let rows = match ira_db::games_missing_content_hash(db, console.def.id) {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("Content hash pass: could not list rows: {e}");
+            return;
+        }
+    };
+    for (db_id, rom_path_str) in rows {
+        let is_archive = is_archive_path(std::path::Path::new(&rom_path_str));
+        if is_archive && !unpack_roms {
+            continue;
+        }
+        let abs = resolve_in_folders(&console.folders, &rom_path_str);
+        let pick = |name: &str| has_rom_extension(name, console.def.extensions);
+        let Some(hash) = crate::rom_hash::content_md5(&abs, &pick) else {
+            continue;
+        };
+        if let Err(e) = ira_db::set_content_hash(db, db_id, &hash) {
+            eprintln!("Content hash pass: failed to store: {e}");
+        }
+    }
 }
 
 /// Archive rows with no hash yet — the container's digest was cleared
@@ -1122,6 +1157,38 @@ mod tests {
             folders: vec![rom_dir.to_path_buf()],
             executable: String::new(),
         }
+    }
+
+    #[test]
+    fn test_fill_content_hashes_hashes_rows_without_guards() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rom_dir = tmp.path().join("roms/gba");
+        std::fs::create_dir_all(&rom_dir).unwrap();
+        let rom = rom_dir.join("Filled (USA).gba");
+        std::fs::write(&rom, b"content to hash").unwrap();
+
+        let db = test_db();
+        let db_id = ira_db::add_game(
+            &db,
+            ira_models::GameKind::Retro,
+            ira_models::TrophySource::Ra,
+            "",
+            "",
+            "gba",
+            "Filled",
+        )
+        .unwrap();
+        ira_db::set_rom_path(&db, db_id, "Filled (USA).gba").unwrap();
+
+        super::fill_content_hashes(&db, &gba_console(&rom_dir), true);
+
+        let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
+        // Even an RA-matched row gets the plain content hash: it is
+        // ScreenScraper's key, independent of the trophy match.
+        assert_eq!(
+            entry.content_hash,
+            crate::rom_hash::file_md5(&rom).unwrap()
+        );
     }
 
     #[test]

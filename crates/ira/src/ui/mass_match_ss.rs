@@ -136,11 +136,18 @@ fn resolve(
     screenscraper_system_id(&platform_id)?;
 
     // The hash search needs the digest and the file size together; a
-    // missing file or hash falls through to the title search.
-    let md5 = (!entry.rom_hash.is_empty())
+    // missing file or hash falls through to the title search. NDS rows
+    // keep an RA-flavored rom_hash, so the plain content hash wins when
+    // the scan has filled it.
+    let stored_hash = if entry.content_hash.is_empty() {
+        &entry.rom_hash
+    } else {
+        &entry.content_hash
+    };
+    let md5 = (!stored_hash.is_empty())
         .then(|| std::fs::metadata(&entry.rom_path).ok().map(|m| m.len()))
         .flatten()
-        .map(|size| (entry.rom_hash.clone(), size));
+        .map(|size| (stored_hash.clone(), size));
     let romnom = std::path::Path::new(&entry.rom_path)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())

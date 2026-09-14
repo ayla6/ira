@@ -135,14 +135,16 @@ pub fn new(cfg: Arc<Config>, sender: AppSender, save_dir: String,
 
 ## Code organization
 
-### Migration lifecycle
+### No backwards compatibility
 
-**Before the first release:** one-time data migrations (e.g. `UPDATE games SET
-game_id = steam_id ...`) should be removed once confirmed working on the user's
-database. Schema migrations (`ensure_column`) stay forever — data migrations
-don't. Mark them with a comment like `// PRE-RELEASE: remove after v0.X` so
-they're easy to grep for. After release, schema migrations are the only
-permanent migration mechanism.
+Ira is pre-release with a single user: **no migrations, no legacy
+fallbacks, no serde aliases for old field names, no format-detection
+shims.** When a schema changes, edit the `CREATE TABLE` in
+`crates/db/src/setup.rs` directly and drop the old data; when a config or
+profile format changes, let old files fail or take their defaults — never
+write code whose only job is to read what an older Ira build wrote.
+Handling *other software's* legacy formats (Steam's VDF shapes, Goldberg's
+old save folder name) is a feature, not back-compat, and stays.
 
 ### File size
 - **Soft cap: 100 lines per function.** If longer, extract sub-functions.

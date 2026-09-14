@@ -136,6 +136,10 @@ pub fn init_db(db_path: &str) -> DbConn {
                 kind TEXT NOT NULL DEFAULT '',
                 name TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS scraper_misses (
+                game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+                checked_at INTEGER NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS game_variants (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,

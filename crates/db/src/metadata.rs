@@ -169,6 +169,43 @@ pub fn store_scraper_metadata(
     Ok(())
 }
 
+/// Remember that a game's ScreenScraper search came up empty, so the mass
+/// matcher stops re-asking for a ROM the source does not know. Manual
+/// picks and later matches clear it again.
+pub fn tombstone_scraper_miss(conn: &DbConn, game_id: i64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "INSERT INTO scraper_misses (game_id, checked_at) VALUES (?1, ?2)
+         ON CONFLICT(game_id) DO UPDATE SET checked_at = excluded.checked_at",
+        params![game_id, chrono::Utc::now().timestamp()],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+/// The games whose ScreenScraper search already came up empty.
+pub fn scraper_missed_ids(conn: &DbConn) -> Result<Vec<i64>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c.prepare("SELECT game_id FROM scraper_misses").map_err(err)?;
+    let ids = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(err)?
+        .collect::<Result<Vec<i64>, _>>()
+        .map_err(err)?;
+    Ok(ids)
+}
+
+/// Forget a game's miss — something matched it after all.
+pub fn clear_scraper_miss(conn: &DbConn, game_id: i64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "DELETE FROM scraper_misses WHERE game_id = ?1",
+        params![game_id],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
 /// The company name a ScreenScraper id refers to, per the lookup table.
 pub fn scraper_company_name(conn: &DbConn, id: i64) -> Result<Option<String>, String> {
     crate::query_optional_scalar(
@@ -308,6 +345,31 @@ mod tests {
         let dates: std::collections::HashMap<String, String> =
             serde_json::from_str(&entry.release_dates).unwrap();
         assert_eq!(dates.get("us").map(String::as_str), Some("1993-12-18"));
+    }
+
+    #[test]
+    fn test_scraper_miss_tombstone_round_trip() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(
+            &conn,
+            GameKind::Retro,
+            TrophySource::Empty,
+            "",
+            "",
+            "",
+            "Obscure Rom",
+        )
+        .unwrap();
+
+        assert!(scraper_missed_ids(&conn).unwrap().is_empty());
+        tombstone_scraper_miss(&conn, id).unwrap();
+        assert_eq!(scraper_missed_ids(&conn).unwrap(), vec![id]);
+        // Re-missing the same game stays one row, refreshed.
+        tombstone_scraper_miss(&conn, id).unwrap();
+        assert_eq!(scraper_missed_ids(&conn).unwrap(), vec![id]);
+        // A later match clears it and the game re-enters the pool.
+        clear_scraper_miss(&conn, id).unwrap();
+        assert!(scraper_missed_ids(&conn).unwrap().is_empty());
     }
 
     #[test]

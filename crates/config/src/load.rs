@@ -62,13 +62,10 @@ pub fn load_config() -> Config {
     let _guard = config_io_lock();
     let path = config_path();
     let mut c = match std::fs::read(&path) {
-        Ok(data) => match serde_json::from_slice::<Config>(&data) {
-            Ok(c) => Some(c),
-            Err(e) => {
-                eprintln!("Failed to parse config: {e}; trying the backup copy");
-                parse_config_file(&backup_path())
-            }
-        },
+        Ok(data) => serde_json::from_slice::<Config>(&data)
+            .map_err(|e| eprintln!("Failed to parse config: {e}; trying the backup copy"))
+            .ok()
+            .or_else(|| parse_config_file(&backup_path())),
         // No config yet (fresh install); the backup is not consulted so a
         // deleted config stays deleted.
         Err(_) => None,

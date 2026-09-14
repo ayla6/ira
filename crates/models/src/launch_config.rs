@@ -159,6 +159,16 @@ impl Default for WineConfig {
     }
 }
 
+/// Resolves one merged field: the override's value when the user touched
+/// it, the global default otherwise.
+fn pick<T: Clone>(overridden: bool, mine: &T, theirs: &T) -> T {
+    if overridden {
+        mine.clone()
+    } else {
+        theirs.clone()
+    }
+}
+
 impl WineConfig {
     pub fn merge_with_default(&self, default: &WineConfig) -> WineConfig {
         let o = &self.overridden_fields;
@@ -169,111 +179,51 @@ impl WineConfig {
             version: self.version.clone(),
             custom_wine_path: self.custom_wine_path.clone(),
             arch: self.arch.clone(),
-            esync: if has("esync") {
-                self.esync
-            } else {
-                default.esync
-            },
-            fsync: if has("fsync") {
-                self.fsync
-            } else {
-                default.fsync
-            },
-            dxvk: if has("dxvk") { self.dxvk } else { default.dxvk },
-            vkd3d: if has("vkd3d") {
-                self.vkd3d
-            } else {
-                default.vkd3d
-            },
-            d3d_extras: if has("d3d_extras") {
-                self.d3d_extras
-            } else {
-                default.d3d_extras
-            },
-            dxvk_nvapi: if has("dxvk_nvapi") {
-                self.dxvk_nvapi
-            } else {
-                default.dxvk_nvapi
-            },
-            fsr: if has("fsr") { self.fsr } else { default.fsr },
-            battleye: if has("battleye") {
-                self.battleye
-            } else {
-                default.battleye
-            },
-            eac: if has("eac") { self.eac } else { default.eac },
-            show_debug: if has("show_debug") {
-                self.show_debug.clone()
-            } else {
-                default.show_debug.clone()
-            },
-            dll_overrides: if has("dll_overrides") {
-                self.dll_overrides.clone()
-            } else {
-                default.dll_overrides.clone()
-            },
-            audio: if has("audio") {
-                self.audio.clone()
-            } else {
-                default.audio.clone()
-            },
-            graphics: if has("graphics") {
-                self.graphics.clone()
-            } else {
-                default.graphics.clone()
-            },
-            desktop_integration: if has("desktop_integration") {
-                self.desktop_integration
-            } else {
-                default.desktop_integration
-            },
-            show_crash_dialogs: if has("show_crash_dialogs") {
-                self.show_crash_dialogs
-            } else {
-                default.show_crash_dialogs
-            },
-            mouse_warp_override: if has("mouse_warp_override") {
-                self.mouse_warp_override.clone()
-            } else {
-                default.mouse_warp_override.clone()
-            },
-            dpi_enabled: if has("dpi_enabled") {
-                self.dpi_enabled
-            } else {
-                default.dpi_enabled
-            },
-            dpi: if has("dpi") { self.dpi } else { default.dpi },
-            dxvk_frame_rate: if has("dxvk_frame_rate") {
-                self.dxvk_frame_rate
-            } else {
-                default.dxvk_frame_rate
-            },
-            dxvk_hud: if has("dxvk_hud") {
-                self.dxvk_hud
-            } else {
-                default.dxvk_hud
-            },
-            proton_wow64: if has("proton_wow64") {
-                self.proton_wow64
-            } else {
-                default.proton_wow64
-            },
-            proton_ntsync: if has("proton_ntsync") {
-                self.proton_ntsync
-            } else {
-                default.proton_ntsync
-            },
-            proton_disable_lsteamclient: if has("proton_disable_lsteamclient") {
-                self.proton_disable_lsteamclient
-            } else {
-                default.proton_disable_lsteamclient
-            },
+            esync: pick(has("esync"), &self.esync, &default.esync),
+            fsync: pick(has("fsync"), &self.fsync, &default.fsync),
+            dxvk: pick(has("dxvk"), &self.dxvk, &default.dxvk),
+            vkd3d: pick(has("vkd3d"), &self.vkd3d, &default.vkd3d),
+            d3d_extras: pick(has("d3d_extras"), &self.d3d_extras, &default.d3d_extras),
+            dxvk_nvapi: pick(has("dxvk_nvapi"), &self.dxvk_nvapi, &default.dxvk_nvapi),
+            fsr: pick(has("fsr"), &self.fsr, &default.fsr),
+            battleye: pick(has("battleye"), &self.battleye, &default.battleye),
+            eac: pick(has("eac"), &self.eac, &default.eac),
+            show_debug: pick(has("show_debug"), &self.show_debug, &default.show_debug),
+            dll_overrides: pick(has("dll_overrides"), &self.dll_overrides, &default.dll_overrides),
+            audio: pick(has("audio"), &self.audio, &default.audio),
+            graphics: pick(has("graphics"), &self.graphics, &default.graphics),
+            desktop_integration: pick(
+                has("desktop_integration"),
+                &self.desktop_integration,
+                &default.desktop_integration,
+            ),
+            show_crash_dialogs: pick(
+                has("show_crash_dialogs"),
+                &self.show_crash_dialogs,
+                &default.show_crash_dialogs,
+            ),
+            mouse_warp_override: pick(
+                has("mouse_warp_override"),
+                &self.mouse_warp_override,
+                &default.mouse_warp_override,
+            ),
+            dpi_enabled: pick(has("dpi_enabled"), &self.dpi_enabled, &default.dpi_enabled),
+            dpi: pick(has("dpi"), &self.dpi, &default.dpi),
+            dxvk_frame_rate: pick(
+                has("dxvk_frame_rate"),
+                &self.dxvk_frame_rate,
+                &default.dxvk_frame_rate,
+            ),
+            dxvk_hud: pick(has("dxvk_hud"), &self.dxvk_hud, &default.dxvk_hud),
+            proton_wow64: pick(has("proton_wow64"), &self.proton_wow64, &default.proton_wow64),
+            proton_ntsync: pick(has("proton_ntsync"), &self.proton_ntsync, &default.proton_ntsync),
+            proton_disable_lsteamclient: pick(
+                has("proton_disable_lsteamclient"),
+                &self.proton_disable_lsteamclient,
+                &default.proton_disable_lsteamclient,
+            ),
             umu_enabled: self.umu_enabled,
-            denuvo_api: if has("denuvo_api") {
-                self.denuvo_api.clone()
-            } else {
-                default.denuvo_api.clone()
-            },
+            denuvo_api: pick(has("denuvo_api"), &self.denuvo_api, &default.denuvo_api),
             overridden_fields: self.overridden_fields.clone(),
         }
     }

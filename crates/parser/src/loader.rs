@@ -67,14 +67,7 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
         })
         .collect();
     for (at, p) in found {
-        match at {
-            AssetType::Icon => game.icon_path = p,
-            AssetType::Hero => game.hero_image_path = p,
-            AssetType::Grid => game.grid_path = p,
-            AssetType::Header => game.header_path = p,
-            AssetType::Logo => game.logo_path = p,
-            AssetType::Square => game.square_path = p,
-        }
+        *game.asset_path_mut(at) = p;
     }
 }
 

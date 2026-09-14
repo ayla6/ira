@@ -98,57 +98,8 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
         env.push(("PROTONPATH".to_string(), proton_path));
     }
 
-    // Proton-specific env vars
     if is_proton {
-        // Enable umu logging
-        env.retain(|(k, _)| k != "UMU_LOG");
-        env.push(("UMU_LOG".to_string(), "1".to_string()));
-        env.retain(|(k, _)| k != "UMU_RUNTIME_UPDATE");
-        env.push(("UMU_RUNTIME_UPDATE".to_string(), "0".to_string()));
-
-        // Proton needs PROTON_USE_WINED3D when DXVK is not enabled
-        if !wine.dxvk {
-            env.retain(|(k, _)| k != "PROTON_USE_WINED3D");
-            env.push(("PROTON_USE_WINED3D".to_string(), "1".to_string()));
-        }
-
-        // DXVK D3D8 support when DXVK is enabled
-        if wine.dxvk {
-            env.retain(|(k, _)| k != "PROTON_DXVK_D3D8");
-            env.push(("PROTON_DXVK_D3D8".to_string(), "1".to_string()));
-        }
-
-        // Disable LSteam client integration (we're not Steam)
-        if wine.proton_disable_lsteamclient {
-            env.retain(|(k, _)| k != "PROTON_DISABLE_LSTEAMCLIENT");
-            env.push(("PROTON_DISABLE_LSTEAMCLIENT".to_string(), "1".to_string()));
-        }
-
-        // Set wayland explicitly (0 or 1, not absent)
-        env.retain(|(k, _)| k != "PROTON_ENABLE_WAYLAND");
-        if wine.graphics == "wayland" {
-            env.push(("PROTON_ENABLE_WAYLAND".to_string(), "1".to_string()));
-        } else {
-            env.push(("PROTON_ENABLE_WAYLAND".to_string(), "0".to_string()));
-        }
-
-        // Set mono/gecko cache dirs from the Proton installation. Lutris sets
-        // these unconditionally; wine falls back to its own detection if absent.
-        let wine_path = std::path::Path::new(wine_exe);
-        if let Some(files_dir) = wine_path.parent().and_then(|p| p.parent()) {
-            let mono = files_dir.join("mono");
-            let gecko = files_dir.join("gecko");
-            env.retain(|(k, _)| k != "WINE_MONO_CACHE_DIR");
-            env.push((
-                "WINE_MONO_CACHE_DIR".to_string(),
-                mono.to_string_lossy().to_string(),
-            ));
-            env.retain(|(k, _)| k != "WINE_GECKO_CACHE_DIR");
-            env.push((
-                "WINE_GECKO_CACHE_DIR".to_string(),
-                gecko.to_string_lossy().to_string(),
-            ));
-        }
+        push_proton_env(&mut env, wine, wine_exe);
     }
 
     if wine.dxvk_frame_rate > 0 {
@@ -159,21 +110,59 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     }
     // Always pass DXVK_HUD explicitly: some Proton builds enable the HUD by
     // default, so setting it to 0 when the toggle is off is required to disable it.
-    env.retain(|(k, _)| k != "DXVK_HUD");
     env.push((
         "DXVK_HUD".to_string(),
         if wine.dxvk_hud { "1" } else { "0" }.to_string(),
     ));
     if wine.proton_wow64 {
-        env.retain(|(k, _)| k != "PROTON_USE_WOW64");
         env.push(("PROTON_USE_WOW64".to_string(), "1".to_string()));
     }
     if wine.proton_ntsync {
-        env.retain(|(k, _)| k != "PROTON_USE_NTSYNC");
         env.push(("PROTON_USE_NTSYNC".to_string(), "1".to_string()));
     }
 
     env
+}
+
+/// Env vars that only make sense under Proton/umu.
+fn push_proton_env(env: &mut Vec<(String, String)>, wine: &WineConfig, wine_exe: &str) {
+    env.push(("UMU_LOG".to_string(), "1".to_string()));
+    env.push(("UMU_RUNTIME_UPDATE".to_string(), "0".to_string()));
+
+    // Proton needs PROTON_USE_WINED3D when DXVK is not enabled
+    if !wine.dxvk {
+        env.push(("PROTON_USE_WINED3D".to_string(), "1".to_string()));
+    }
+
+    // DXVK D3D8 support when DXVK is enabled
+    if wine.dxvk {
+        env.push(("PROTON_DXVK_D3D8".to_string(), "1".to_string()));
+    }
+
+    // Disable LSteam client integration (we're not Steam)
+    if wine.proton_disable_lsteamclient {
+        env.push(("PROTON_DISABLE_LSTEAMCLIENT".to_string(), "1".to_string()));
+    }
+
+    // Set wayland explicitly (0 or 1, not absent)
+    let wayland = if wine.graphics == "wayland" { "1" } else { "0" };
+    env.push(("PROTON_ENABLE_WAYLAND".to_string(), wayland.to_string()));
+
+    // Set mono/gecko cache dirs from the Proton installation. Lutris sets
+    // these unconditionally; wine falls back to its own detection if absent.
+    let wine_path = std::path::Path::new(wine_exe);
+    if let Some(files_dir) = wine_path.parent().and_then(|p| p.parent()) {
+        let mono = files_dir.join("mono");
+        let gecko = files_dir.join("gecko");
+        env.push((
+            "WINE_MONO_CACHE_DIR".to_string(),
+            mono.to_string_lossy().to_string(),
+        ));
+        env.push((
+            "WINE_GECKO_CACHE_DIR".to_string(),
+            gecko.to_string_lossy().to_string(),
+        ));
+    }
 }
 
 pub fn build_wine_command(

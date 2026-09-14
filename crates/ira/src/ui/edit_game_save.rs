@@ -112,12 +112,21 @@ fn save_app_id(db: &ira_db::DbConn, params: &SaveGameSettingsParams) -> AppIdRes
             } else {
                 &new_id
             };
-            let (steam_id, game_id): (&str, &str) = if params.trophy_source.has_steam_enrichment() {
-                (&new_id, "")
-            } else {
-                ("", &new_id)
-            };
-            if let Err(e) = ira_db::update_game_ids(db, params.db_id, steam_id, game_id, ts, pid) {
+            // The edited id lands in the column it belongs to: steam
+            // appids for steam-enriched rows, the RA id for RA matches,
+            // the platform-native id (title id, serial) otherwise.
+            if params.trophy_source.has_steam_enrichment() {
+                if let Err(e) = ira_db::update_game_ids(db, params.db_id, &new_id, "", ts, pid) {
+                    eprintln!("Failed to update app ID: {}", e);
+                }
+                if let Err(e) = ira_db::update_native_id(db, params.db_id, "") {
+                    eprintln!("Failed to clear native id: {}", e);
+                }
+            } else if ts == ira_models::TrophySource::Ra {
+                if let Err(e) = ira_db::update_game_ids(db, params.db_id, "", &new_id, ts, pid) {
+                    eprintln!("Failed to update app ID: {}", e);
+                }
+            } else if let Err(e) = ira_db::update_native_id(db, params.db_id, &new_id) {
                 eprintln!("Failed to update app ID: {}", e);
             }
         }

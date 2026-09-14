@@ -7,7 +7,7 @@ pub fn add_game(
     kind: GameKind,
     trophy_source: TrophySource,
     steam_id: &str,
-    game_id: &str,
+    native_id: &str,
     platform_id: &str,
     title: &str,
 ) -> Result<i64, String> {
@@ -16,15 +16,15 @@ pub fn add_game(
     let trophy_source = trophy_source.as_str();
     if !steam_id.is_empty() {
         c.execute(
-            "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO games (kind, trophy_source, steam_id, native_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(steam_id) WHERE steam_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
-            params![kind, trophy_source, steam_id, game_id, platform_id, title],
+            params![kind, trophy_source, steam_id, native_id, platform_id, title],
         ).map_err(err)?;
     } else {
         c.execute(
-            "INSERT INTO games (kind, trophy_source, steam_id, game_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(game_id, platform_id) WHERE game_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
-            params![kind, trophy_source, steam_id, game_id, platform_id, title],
+            "INSERT INTO games (kind, trophy_source, steam_id, native_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(native_id, platform_id) WHERE native_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
+            params![kind, trophy_source, steam_id, native_id, platform_id, title],
         ).map_err(err)?;
     }
     Ok(c.last_insert_rowid())
@@ -44,15 +44,27 @@ pub fn update_game_ids(
     conn: &DbConn,
     id: i64,
     steam_id: &str,
-    game_id: &str,
+    ra_id: &str,
     trophy_source: TrophySource,
     platform_id: &str,
 ) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(
-        "UPDATE games SET steam_id = ?1, game_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
-        params![steam_id, game_id, trophy_source.as_str(), platform_id, id],
+        "UPDATE games SET steam_id = ?1, ra_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
+        params![steam_id, ra_id, trophy_source.as_str(), platform_id, id],
     ).map_err(err)?;
+    Ok(())
+}
+
+/// Overwrite the platform-native id (title id, disc serial, emulator app
+/// id) without touching the achievement keys.
+pub fn update_native_id(conn: &DbConn, id: i64, native_id: &str) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "UPDATE games SET native_id = ?1 WHERE id = ?2",
+        params![native_id, id],
+    )
+    .map_err(err)?;
     Ok(())
 }
 
@@ -473,7 +485,10 @@ mod tests {
         update_game_ids(&conn, id, "67890", "game123", TrophySource::Ra, "ps4").unwrap();
         let game = find_by_db_id(&conn, id).unwrap().unwrap();
         assert_eq!(game.steam_id, "67890");
-        assert_eq!(game.game_id, "game123");
+        // The RA key lands in its own column; the platform-native id is
+        // preserved untouched.
+        assert_eq!(game.ra_id, "game123");
+        assert_eq!(game.native_id, "");
         assert_eq!(game.trophy_source, TrophySource::Ra);
         assert_eq!(game.platform_id, "ps4");
     }

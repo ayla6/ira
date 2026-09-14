@@ -529,7 +529,7 @@ fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
         .filter(|entry| {
             !(entry.platform_id == "switch"
                 && entry.rom_path.is_empty()
-                && ira_platforms::switch::is_title_id(&entry.game_id))
+                && ira_platforms::switch::is_title_id(&entry.native_id))
         })
         .filter(|entry| !rom_entry_has_file(db, cfg, entry))
     {
@@ -665,7 +665,7 @@ fn find_or_create_console_entry(
     title: &str,
     include_version: bool,
 ) -> Option<ConsoleDbMeta> {
-    let entry = match db::find_by_game_id(db, npwr_id, serial) {
+    let entry = match db::find_by_native_id(db, npwr_id, serial) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("DB error looking up {kind} game {serial}: {e}");
@@ -797,7 +797,7 @@ fn reconcile_console_presence(db: &db::DbConn, kind: GameKind, seen: &[(String, 
     for entry in entries.iter().filter(|entry| entry.kind == kind) {
         let present = seen
             .iter()
-            .any(|(game_id, platform_id)| entry.game_id == *game_id && entry.platform_id == *platform_id);
+            .any(|(game_id, platform_id)| entry.external_id() == *game_id && entry.platform_id == *platform_id);
         if present == entry.vanished {
             if let Err(error) = db::set_game_vanished(db, entry.id, !present) {
                 eprintln!("Failed to mark {kind} game {}: {error}", entry.id);

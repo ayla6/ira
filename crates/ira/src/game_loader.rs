@@ -103,7 +103,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     let app_id = if !entry.steam_id.is_empty() {
         &entry.steam_id
     } else {
-        &entry.game_id
+        entry.external_id()
     };
 
     let mut game = entry.to_game();
@@ -174,7 +174,7 @@ pub fn load_game_fast(entry: &GameEntry, save_dir: &str) -> Result<Game, String>
     let app_id = if !entry.steam_id.is_empty() {
         &entry.steam_id
     } else {
-        &entry.game_id
+        entry.external_id()
     };
     let _s = tracing::info_span!("load_game_fast", app_id).entered();
     let mut game = build_game_base(entry, save_dir);
@@ -206,7 +206,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let app_id = if !entry.steam_id.is_empty() {
         &entry.steam_id
     } else {
-        &entry.game_id
+        entry.external_id()
     };
     let platform_id = &entry.platform_id;
     let _s = tracing::info_span!("load_game", app_id).entered();

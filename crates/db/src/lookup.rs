@@ -35,15 +35,27 @@ pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntr
     find_game_by(conn, "steam_id = ?1", params![steam_id])
 }
 
-pub fn find_by_game_id(
+pub fn find_by_ra_id(
     conn: &DbConn,
-    game_id: &str,
+    ra_id: &str,
     platform_id: &str,
 ) -> Result<Option<GameEntry>, String> {
     find_game_by(
         conn,
-        "game_id = ?1 AND platform_id = ?2",
-        params![game_id, platform_id],
+        "ra_id = ?1 AND platform_id = ?2",
+        params![ra_id, platform_id],
+    )
+}
+
+pub fn find_by_native_id(
+    conn: &DbConn,
+    native_id: &str,
+    platform_id: &str,
+) -> Result<Option<GameEntry>, String> {
+    find_game_by(
+        conn,
+        "native_id = ?1 AND platform_id = ?2",
+        params![native_id, platform_id],
     )
 }
 
@@ -188,7 +200,7 @@ mod tests {
         .unwrap();
 
         let switch_games = find_all_rom_by_platform(&conn, "switch").unwrap();
-        let mut ids: Vec<&str> = switch_games.iter().map(|g| g.game_id.as_str()).collect();
+        let mut ids: Vec<&str> = switch_games.iter().map(|g| g.native_id.as_str()).collect();
         ids.sort();
         assert_eq!(ids, vec!["010051f0207b2000", "legacy"]);
     }

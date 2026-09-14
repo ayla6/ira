@@ -288,7 +288,7 @@ fn build_ra_games_for_console(
                 if let Some(ra_id) = ra_index.find(entry.hashes.ra_key(), &rom_norm) {
                     let new_game_id = ra_id.to_string();
                     let already_matched =
-                        ira_db::find_by_game_id(db, &new_game_id, console.def.id)
+                        ira_db::find_by_ra_id(db, &new_game_id, console.def.id)
                             .unwrap_or_else(|e| {
                                 eprintln!(
                                     "Failed to look up game_id {new_game_id}: {e}"
@@ -310,7 +310,7 @@ fn build_ra_games_for_console(
                         ) {
                             eprintln!("Failed to update game IDs for RA match: {}", e);
                         }
-                        entry.game_id = new_game_id;
+                        entry.ra_id = new_game_id;
                         entry.trophy_source = ira_models::TrophySource::Ra;
                         if entry.title.is_empty() {
                             entry.title = ra_title;
@@ -323,8 +323,10 @@ fn build_ra_games_for_console(
             let mut g = load_game(&entry, save_dir).unwrap_or_else(|_| Game {
                 app_id: if !entry.steam_id.is_empty() {
                     entry.steam_id.clone()
+                } else if !entry.ra_id.is_empty() {
+                    entry.ra_id.clone()
                 } else {
-                    entry.game_id.clone()
+                    entry.native_id.clone()
                 },
                 kind: console.def.game_kind(),
                 trophy_source: entry.trophy_source,
@@ -423,7 +425,7 @@ fn build_ra_games_for_console(
             candidate_ids.sort_unstable();
             candidate_ids.dedup();
 
-            let id_from_key = ira_db::find_by_game_id(db, &app_id, console.def.id)
+            let id_from_key = ira_db::find_by_native_id(db, &app_id, console.def.id)
                 .ok()
                 .flatten()
                 .map(|entry| entry.id);
@@ -491,7 +493,7 @@ fn build_ra_games_for_console(
                         }
                     }
                     let mut g = load_game(&e, save_dir).unwrap_or_else(|_| Game {
-                        app_id: e.game_id.clone(),
+                        app_id: e.external_id().to_string(),
                         kind: console.def.game_kind(),
                         trophy_source: e.trophy_source,
                         platform_id: e.platform_id.clone(),
@@ -998,14 +1000,7 @@ fn enrich_switch_roms(
         let meta = crate::switch::rom_meta_deep(&rom, cache, &console.executable);
 
         if !meta.title_id.is_empty() && !crate::switch::is_title_id(&game.app_id) {
-            if let Err(e) = ira_db::update_game_ids(
-                db,
-                game.db_id,
-                "",
-                &meta.title_id,
-                game.trophy_source,
-                console.def.id,
-            ) {
+            if let Err(e) = ira_db::update_native_id(db, game.db_id, &meta.title_id) {
                 eprintln!("Failed to set Switch title id for game {}: {e}", game.db_id);
             } else {
                 game.app_id = meta.title_id.clone();
@@ -1372,7 +1367,7 @@ mod tests {
         assert_eq!(games.len(), 1);
         let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
         assert_eq!(entry.hashes.md5, content_hash);
-        assert_eq!(entry.game_id, "77");
+        assert_eq!(entry.ra_id, "77");
         assert_eq!(entry.trophy_source, ira_models::TrophySource::Ra);
     }
 
@@ -1462,6 +1457,6 @@ mod tests {
 
         assert_eq!(game.name, "My own name");
         let entry = ira_db::find_by_db_id(&db, game.db_id).unwrap().unwrap();
-        assert_eq!(entry.game_id, "01007ef00011e000");
+        assert_eq!(entry.native_id, "01007ef00011e000");
     }
 }

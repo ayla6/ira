@@ -37,10 +37,15 @@ pub struct GameEntry {
     pub kind: GameKind,
     pub trophy_source: TrophySource,
     pub steam_id: String,
-    pub game_id: String,
     pub platform_id: String,
     pub title: String,
     pub hidden: bool,
+    /// RetroAchievements' game id, set when the game is RA-matched.
+    pub ra_id: String,
+    /// The id native to the game's own platform: the title id on
+    /// switch/wiiu/3ds, the manufacturer serial on disc consoles, the
+    /// emulator's app id on integration platforms.
+    pub native_id: String,
     /// SteamGridDB id for games with no achievement source but need images.
     pub sgdb_id: Option<String>,
     /// Per-game logo overlay position (e.g. "bottom-left").
@@ -120,6 +125,17 @@ pub struct GameEntry {
 }
 
 impl GameEntry {
+    /// The id this row's data dirs and external references key on: the RA
+    /// id for matched rows, the platform-native id (title id, serial) for
+    /// everything else. Matches the pre-split game_id values exactly.
+    pub fn external_id(&self) -> &str {
+        if self.ra_id.is_empty() {
+            &self.native_id
+        } else {
+            &self.ra_id
+        }
+    }
+
     /// Build a minimal GameEntry for reloading a game from disk.
     /// Callers can override specific fields (e.g. `entry.title = ...`) as needed.
     pub fn for_reload(
@@ -127,7 +143,7 @@ impl GameEntry {
         kind: GameKind,
         trophy_source: TrophySource,
         steam_id: &str,
-        game_id: &str,
+        native_id: &str,
         platform_id: &str,
     ) -> Self {
         GameEntry {
@@ -135,7 +151,8 @@ impl GameEntry {
             kind,
             trophy_source,
             steam_id: steam_id.to_string(),
-            game_id: game_id.to_string(),
+            ra_id: String::new(),
+            native_id: native_id.to_string(),
             platform_id: platform_id.to_string(),
             title: String::new(),
             hidden: false,
@@ -184,7 +201,8 @@ impl GameEntry {
             } else {
                 g.app_id.clone()
             },
-            game_id: g.app_id.clone(),
+            ra_id: String::new(),
+            native_id: g.app_id.clone(),
             platform_id: g.platform_id.clone(),
             title: g.name.clone(),
             hidden: g.hidden,
@@ -278,7 +296,7 @@ mod tests {
         assert_eq!(entry.kind, GameKind::Steam);
         assert_eq!(entry.trophy_source, TrophySource::Gse);
         assert_eq!(entry.steam_id, "sid");
-        assert_eq!(entry.game_id, "gid");
+        assert_eq!(entry.native_id, "gid");
         assert_eq!(entry.platform_id, "pid");
         assert_eq!(entry.logo_position, LogoPosition::BottomLeft.to_string());
         assert_eq!(entry.title, "");
@@ -366,7 +384,7 @@ mod tests {
         assert_eq!(entry.kind, g.kind);
         assert_eq!(entry.trophy_source, g.trophy_source);
         assert_eq!(entry.steam_id, g.app_id);
-        assert_eq!(entry.game_id, g.app_id);
+        assert_eq!(entry.native_id, g.app_id);
         assert_eq!(entry.platform_id, g.platform_id);
         assert_eq!(entry.title, g.name);
         assert_eq!(entry.hidden, g.hidden);
@@ -398,7 +416,7 @@ mod tests {
         let _ = format!("{entry:?}");
         assert_eq!(entry.id, 1);
         assert!(entry.steam_id.is_empty());
-        assert!(entry.game_id.is_empty());
+        assert!(entry.native_id.is_empty());
         assert!(entry.platform_id.is_empty());
         assert_eq!(entry.logo_position, LogoPosition::BottomLeft.to_string());
     }

@@ -827,7 +827,7 @@ fn build_dir_buttons(
     } else if !entry.steam_id.is_empty() {
         entry.steam_id.clone()
     } else {
-        entry.game_id.clone()
+        entry.external_id().to_string()
     };
     if !sgdb_id_for_picker.is_empty() {
         let btn = gtk4::Button::with_label(&crate::tr!("SGDB"));

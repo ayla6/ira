@@ -88,7 +88,7 @@ pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf 
     let id = if !entry.steam_id.is_empty() {
         &entry.steam_id
     } else {
-        &entry.game_id
+        entry.external_id()
     };
     data_dir_for(
         save_dir,

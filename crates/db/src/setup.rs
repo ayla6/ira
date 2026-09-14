@@ -41,7 +41,8 @@ pub fn init_db(db_path: &str) -> DbConn {
                 kind TEXT NOT NULL,
                 trophy_source TEXT NOT NULL DEFAULT '',
                 steam_id TEXT NOT NULL DEFAULT '',
-                game_id TEXT NOT NULL DEFAULT '',
+                ra_id TEXT NOT NULL DEFAULT '',
+                native_id TEXT NOT NULL DEFAULT '',
                 platform_id TEXT NOT NULL,
                 title TEXT NOT NULL DEFAULT '',
                 hidden INTEGER NOT NULL DEFAULT 0,
@@ -84,7 +85,8 @@ pub fn init_db(db_path: &str) -> DbConn {
                 classification_ids TEXT NOT NULL DEFAULT ''
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_game_id_platform ON games(game_id, platform_id) WHERE game_id != '';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ra_id_platform ON games(ra_id, platform_id) WHERE ra_id != '';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_native_id_platform ON games(native_id, platform_id) WHERE native_id != '';
             CREATE TABLE IF NOT EXISTS game_configs (
                 game_id INTEGER NOT NULL UNIQUE,
                 launch_config TEXT NOT NULL DEFAULT '',

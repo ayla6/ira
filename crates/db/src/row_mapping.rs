@@ -2,7 +2,7 @@ use crate::DbConn;
 use ira_models::{GameEntry, GameKind, TrophySource};
 use r2d2_sqlite::SqliteConnectionManager;
 
-pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, hashes, vanished, developer, publisher, genre, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, developer_id, publisher_id, genre_ids, classification_ids, title_trusted";
+pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, ra_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, hashes, vanished, developer, publisher, genre, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, developer_id, publisher_id, genre_ids, classification_ids, title_trusted, native_id";
 
 pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameEntry> {
     Ok(GameEntry {
@@ -10,7 +10,7 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
         kind: GameKind::from_string(&row.get::<_, String>(1)?),
         trophy_source: TrophySource::from_string(&row.get::<_, String>(2)?),
         steam_id: row.get(3)?,
-        game_id: row.get(4)?,
+        ra_id: row.get(4)?,
         platform_id: row.get(5)?,
         title: row.get(6)?,
         hidden: row.get(7)?,
@@ -49,6 +49,7 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
         genre_ids: row.get(40)?,
         classification_ids: row.get(41)?,
         title_trusted: row.get::<_, i64>(42)? != 0,
+        native_id: row.get::<_, String>(43)?,
     })
 }
 

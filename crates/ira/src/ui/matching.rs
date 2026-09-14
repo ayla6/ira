@@ -32,10 +32,13 @@ pub fn match_game_to_steam(
             &db,
             db_id,
             &steam_app_id,
-            &steam_app_id,
+            "",
             ira_models::TrophySource::Gse,
             &steam_app_id,
         ) {
+            if let Err(e2) = ira_db::update_native_id(&db, db_id, &steam_app_id) {
+                eprintln!("native id update failed too: {e2}");
+            }
             eprintln!("match_game_to_steam: update_game_ids failed: {}", e);
             return;
         }

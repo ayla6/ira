@@ -146,6 +146,12 @@ write code whose only job is to read what an older Ira build wrote.
 Handling *other software's* legacy formats (Steam's VDF shapes, Goldberg's
 old save folder name) is a feature, not back-compat, and stays.
 
+When existing data genuinely needs changing (a column rename on the live
+database, a one-time fixup), do it **manually** — run the SQL by hand
+against the database, move the files yourself — and never commit that
+change as migration code. One-off SQL typed into `sqlite3` is free to
+delete; migration code has to be carried forever.
+
 ### File size
 - **Soft cap: 100 lines per function.** If longer, extract sub-functions.
 - **Hard cap: 200 lines per function.** No exceptions — split it.

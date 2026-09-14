@@ -1,22 +1,6 @@
 use crate::{err, lock_db, DbConn};
 use rusqlite::params;
 
-/// Creates the disc-serial cache table; rows are keyed by ROM path and
-/// validated against the file's size and mtime on lookup.
-pub fn create_rom_serials_table(conn: &DbConn) {
-    let c = lock_db(conn).expect("db lock");
-    c.execute_batch(
-        "CREATE TABLE IF NOT EXISTS rom_serials (
-            rom_path TEXT PRIMARY KEY,
-            size INTEGER NOT NULL,
-            mtime INTEGER NOT NULL,
-            serial TEXT NOT NULL DEFAULT '',
-            title TEXT NOT NULL DEFAULT ''
-        );",
-    )
-    .expect("create rom_serials table");
-}
-
 /// A disc serial cached for one ROM file version.
 pub struct RomSerial {
     pub serial: String,

@@ -41,20 +41,6 @@ pub fn get_disc_owners_for_platform(
     Ok(result)
 }
 
-pub fn create_discs_table(conn: &DbConn) {
-    let c = crate::lock_db(conn).expect("db lock");
-    c.execute_batch(
-        "CREATE TABLE IF NOT EXISTS game_discs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-            disc_number INTEGER NOT NULL,
-            rom_path TEXT NOT NULL,
-            label TEXT NOT NULL DEFAULT ''
-        );",
-    )
-    .expect("create game_discs table");
-}
-
 pub fn get_discs(conn: &DbConn, game_id: i64) -> Result<Vec<GameDisc>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(
@@ -125,15 +111,4 @@ pub fn set_default_disc(conn: &DbConn, game_id: i64, disc_id: Option<i64>) -> Re
         .map_err(err)?;
     }
     Ok(())
-}
-
-pub fn create_default_disc_table(conn: &DbConn) {
-    let c = crate::lock_db(conn).expect("db lock");
-    c.execute_batch(
-        "CREATE TABLE IF NOT EXISTS game_default_disc (
-            game_id INTEGER PRIMARY KEY,
-            disc_id INTEGER
-        );",
-    )
-    .expect("create game_default_disc table");
 }

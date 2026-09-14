@@ -52,31 +52,6 @@ fn positional_placeholders(count: usize) -> String {
         .join(", ")
 }
 
-pub fn create_variants_table(conn: &DbConn) {
-    let c = crate::lock_db(conn).expect("db lock");
-    c.execute_batch(
-        "CREATE TABLE IF NOT EXISTS game_variants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-            name TEXT NOT NULL,
-            exe TEXT NOT NULL DEFAULT '',
-            working_dir TEXT NOT NULL DEFAULT '',
-            args TEXT NOT NULL DEFAULT '',
-            env_vars TEXT NOT NULL DEFAULT '[]',
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            pre_launch TEXT NOT NULL DEFAULT '',
-            custom_images INTEGER NOT NULL DEFAULT 0,
-            show_as_entry INTEGER NOT NULL DEFAULT 0,
-            playtime REAL NOT NULL DEFAULT 0.0,
-            last_played INTEGER NOT NULL DEFAULT 0,
-            count_playtime INTEGER NOT NULL DEFAULT 1,
-            logo_position TEXT NOT NULL DEFAULT '',
-            logo_size INTEGER NOT NULL DEFAULT 0
-        );",
-    )
-    .expect("create game_variants table");
-}
-
 pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c.prepare(&format!(

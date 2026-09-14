@@ -22,30 +22,6 @@ pub fn update_field(
     Ok(())
 }
 
-/// Adds `column` to `table` when an existing database predates it.
-/// Schema migrations like this stay forever; new databases get the column
-/// from the CREATE TABLE above.
-fn ensure_column(conn: &Connection, table: &str, column: &str, decl: &str) {
-    let present: bool = conn
-        .query_row(
-            &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
-            rusqlite::params![column],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|count| count > 0)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to inspect {table} schema: {e}");
-            true // don't try to ALTER on inspection failure
-        });
-    if present {
-        return;
-    }
-    if let Err(e) = conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl};"))
-    {
-        eprintln!("Failed to add column {column} to {table}: {e}");
-    }
-}
-
 pub fn init_db(db_path: &str) -> DbConn {
     if let Some(parent) = std::path::Path::new(db_path).parent() {
         std::fs::create_dir_all(parent).expect("failed to create database directory");
@@ -159,6 +135,46 @@ pub fn init_db(db_path: &str) -> DbConn {
                 id INTEGER PRIMARY KEY,
                 kind TEXT NOT NULL DEFAULT '',
                 name TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS game_variants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                exe TEXT NOT NULL DEFAULT '',
+                working_dir TEXT NOT NULL DEFAULT '',
+                args TEXT NOT NULL DEFAULT '',
+                env_vars TEXT NOT NULL DEFAULT '[]',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                pre_launch TEXT NOT NULL DEFAULT '',
+                custom_images INTEGER NOT NULL DEFAULT 0,
+                show_as_entry INTEGER NOT NULL DEFAULT 0,
+                playtime REAL NOT NULL DEFAULT 0.0,
+                last_played INTEGER NOT NULL DEFAULT 0,
+                count_playtime INTEGER NOT NULL DEFAULT 1,
+                logo_position TEXT NOT NULL DEFAULT '',
+                logo_size INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS game_default_variant (
+                game_id INTEGER PRIMARY KEY,
+                variant_id INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS game_discs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                disc_number INTEGER NOT NULL,
+                rom_path TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS game_default_disc (
+                game_id INTEGER PRIMARY KEY,
+                disc_id INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS rom_serials (
+                rom_path TEXT PRIMARY KEY,
+                size INTEGER NOT NULL,
+                mtime INTEGER NOT NULL,
+                serial TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT ''
             );",
         ).expect("failed to create tables");
         // Serial-number indexes keyed by the models' kind strings — raw
@@ -170,38 +186,8 @@ pub fn init_db(db_path: &str) -> DbConn {
             ira_models::GameKind::Ps3.as_str(),
         ))
         .expect("failed to create kind serial indexes");
-        // Schema migrations for databases created before a column existed.
-        ensure_column(&conn, "games", "rom_hash", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "vanished", "INTEGER NOT NULL DEFAULT 0");
-        ensure_column(&conn, "games", "developer", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "publisher", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "genre", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "players", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "synopsis", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "screenscraper_id", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "screenscraper_rating", "REAL NOT NULL DEFAULT -1");
-        ensure_column(&conn, "games", "release_dates", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "developer_id", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "publisher_id", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "genre_ids", "TEXT NOT NULL DEFAULT ''");
-        ensure_column(&conn, "games", "classification_ids", "TEXT NOT NULL DEFAULT ''");
     }
 
-    crate::create_variants_table(&pool);
-    {
-        let c = crate::lock_db(&pool).expect("failed to get connection for default variant table");
-        if let Err(e) = c.execute_batch(
-            "CREATE TABLE IF NOT EXISTS game_default_variant (
-                game_id INTEGER PRIMARY KEY,
-                variant_id INTEGER
-            );",
-        ) {
-            eprintln!("Failed to create game_default_variant table: {e}");
-        }
-    }
-    crate::create_discs_table(&pool);
-    crate::create_rom_serials_table(&pool);
-    crate::create_default_disc_table(&pool);
     pool
 }
 

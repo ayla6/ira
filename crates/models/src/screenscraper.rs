@@ -78,6 +78,7 @@ const SYSTEM_IDS: &[(&str, u32)] = &[
     ("n64", 14),
     ("n64dd", 14),
     ("nds", 15),
+    ("3ds", 17),
     ("gc", 13),
     ("wii", 16),
     ("wiiu", 18),
@@ -150,6 +151,9 @@ mod tests {
     #[test]
     fn test_screenscraper_system_id_known_platforms() {
         assert_eq!(screenscraper_system_id("psx"), Some(57));
+        // The azahar integration's console has no ConsoleDef, so only this
+        // pin keeps it mapped.
+        assert_eq!(screenscraper_system_id("3ds"), Some(17));
         assert_eq!(screenscraper_system_id("snes"), Some(4));
         assert_eq!(screenscraper_system_id("wii"), Some(16));
         assert_eq!(screenscraper_system_id("switch"), Some(225));

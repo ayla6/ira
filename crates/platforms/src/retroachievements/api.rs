@@ -34,6 +34,19 @@ pub fn is_fallback_game_icon(image_icon: &str) -> bool {
 const CACHE_SECS: u64 = 3600;
 const RA_RATE_LIMIT_MS: u64 = 500;
 
+/// The web key rides in the query string; error text must not carry it.
+fn redact_url(url: &reqwest::Url) -> String {
+    match url.query() {
+        Some(_) => format!(
+            "{}://{}{}",
+            url.scheme(),
+            url.host_str().unwrap_or_default(),
+            url.path()
+        ),
+        None => url.to_string(),
+    }
+}
+
 pub struct RaClient {
     http: reqwest::blocking::Client,
     username: String,
@@ -81,10 +94,10 @@ impl RaClient {
             .http
             .get(url.clone())
             .send()
-            .map_err(|e| format!("RA web api request: {}", e))?;
+            .map_err(|e| format!("RA web api request: {}", e.to_string().replace(url.as_str(), &redact_url(&url))))?;
         let status = resp.status();
         if !status.is_success() {
-            return Err(format!("RA web api HTTP {} for {}", status, url));
+            return Err(format!("RA web api HTTP {} for {}", status, redact_url(&url)));
         }
         resp.text().map_err(|e| format!("RA web api body: {}", e))
     }
@@ -425,6 +438,20 @@ fn find_game_by_hash(games: &[RaGameEntry], rom_hash: &str) -> Option<RaGameEntr
         .iter()
         .find(|g| g.hashes.iter().any(|h| h.eq_ignore_ascii_case(rom_hash)))
         .cloned()
+}
+
+#[cfg(test)]
+mod redact_tests {
+    use super::redact_url;
+
+    #[test]
+    fn test_redact_url_hides_the_web_key() {
+        let url = reqwest::Url::parse(
+            "https://retroachievements.org/API/API_GetGameList.php?i=7&y=sekrit&h=1",
+        )
+        .unwrap();
+        assert_eq!(redact_url(&url), "https://retroachievements.org/API/API_GetGameList.php");
+    }
 }
 
 #[cfg(test)]

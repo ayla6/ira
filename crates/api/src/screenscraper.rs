@@ -601,12 +601,12 @@ impl SteamDataClient {
     }
 
     fn screenscraper_get(&self, url: &str) -> Result<Vec<ScrapedGame>, String> {
-        let _s = tracing::info_span!("screenscraper_get", url).entered();
+        let _s = tracing::info_span!("screenscraper_get", url = redact_url(url)).entered();
         let resp = self
             .http
             .get(url)
             .send()
-            .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
+            .map_err(|e| format!("ScreenScraper request failed: {}", redact_text(&e.to_string(), url)))?;
         let status = resp.status();
         let body = resp
             .text()
@@ -635,6 +635,19 @@ fn status_hint(status: u16, body: &str) -> String {
         _ => "",
     };
     format!("ScreenScraper request failed: {status}{hint}")
+}
+
+/// Both credential pairs ride in the query string, so no error message or
+/// log line may carry it whole.
+fn redact_url(url: &str) -> String {
+    match url.split_once('?') {
+        Some((base, _)) => base.to_string(),
+        None => url.to_string(),
+    }
+}
+
+fn redact_text(text: &str, url: &str) -> String {
+    text.replace(url, &redact_url(url))
 }
 
 /// Collapse the double spaces the entity replacements leave behind.
@@ -860,6 +873,19 @@ mod tests {
         let url = genres_list_url(&creds);
         assert!(url.contains("genresListe.php?devid=ira&devpassword=pw"));
         assert!(url.contains("softname=ira"));
+    }
+
+    #[test]
+    fn test_redact_url_strips_credentials_from_errors() {
+        let url = "https://www.screenscraper.fr/api2/jeuRecherche.php?devid=a&devpassword=b&ssid=c&sspassword=d&recherche=x";
+        let text = format!("ScreenScraper request failed: error sending request for url ({url})");
+        let redacted = redact_text(&text, url);
+        assert_eq!(
+            redacted,
+            "ScreenScraper request failed: error sending request for url (https://www.screenscraper.fr/api2/jeuRecherche.php)"
+        );
+        // A URL without a query passes through untouched.
+        assert_eq!(redact_url("https://x/y.png"), "https://x/y.png");
     }
 
     #[test]

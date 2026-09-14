@@ -13,7 +13,6 @@ mod emu_dirs;
 mod qt_ini;
 pub mod game_folder;
 pub mod gog;
-pub mod gog_setup;
 pub mod installer;
 pub mod lutris;
 pub mod lutris_config;

@@ -197,12 +197,6 @@ pub fn read_all_playtimes() -> HashMap<String, (f64, i64)> {
     result
 }
 
-/// Read playtime for a single app. Prefer `read_all_playtimes` when loading
-/// multiple games — it reads localconfig.vdf once instead of per-app.
-pub fn read_playtime(app_id: &str) -> Option<(f64, i64)> {
-    read_all_playtimes().get(app_id).copied()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

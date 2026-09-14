@@ -64,10 +64,6 @@ pub fn read_serial(path: &Path) -> Option<String> {
     read_disc_info(path).and_then(|info| info.serial)
 }
 
-pub fn read_title(path: &Path) -> Option<String> {
-    read_disc_info(path).and_then(|info| info.title)
-}
-
 /// Reads a ROM's disc serial through the cache: unchanged files answer
 /// from the database instead of spawning the disc reader, and files that
 /// cannot hold a serial never spawn it at all. Probe results — including

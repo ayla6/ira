@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::steam::mirror_variants;
 use crate::SteamDataClient;
-use ira_models::{AssetType, DlcInfo};
+use ira_models::AssetType;
 
 /// Steam CDN base URL for app asset images.
 fn steam_cdn_url(app_id: &str, suffix: &str) -> String {
@@ -19,14 +19,6 @@ fn shrink(dir: &Path, asset: AssetType) {
 }
 
 impl SteamDataClient {
-    pub fn ensure_sgdb_assets(
-        &self,
-        sgdb_id: &str,
-    ) -> (String, String, String, String, String, String) {
-        let dir = self.sgdb_dir(sgdb_id);
-        self.ensure_sgdb_assets_in_dir(&dir, crate::types::SgdbId::Game(sgdb_id), &[])
-    }
-
     /// Fetch every enabled SGDB asset type into `dir` (cached files are
     /// reused). Types in `skip` are not touched at all — used to keep the
     /// square slot native for console games. `id` picks the endpoint
@@ -150,34 +142,6 @@ impl SteamDataClient {
         }
 
         (grid_path, header_path, logo_path)
-    }
-
-    pub fn ensure_dlc_images(
-        &self,
-        app_id: &str,
-        dlcs: &mut std::collections::HashMap<String, DlcInfo>,
-    ) {
-        let _s = tracing::info_span!("ensure_dlc_images", app_id).entered();
-        let base_dir = self.game_dir(app_id);
-        let dlc_dir = base_dir.join("dlc");
-        let _ = std::fs::create_dir_all(&dlc_dir);
-
-        for dlc in dlcs.values_mut() {
-            if dlc.image_url.is_empty() {
-                continue;
-            }
-            if dlc.image_url.starts_with("dlc/") {
-                continue;
-            }
-            let local_rel = format!("dlc/{}.jpg", dlc.app_id);
-            let dest = base_dir.join(&local_rel);
-            if !dest.exists() {
-                let _ = self.download_file(&dlc.image_url, &dest);
-            }
-            if dest.exists() {
-                dlc.image_url = local_rel;
-            }
-        }
     }
 
     pub fn force_download_steam(&self, app_id: &str, asset: AssetType) -> String {

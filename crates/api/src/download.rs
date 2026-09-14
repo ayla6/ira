@@ -8,10 +8,6 @@ impl SteamDataClient {
         self.cache_dir.join("steam").join(app_id)
     }
 
-    pub(super) fn sgdb_dir(&self, sgdb_id: &str) -> PathBuf {
-        self.cache_dir.join("steamgriddb").join(sgdb_id)
-    }
-
     pub(super) fn fetch_image(&self, url: &str, dest: &Path) -> String {
         let _s = tracing::info_span!("fetch_image", url).entered();
         if self.download_file(url, dest).is_ok() {

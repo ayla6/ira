@@ -90,18 +90,6 @@ pub(crate) fn detect_flatpak(flatpak_id: &str, display_name: &str) -> Option<Det
     }
 }
 
-pub fn detect_native(names: &[&str], display_name: &str) -> Option<DetectedEmulator> {
-    for name in names {
-        if let Some(path) = which(name) {
-            return Some(DetectedEmulator {
-                display_name: format!("{} (native)", display_name),
-                launch_command: path,
-            });
-        }
-    }
-    None
-}
-
 fn detect_native_all(names: &[&str], display_name: &str) -> Vec<DetectedEmulator> {
     let mut choices = Vec::new();
     let mut seen = std::collections::HashSet::new();

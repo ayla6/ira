@@ -12,14 +12,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-pub fn build_image_manager_content(
-    state: &SharedState,
-    game: &Game,
-    parent_win: &adw::Window,
-) -> gtk4::Box {
-    build_image_manager_content_with_drafts(state, game, parent_win, None, None)
-}
-
 pub fn build_image_manager_content_with_drafts(
     state: &SharedState,
     game: &Game,

@@ -16,10 +16,6 @@ fn portable_dir_for(executable: &str) -> Option<PathBuf> {
         .find(|path| path.is_dir())
 }
 
-pub fn cemu_config_dir() -> PathBuf {
-    cemu_config_dir_for("")
-}
-
 pub fn cemu_config_dir_for(executable: &str) -> PathBuf {
     if executable.starts_with("flatpak:") {
         return app_path_for(executable, "config/Cemu");

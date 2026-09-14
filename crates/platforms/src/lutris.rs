@@ -76,25 +76,3 @@ pub fn load_lutris_games() -> Result<Vec<LutrisGame>, String> {
     Ok(result)
 }
 
-/// Read just `(id, playtime, lastplayed)` for every game in pga.db.
-pub fn load_lutris_playtime() -> Result<Vec<(i64, f64, i64)>, String> {
-    let path = lutris_db_path();
-    let conn = Connection::open(&path).map_err(|e| format!("open {}: {}", path.display(), e))?;
-    let mut stmt = conn
-        .prepare("SELECT id, playtime, lastplayed FROM games")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
-                row.get::<_, Option<i64>>(2)?.unwrap_or(0),
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for r in rows {
-        result.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(result)
-}

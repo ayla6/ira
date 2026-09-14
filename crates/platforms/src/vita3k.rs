@@ -3,10 +3,6 @@ use std::path::{Path, PathBuf};
 use crate::ps4::{parse_psf, psf_get_title, psf_get_title_id};
 use crate::emu_dirs::home_dir;
 
-pub fn vita_fs_path() -> PathBuf {
-    vita_fs_path_for("")
-}
-
 pub fn vita_fs_path_for(executable: &str) -> PathBuf {
     if !executable.is_empty() && !executable.starts_with("flatpak:") {
         let path = Path::new(executable);

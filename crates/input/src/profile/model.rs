@@ -538,22 +538,6 @@ pub enum OutputAction {
 }
 
 impl OutputAction {
-    pub fn is_xinput_compatible(&self) -> bool {
-        match self {
-            Self::GamepadButton(button) => button.is_xinput(),
-            Self::GamepadAxis(_)
-            | Self::WheelClick { .. }
-            | Self::SwitchActionSet(_)
-            | Self::EnableLayer { .. }
-            | Self::ModeShiftActivate { .. } => true,
-            Self::Keyboard { .. } | Self::MouseButton(_) | Self::MouseAxis(_) => false,
-        }
-    }
-
-    pub fn is_supported(&self) -> bool {
-        self.is_supported_by(VirtualGamepadBackend::XInput)
-    }
-
     pub fn is_supported_by(&self, backend: VirtualGamepadBackend) -> bool {
         match backend {
             VirtualGamepadBackend::XInput | VirtualGamepadBackend::SteamInput => {
@@ -1245,17 +1229,6 @@ impl InputProfile {
 
     pub fn default_gamepad() -> Self {
         Self::default_gamepad_for_backend(VirtualGamepadBackend::XInput)
-    }
-
-    /// Seed an identity default action set from the standard controls,
-    /// replacing whatever sets the profile had. Used for fresh profiles and
-    /// the reset-to-defaults flow.
-    pub fn with_default_action_set(mut self) -> Self {
-        self.action_sets = vec![ActionSet {
-            name: "Default".to_string(),
-            inputs: default_action_set_inputs(self.backend, &standard_buttons(self.backend)),
-        }];
-        self
     }
 
     pub fn default_gamepad_for_buttons(supported_buttons: &[GamepadButton]) -> Self {

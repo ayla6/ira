@@ -360,16 +360,6 @@ impl SteamDataClient {
         }
     }
 
-    pub fn cached_icon_hash(&self, app_id: &str) -> Option<String> {
-        let raw = self.load_appdetails_cache(app_id)?;
-        let hash = raw.data.get(app_id)?.common.icon.clone();
-        if hash.is_empty() {
-            None
-        } else {
-            Some(hash)
-        }
-    }
-
     /// True when a usable (parseable, "success") appdetails cache exists,
     /// refreshing it from steamcmd.net otherwise.
     pub fn ensure_steamcmd_cache(&self, app_id: &str) -> bool {

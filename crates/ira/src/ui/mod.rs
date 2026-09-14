@@ -82,7 +82,7 @@ mod settings_dialog_pages;
 mod settings_pages;
 mod sgdb_picker;
 mod steam_search;
-pub use image_manager::{build_image_manager_content, build_image_manager_content_with_drafts};
+pub use image_manager::build_image_manager_content_with_drafts;
 pub use settings_dialog::show_settings_dialog;
 mod add_game;
 mod add_game_db;

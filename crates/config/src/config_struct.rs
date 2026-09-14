@@ -383,14 +383,6 @@ impl Config {
             .any(|def| self.console(def.id).enabled)
     }
 
-    pub fn rom_folder(&self, platform_id: &str) -> std::path::PathBuf {
-        if self.roms_folder.trim().is_empty() {
-            std::path::PathBuf::new()
-        } else {
-            std::path::Path::new(self.roms_folder.trim()).join(platform_id)
-        }
-    }
-
     /// All PC games folders in priority order: the primary folder first,
     /// then extras. Empty and duplicate entries are dropped.
     pub fn all_game_folders(&self) -> Vec<std::path::PathBuf> {
@@ -662,30 +654,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rom_folder_uses_shared_root() {
-        let cfg = Config {
-            roms_folder: "/games/roms".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.rom_folder("gba"),
-            std::path::PathBuf::from("/games/roms/gba")
-        );
-    }
-
-    #[test]
-    fn test_rom_folder_uses_virtualboy_console_id() {
-        let cfg = Config {
-            roms_folder: "/games/roms".to_string(),
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.rom_folder("virtualboy"),
-            std::path::PathBuf::from("/games/roms/virtualboy")
-        );
-    }
-
-    #[test]
     fn test_config_level_controller_modes_json_roundtrip() {
         let cfg = Config {
             linux_controller_mode: Some(ControllerInputMode::Enabled),
@@ -705,11 +673,6 @@ mod tests {
             deserialized.wine_controller_mode,
             Some(ControllerInputMode::Disabled)
         );
-    }
-
-    #[test]
-    fn test_rom_folder_is_empty_without_shared_root() {
-        assert!(Config::default().rom_folder("gba").as_os_str().is_empty());
     }
 
     #[test]

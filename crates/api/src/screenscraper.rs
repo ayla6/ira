@@ -23,8 +23,8 @@ pub struct ScrapedGame {
     pub release_date: String,
     /// Every dated region as `(region, YYYY-MM-DD)` pairs.
     pub release_dates: Vec<(String, String)>,
-    pub developer: Option<ira_models::ScraperEntity>,
-    pub publisher: Option<ira_models::ScraperEntity>,
+    pub developers: Vec<ira_models::ScraperEntity>,
+    pub publishers: Vec<ira_models::ScraperEntity>,
     /// All English genres, the primary one first.
     pub genres: Vec<ira_models::ScraperEntity>,
     pub players: String,
@@ -51,8 +51,8 @@ impl ScrapedGame {
             release_date: self.release_date.clone(),
             release_timestamp,
             release_dates: self.release_dates.clone(),
-            developer: self.developer.clone(),
-            publisher: self.publisher.clone(),
+            developers: self.developers.clone(),
+            publishers: self.publishers.clone(),
             genres: self.genres.clone(),
             players: self.players.clone(),
             rating: self.rating,
@@ -164,9 +164,9 @@ struct SsJeu {
     #[serde(default)]
     dates: Option<SsAttributed>,
     #[serde(default, rename = "developpeur")]
-    developer: Option<SsEntity>,
+    developers: Vec<SsEntity>,
     #[serde(default, rename = "editeur")]
-    publisher: Option<SsEntity>,
+    publishers: Vec<SsEntity>,
     #[serde(default)]
     genres: Option<SsGenres>,
     #[serde(default)]
@@ -410,14 +410,8 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
         name,
         release_date,
         release_dates,
-        developer: jeu.developer.as_ref().map(|entity| ira_models::ScraperEntity {
-            id: entity.id.clone(),
-            name: entity.name.trim().to_string(),
-        }),
-        publisher: jeu.publisher.as_ref().map(|entity| ira_models::ScraperEntity {
-            id: entity.id.clone(),
-            name: entity.name.trim().to_string(),
-        }),
+        developers: entity_list(&jeu.developers),
+        publishers: entity_list(&jeu.publishers),
         genres,
         players: jeu.joueurs.as_deref().unwrap_or_default().trim().to_string(),
         rating,
@@ -427,6 +421,18 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
         box2d,
         title_screen,
     }
+}
+
+/// The referenced entities, names trimmed — ScreenScraper repeats
+/// `<developpeur>`/`<editeur>` elements when several apply.
+fn entity_list(entities: &[SsEntity]) -> Vec<ira_models::ScraperEntity> {
+    entities
+        .iter()
+        .map(|entity| ira_models::ScraperEntity {
+            id: entity.id.clone(),
+            name: entity.name.trim().to_string(),
+        })
+        .collect()
 }
 
 /// The region-picked URL for one media type; the URL's spaces are
@@ -612,6 +618,7 @@ mod tests {
             <date region="us">1993-12-18</date>
           </dates>
           <developpeur id="2911"> Chunsoft </developpeur>
+          <developpeur id="2912">Nintendo</developpeur>
           <editeur id="1299">Enix</editeur>
           <genres>
             <genre id="2620" primary="1" langue="en">Role Playing Game</genre>
@@ -664,18 +671,21 @@ mod tests {
                 ("us".to_string(), "1993-12-18".to_string())
             ]
         );
-        // Companies come with their ScreenScraper ids.
+        // Companies come with their ScreenScraper ids; a second
+        // <developpeur> element lands as another entry.
         assert_eq!(
-            game.developer.as_ref().map(|d| d.id.as_str()),
-            Some("2911")
+            game.developers
+                .iter()
+                .map(|d| (d.id.as_str(), d.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("2911", "Chunsoft"), ("2912", "Nintendo")]
         );
         assert_eq!(
-            game.developer.as_ref().map(|d| d.name.as_str()),
-            Some("Chunsoft")
-        );
-        assert_eq!(
-            game.publisher.as_ref().map(|p| p.id.as_str()),
-            Some("1299")
+            game.publishers
+                .iter()
+                .map(|p| (p.id.as_str(), p.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("1299", "Enix")]
         );
         // English genres, primary first, ids kept.
         assert_eq!(

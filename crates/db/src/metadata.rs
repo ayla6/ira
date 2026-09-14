@@ -52,6 +52,19 @@ fn store_entities(
     Ok(())
 }
 
+/// The id list of one entity field, as the JSON array the games row
+/// stores — `[]` when the field is empty, so a deliberate clear still
+/// overwrites a previous value.
+fn entity_ids_json(entities: &[ira_models::ScraperEntity]) -> String {
+    serde_json::to_string(
+        &entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_default()
+}
+
 /// Upsert the age-rating boards: ids are stable, the board kind and the
 /// entry name follow the source.
 fn store_classifications(
@@ -82,12 +95,7 @@ pub fn store_scraper_metadata(
     metadata: &ira_models::ScraperMetadata,
 ) -> Result<(), String> {
     let mut companies: Vec<(i64, String)> = Vec::new();
-    if let Some(entity) = &metadata.developer {
-        if let Ok(id) = entity.id.parse::<i64>() {
-            companies.push((id, entity.name.clone()));
-        }
-    }
-    if let Some(entity) = &metadata.publisher {
+    for entity in metadata.developers.iter().chain(&metadata.publishers) {
         if let Ok(id) = entity.id.parse::<i64>() {
             companies.push((id, entity.name.clone()));
         }
@@ -102,8 +110,8 @@ pub fn store_scraper_metadata(
         .iter()
         .filter_map(|c| c.id.parse::<i64>().ok().map(|id| (id, c.kind.clone(), c.name.clone())))
         .collect();
-    let developer_id = metadata.developer.as_ref().map(|e| e.id.clone()).unwrap_or_default();
-    let publisher_id = metadata.publisher.as_ref().map(|e| e.id.clone()).unwrap_or_default();
+    let developer_id = entity_ids_json(&metadata.developers);
+    let publisher_id = entity_ids_json(&metadata.publishers);
     let genre_ids = serde_json::to_string(
         &genres.iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(),
     )
@@ -247,14 +255,14 @@ mod tests {
                     ("jp".into(), "1993-12-18".into()),
                     ("us".into(), "1993-12-18".into()),
                 ],
-                developer: Some(ira_models::ScraperEntity {
+                developers: vec![ira_models::ScraperEntity {
                     id: "2911".into(),
                     name: "Chunsoft".into(),
-                }),
-                publisher: Some(ira_models::ScraperEntity {
+                }],
+                publishers: vec![ira_models::ScraperEntity {
                     id: "1299".into(),
                     name: "Enix".into(),
-                }),
+                }],
                 genres: vec![ira_models::ScraperEntity {
                     id: "2620".into(),
                     name: "Role Playing Game".into(),
@@ -275,10 +283,10 @@ mod tests {
         assert_eq!(entry.screenscraper_id, "2124");
         assert_eq!(entry.release_date, "1993-12-18");
         assert!(entry.release_timestamp > 0);
-        // The entry keeps only the references; the names live in the
-        // lookup tables.
-        assert_eq!(entry.developer_id, "2911");
-        assert_eq!(entry.publisher_id, "1299");
+        // The entry keeps only the references, as id arrays; the names
+        // live in the lookup tables.
+        assert_eq!(entry.developer_id, r#"["2911"]"#);
+        assert_eq!(entry.publisher_id, r#"["1299"]"#);
         assert_eq!(entry.genre_ids, r#"["2620"]"#);
         assert_eq!(entry.classification_ids, r#"["279"]"#);
         assert_eq!(entry.players, "1-4");
@@ -324,7 +332,7 @@ mod tests {
             id,
             &ira_models::ScraperMetadata {
                 ss_id: "1".into(),
-                developer: Some(company()),
+                developers: vec![company()],
                 ..Default::default()
             },
         )
@@ -335,10 +343,10 @@ mod tests {
             id,
             &ira_models::ScraperMetadata {
                 ss_id: "1".into(),
-                developer: Some(ira_models::ScraperEntity {
+                developers: vec![ira_models::ScraperEntity {
                     id: "2911".into(),
                     name: "ChunSoft".into(),
-                }),
+                }],
                 ..Default::default()
             },
         )
@@ -368,14 +376,14 @@ mod tests {
             id,
             &ira_models::ScraperMetadata {
                 ss_id: "9".into(),
-                developer: Some(ira_models::ScraperEntity {
+                developers: vec![ira_models::ScraperEntity {
                     id: "1".into(),
                     name: "id".into(),
-                }),
-                publisher: Some(ira_models::ScraperEntity {
+                }],
+                publishers: vec![ira_models::ScraperEntity {
                     id: "2".into(),
                     name: "pub".into(),
-                }),
+                }],
                 genres: vec![ira_models::ScraperEntity {
                     id: "3".into(),
                     name: "g".into(),
@@ -390,7 +398,7 @@ mod tests {
         assert_eq!(entry.release_date, "15 Sep, 2014");
         assert_eq!(entry.release_timestamp, 1410000000);
         assert_eq!(entry.screenscraper_rating, -1.0);
-        assert_eq!(entry.developer_id, "1");
+        assert_eq!(entry.developer_id, r#"["1"]"#);
         assert_eq!(
             scraper_company_name(&conn, 1).unwrap().as_deref(),
             Some("id")

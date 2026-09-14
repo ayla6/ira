@@ -35,8 +35,8 @@ pub struct ScraperMetadata {
     /// Every dated region as `(region, YYYY-MM-DD)` pairs.
     #[serde(default)]
     pub release_dates: Vec<(String, String)>,
-    pub developer: Option<ScraperEntity>,
-    pub publisher: Option<ScraperEntity>,
+    pub developers: Vec<ScraperEntity>,
+    pub publishers: Vec<ScraperEntity>,
     /// All English genres, the primary one first.
     #[serde(default)]
     pub genres: Vec<ScraperEntity>,

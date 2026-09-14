@@ -167,14 +167,20 @@ fn resolve(
         }
     }
 
-    // No hash hit: the display name is the better search term — ROM stems
-    // carry dump tags, and install-folder stems are serial numbers.
-    let term = clean_rom_name(
-        [entry.title.as_str(), item.name.as_str()]
-            .into_iter()
-            .find(|t| !t.trim().is_empty())
-            .unwrap_or_default(),
-    );
+    // No hash hit: one title search, preferring the ROM file name — the
+    // library title is user-editable and drifts from the dump, while the
+    // file name is what the scene shipped. Punctuation goes: the colon in
+    // "13 Sentinels: Aegis Rim" poisons ScreenScraper's search (ES-DE
+    // strips parentheses for the same reason).
+    let stem = std::path::Path::new(&entry.rom_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let term = search_term(&[stem.as_str(), entry.title.as_str(), item.name.as_str()]
+        .into_iter()
+        .map(clean_rom_name)
+        .find(|t| !t.trim().is_empty())
+        .unwrap_or_default());
     if term.is_empty() {
         eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit and no name to search");
         return Some(SsOutcome::Miss);
@@ -239,13 +245,26 @@ fn normalized_for_match(name: &str) -> String {
 
 /// A candidate counts as the game when the normalized names agree or one
 /// is a prefix of the other — subtitle and region chopping tolerated,
-/// unrelated games (usually) not.
+/// missing or extra leading words not.
 fn acceptable(target: &str, candidate: &str) -> bool {
     !target.is_empty()
         && !candidate.is_empty()
         && (candidate == target
             || candidate.starts_with(target)
             || target.starts_with(candidate))
+}
+
+/// The term the title search sends: dump tags gone (ES-DE's
+/// removeParenthesis), then every punctuation run collapsed to one space —
+/// the colon in "13 Sentinels: Aegis Rim" poisons ScreenScraper's search.
+fn search_term(name: &str) -> String {
+    clean_rom_name(name)
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// UI loop: persist a hit's metadata and repaint the row's SS box; only a
@@ -292,7 +311,7 @@ fn apply_hit(
 
 #[cfg(test)]
 mod tests {
-    use super::{acceptable, clean_rom_name, normalized_for_match};
+    use super::{acceptable, clean_rom_name, normalized_for_match, search_term};
 
     #[test]
     fn test_clean_rom_name_strips_dump_tags() {
@@ -316,6 +335,16 @@ mod tests {
     }
 
     #[test]
+    fn test_search_term_strips_punctuation_the_source_chokes_on() {
+        assert_eq!(search_term("13 Sentinels: Aegis Rim"), "13 Sentinels Aegis Rim");
+        assert_eq!(
+            search_term("Ace Attorney - Justice for All (USA)"),
+            "Ace Attorney Justice for All"
+        );
+        assert_eq!(search_term("Pokémon: Let's Go"), "Pokémon Let s Go");
+    }
+
+    #[test]
     fn test_acceptable_tolerates_subtitles_not_unrelated_games() {
         let target = normalized_for_match("Dragon Quest I & II");
         assert!(acceptable(&target, &normalized_for_match("Dragon Quest I & II")));
@@ -330,6 +359,12 @@ mod tests {
         assert!(!acceptable(
             &target,
             &normalized_for_match("Dragon Quest Monsters")
+        ));
+        // A leading brand word the target lacks is a different title, not
+        // the game with decoration.
+        assert!(!acceptable(
+            &normalized_for_match("Ace Attorney Justice for All"),
+            &normalized_for_match("Phoenix Wright Ace Attorney Justice for All")
         ));
         // Empty sides never match — a nameless candidate is not the game.
         assert!(!acceptable(&target, ""));

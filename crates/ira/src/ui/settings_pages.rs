@@ -720,6 +720,31 @@ pub(super) fn build_ra_settings_page(
 }
 
 
+pub(super) fn build_screenscraper_settings_page(
+    cfg: &Config,
+) -> (gtk4::Box, adw::EntryRow, adw::PasswordEntryRow) {
+    let page = settings_page_container();
+
+    let account_group = adw::PreferencesGroup::new();
+    account_group.set_title(&crate::tr!("Account"));
+    account_group.set_description(Some(&crate::tr!(
+        "Ira's developer identity is built in; your own account is optional and only attributes requests to your quota, which raises it. Register free at screenscraper.fr."
+    )));
+
+    let username_row = adw::EntryRow::new();
+    username_row.set_title(&crate::tr!("Username"));
+    username_row.set_text(&cfg.screenscraper_id);
+    account_group.add(&username_row);
+
+    let password_row = adw::PasswordEntryRow::new();
+    password_row.set_title(&crate::tr!("Password"));
+    password_row.set_text(&cfg.screenscraper_password);
+    account_group.add(&password_row);
+    page.append(&account_group);
+
+    (page, username_row, password_row)
+}
+
 pub(super) fn build_api_emulators_page(
     cfg: &Config,
 ) -> (gtk4::Box, adw::ComboRow, gtk4::StringList) {

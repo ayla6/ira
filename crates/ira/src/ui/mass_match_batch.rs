@@ -13,20 +13,24 @@ pub(super) struct BatchItem {
 }
 
 /// A finished candidate handed from the worker thread back to the UI loop.
-pub(super) struct BatchHit {
+/// `T` is the worker's match payload: a `(id, title)` pair for Steam/SGDB/RA
+/// and a full `ScrapedGame` for ScreenScraper.
+pub(super) struct BatchHit<T> {
     pub(super) row_idx: usize,
     pub(super) db_id: i64,
     pub(super) name: String,
-    pub(super) matched: Option<(String, String)>,
+    pub(super) matched: Option<T>,
 }
 
 /// The action boxes of one match-list row: `main` takes the Steam or SGDB
 /// result, `ra` (retro games on RA-covered consoles only) the
-/// RetroAchievements one, so the two sources never overwrite each other.
+/// RetroAchievements one, and `ss` (console games ScreenScraper covers)
+/// the ScreenScraper one, so the sources never overwrite each other.
 #[derive(Clone)]
 pub(super) struct RowActions {
     pub(super) main: gtk4::Box,
     pub(super) ra: Option<gtk4::Box>,
+    pub(super) ss: Option<gtk4::Box>,
 }
 
 /// Shared shape of every batch pass: one sequential worker thread computes
@@ -35,15 +39,15 @@ pub(super) struct RowActions {
 /// not touch GTK; it waits `pace_ms` before every request but the first,
 /// so a rate-limited service sees one request per pace, never a burst.
 /// `on_result` runs on the main loop.
-pub(super) fn run_batch(
+pub(super) fn run_batch<T: Send + 'static>(
     queue: Vec<BatchItem>,
     interval_ms: u64,
     pace_ms: u64,
-    worker: impl Fn(&BatchItem) -> Option<(String, String)> + Send + 'static,
-    on_result: impl Fn(BatchHit) + 'static,
+    worker: impl Fn(&BatchItem) -> Option<T> + Send + 'static,
+    on_result: impl Fn(BatchHit<T>) + 'static,
 ) {
     let total = queue.len();
-    let (tx, rx) = std::sync::mpsc::channel::<BatchHit>();
+    let (tx, rx) = std::sync::mpsc::channel::<BatchHit<T>>();
     std::thread::spawn(move || {
         for (index, item) in queue.iter().enumerate() {
             if index > 0 && pace_ms > 0 {

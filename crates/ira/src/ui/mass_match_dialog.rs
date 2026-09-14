@@ -4,6 +4,7 @@ use adw::prelude::*;
 use super::css::*;
 use super::mass_match_batch::{run_batch, BatchItem, RowActions};
 use super::mass_match_ra::{attach_ra_actions, ra_pass_available, start_ra_batch_matching};
+use super::mass_match_ss::{attach_ss_actions, start_ss_batch_matching};
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::state::SharedState;
 use super::steam_search_dialog::{handle_steam_search_result, status_label};
@@ -64,12 +65,24 @@ fn needs_ra_match(g: &Game) -> bool {
         && ira_models::console_has_ra(&g.platform_id)
 }
 
+/// Games the ScreenScraper matcher can enrich: console games on platforms
+/// ScreenScraper covers, until metadata from one is on record. Purely
+/// additive — stored pieces only ever fill blanks.
+fn needs_ss_match(g: &Game) -> bool {
+    (g.kind == ira_models::GameKind::Retro || g.kind.is_console_emulator())
+        && g.screenscraper_id.is_empty()
+        && !g.manual_unmatch
+        && ira_models::screenscraper_system_id(&g.platform_id).is_some()
+}
+
 fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
     let s = state.borrow();
     let games = s.games.clone();
     let needs_matching: Vec<Game> = games
         .into_iter()
-        .filter(|g| needs_steam_match(g) || needs_ra_match(g) || needs_sgdb_match(g))
+        .filter(|g| {
+            needs_steam_match(g) || needs_ra_match(g) || needs_sgdb_match(g) || needs_ss_match(g)
+        })
         .collect();
     let save_dir = &s.save_dir;
     let data_dir = std::path::Path::new(save_dir).join("data").join("steam");
@@ -108,7 +121,8 @@ fn populate_match_list(
             let (row, main) = create_match_row(list, &game.name, &searching_text);
             let ra = needs_ra_match(game)
                 .then(|| attach_ra_actions(&row, state, game, dialog, ra_available));
-            RowActions { main, ra }
+            let ss = needs_ss_match(game).then(|| attach_ss_actions(&row));
+            RowActions { main, ra, ss }
         })
         .collect()
 }
@@ -287,6 +301,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     start_steam_batch_matching(state, &needs_matching, title_map, &rows, &dialog);
     start_sgdb_batch_matching(state, &needs_matching, &rows, &dialog);
     start_ra_batch_matching(state, &needs_matching, &rows, &dialog);
+    start_ss_batch_matching(state, &needs_matching, &rows);
 }
 
 /// One list row: the game's title plus its main action box, which starts
@@ -376,5 +391,26 @@ mod tests {
         let mut g = game(ira_models::GameKind::Wine);
         g.app_id = "420530".to_string();
         assert!(!needs_sgdb_match(&g), "steam-driven enrichment owns these");
+    }
+
+    #[test]
+    fn test_needs_ss_match_targets_mapped_console_platforms() {
+        // 3ds is a console-emulator kind on a mapped platform: the prime
+        // ScreenScraper candidate.
+        let mut g = game(ira_models::GameKind::ThreeDS);
+        g.platform_id = "3ds".to_string();
+        assert!(needs_ss_match(&g));
+        // Once metadata is on record, the pass leaves it alone.
+        g.screenscraper_id = "2124".to_string();
+        assert!(!needs_ss_match(&g));
+        g.screenscraper_id.clear();
+        g.manual_unmatch = true;
+        assert!(!needs_ss_match(&g));
+        // Wine games enrich from Steam, not ScreenScraper.
+        assert!(!needs_ss_match(&game(ira_models::GameKind::Wine)));
+        // Console kinds on platforms ScreenScraper has no system for.
+        let mut unmapped = game(ira_models::GameKind::Switch);
+        unmapped.platform_id = "madeup".to_string();
+        assert!(!needs_ss_match(&unmapped));
     }
 }

@@ -154,7 +154,12 @@ fn resolve(
 }
 
 /// UI loop: persist a hit and repaint the row's RA box either way.
-fn apply_hit(state: &SharedState, rows: &[RowActions], dialog: &adw::Dialog, hit: BatchHit) {
+fn apply_hit(
+    state: &SharedState,
+    rows: &[RowActions],
+    dialog: &adw::Dialog,
+    hit: BatchHit<(String, String)>,
+) {
     let Some(ra_box) = rows.get(hit.row_idx).and_then(|r| r.ra.clone()) else {
         return;
     };

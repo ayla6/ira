@@ -39,6 +39,8 @@ pub struct Game {
     pub game_path: String,
     /// SteamGridDB game ID (if matched) for image downloads.
     pub sgdb_id: String,
+    /// ScreenScraper game ID (if matched) for metadata enrichment.
+    pub screenscraper_id: String,
     /// Per-game shadPS4 version path (empty = use global default).
     pub shadps4_version: String,
     /// Raw release date string from Steam API (e.g. "15 Sep, 2014").
@@ -93,6 +95,7 @@ impl Default for Game {
             sort_title: String::new(),
             game_path: String::new(),
             sgdb_id: String::new(),
+            screenscraper_id: String::new(),
             shadps4_version: String::new(),
             release_date: String::new(),
             release_timestamp: 0,

@@ -210,6 +210,7 @@ impl GameEntry {
             manual_unmatch: self.manual_unmatch,
             sort_title: self.sort_title.clone(),
             sgdb_id: self.sgdb_id.clone().unwrap_or_default(),
+            screenscraper_id: self.screenscraper_id.clone(),
             shadps4_version: self.shadps4_version.clone(),
             release_date: self.release_date.clone(),
             release_timestamp: self.release_timestamp,

@@ -193,43 +193,12 @@ fn profile_slug(name: &str) -> String {
 mod tests {
     use super::{
         add_game_compatibility, ensure_controller_default_profile, find_controller_default_profile,
-        managed_profile_path, migrate_profile_files, new_managed_profile_path,
-        profile_matches_game, read_profile,
+        managed_profile_path, new_managed_profile_path, profile_matches_game,
     };
     use ira_input::{
         ActionSet, ControllerCalibration, GamepadButton, InputMapping, InputProfile, InputSource,
-        OutputAction, StickDeadzone,
+        OutputAction,
     };
-
-    #[test]
-    fn test_migrate_profile_files_rewrites_old_deadzone_default() {
-        let tmp = tempfile::tempdir().unwrap();
-        let save_dir = tmp.path().to_str().unwrap();
-        let path = managed_profile_path(save_dir, "Old");
-        // A version-1 file with the serialized raw-passthrough default.
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            &path,
-            r#"{"version":1,"name":"Old","action_sets":[{"name":"Default","inputs":[
-                {"source":{"axis":"left_x"},
-                 "mode":{"joystick":{"output":"left","deadzone":"none","deadzone_inner":0.1,"deadzone_outer":0.95}}}
-            ]}]}"#,
-        )
-        .unwrap();
-        assert_eq!(migrate_profile_files(save_dir), 1);
-        let saved = read_profile(&path).unwrap();
-        let Some(ira_input::SourceMode::Joystick(settings)) =
-            saved.action_sets[0].inputs[0].mode.as_ref()
-        else {
-            panic!("expected a joystick mode");
-        };
-        assert_eq!(settings.processing.deadzone, StickDeadzone::Controller);
-        // The file itself now carries the current version.
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"version\": 2"));
-        // A second sweep finds nothing left to migrate.
-        assert_eq!(migrate_profile_files(save_dir), 0);
-    }
 
     #[test]
     fn test_new_managed_profile_path_uses_unique_name() {

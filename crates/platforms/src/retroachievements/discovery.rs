@@ -734,6 +734,13 @@ fn is_archive_path(path: &std::path::Path) -> bool {
         .is_some_and(crate::archives::is_archive_extension)
 }
 
+/// Files bigger than this never get a content hash: md5-ing the whole
+/// library of DVD-sized PS2/Switch/Wii images costs hours of I/O for a
+/// match key those platforms barely use — their SS matching runs through
+/// the title search instead. Archive files are statted by their container
+/// size, a lower bound of the inner ROM.
+const CONTENT_HASH_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
 /// The plain full-file md5 the ScreenScraper matcher keys on, computed
 /// once per ROM and stored beside the RA-flavored `rom_hash` (whose NDS
 /// variant hashes only the ranges RetroAchievements identifies). No
@@ -760,6 +767,9 @@ fn fill_content_hashes(
             continue;
         }
         let abs = resolve_in_folders(&console.folders, &entry.rom_path);
+        if std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0) > CONTENT_HASH_MAX_BYTES {
+            continue;
+        }
         let pick = |name: &str| has_rom_extension(name, console.def.extensions);
         let Some(hash) = crate::rom_hash::content_md5(&abs, &pick) else {
             continue;

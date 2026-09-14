@@ -169,6 +169,30 @@ fn resolve(
         }
     }
 
+    // No hash hit: a disc serial is the next-best exact identity — it
+    // survives chd/rvz repacks that scramble every file digest. Only
+    // serial-shaped ids qualify; RA ids and title ids are plain numbers
+    // or too long.
+    if looks_like_serial(&entry.game_id) {
+        let serial = entry.game_id.clone();
+        match steam.screenscraper_serial_lookup(creds, &serial, &platform_id) {
+            Err(e) => {
+                eprintln!("SS batch: serial '{serial}' lookup failed: {e}");
+                return Some(SsOutcome::Failed(e));
+            }
+            Ok(games) => {
+                if let Some(game) = games.into_iter().next() {
+                    eprintln!(
+                        "SS batch: serial '{serial}' [{platform_id}] hit -> ss id {} '{}'",
+                        game.ss_id, game.name
+                    );
+                    return Some(SsOutcome::Hit(Box::new(game)));
+                }
+            }
+        }
+        eprintln!("SS batch: serial '{serial}' [{platform_id}] unknown to the source");
+    }
+
     // No hash hit: one title search, preferring the ROM file name — the
     // library title is user-editable and drifts from the dump, while the
     // file name is what the scene shipped. Punctuation goes: the colon in
@@ -214,6 +238,18 @@ fn resolve(
             }
         }
     }
+}
+
+/// Disc serials — `SLES-52005`, `SLPS-01204`, `RLJE52` — are short
+/// uppercase codes mixing letters and digits. Plain numbers (RA ids),
+/// 16-hex title ids and 4-letter NDS gamecodes don't qualify.
+fn looks_like_serial(game_id: &str) -> bool {
+    (6..=12).contains(&game_id.len())
+        && game_id.chars().any(|c| c.is_ascii_alphabetic())
+        && game_id.chars().any(|c| c.is_ascii_digit())
+        && game_id
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
 }
 
 /// Strip the dump tags a ROM stem carries — `(USA)`, `[!]`, `(Rev 1)` —
@@ -334,6 +370,19 @@ mod tests {
             normalized_for_match("13 Sentinels   Aegis Rim!!")
         );
         assert_eq!(normalized_for_match("  pokémon! "), "pok mon");
+    }
+
+    #[test]
+    fn test_looks_like_serial_gates_disc_ids_only() {
+        assert!(super::looks_like_serial("SLES-52005"));
+        assert!(super::looks_like_serial("SLPS_012.04"));
+        assert!(super::looks_like_serial("RLJE52"));
+        // Plain numbers are RA ids; 16 chars are switch title ids; four
+        // letters are NDS gamecodes.
+        assert!(!super::looks_like_serial("22069"));
+        assert!(!super::looks_like_serial("0100A9400C9C2000"));
+        assert!(!super::looks_like_serial("YG3E"));
+        assert!(!super::looks_like_serial(""));
     }
 
     #[test]

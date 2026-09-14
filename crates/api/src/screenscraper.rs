@@ -95,6 +95,22 @@ pub fn genres_list_url(creds: &ScraperCreds) -> String {
     )
 }
 
+/// The exact-match URL by disc serial: disc dumps — `SLES-52005`, chd,
+/// rvz, whatever repack — identify themselves through `serialnum` instead
+/// of any file digest.
+pub fn serial_lookup_url(creds: &ScraperCreds, serial: &str, platform_id: &str) -> String {
+    let mut url = format!(
+        "{API_URL_BASE}/jeuInfos.php?{}&softname={}&output=xml&serialnum={}",
+        creds.auth_params(),
+        urlencode(SOFT_NAME),
+        urlencode(serial)
+    );
+    if let Some(system) = screenscraper_system_id(platform_id) {
+        url.push_str(&format!("&systemeid={system}"));
+    }
+    url
+}
+
 /// The by-id URL: re-fetch one known game without searching.
 pub fn game_info_by_id_url(creds: &ScraperCreds, ss_id: &str) -> String {
     format!(
@@ -547,6 +563,20 @@ impl SteamDataClient {
         self.screenscraper_get(&game_info_url(creds, rom_nom, platform_id, md5))
     }
 
+    /// Exact lookup by disc serial — the identity that survives chd/rvz
+    /// repacks, where file digests do not.
+    pub fn screenscraper_serial_lookup(
+        &self,
+        creds: &ScraperCreds,
+        serial: &str,
+        platform_id: &str,
+    ) -> Result<Vec<ScrapedGame>, String> {
+        if !creds.is_configured() {
+            return Err("ScreenScraper credentials not configured".to_string());
+        }
+        self.screenscraper_get(&serial_lookup_url(creds, serial, platform_id))
+    }
+
     /// Re-fetch one known game by its ScreenScraper id.
     pub fn screenscraper_game(
         &self,
@@ -873,6 +903,19 @@ mod tests {
         let url = genres_list_url(&creds);
         assert!(url.contains("genresListe.php?devid=ira&devpassword=pw"));
         assert!(url.contains("softname=ira"));
+    }
+
+    #[test]
+    fn test_serial_lookup_url_carries_credentials_and_system() {
+        let creds = ScraperCreds {
+            dev_id: "ira".into(),
+            dev_password: "pw".into(),
+            ..Default::default()
+        };
+        let url = serial_lookup_url(&creds, "SLES-52005", "ps2");
+        assert!(url.contains("jeuInfos.php?devid=ira&devpassword=pw"));
+        assert!(url.contains("serialnum=SLES-52005"));
+        assert!(url.contains("systemeid=58"));
     }
 
     #[test]

@@ -139,15 +139,10 @@ fn resolve(
     // missing file or hash falls through to the title search. NDS rows
     // keep an RA-flavored rom_hash, so the plain content hash wins when
     // the scan has filled it.
-    let stored_hash = if entry.content_hash.is_empty() {
-        &entry.rom_hash
-    } else {
-        &entry.content_hash
-    };
-    let md5 = (!stored_hash.is_empty())
+    let md5 = (!entry.hashes.md5.is_empty())
         .then(|| std::fs::metadata(&entry.rom_path).ok().map(|m| m.len()))
         .flatten()
-        .map(|size| (stored_hash.clone(), size));
+        .map(|size| (entry.hashes.md5.clone(), size));
     let romnom = std::path::Path::new(&entry.rom_path)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())

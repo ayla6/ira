@@ -76,28 +76,6 @@ pub fn find_all_rom_by_platform(
     )
 }
 
-/// Rows of one platform whose full-file content hash was never computed,
-/// as `(id, rom_path)` — the ScreenScraper matcher's fill pass consumes
-/// this on every scan until the column is populated.
-pub fn games_missing_content_hash(
-    conn: &DbConn,
-    platform_id: &str,
-) -> Result<Vec<(i64, String)>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(
-            "SELECT id, rom_path FROM games
-             WHERE platform_id = ?1 AND content_hash = '' AND rom_path != ''",
-        )
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![platform_id], |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
-}
-
 /// Cached API-emulator DLL folder for the game (empty string if unknown).
 pub fn get_api_dll_folder(conn: &DbConn, game_id: i64) -> Result<String, String> {
     let c = lock_db(conn)?;

@@ -149,7 +149,7 @@ fn resolve(
         .unwrap_or_default();
     let names = [item.name.as_str(), entry.title.as_str(), stem.as_str()];
     client
-        .match_ra_game(save_dir, console_id, &entry.rom_hash, &names)
+        .match_ra_game(save_dir, console_id, entry.hashes.ra_key(), &names)
         .map(|g| (g.id.to_string(), g.title))
 }
 

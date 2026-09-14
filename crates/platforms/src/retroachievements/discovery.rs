@@ -227,8 +227,8 @@ fn build_ra_games_for_console(
     // comes back under a new name or path can be pinned to its old row.
     let existing_by_hash: HashMap<&str, &ira_models::GameEntry> = existing_entries
         .iter()
-        .filter(|e| !e.rom_hash.is_empty())
-        .map(|e| (e.rom_hash.as_str(), e))
+        .filter(|e| !e.hashes.md5.is_empty())
+        .map(|e| (e.hashes.md5.as_str(), e))
         .collect();
 
     // With RA disabled the match index stays empty: ROMs are discovered
@@ -285,7 +285,7 @@ fn build_ra_games_for_console(
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let rom_norm = normalize_name(&rom_name);
-                if let Some(ra_id) = ra_index.find(&entry.rom_hash, &rom_norm) {
+                if let Some(ra_id) = ra_index.find(entry.hashes.ra_key(), &rom_norm) {
                     let new_game_id = ra_id.to_string();
                     let already_matched =
                         ira_db::find_by_game_id(db, &new_game_id, console.def.id)
@@ -354,7 +354,7 @@ fn build_ra_games_for_console(
         let nds_infos = precompute_nds_infos(console, unpack_roms, &groups, &to_relative);
         let hashed: HashSet<&str> = existing_by_path
             .iter()
-            .filter(|(_, entry)| !entry.rom_hash.is_empty())
+            .filter(|(_, entry)| !entry.hashes.md5.is_empty())
             .map(|(path, _)| path.as_str())
             .collect();
         let rom_hashes = compute_rom_hashes(
@@ -370,11 +370,9 @@ fn build_ra_games_for_console(
             let rom_path_str = to_relative(rom_path);
 
             let rom_norm = normalize_name(rom_name);
-            let rom_hash = rom_hashes
-                .get(&rom_path_str)
-                .map(String::as_str)
-                .unwrap_or_default();
-            let matched_id = ra_index.find(rom_hash, &rom_norm);
+            let rom_hash = rom_hashes.get(&rom_path_str).map(|h| h.ra_key());
+            let matched_id = rom_hash
+                .and_then(|hash| ra_index.find(hash, &rom_norm));
 
             let serial = if matched_id.is_some() {
                 group.serial.clone()
@@ -438,7 +436,9 @@ fn build_ra_games_for_console(
             // A matching content hash pins the file to the row it lived on
             // before its old file vanished — the reattachment path for a
             // ROM that returns renamed or moved.
-            let id_from_hash = existing_by_hash.get(rom_hash).map(|entry| entry.id);
+            let id_from_hash = rom_hash
+                .and_then(|hash| existing_by_hash.get(hash))
+                .map(|entry| entry.id);
             if let Some(id) = id_from_hash {
                 candidate_ids.push(id);
                 candidate_ids.sort_unstable();
@@ -468,19 +468,19 @@ fn build_ra_games_for_console(
                     None
                 })
             });
-            let existing_hash = existing_by_id
+            let existing_hashes = existing_by_id
                 .as_ref()
-                .map(|e| e.rom_hash.clone())
+                .map(|e| e.hashes.clone())
                 .unwrap_or_default();
             // Resolved before the match below: `rom_path_str` is moved into
             // the built game in both branches.
             let pending_hash = rom_hashes
                 .get(&rom_path_str)
-                .filter(|hash| hash.as_str() != existing_hash);
-            let nds_info = if !existing_hash.is_empty() {
-                None
-            } else {
+                .filter(|hashes| *hashes != &existing_hashes);
+            let nds_info = if existing_hashes.is_empty() {
                 nds_infos.get(&rom_path_str)
+            } else {
+                None
             };
             let switch_meta = switch_metas.get(&rom_path_str);
             let game = match existing_by_id {
@@ -545,9 +545,11 @@ fn build_ra_games_for_console(
                 }
             };
 
-            if let Some(hash) = pending_hash {
-                if let Err(e) = ira_db::set_rom_hash(db, game.db_id, hash) {
-                    eprintln!("Failed to store ROM hash: {e}");
+            if let Some(hashes) = pending_hash {
+                for (key, value) in [("md5", &hashes.md5), ("ra_md5", &hashes.ra_md5)] {
+                    if let Err(e) = ira_db::set_hash_key(db, game.db_id, key, value) {
+                        eprintln!("Failed to store {key} hash: {e}");
+                    }
                 }
             }
             if let Some(info) = nds_info {
@@ -671,15 +673,20 @@ fn compute_rom_hashes(
     hashed: &HashSet<&str>,
     extensions: &[&str],
     unpack_roms: bool,
-) -> HashMap<String, String> {
+) -> HashMap<String, ira_models::RomHashes> {
     if groups.is_empty() {
         return HashMap::new();
     }
     use rayon::prelude::*;
 
-    let mut hashes: HashMap<String, String> = nds_infos
+    let mut hashes: HashMap<String, ira_models::RomHashes> = nds_infos
         .iter()
-        .map(|(path, info)| (path.clone(), info.rom_hash.clone()))
+        .map(|(path, info)| {
+            (path.clone(), ira_models::RomHashes {
+                ra_md5: info.rom_hash.clone(),
+                ..Default::default()
+            })
+        })
         .collect();
     let targets: Vec<(String, PathBuf)> = groups
         .iter()
@@ -699,7 +706,13 @@ fn compute_rom_hashes(
         .collect();
     for ((relative, _), digest) in targets.into_iter().zip(digests) {
         if let Some(digest) = digest {
-            hashes.insert(relative, digest);
+            hashes.insert(
+                relative,
+                ira_models::RomHashes {
+                    md5: digest,
+                    ..Default::default()
+                },
+            );
         }
     }
     hashes
@@ -731,24 +744,27 @@ fn fill_content_hashes(
     console: &ActiveConsole,
     unpack_roms: bool,
 ) {
-    let rows = match ira_db::games_missing_content_hash(db, console.def.id) {
+    let rows = match ira_db::find_all_rom_by_platform(db, console.def.id) {
         Ok(rows) => rows,
         Err(e) => {
             eprintln!("Content hash pass: could not list rows: {e}");
             return;
         }
     };
-    for (db_id, rom_path_str) in rows {
-        let is_archive = is_archive_path(std::path::Path::new(&rom_path_str));
+    for entry in rows {
+        if !entry.hashes.md5.is_empty() {
+            continue;
+        }
+        let is_archive = is_archive_path(std::path::Path::new(&entry.rom_path));
         if is_archive && !unpack_roms {
             continue;
         }
-        let abs = resolve_in_folders(&console.folders, &rom_path_str);
+        let abs = resolve_in_folders(&console.folders, &entry.rom_path);
         let pick = |name: &str| has_rom_extension(name, console.def.extensions);
         let Some(hash) = crate::rom_hash::content_md5(&abs, &pick) else {
             continue;
         };
-        if let Err(e) = ira_db::set_content_hash(db, db_id, &hash) {
+        if let Err(e) = ira_db::set_hash_key(db, entry.id, "md5", &hash) {
             eprintln!("Content hash pass: failed to store: {e}");
         }
     }
@@ -771,7 +787,7 @@ fn rehash_archived_rom(
         || ra_index.is_empty()
         || entry.manual_unmatch
         || entry.trophy_source != TrophySource::Empty
-        || !entry.rom_hash.is_empty()
+        || !entry.hashes.md5.is_empty()
         || !is_archive_path(std::path::Path::new(rom_path_str))
     {
         return;
@@ -781,11 +797,11 @@ fn rehash_archived_rom(
     let Some(hash) = crate::rom_hash::content_md5(&abs, &pick) else {
         return;
     };
-    if let Err(e) = ira_db::set_rom_hash(db, entry.id, &hash) {
+    if let Err(e) = ira_db::set_hash_key(db, entry.id, "md5", &hash) {
         eprintln!("Failed to store rehashed ROM hash: {}", e);
         return;
     }
-    entry.rom_hash = hash;
+    entry.hashes.md5 = hash;
 }
 
 /// Extracts DS banner icons and RetroAchievements hashes for games that
@@ -809,7 +825,7 @@ fn enrich_nds_roms(
 
     let already_hashed: HashSet<i64> = existing
         .iter()
-        .filter(|entry| !entry.rom_hash.is_empty())
+        .filter(|entry| !entry.hashes.is_empty())
         .map(|entry| entry.id)
         .collect();
     let targets: Vec<(i64, PathBuf)> = games
@@ -830,7 +846,7 @@ fn enrich_nds_roms(
         let Some(info) = info else {
             continue;
         };
-        if let Err(e) = ira_db::set_rom_hash(db, db_id, &info.rom_hash) {
+        if let Err(e) = ira_db::set_hash_key(db, db_id, "ra_md5", &info.rom_hash) {
             eprintln!("Failed to store DS ROM hash: {e}");
         }
         write_nds_icon(save_dir, db_id, &info.icon);
@@ -1186,7 +1202,7 @@ mod tests {
         // Even an RA-matched row gets the plain content hash: it is
         // ScreenScraper's key, independent of the trophy match.
         assert_eq!(
-            entry.content_hash,
+            entry.hashes.md5,
             crate::rom_hash::file_md5(&rom).unwrap()
         );
     }
@@ -1212,7 +1228,7 @@ mod tests {
         )
         .unwrap();
         let hash = crate::rom_hash::file_md5(&rom).unwrap();
-        ira_db::set_rom_hash(&db, db_id, &hash).unwrap();
+        ira_db::set_hash_key(&db, db_id, "md5", &hash).unwrap();
 
         let save_dir = tmp.path().join("save").to_string_lossy().into_owned();
         let games = super::build_ra_games_for_console(
@@ -1233,7 +1249,7 @@ mod tests {
         let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
         assert_eq!(entry.rom_path, "Same Game (USA).gba");
         assert_eq!(entry.title, "Old title");
-        assert_eq!(entry.rom_hash, hash);
+        assert_eq!(entry.hashes.md5, hash);
         assert_eq!(
             ira_db::find_all_rom_by_platform(&db, "gba").unwrap().len(),
             1
@@ -1343,7 +1359,7 @@ mod tests {
 
         assert_eq!(games.len(), 1);
         let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
-        assert_eq!(entry.rom_hash, content_hash);
+        assert_eq!(entry.hashes.md5, content_hash);
         assert_eq!(entry.game_id, "77");
         assert_eq!(entry.trophy_source, ira_models::TrophySource::Ra);
     }

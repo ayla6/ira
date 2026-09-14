@@ -2,7 +2,7 @@ use crate::DbConn;
 use ira_models::{GameEntry, GameKind, TrophySource};
 use r2d2_sqlite::SqliteConnectionManager;
 
-pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, rom_hash, vanished, developer, publisher, genre, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, developer_id, publisher_id, genre_ids, classification_ids, content_hash";
+pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, game_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, hashes, vanished, developer, publisher, genre, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, developer_id, publisher_id, genre_ids, classification_ids";
 
 pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameEntry> {
     Ok(GameEntry {
@@ -34,7 +34,10 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
         cached_earned_count: row.get(25)?,
         cached_total_count: row.get(26)?,
         cached_achievement_mtime: row.get(27)?,
-        rom_hash: row.get(28)?,
+        hashes: serde_json::from_str(
+            &row.get::<_, String>(28)?,
+        )
+        .unwrap_or_default(),
         vanished: row.get(29)?,
         players: row.get(33)?,
         synopsis: row.get(34)?,
@@ -45,7 +48,6 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
         publisher_id: row.get(39)?,
         genre_ids: row.get(40)?,
         classification_ids: row.get(41)?,
-        content_hash: row.get(42)?,
     })
 }
 

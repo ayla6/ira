@@ -1,6 +1,36 @@
 use super::asset_type::LogoPosition;
 use super::kind::{GameKind, TrophySource};
 
+/// The ROM's hashes, keyed by what they hash: `md5` is the whole-file
+/// digest — ScreenScraper's match key and the ROM's plain identity —
+/// while `ra_md5` is RetroAchievements' key, set only where it differs
+/// (for NDS an md5 over header + ARM9 + ARM7 + banner ranges instead of
+/// the whole file). Serialized as a JSON object in the games row.
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RomHashes {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub md5: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ra_md5: String,
+}
+
+impl RomHashes {
+    /// True when no consumer has a key yet.
+    pub fn is_empty(&self) -> bool {
+        self.md5.is_empty() && self.ra_md5.is_empty()
+    }
+
+    /// The key an RA match needs: the dedicated one when the console's
+    /// hash diverges from the plain file md5, the md5 itself otherwise.
+    pub fn ra_key(&self) -> &str {
+        if self.ra_md5.is_empty() {
+            &self.md5
+        } else {
+            &self.ra_md5
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GameEntry {
     pub id: i64,
@@ -54,10 +84,7 @@ pub struct GameEntry {
     /// Content hash of the game's ROM: the RetroAchievements hash on NDS,
     /// a full-file MD5 elsewhere. Lets a scan reattach a game whose file
     /// reappears under a new name or path (empty = unknown).
-    pub rom_hash: String,
-    /// The plain full-file md5 — ScreenScraper's key — kept beside the
-    /// RA-flavored `rom_hash`, whose NDS variant hashes only ranges.
-    pub content_hash: String,
+    pub hashes: RomHashes,
     /// The game's files are gone: the source scan that owns this row last
     /// looked and did not find it. The row stays (its playtime and trophies
     /// remain), but game loads must ignore it entirely — even when hidden
@@ -128,8 +155,7 @@ impl GameEntry {
             cached_earned_count: 0,
             cached_total_count: 0,
             cached_achievement_mtime: 0,
-            rom_hash: String::new(),
-            content_hash: String::new(),
+            hashes: RomHashes::default(),
             vanished: false,
             players: String::new(),
             synopsis: String::new(),
@@ -181,8 +207,7 @@ impl GameEntry {
             cached_earned_count: g.earned_count as i64,
             cached_total_count: g.total_count as i64,
             cached_achievement_mtime: 0,
-            rom_hash: String::new(),
-            content_hash: String::new(),
+            hashes: RomHashes::default(),
             vanished: false,
             players: String::new(),
             synopsis: String::new(),

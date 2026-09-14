@@ -179,7 +179,7 @@ pub fn show_ra_search_dialog(
         ira_db::find_by_db_id(&s.db, db_id)
             .ok()
             .flatten()
-            .map(|e| e.rom_hash)
+            .map(|e| e.hashes.ra_key().to_string())
             .unwrap_or_default()
     };
 

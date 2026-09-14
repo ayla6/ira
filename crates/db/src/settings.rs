@@ -61,10 +61,22 @@ pub fn set_rom_path(conn: &DbConn, id: i64, rom_path: &str) -> Result<(), String
 
 /// Stores the ROM's content hash, used for name-independent RA matching
 /// and to reattach a game whose ROM reappears under a new name or path.
-pub fn set_rom_hash(conn: &DbConn, id: i64, rom_hash: &str) -> Result<(), String> {
-    update_field(conn, id, "rom_hash", &rom_hash)
-}
-
-pub fn set_content_hash(conn: &DbConn, id: i64, content_hash: &str) -> Result<(), String> {
-    update_field(conn, id, "content_hash", &content_hash)
+/// Set one key of the games row's hashes object, keeping the others: the
+/// RA pass and the content pass each only know their own key.
+pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    let current: String = c
+        .query_row("SELECT hashes FROM games WHERE id = ?1", params![id], |row| row.get(0))
+        .unwrap_or_default();
+    let mut hashes: ira_models::RomHashes =
+        serde_json::from_str(&current).unwrap_or_default();
+    match key {
+        "md5" => hashes.md5 = value.to_string(),
+        "ra_md5" => hashes.ra_md5 = value.to_string(),
+        other => return Err(format!("unknown hash key {other}")),
+    }
+    let json = serde_json::to_string(&hashes).map_err(err)?;
+    c.execute("UPDATE games SET hashes = ?1 WHERE id = ?2", params![json, id])
+        .map_err(err)?;
+    Ok(())
 }

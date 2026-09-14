@@ -591,7 +591,7 @@ fn rom_hash_for(state: &SharedState, db_id: i64) -> Option<String> {
     ira_db::find_by_db_id(&s.db, db_id)
         .ok()
         .flatten()
-        .map(|entry| entry.rom_hash)
+        .map(|entry| entry.hashes.ra_key().to_string())
         .filter(|hash| !hash.is_empty())
 }
 

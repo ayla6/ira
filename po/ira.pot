@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-14 12:21-0300\n"
+"POT-Creation-Date: 2026-09-14 13:03-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -558,7 +558,7 @@ msgstr ""
 #: crates/ira/src/ui/auto_add_dialog.rs:1745
 #: crates/ira/src/ui/big_picture/all_games.rs:755
 #: crates/ira/src/ui/big_picture/keyboard.rs:405
-#: crates/ira/src/ui/mass_match_dialog.rs:266
+#: crates/ira/src/ui/mass_match_dialog.rs:269
 #: crates/ira/src/ui/message_handler.rs:103
 msgid "OK"
 msgstr ""
@@ -4303,28 +4303,28 @@ msgstr ""
 msgid "Search log…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:115
+#: crates/ira/src/ui/mass_match_dialog.rs:117
 msgid "Searching Steam..."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:117
+#: crates/ira/src/ui/mass_match_dialog.rs:119
 msgid "Searching SGDB..."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:261
+#: crates/ira/src/ui/mass_match_dialog.rs:264
 msgid "Nothing to match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:263
+#: crates/ira/src/ui/mass_match_dialog.rs:266
 msgid "Every game already has a trophy source and image assets linked."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:272
+#: crates/ira/src/ui/mass_match_dialog.rs:275
 #: crates/ira/src/ui/window.rs:321
 msgid "Match unmatched games"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:280
+#: crates/ira/src/ui/mass_match_dialog.rs:283
 #, rust-format
 msgid "{} game(s) to match"
 msgstr ""
@@ -4345,16 +4345,8 @@ msgstr ""
 msgid "RA: matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ss.rs:27
+#: crates/ira/src/ui/mass_match_ss.rs:46
 msgid "Searching ScreenScraper..."
-msgstr ""
-
-#: crates/ira/src/ui/mass_match_ss.rs:134
-msgid "SS: matched"
-msgstr ""
-
-#: crates/ira/src/ui/mass_match_ss.rs:138
-msgid "SS: not matched"
 msgstr ""
 
 #: crates/ira/src/ui/matching.rs:211
@@ -4542,6 +4534,7 @@ msgstr ""
 
 #: crates/ira/src/ui/ra_match_dialog.rs:139
 #: crates/ira/src/ui/sgdb_match_dialog.rs:242
+#: crates/ira/src/ui/ss_match_dialog.rs:73
 #: crates/ira/src/ui/steam_search_dialog.rs:290
 #: crates/ira/src/ui/steam_search.rs:70
 msgid "No results found"
@@ -4566,6 +4559,7 @@ msgstr ""
 
 #: crates/ira/src/ui/ra_match_dialog.rs:197
 #: crates/ira/src/ui/sgdb_match_dialog.rs:219
+#: crates/ira/src/ui/ss_match_dialog.rs:115
 #: crates/ira/src/ui/steam_search.rs:30
 msgid "Game name…"
 msgstr ""
@@ -5416,6 +5410,22 @@ msgstr ""
 
 #: crates/ira/src/ui/sidebar.rs:340
 msgid "Add collection"
+msgstr ""
+
+#: crates/ira/src/ui/ss_match_dialog.rs:110
+msgid "Match to ScreenScraper"
+msgstr ""
+
+#: crates/ira/src/ui/ss_match_dialog.rs:177
+msgid "SS: not matched"
+msgstr ""
+
+#: crates/ira/src/ui/ss_match_dialog.rs:178
+msgid "Search SS…"
+msgstr ""
+
+#: crates/ira/src/ui/ss_match_dialog.rs:202
+msgid "SS: matched"
 msgstr ""
 
 #: crates/ira/src/ui/steam_search_dialog.rs:41

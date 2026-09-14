@@ -1,15 +1,17 @@
 //! The mass matcher's ScreenScraper pass: console games are resolved
 //! through their stored ROM md5 — the exact-match search — and the
 //! metadata a hit carries (dates, companies, genres, players, synopses)
-//! is persisted as it lands. Misses stay dim labels: there is no manual
-//! ScreenScraper search dialog to offer yet.
+//! is persisted as it lands. Games the source already came up empty for
+//! are skipped, but stay visible with a manual search button.
 
 use adw::prelude::*;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
+use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
 use super::state::SharedState;
 use super::steam_search_dialog::status_label;
 use crate::Game;
@@ -18,15 +20,33 @@ use ira_api::{ScraperCreds, SteamDataClient};
 use ira_models::screenscraper_system_id;
 
 /// The status box of a match-list row's ScreenScraper pass, added as its
-/// own suffix so the Steam/SGDB/RA boxes stay independent. The pass runs
-/// for every row it is attached to, so it starts at "Searching".
-pub(super) fn attach_ss_actions(row: &adw::ActionRow) -> gtk4::Box {
+/// own suffix so the Steam/SGDB/RA boxes stay independent. Rows the source
+/// already missed skip straight to the manual search button instead of
+/// burning the request again.
+pub(super) fn attach_ss_actions(
+    row: &adw::ActionRow,
+    state: &SharedState,
+    game: &Game,
+    dialog: &adw::Dialog,
+    missed: bool,
+) -> gtk4::Box {
     let ss_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     ss_box.set_valign(gtk4::Align::Center);
-    ss_box.append(&status_label(
-        &crate::tr!("Searching ScreenScraper..."),
-        CSS_DIM_LABEL,
-    ));
+    if missed {
+        show_unmatched(
+            &ss_box,
+            state,
+            game.db_id,
+            &game.name,
+            &game.platform_id,
+            dialog,
+        );
+    } else {
+        ss_box.append(&status_label(
+            &crate::tr!("Searching ScreenScraper..."),
+            CSS_DIM_LABEL,
+        ));
+    }
     row.add_suffix(&ss_box);
     ss_box
 }
@@ -37,19 +57,31 @@ pub(super) fn start_ss_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
     rows: &[RowActions],
+    dialog: &adw::Dialog,
 ) {
-    let (steam, db, creds) = {
+    let (steam, db, creds, missed) = {
         let s = state.borrow();
+        let missed: HashSet<i64> = match ira_db::scraper_missed_ids(&s.db) {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => {
+                eprintln!("ScreenScraper batch: could not read misses: {e}");
+                HashSet::new()
+            }
+        };
         (
             s.steam.clone(),
             s.db.clone(),
-            ScraperCreds::from_account(s.cfg.screenscraper_id.clone(), s.cfg.screenscraper_password.clone()),
+            ScraperCreds::from_account(
+                s.cfg.screenscraper_id.clone(),
+                s.cfg.screenscraper_password.clone(),
+            ),
+            missed,
         )
     };
     let queue: Vec<BatchItem> = needs_matching
         .iter()
         .enumerate()
-        .filter(|(i, _)| rows.get(*i).is_some_and(|r| r.ss.is_some()))
+        .filter(|(i, g)| rows.get(*i).is_some_and(|r| r.ss.is_some()) && !missed.contains(&g.db_id))
         .map(|(row_idx, g)| BatchItem {
             name: g.name.clone(),
             db_id: g.db_id,
@@ -72,7 +104,8 @@ pub(super) fn start_ss_batch_matching(
         {
             let state = state.clone();
             let rows = rows.to_vec();
-            move |hit| apply_hit(&state, &rows, hit)
+            let dialog = dialog.clone();
+            move |hit| apply_hit(&state, &rows, &dialog, hit)
         },
     );
 }
@@ -109,33 +142,37 @@ fn resolve(
     games.into_iter().next()
 }
 
-/// UI loop: persist a hit's metadata and repaint the row's SS box.
-fn apply_hit(state: &SharedState, rows: &[RowActions], hit: BatchHit<ScrapedGame>) {
+/// UI loop: persist a hit's metadata and repaint the row's SS box; a miss
+/// is tombstoned so the next dialog opening skips the request, and the row
+/// grows the manual search button.
+fn apply_hit(
+    state: &SharedState,
+    rows: &[RowActions],
+    dialog: &adw::Dialog,
+    hit: BatchHit<ScrapedGame>,
+) {
     let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) else {
         return;
     };
+    let platform_id = state
+        .borrow()
+        .games
+        .iter()
+        .find(|g| g.db_id == hit.db_id)
+        .map(|g| g.platform_id.clone())
+        .unwrap_or_default();
     match hit.matched {
         Some(game) => {
-            let timestamp = ira_db::scraper_release_timestamp(&game.release_date);
-            if let Err(e) =
-                ira_db::store_scraper_metadata(&state.borrow().db, hit.db_id, &game.metadata(timestamp))
-            {
-                eprintln!("ScreenScraper batch: failed to store metadata: {e}");
-            }
-            if let Some(g) = state
-                .borrow_mut()
-                .games
-                .iter_mut()
-                .find(|g| g.db_id == hit.db_id)
-            {
-                g.screenscraper_id = game.ss_id.clone();
+            persist_ss_match(state, hit.db_id, &game);
+            show_matched(&ss_box);
+        }
+        None => {
+            if let Err(e) = ira_db::tombstone_scraper_miss(&state.borrow().db, hit.db_id) {
+                eprintln!("ScreenScraper batch: failed to record the miss: {e}");
             }
             replace_row_actions(&ss_box, |ab| {
-                ab.append(&status_label(&crate::tr!("SS: matched"), CSS_SUCCESS_LABEL));
+                show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
             });
         }
-        None => replace_row_actions(&ss_box, |ab| {
-            ab.append(&status_label(&crate::tr!("SS: not matched"), CSS_DIM_LABEL));
-        }),
     }
 }

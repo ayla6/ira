@@ -1,5 +1,6 @@
 use crate::Game;
 use adw::prelude::*;
+use std::collections::HashSet;
 
 use super::css::*;
 use super::mass_match_batch::{run_batch, BatchItem, RowActions};
@@ -106,6 +107,7 @@ fn populate_match_list(
     needs_matching: &[Game],
     state: &SharedState,
     dialog: &adw::Dialog,
+    ss_missed: &HashSet<i64>,
 ) -> Vec<RowActions> {
     let ra_available = ra_pass_available(state);
     needs_matching
@@ -121,7 +123,8 @@ fn populate_match_list(
             let (row, main) = create_match_row(list, &game.name, &searching_text);
             let ra = needs_ra_match(game)
                 .then(|| attach_ra_actions(&row, state, game, dialog, ra_available));
-            let ss = needs_ss_match(game).then(|| attach_ss_actions(&row));
+            let ss = needs_ss_match(game)
+                .then(|| attach_ss_actions(&row, state, game, dialog, ss_missed.contains(&game.db_id)));
             RowActions { main, ra, ss }
         })
         .collect()
@@ -291,7 +294,14 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     scrolled.set_propagate_natural_height(true);
     scrolled.set_min_content_height(160);
     scrolled.set_max_content_height(500);
-    let rows = populate_match_list(&list, &needs_matching, state, &dialog);
+    let ss_missed: HashSet<i64> = match ira_db::scraper_missed_ids(&state.borrow().db) {
+        Ok(ids) => ids.into_iter().collect(),
+        Err(e) => {
+            eprintln!("Mass matcher: could not read ScreenScraper misses: {e}");
+            HashSet::new()
+        }
+    };
+    let rows = populate_match_list(&list, &needs_matching, state, &dialog, &ss_missed);
     content.append(&scrolled);
 
     toolbar.set_content(Some(&content));
@@ -301,7 +311,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     start_steam_batch_matching(state, &needs_matching, title_map, &rows, &dialog);
     start_sgdb_batch_matching(state, &needs_matching, &rows, &dialog);
     start_ra_batch_matching(state, &needs_matching, &rows, &dialog);
-    start_ss_batch_matching(state, &needs_matching, &rows);
+    start_ss_batch_matching(state, &needs_matching, &rows, &dialog);
 }
 
 /// One list row: the game's title plus its main action box, which starts

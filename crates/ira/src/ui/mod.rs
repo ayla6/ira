@@ -21,6 +21,7 @@ mod mass_match_batch;
 mod mass_match_dialog;
 mod mass_match_ra;
 mod mass_match_ss;
+mod ss_match_dialog;
 mod message_handler;
 mod message_helpers;
 mod open_emulator_row;

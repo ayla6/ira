@@ -39,7 +39,8 @@ pub use message::{AppMessage, AppSender};
 pub use session::PlaySession;
 pub use group_order::GroupOrder;
 pub use screenscraper::{
-    screenscraper_system_id, ScraperClassification, ScraperEntity, ScraperMetadata,
+    screenscraper_hashes_content, screenscraper_matches_by_serial, screenscraper_system_id,
+    title_from_trusted_source, ScraperClassification, ScraperEntity, ScraperMetadata,
 };
 pub use sort_mode::SortMode;
 pub use steam_languages::{steam_language_name, SteamLanguage, STEAM_LANGUAGES};

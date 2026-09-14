@@ -79,6 +79,11 @@ fn save_title_and_sort(
     if let Err(e) = ira_db::update_sort_title(db, db_id, &sort_title) {
         eprintln!("Failed to update sort title: {}", e);
     }
+    // Whatever the user saved is authoritative: a later ScreenScraper
+    // match must not rename the game behind their back.
+    if let Err(e) = ira_db::set_title_trusted(db, db_id, true) {
+        eprintln!("Failed to mark the title trusted: {}", e);
+    }
 }
 
 fn save_app_id(db: &ira_db::DbConn, params: &SaveGameSettingsParams) -> AppIdResult {

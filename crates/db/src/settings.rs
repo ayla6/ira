@@ -63,6 +63,10 @@ pub fn set_rom_path(conn: &DbConn, id: i64, rom_path: &str) -> Result<(), String
 /// and to reattach a game whose ROM reappears under a new name or path.
 /// Set one key of the games row's hashes object, keeping the others: the
 /// RA pass and the content pass each only know their own key.
+pub fn set_title_trusted(conn: &DbConn, id: i64, trusted: bool) -> Result<(), String> {
+    update_field(conn, id, "title_trusted", &(trusted as i64))
+}
+
 pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     let current: String = c

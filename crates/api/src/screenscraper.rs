@@ -344,7 +344,11 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
         .replace("&nbsp;", " ")
         .replace("&#x26;", "&")
         .replace("&#39;", "\u{2019}")
-        .replace('\n', "");
+        .replace('\n', "")
+        // ScreenScraper's French typographic spaces leak into non-French
+        // names: "007 : Everything or Nothing" reads as "007: Everything
+        // or Nothing" everywhere else.
+        .replace(" : ", ": ");
     let release_dates: Vec<(String, String)> = jeu
         .dates
         .as_ref()
@@ -929,6 +933,15 @@ mod tests {
         );
         // A URL without a query passes through untouched.
         assert_eq!(redact_url("https://x/y.png"), "https://x/y.png");
+    }
+
+    #[test]
+    fn test_parse_games_defrenchifies_the_picked_name() {
+        let xml = r#"<Data><jeux><jeu id="1">
+            <noms><nom region="us">007 : Everything or Nothing</nom></noms>
+        </jeu></jeux></Data>"#;
+        let games = parse_games(xml).unwrap();
+        assert_eq!(games[0].name, "007: Everything or Nothing");
     }
 
     #[test]

@@ -135,36 +135,42 @@ fn resolve(
     let platform_id = entry.platform_id.clone();
     screenscraper_system_id(&platform_id)?;
 
-    // The hash search needs the digest and the file size together; a
-    // missing file or hash falls through to the title search. NDS rows
-    // keep an RA-flavored rom_hash, so the plain content hash wins when
-    // the scan has filled it.
-    let md5 = (!entry.hashes.md5.is_empty())
-        .then(|| std::fs::metadata(&entry.rom_path).ok().map(|m| m.len()))
-        .flatten()
-        .map(|size| (entry.hashes.md5.clone(), size));
-    let romnom = std::path::Path::new(&entry.rom_path)
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| item.name.clone());
-    match steam.screenscraper_rom_lookup(
-        creds,
-        &romnom,
-        &platform_id,
-        md5.as_ref().map(|(hash, size)| (hash.as_str(), *size)),
-    ) {
-        Err(e) => {
-            eprintln!("SS batch: '{romnom}' [{platform_id}] lookup failed: {e}");
-            return Some(SsOutcome::Failed(e));
-        }
-        Ok(games) => {
-            if let Some(game) = games.into_iter().next() {
-                eprintln!(
-                    "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
-                    game.ss_id, game.name
-                );
-                return Some(SsOutcome::Hit(Box::new(game)));
+    // The exact hash search runs only on consoles where file digests are
+    // the matching key — disc consoles go serial-first below, and their
+    // multi-gigabyte images never get hashed at all. NDS rows keep an
+    // RA-flavored rom_hash, so the plain content md5 wins when the scan
+    // has filled it. romnom carries the real file name with extension,
+    // exactly what ScreenScraper's rom index stores (ES-DE sends it the
+    // same way); the stem alone loses the match.
+    if ira_models::screenscraper_hashes_content(&platform_id) && !entry.hashes.md5.is_empty() {
+        let romnom = std::path::Path::new(&entry.rom_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| item.name.clone());
+        let size = std::fs::metadata(&entry.rom_path).ok().map(|m| m.len());
+        let Some(size) = size else {
+            eprintln!("SS batch: '{romnom}' [{platform_id}] hash present but file missing");
+            return Some(SsOutcome::Miss);
+        };
+        match steam.screenscraper_rom_lookup(
+            creds,
+            &romnom,
+            &platform_id,
+            Some((entry.hashes.md5.as_str(), size)),
+        ) {
+            Err(e) => {
+                eprintln!("SS batch: '{romnom}' [{platform_id}] lookup failed: {e}");
+                return Some(SsOutcome::Failed(e));
+            }
+            Ok(games) => {
+                if let Some(game) = games.into_iter().next() {
+                    eprintln!(
+                        "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
+                        game.ss_id, game.name
+                    );
+                    return Some(SsOutcome::Hit(Box::new(game)));
+                }
+                eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit");
             }
         }
     }
@@ -173,7 +179,7 @@ fn resolve(
     // survives chd/rvz repacks that scramble every file digest. Only
     // serial-shaped ids qualify; RA ids and title ids are plain numbers
     // or too long.
-    if looks_like_serial(&entry.game_id) {
+    if ira_models::screenscraper_matches_by_serial(&platform_id) && looks_like_serial(&entry.game_id) {
         let serial = entry.game_id.clone();
         match steam.screenscraper_serial_lookup(creds, &serial, &platform_id) {
             Err(e) => {
@@ -208,7 +214,7 @@ fn resolve(
         .find(|t| !t.trim().is_empty())
         .unwrap_or_default());
     if term.is_empty() {
-        eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit and no name to search");
+        eprintln!("SS batch: [{platform_id}] no hash hit and no name to search");
         return Some(SsOutcome::Miss);
     }
     match steam.screenscraper_search(creds, &term, &platform_id) {

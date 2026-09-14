@@ -759,7 +759,9 @@ fn fill_content_hashes(
         }
     };
     for entry in rows {
-        if !entry.hashes.md5.is_empty() {
+        if !ira_models::screenscraper_hashes_content(console.def.id)
+            || !entry.hashes.md5.is_empty()
+        {
             continue;
         }
         let is_archive = is_archive_path(std::path::Path::new(&entry.rom_path));

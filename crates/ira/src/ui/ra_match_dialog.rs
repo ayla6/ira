@@ -33,6 +33,9 @@ pub(super) fn persist_ra_match(
     if let Err(e) = ira_db::set_manual_unmatch(&sc.borrow().db, db_id, false) {
         eprintln!("Failed to clear manual unmatch: {}", e);
     }
+    if let Err(e) = ira_db::set_title_trusted(&sc.borrow().db, db_id, true) {
+        eprintln!("Failed to mark the title trusted: {}", e);
+    }
     if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
         g.app_id = app_id;
         g.trophy_source = ira_models::TrophySource::Ra;

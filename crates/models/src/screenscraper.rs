@@ -50,6 +50,29 @@ pub struct ScraperMetadata {
     pub synopses: Vec<(String, String)>,
 }
 
+/// Consoles whose games are identified on ScreenScraper by disc serial
+/// instead of any file digest: multi-gigabyte images (PS2 DVDs, Wii/GC
+/// discs) whose repacks — chd, rvz, wux — scramble every hash, while the
+/// serial printed on the disc survives all of them.
+pub fn screenscraper_matches_by_serial(platform_id: &str) -> bool {
+    matches!(platform_id, "ps2" | "ps3" | "wii" | "gc" | "psx" | "psp")
+}
+
+/// Consoles whose images are too big for content hashing to be worth it.
+/// Disc consoles here match by serial instead; Switch and Wii U have no
+/// serials on ScreenScraper at all and match by title.
+pub fn screenscraper_hashes_content(platform_id: &str) -> bool {
+    !matches!(platform_id, "ps2" | "ps3" | "wii" | "gc" | "switch" | "wiiu")
+}
+
+/// Consoles whose scan-time titles come from official metadata (param.sfo,
+/// nsw/Eden lists, xml) rather than file names or shortened ROM headers —
+/// good enough to keep even when a ScreenScraper match lands. Everything
+/// else — filename stems, 3DS internal names — gets replaced by the match.
+pub fn title_from_trusted_source(platform_id: &str) -> bool {
+    matches!(platform_id, "ps3" | "ps4" | "psvita" | "switch" | "wiiu")
+}
+
 /// The ScreenScraper system id for an Ira platform id, or `None` when the
 /// platform has no mapping — callers search without a system, exactly
 /// like ES-DE does for unmapped platforms.

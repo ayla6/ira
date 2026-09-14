@@ -29,6 +29,20 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
     if let Err(e) = ira_db::clear_scraper_miss(&state.borrow().db, db_id) {
         eprintln!("Failed to clear the ScreenScraper miss marker: {e}");
     }
+    // The SS title is authoritative for consoles whose own names came
+    // from file stems or shortened ROM headers; trusted sources (official
+    // console headers, RA, the user's own edits) keep theirs.
+    let replace_title = entry_title_trusted(state, db_id)
+        .map(|trusted| !trusted)
+        .unwrap_or(false);
+    let mut new_title = None;
+    if replace_title && !picked.name.is_empty() {
+        if let Err(e) = ira_db::update_game_title(&state.borrow().db, db_id, &picked.name) {
+            eprintln!("Failed to store the ScreenScraper title: {e}");
+        } else {
+            new_title = Some(picked.name.clone());
+        }
+    }
     if let Some(g) = state
         .borrow_mut()
         .games
@@ -36,7 +50,24 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
         .find(|g| g.db_id == db_id)
     {
         g.screenscraper_id = picked.ss_id.clone();
+        if let Some(title) = new_title {
+            g.set_name(title);
+        }
     }
+}
+
+/// Whether the row's current title is already authoritative: edited by the
+/// user, from an RA match, or from an official console header.
+fn entry_title_trusted(state: &SharedState, db_id: i64) -> Option<bool> {
+    Some(
+        ira_db::find_by_db_id(&state.borrow().db, db_id)
+            .ok()
+            .flatten()?
+            .title_trusted
+            || ira_models::title_from_trusted_source(
+                &state.borrow().games.iter().find(|g| g.db_id == db_id)?.platform_id,
+            ),
+    )
 }
 
 fn apply_ss_match(

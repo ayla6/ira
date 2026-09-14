@@ -3,11 +3,11 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppDetails {
-    #[serde(default, alias = "Name")]
+    #[serde(default)]
     pub name: String,
-    #[serde(default, alias = "Languages")]
+    #[serde(default)]
     pub languages: Vec<String>,
-    #[serde(default, alias = "Dlcs")]
+    #[serde(default)]
     pub dlcs: HashMap<String, DlcInfo>,
     #[serde(default)]
     pub ufs_savefiles: Vec<UfsSaveFile>,
@@ -17,11 +17,11 @@ pub struct AppDetails {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DlcInfo {
-    #[serde(default, alias = "Name")]
+    #[serde(default)]
     pub name: String,
-    #[serde(default, alias = "AppId")]
+    #[serde(default)]
     pub app_id: i64,
-    #[serde(default, alias = "ImageUrl")]
+    #[serde(default)]
     pub image_url: String,
     #[serde(default = "default_true")]
     pub enabled: bool,

@@ -138,7 +138,6 @@ const SYSTEM_IDS: &[(&str, u32)] = &[
     ("vsmile", 120),
     ("x68000", 79),
     ("xbox", 32),
-    ("xemu", 32),
     ("zxspectrum", 76),
     ("zx81", 77),
     ("vircon32", 272),

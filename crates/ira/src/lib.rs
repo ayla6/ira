@@ -9,5 +9,5 @@ pub mod ui;
 
 pub use ira_models::{
     AchievementStatus, AppMessage, AppSender, Game, GameEntry, GameLaunchConfig, MergedAchievement,
-    PlaySession, StringOrMap, WineConfig,
+    PlaySession, WineConfig,
 };

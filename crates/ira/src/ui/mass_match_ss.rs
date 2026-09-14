@@ -1,8 +1,9 @@
 //! The mass matcher's ScreenScraper pass: console games are resolved
-//! through their stored ROM md5 — the exact-match search — and the
-//! metadata a hit carries (dates, companies, genres, players, synopses)
-//! is persisted as it lands. Games the source already came up empty for
-//! are skipped, but stay visible with a manual search button.
+//! through their stored ROM md5 first — the exact-match search — and fall
+//! back to one platform-narrowed title search with the display name. Every
+//! decision is logged so misses explain themselves, and only a confirmed
+//! miss (the source answered and does not know the game) tombstones the
+//! game; a failed request retries on the next dialog opening.
 
 use adw::prelude::*;
 use std::collections::HashSet;
@@ -18,6 +19,15 @@ use crate::Game;
 use ira_api::screenscraper::ScrapedGame;
 use ira_api::{ScraperCreds, SteamDataClient};
 use ira_models::screenscraper_system_id;
+
+/// The per-game outcome of the pass. The distinction decides the
+/// tombstone: only `Miss` records one — `Failed` leaves the game untombed
+/// so the next opening asks again.
+enum SsOutcome {
+    Hit(Box<ScrapedGame>),
+    Miss,
+    Failed(String),
+}
 
 /// The status box of a match-list row's ScreenScraper pass, added as its
 /// own suffix so the Steam/SGDB/RA boxes stay independent. Rows the source
@@ -91,6 +101,7 @@ pub(super) fn start_ss_batch_matching(
     if queue.is_empty() {
         return;
     }
+    eprintln!("ScreenScraper batch: {} game(s) to resolve", queue.len());
 
     run_batch(
         queue,
@@ -110,19 +121,22 @@ pub(super) fn start_ss_batch_matching(
     );
 }
 
-/// Off-thread: console, ROM name and md5 come from the DB row, and the
-/// exact-match search answers authoritatively when the hash is on record.
+/// Off-thread: the hash search answers authoritatively when the ROM's md5
+/// is known to the source; otherwise one title search runs with the
+/// display name, and its top candidates must plausibly *be* the game to
+/// count — a wrong auto-match would stick forever.
 fn resolve(
     steam: &SteamDataClient,
     creds: &ScraperCreds,
     db: &ira_db::DbConn,
     item: &BatchItem,
-) -> Option<ScrapedGame> {
+) -> Option<SsOutcome> {
     let entry = ira_db::find_by_db_id(db, item.db_id).ok().flatten()?;
     let platform_id = entry.platform_id.clone();
     screenscraper_system_id(&platform_id)?;
+
     // The hash search needs the digest and the file size together; a
-    // missing file or hash falls back to the name-only exact search.
+    // missing file or hash falls through to the title search.
     let md5 = (!entry.rom_hash.is_empty())
         .then(|| std::fs::metadata(&entry.rom_path).ok().map(|m| m.len()))
         .flatten()
@@ -132,24 +146,116 @@ fn resolve(
         .map(|s| s.to_string_lossy().into_owned())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| item.name.clone());
-    let games = steam.screenscraper_rom_lookup(
+    match steam.screenscraper_rom_lookup(
         creds,
         &romnom,
         &platform_id,
         md5.as_ref().map(|(hash, size)| (hash.as_str(), *size)),
-    )
-    .ok()?;
-    games.into_iter().next()
+    ) {
+        Err(e) => {
+            eprintln!("SS batch: '{romnom}' [{platform_id}] lookup failed: {e}");
+            return Some(SsOutcome::Failed(e));
+        }
+        Ok(games) => {
+            if let Some(game) = games.into_iter().next() {
+                eprintln!(
+                    "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
+                    game.ss_id, game.name
+                );
+                return Some(SsOutcome::Hit(Box::new(game)));
+            }
+        }
+    }
+
+    // No hash hit: the display name is the better search term — ROM stems
+    // carry dump tags, and install-folder stems are serial numbers.
+    let term = clean_rom_name(
+        [entry.title.as_str(), item.name.as_str()]
+            .into_iter()
+            .find(|t| !t.trim().is_empty())
+            .unwrap_or_default(),
+    );
+    if term.is_empty() {
+        eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit and no name to search");
+        return Some(SsOutcome::Miss);
+    }
+    match steam.screenscraper_search(creds, &term, &platform_id) {
+        Err(e) => {
+            eprintln!("SS batch: '{term}' [{platform_id}] search failed: {e}");
+            Some(SsOutcome::Failed(e))
+        }
+        Ok(candidates) => {
+            let target = normalized_for_match(&term);
+            let hit = candidates.into_iter().find(|game| {
+                acceptable(&target, &normalized_for_match(&game.name))
+            });
+            match hit {
+                Some(game) => {
+                    eprintln!(
+                        "SS batch: '{term}' [{platform_id}] no hash hit; name matched ss id {} '{}'",
+                        game.ss_id, game.name
+                    );
+                    Some(SsOutcome::Hit(Box::new(game)))
+                }
+                None => {
+                    eprintln!(
+                        "SS batch: '{term}' [{platform_id}] no hash hit and no acceptable candidate"
+                    );
+                    Some(SsOutcome::Miss)
+                }
+            }
+        }
+    }
 }
 
-/// UI loop: persist a hit's metadata and repaint the row's SS box; a miss
-/// is tombstoned so the next dialog opening skips the request, and the row
-/// grows the manual search button.
+/// Strip the dump tags a ROM stem carries — `(USA)`, `[!]`, `(Rev 1)` —
+/// and the separators around them, so the title search sees a title.
+fn clean_rom_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut depth = 0usize;
+    for c in name.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    let cleaned: String = out.replace('_', " ");
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Lowercase letters-and-digits only, so `13 Sentinels: Aegis Rim` and
+/// `13 Sentinels - Aegis Rim (US)` compare equal.
+fn normalized_for_match(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A candidate counts as the game when the normalized names agree or one
+/// is a prefix of the other — subtitle and region chopping tolerated,
+/// unrelated games (usually) not.
+fn acceptable(target: &str, candidate: &str) -> bool {
+    !target.is_empty()
+        && !candidate.is_empty()
+        && (candidate == target
+            || candidate.starts_with(target)
+            || target.starts_with(candidate))
+}
+
+/// UI loop: persist a hit's metadata and repaint the row's SS box; only a
+/// confirmed miss tombstones the game, and any non-hit grows the manual
+/// search button.
 fn apply_hit(
     state: &SharedState,
     rows: &[RowActions],
     dialog: &adw::Dialog,
-    hit: BatchHit<ScrapedGame>,
+    hit: BatchHit<SsOutcome>,
 ) {
     let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) else {
         return;
@@ -162,11 +268,11 @@ fn apply_hit(
         .map(|g| g.platform_id.clone())
         .unwrap_or_default();
     match hit.matched {
-        Some(game) => {
+        Some(SsOutcome::Hit(game)) => {
             persist_ss_match(state, hit.db_id, &game);
             show_matched(&ss_box);
         }
-        None => {
+        Some(SsOutcome::Miss) => {
             if let Err(e) = ira_db::tombstone_scraper_miss(&state.borrow().db, hit.db_id) {
                 eprintln!("ScreenScraper batch: failed to record the miss: {e}");
             }
@@ -174,5 +280,59 @@ fn apply_hit(
                 show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
             });
         }
+        Some(SsOutcome::Failed(e)) => {
+            eprintln!("ScreenScraper batch: '{}': request failed, leaving untombed: {e}", hit.name);
+            replace_row_actions(&ss_box, |ab| {
+                show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
+            });
+        }
+        None => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{acceptable, clean_rom_name, normalized_for_match};
+
+    #[test]
+    fn test_clean_rom_name_strips_dump_tags() {
+        assert_eq!(
+            clean_rom_name("Fire Emblem - Three Houses (USA) (En,Fr,De) [b]"),
+            "Fire Emblem - Three Houses"
+        );
+        assert_eq!(clean_rom_name("Zelda_No_Densetsu [v1.0]"), "Zelda No Densetsu");
+        // Unbalanced opening brackets still keep the text.
+        assert_eq!(clean_rom_name("Half Life (Source"), "Half Life");
+        assert_eq!(clean_rom_name("   "), "");
+    }
+
+    #[test]
+    fn test_normalized_for_match_ignores_punctuation_and_case() {
+        assert_eq!(
+            normalized_for_match("13 Sentinels: Aegis Rim"),
+            normalized_for_match("13 Sentinels   Aegis Rim!!")
+        );
+        assert_eq!(normalized_for_match("  pokémon! "), "pok mon");
+    }
+
+    #[test]
+    fn test_acceptable_tolerates_subtitles_not_unrelated_games() {
+        let target = normalized_for_match("Dragon Quest I & II");
+        assert!(acceptable(&target, &normalized_for_match("Dragon Quest I & II")));
+        assert!(acceptable(
+            &target,
+            &normalized_for_match("Dragon Quest I & II (Japan)")
+        ));
+        assert!(acceptable(
+            &normalized_for_match("Final Fantasy VI Advance"),
+            &normalized_for_match("Final Fantasy VI")
+        ));
+        assert!(!acceptable(
+            &target,
+            &normalized_for_match("Dragon Quest Monsters")
+        ));
+        // Empty sides never match — a nameless candidate is not the game.
+        assert!(!acceptable(&target, ""));
+        assert!(!acceptable("", &target));
     }
 }

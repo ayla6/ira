@@ -215,6 +215,153 @@ pub fn scraper_company_name(conn: &DbConn, id: i64) -> Result<Option<String>, St
     )
 }
 
+/// What a ScreenScraper match stored for one game, with every id expanded
+/// back through the lookup tables. `None` when the game was never matched.
+pub fn scraper_metadata_for_game(
+    conn: &DbConn,
+    game_id: i64,
+) -> Result<Option<ira_models::ScraperMetadata>, String> {
+    let row = crate::query_optional(
+        conn,
+        "SELECT screenscraper_id, release_date, release_timestamp, release_dates,
+                developer_id, publisher_id, genre_ids, classification_ids,
+                players, screenscraper_rating, synopsis
+         FROM games WHERE id = ?1",
+        params![game_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, f64>(9)?,
+                row.get::<_, String>(10)?,
+            ))
+        },
+    )?;
+    let Some((
+        ss_id,
+        release_date,
+        release_timestamp,
+        release_dates,
+        developer_id,
+        publisher_id,
+        genre_ids,
+        classification_ids,
+        players,
+        rating,
+        synopsis,
+    )) = row
+    else {
+        return Ok(None);
+    };
+    if ss_id.is_empty() {
+        return Ok(None);
+    }
+    let dates: std::collections::HashMap<String, String> = if release_dates.is_empty() {
+        Default::default()
+    } else {
+        serde_json::from_str(&release_dates).unwrap_or_default()
+    };
+    let mut release_dates: Vec<(String, String)> = dates.into_iter().collect();
+    release_dates.sort();
+    let synopses: Vec<(String, String)> = if synopsis.is_empty() {
+        Default::default()
+    } else {
+        serde_json::from_str(&synopsis).unwrap_or_default()
+    };
+    Ok(Some(ira_models::ScraperMetadata {
+        ss_id,
+        release_date,
+        release_timestamp,
+        release_dates,
+        developers: expand_entities(conn, &developer_id, scraper_company_name)?,
+        publishers: expand_entities(conn, &publisher_id, scraper_company_name)?,
+        genres: expand_entities(conn, &genre_ids, scraper_genre_name)?,
+        players,
+        rating,
+        classifications: classification_ids
+            .split_json_ids()
+            .into_iter()
+            .filter_map(|id| {
+                let numeric = id.parse::<i64>().ok()?;
+                scraper_classification(conn, numeric)
+                    .ok()
+                    .flatten()
+                    .map(|(kind, name)| ira_models::ScraperClassification { kind, id, name })
+            })
+            .collect(),
+        synopses,
+    }))
+}
+
+/// The entities behind one stored id array; ids whose lookup row is gone
+/// resolve to nothing.
+fn expand_entities(
+    conn: &DbConn,
+    ids_json: &str,
+    lookup: impl Fn(&DbConn, i64) -> Result<Option<String>, String>,
+) -> Result<Vec<ira_models::ScraperEntity>, String> {
+    Ok(ids_json
+        .split_json_ids()
+        .into_iter()
+        .filter_map(|id| {
+            let numeric = id.parse::<i64>().ok()?;
+            let name = lookup(conn, numeric).ok().flatten()?;
+            Some(ira_models::ScraperEntity { id, name })
+        })
+        .collect())
+}
+
+/// The id list of a games-row JSON column, tolerating the empty string a
+/// fresh row carries.
+trait SplitJsonIds {
+    fn split_json_ids(&self) -> Vec<String>;
+}
+
+impl SplitJsonIds for str {
+    fn split_json_ids(&self) -> Vec<String> {
+        if self.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str::<Vec<String>>(self).unwrap_or_default()
+        }
+    }
+}
+
+/// Local companies whose name contains the filter, case-insensitive and
+/// alphabetically capped — the search index is the cache itself, since the
+/// source has no company list endpoint.
+pub fn scraper_companies_search(
+    conn: &DbConn,
+    filter: &str,
+) -> Result<Vec<ira_models::ScraperEntity>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(
+            "SELECT id, name FROM scraper_companies
+             WHERE name LIKE '%' || ?1 || '%' COLLATE NOCASE
+             ORDER BY name LIMIT 60",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![filter.trim()], |row| {
+            Ok(ira_models::ScraperEntity {
+                id: row.get::<_, i64>(0)?.to_string(),
+                name: row.get(1)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
+}
+
 /// The genre name a ScreenScraper id refers to, per the lookup table.
 pub fn scraper_genre_name(conn: &DbConn, id: i64) -> Result<Option<String>, String> {
     crate::query_optional_scalar(
@@ -370,6 +517,68 @@ mod tests {
         // A later match clears it and the game re-enters the pool.
         clear_scraper_miss(&conn, id).unwrap();
         assert!(scraper_missed_ids(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_scraper_metadata_for_game_expands_ids() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(
+            &conn,
+            GameKind::Retro,
+            TrophySource::Empty,
+            "",
+            "",
+            "",
+            "Round Trip",
+        )
+        .unwrap();
+
+        // Never matched: nothing to read back.
+        assert!(scraper_metadata_for_game(&conn, id).unwrap().is_none());
+
+        store_scraper_metadata(
+            &conn,
+            id,
+            &ira_models::ScraperMetadata {
+                ss_id: "2124".into(),
+                release_date: "1993-12-18".into(),
+                release_timestamp: 1,
+                developers: vec![
+                    ira_models::ScraperEntity { id: "2911".into(), name: "Chunsoft".into() },
+                    ira_models::ScraperEntity { id: "2912".into(), name: "Nintendo".into() },
+                ],
+                genres: vec![ira_models::ScraperEntity {
+                    id: "2620".into(),
+                    name: "Role Playing Game".into(),
+                }],
+                players: "1-4".into(),
+                synopses: vec![("en".into(), "Two quests.".into())],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let metadata = scraper_metadata_for_game(&conn, id).unwrap().unwrap();
+        assert_eq!(metadata.ss_id, "2124");
+        assert_eq!(
+            metadata
+                .developers
+                .iter()
+                .map(|d| d.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Chunsoft", "Nintendo"]
+        );
+        assert_eq!(metadata.genres[0].name, "Role Playing Game");
+        assert_eq!(metadata.players, "1-4");
+        assert_eq!(
+            metadata.synopses,
+            vec![("en".to_string(), "Two quests.".to_string())]
+        );
+        // The lookup names survive the round trip through the id columns.
+        assert_eq!(
+            scraper_companies_search(&conn, "chun").unwrap().len(),
+            1
+        );
     }
 
     #[test]

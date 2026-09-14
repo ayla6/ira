@@ -45,6 +45,7 @@ pub struct SettingsData {
     pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,
     pub sgdb_cache: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>,
     pub ra_container: Option<gtk4::Box>,
+    pub scraper_container: Option<gtk4::Box>,
 }
 
 /// Widgets of the transient "Loading game library" screen, kept so progress

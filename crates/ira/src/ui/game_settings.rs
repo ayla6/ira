@@ -26,6 +26,7 @@ type GameGeneralPageResult = (
     Option<adw::EntryRow>,
     Option<gtk4::Button>,
     Option<adw::ComboRow>,
+    gtk4::Box,
 );
 
 fn build_ra_section(
@@ -740,6 +741,12 @@ pub(super) fn build_game_general_page(
     let (pending_ra_core, pending_emulator, ra_container) =
         build_retro_emulator_and_ra(&general_page, state, game, win, pending_copies);
 
+    let scraper_container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    if let Some(group) = super::edit_game_scraper::build_scraper_section(state, game, win) {
+        scraper_container.append(&group);
+    }
+    general_page.append(&scraper_container);
+
     let service_group = adw::PreferencesGroup::new();
     service_group.set_title(&crate::tr!("Service"));
     let (has_service_ids, app_id_entry) =
@@ -763,6 +770,7 @@ pub(super) fn build_game_general_page(
         game_folder_entry,
         migrate_btn,
         runtime_row,
+        scraper_container,
     )
 }
 

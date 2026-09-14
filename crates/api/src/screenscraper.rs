@@ -85,6 +85,16 @@ pub fn game_info_url(
     url
 }
 
+/// The whole genre table: the service has no per-name genre search, so
+/// the fetched copy *is* the search index.
+pub fn genres_list_url(creds: &ScraperCreds) -> String {
+    format!(
+        "{API_URL_BASE}/genresListe.php?{}&softname={}&output=xml",
+        creds.auth_params(),
+        urlencode(SOFT_NAME)
+    )
+}
+
 /// The by-id URL: re-fetch one known game without searching.
 pub fn game_info_by_id_url(creds: &ScraperCreds, ss_id: &str) -> String {
     format!(
@@ -446,6 +456,68 @@ fn media_url(medias: &[SsMedia], kind: &str, regions: &[&str]) -> Option<String>
     pick(regions, &matches).map(|url| url.replace(' ', "%20"))
 }
 
+// ——— genre table ———
+// `genresListe.php` answers `<genre><id>..</id><nom_en>..</nom_en>..` rows
+// covering every genre the service knows, so one cached request serves
+// every picker forever.
+
+/// One genre from the whole-table listing: stable id, display name,
+/// parent id (`0` = top level).
+#[derive(Debug, Clone)]
+pub struct GenreListEntry {
+    pub id: String,
+    pub name: String,
+    pub parent: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SsGenresRoot {
+    #[serde(default)]
+    genres: Option<SsGenreTable>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SsGenreTable {
+    #[serde(default, rename = "genre")]
+    genres: Vec<SsGenreListRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SsGenreListRow {
+    #[serde(default)]
+    id: String,
+    #[serde(default, rename = "nom_en")]
+    name_en: String,
+    #[serde(default, rename = "nom_fr")]
+    name_fr: String,
+    #[serde(default)]
+    parent: String,
+}
+
+/// Parse the genre table; the English name is preferred with the French
+/// one as fallback, and nameless or idless rows drop out.
+pub fn parse_genres_list(xml: &str) -> Result<Vec<GenreListEntry>, String> {
+    let root: SsGenresRoot = quick_xml::de::from_str(xml)
+        .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
+    Ok(root
+        .genres
+        .map(|table| table.genres)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|row| !row.id.is_empty())
+        .map(|row| GenreListEntry {
+            name: if row.name_en.is_empty() {
+                row.name_fr
+            } else {
+                row.name_en
+            },
+            id: row.id,
+            parent: row.parent,
+        })
+        .filter(|row| !row.name.is_empty())
+        .collect())
+}
+
 impl SteamDataClient {
     /// Run a ScreenScraper wide search. Empty when credentials are not
     /// configured; errors surface for the dialog to show.
@@ -501,6 +573,31 @@ impl SteamDataClient {
         resp.bytes()
             .map(|b| b.to_vec())
             .map_err(|e| format!("ScreenScraper media download failed: {e}"))
+    }
+
+    /// The genre table, from the disk cache when present, fetched and
+    /// cached otherwise — one request, ever, until the file is deleted.
+    pub fn screenscraper_genres(&self, creds: &ScraperCreds) -> Result<Vec<GenreListEntry>, String> {
+        if !creds.is_configured() {
+            return Err("ScreenScraper credentials not configured".to_string());
+        }
+        let dir = self.cache_dir.join("scrapers");
+        let body = self.cached_or_fetch(&dir, "ss_genres.xml", &genres_list_url(creds))?;
+        parse_genres_list(&body)
+    }
+
+    /// The file's content when it exists, otherwise a fresh fetch written
+    /// into it first. A failed cache write only costs the next fetch.
+    fn cached_or_fetch(&self, dir: &std::path::Path, file: &str, url: &str) -> Result<String, String> {
+        let path = dir.join(file);
+        if let Ok(body) = std::fs::read_to_string(&path) {
+            return Ok(body);
+        }
+        let body = self.http_get_text(url)?;
+        if let Err(err) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&path, &body)) {
+            eprintln!("Failed to cache {file}: {err}");
+        }
+        Ok(body)
     }
 
     fn screenscraper_get(&self, url: &str) -> Result<Vec<ScrapedGame>, String> {
@@ -720,6 +817,49 @@ mod tests {
             game.title_screen.as_deref(),
             Some("https://ss.example/dq2_title.png")
         );
+    }
+
+    const GENRES_XML: &str = r#"<Data>
+      <genres>
+        <genre>
+          <id>10</id>
+          <nom_fr>Action</nom_fr>
+          <nom_en>Action</nom_en>
+          <parent>0</parent>
+          <medias><media type="background">https://x/y.jpg</media></medias>
+        </genre>
+        <genre>
+          <id>2620</id>
+          <nom_fr>Jeu de r&#244;le</nom_fr>
+          <nom_en>Role Playing Game</nom_en>
+          <parent>2600</parent>
+        </genre>
+      </genres>
+    </Data>"#;
+
+    #[test]
+    fn test_parse_genres_list_prefers_english_names() {
+        let genres = parse_genres_list(GENRES_XML).unwrap();
+        assert_eq!(genres.len(), 2);
+        assert_eq!(genres[0].id, "10");
+        assert_eq!(genres[0].name, "Action");
+        assert_eq!(genres[0].parent, "0");
+        assert_eq!(genres[1].name, "Role Playing Game");
+        assert_eq!(genres[1].parent, "2600");
+        // Garbage answers surface as errors, not empty tables.
+        assert!(parse_genres_list("<not closed").is_err());
+    }
+
+    #[test]
+    fn test_genres_list_url_carries_credentials() {
+        let creds = ScraperCreds {
+            dev_id: "ira".into(),
+            dev_password: "pw".into(),
+            ..Default::default()
+        };
+        let url = genres_list_url(&creds);
+        assert!(url.contains("genresListe.php?devid=ira&devpassword=pw"));
+        assert!(url.contains("softname=ira"));
     }
 
     #[test]

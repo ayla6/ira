@@ -517,24 +517,47 @@ fn resolve_pc(
     }
 }
 
-/// Whether a ScreenScraper candidate's developer or publisher agrees with
-/// the Steam ones: one normalized name in common. Accents, case and
-/// punctuation fold away, so "ATLUS" meets "Atlus"; an empty answer on
-/// either side never agrees.
-fn companies_overlap(info: &SteamCmdInfo, game: &ScrapedGame) -> bool {
-    let steam: std::collections::HashSet<String> = [info.developer.as_str(), info.publisher.as_str()]
-        .into_iter()
-        .flat_map(|field| field.split(','))
-        .map(normalized_for_match)
-        .filter(|name| !name.is_empty())
+/// The corporate words a store appends to a studio's name — Steam says
+/// "Naughty Dog, LLC" where ScreenScraper writes "Naughty Dog", "Sega
+/// Games" where it writes "Sega" — dropped before companies compare.
+const COMPANY_FILLER: &[&str] = &[
+    "llc", "inc", "ltd", "limited", "gmbh", "co", "corp", "corporation", "studio", "studios",
+    "games", "entertainment", "interactive", "software", "digital", "sa", "sas", "srl", "bv",
+    "nv", "plc", "ag", "kk",
+];
+
+/// A company name reduced to its identifying tokens: folded, punctuation
+/// gone, corporate filler dropped, order ignored ("Bandai Namco" and
+/// "Namco Bandai" agree).
+fn company_tokens(name: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = normalized_for_match(name)
+        .split_whitespace()
+        .filter(|token| !COMPANY_FILLER.contains(token))
+        .map(str::to_string)
         .collect();
+    tokens.sort();
+    tokens
+}
+
+/// Whether a ScreenScraper candidate's developer or publisher agrees with
+/// the Steam ones: one company name in common, up to the legal suffixes
+/// and word order. Accents, case and punctuation fold away, so "ATLUS"
+/// meets "Atlus"; an empty answer on either side never agrees.
+fn companies_overlap(info: &SteamCmdInfo, game: &ScrapedGame) -> bool {
+    let steam: std::collections::HashSet<Vec<String>> =
+        [info.developer.as_str(), info.publisher.as_str()]
+            .into_iter()
+            .flat_map(|field| field.split(','))
+            .map(company_tokens)
+            .filter(|tokens| !tokens.is_empty())
+            .collect();
     if steam.is_empty() {
         return false;
     }
     game.developers
         .iter()
         .chain(game.publishers.iter())
-        .any(|entity| steam.contains(&normalized_for_match(&entity.name)))
+        .any(|entity| steam.contains(&company_tokens(&entity.name)))
 }
 
 /// Steam's release timestamp as the `YYYY-MM-DD` string the metadata
@@ -1047,6 +1070,25 @@ mod tests {
         // Steam knowing nothing about a game never agrees either.
         let empty = SteamCmdInfo::default();
         assert!(!super::companies_overlap(&empty, &atlus));
+        // Corporate suffixes drop: the store's "Naughty Dog, LLC" is the
+        // source's "Naughty Dog", word order included.
+        let dog = SteamCmdInfo {
+            developer: "Naughty Dog, LLC".into(),
+            publisher: "Sony Interactive Entertainment".into(),
+            ..Default::default()
+        };
+        let nd = ScrapedGame {
+            publishers: vec![entity("Naughty Dog")],
+            ..Default::default()
+        };
+        assert!(super::companies_overlap(&dog, &nd));
+        // A name that is only filler agrees with nothing.
+        let filler = SteamCmdInfo {
+            developer: "LLC".into(),
+            publisher: "Studios".into(),
+            ..Default::default()
+        };
+        assert!(!super::companies_overlap(&filler, &nd));
     }
 
     fn entity(name: &str) -> ira_models::ScraperEntity {

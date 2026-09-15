@@ -170,48 +170,56 @@ fn resolve(
     // exactly what ScreenScraper's rom index stores (ES-DE sends it the
     // same way); the stem alone loses the match.
     if ira_models::screenscraper_hashes_content(&platform_id) {
-        // Hash on demand when the scan has not filled the md5 yet, and
-        // keep it stored so this costs nothing next time.
-        if entry.hashes.md5.is_empty() {
+        // Hash on demand — digest and inner-file size in one streaming
+        // pass — and keep the pair stored so this costs nothing next
+        // time. The size is the inner ROM's own, never the container's:
+        // a wrong size reads as a miss, an absent one still matches on
+        // the digest alone.
+        if entry.hashes.md5.is_empty() || entry.hashes.size == 0 {
             let pick = rom_extension_pick(&platform_id);
-            match ira_platforms::rom_hash::content_md5(&abs, &pick) {
-                Some(hash) => {
-                    if let Err(e) = ira_db::set_hash_key(db, item.db_id, "md5", &hash) {
-                        eprintln!("SS batch: failed to store the md5: {e}");
+            match ira_platforms::rom_hash::content_md5_and_size(&abs, &pick) {
+                Some((hash, size)) => {
+                    for (key, value) in [("md5", hash.clone()), ("size", size.to_string())] {
+                        if let Err(e) = ira_db::set_hash_key(db, item.db_id, key, &value) {
+                            eprintln!("SS batch: failed to store the {key}: {e}");
+                        }
                     }
                     entry.hashes.md5 = hash;
+                    entry.hashes.size = size as i64;
                 }
                 None => eprintln!("SS batch: could not hash {}", abs.display()),
             }
         }
-        let romnom = std::path::Path::new(&abs)
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| item.name.clone());
-        let size = std::fs::metadata(&abs).ok().map(|m| m.len());
-        let Some(size) = size else {
-            eprintln!("SS batch: '{romnom}' [{platform_id}] hash present but file missing");
-            return Some(SsOutcome::Miss);
-        };
-        match steam.screenscraper_rom_lookup(
-            creds,
-            &romnom,
-            &platform_id,
-            Some((entry.hashes.md5.as_str(), size)),
-        ) {
-            Err(e) => {
-                eprintln!("SS batch: '{romnom}' [{platform_id}] lookup failed: {e}");
-                return Some(SsOutcome::Failed(e));
-            }
-            Ok(games) => {
-                if let Some(game) = games.into_iter().next() {
-                    eprintln!(
-                        "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
-                        game.ss_id, game.name
-                    );
-                    return Some(SsOutcome::Hit(Box::new(game)));
+        if !entry.hashes.md5.is_empty() {
+            let romnom = std::path::Path::new(&abs)
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| item.name.clone());
+            let lookup = if entry.hashes.size > 0 {
+                steam.screenscraper_rom_lookup(
+                    creds,
+                    &romnom,
+                    &platform_id,
+                    Some((entry.hashes.md5.as_str(), entry.hashes.size as u64)),
+                )
+            } else {
+                steam.screenscraper_rom_lookup(creds, &romnom, &platform_id, None)
+            };
+            match lookup {
+                Err(e) => {
+                    eprintln!("SS batch: '{romnom}' [{platform_id}] lookup failed: {e}");
+                    return Some(SsOutcome::Failed(e));
                 }
-                eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit");
+                Ok(games) => {
+                    if let Some(game) = games.into_iter().next() {
+                        eprintln!(
+                            "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
+                            game.ss_id, game.name
+                        );
+                        return Some(SsOutcome::Hit(Box::new(game)));
+                    }
+                    eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit");
+                }
             }
         }
     }
@@ -269,6 +277,10 @@ fn resolve(
             Some(SsOutcome::Failed(e))
         }
         Ok(candidates) => {
+            eprintln!(
+                "SS batch: '{term}' [{platform_id}] {} candidate(s)",
+                candidates.len()
+            );
             let target = normalized_for_match(&term);
             let hit = candidates.into_iter().find(|game| {
                 acceptable(&target, &normalized_for_match(&game.name))
@@ -358,27 +370,39 @@ fn normalized_for_match(name: &str) -> String {
 }
 
 /// A candidate counts as the game when the normalized names agree or one
-/// is a prefix of the other — subtitle and region chopping tolerated,
-/// missing or extra leading words not.
+/// is a prefix of the other — subtitle and region chopping tolerated
+/// ("(Japan)", "Advance"), but a number leading the extension is a
+/// sequel: "Advance Wars" is not "Advance Wars 2".
 fn acceptable(target: &str, candidate: &str) -> bool {
     !target.is_empty()
         && !candidate.is_empty()
         && (candidate == target
-            || candidate.starts_with(target)
-            || target.starts_with(candidate))
+            || prefix_extension_ok(target, candidate)
+            || prefix_extension_ok(candidate, target))
+}
+
+fn prefix_extension_ok(short: &str, long: &str) -> bool {
+    if !long.starts_with(short) || long.len() <= short.len() {
+        return false;
+    }
+    // The extension must start at a word boundary, and the first new word
+    // must not be a bare number — "(Japan)" and "Advance" are decoration,
+    // the "2" in a sequel is not.
+    match long[short.len()..].trim_start().chars().next() {
+        None => true,
+        Some(c) => {
+            let at_word_boundary = long.as_bytes()[short.len()] == b' ';
+            !c.is_ascii_digit() && at_word_boundary
+        }
+    }
 }
 
 /// The term the title search sends: dump tags gone (ES-DE's
-/// removeParenthesis), then every punctuation run collapsed to one space —
-/// the colon in "13 Sentinels: Aegis Rim" poisons ScreenScraper's search.
+/// removeParenthesis) but punctuation kept — jeuRecherche finds
+/// "Phoenix Wright: Ace Attorney Trilogy" only with the colon intact.
+/// The acceptance comparison is what ignores punctuation.
 fn search_term(name: &str) -> String {
     clean_rom_name(name)
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// UI loop: persist a hit's metadata and repaint the row's SS box; only a
@@ -462,17 +486,17 @@ mod tests {
     }
 
     #[test]
-    fn test_search_term_strips_punctuation_the_source_chokes_on() {
-        assert_eq!(search_term("13 Sentinels: Aegis Rim"), "13 Sentinels Aegis Rim");
+    fn test_search_term_keeps_punctuation_the_source_needs() {
+        assert_eq!(search_term("13 Sentinels: Aegis Rim"), "13 Sentinels: Aegis Rim");
         assert_eq!(
             search_term("Ace Attorney - Justice for All (USA)"),
-            "Ace Attorney Justice for All"
+            "Ace Attorney - Justice for All"
         );
-        assert_eq!(search_term("Pokémon: Let's Go"), "Pokémon Let s Go");
+        assert_eq!(search_term("Pok\u{e9}mon: Let's Go"), "Pok\u{e9}mon: Let's Go");
     }
 
     #[test]
-    fn test_acceptable_tolerates_subtitles_not_unrelated_games() {
+    fn test_acceptable_tolerates_subtitles_rejects_sequels() {
         let target = normalized_for_match("Dragon Quest I & II");
         assert!(acceptable(&target, &normalized_for_match("Dragon Quest I & II")));
         assert!(acceptable(
@@ -482,6 +506,11 @@ mod tests {
         assert!(acceptable(
             &normalized_for_match("Final Fantasy VI Advance"),
             &normalized_for_match("Final Fantasy VI")
+        ));
+        // A number leading the extension is a sequel, not decoration.
+        assert!(!acceptable(
+            &normalized_for_match("Advance Wars"),
+            &normalized_for_match("Advance Wars 2: Black Hole Rising")
         ));
         assert!(!acceptable(
             &target,

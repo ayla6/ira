@@ -77,6 +77,7 @@ pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<()
     match key {
         "md5" => hashes.md5 = value.to_string(),
         "ra_md5" => hashes.ra_md5 = value.to_string(),
+        "size" => hashes.size = value.parse().unwrap_or(0),
         other => return Err(format!("unknown hash key {other}")),
     }
     let json = serde_json::to_string(&hashes).map_err(err)?;

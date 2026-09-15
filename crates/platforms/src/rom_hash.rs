@@ -23,6 +23,26 @@ fn reader_md5(reader: &mut dyn Read) -> Option<String> {
     Some(format!("{:x}", hasher.finalize()))
 }
 
+/// [`content_md5`] plus the byte count of the same stream — the pair
+/// ScreenScraper's exact search wants (`md5` + `romtaille`). The count is
+/// of the inner ROM for archives, never of the container.
+pub fn content_md5_and_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<(String, u64)> {
+    let mut bytes = 0u64;
+    let mut hasher = Md5::new();
+    crate::archives::with_entry_reader(path, pick, |reader| {
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let read = reader.read(&mut buf).unwrap_or(0);
+            if read == 0 {
+                break Some(());
+            }
+            hasher.update(&buf[..read]);
+            bytes += read as u64;
+        }
+    })?;
+    Some((format!("{:x}", hasher.finalize()), bytes))
+}
+
 /// [`file_md5`] of the ROM *inside* a `.zip`/`.7z`/`.zst` container, or of
 /// the file itself for anything else. A digest of the container bytes is
 /// useless for RetroAchievements — no game ever lists it — so archives are

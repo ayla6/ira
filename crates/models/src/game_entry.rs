@@ -12,6 +12,18 @@ pub struct RomHashes {
     pub md5: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_md5: String,
+    /// The byte size the `md5` covers — ScreenScraper's exact search wants
+    /// the digest and the size together, and a wrong size is worse than
+    /// none. 0 = unknown: send the digest alone.
+    #[serde(default)]
+    pub size: i64,
+}
+
+impl RomHashes {
+    /// The md5 + size pair for the exact search, when both are known.
+    pub fn md5_with_size(&self) -> Option<(&str, i64)> {
+        (!self.md5.is_empty() && self.size > 0).then_some((self.md5.as_str(), self.size))
+    }
 }
 
 impl RomHashes {

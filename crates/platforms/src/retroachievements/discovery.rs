@@ -775,11 +775,14 @@ fn fill_content_hashes(
             continue;
         }
         let pick = |name: &str| has_rom_extension(name, console.def.extensions);
-        let Some(hash) = crate::rom_hash::content_md5(&abs, &pick) else {
+        let Some((hash, size)) = crate::rom_hash::content_md5_and_size(&abs, &pick) else {
             continue;
         };
         if let Err(e) = ira_db::set_hash_key(db, entry.id, "md5", &hash) {
             eprintln!("Content hash pass: failed to store: {e}");
+        }
+        if let Err(e) = ira_db::set_hash_key(db, entry.id, "size", &size.to_string()) {
+            eprintln!("Content hash pass: failed to store the size: {e}");
         }
     }
 }

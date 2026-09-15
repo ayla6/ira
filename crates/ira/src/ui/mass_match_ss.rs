@@ -14,7 +14,7 @@ use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
 use super::rom_name::{
-    clean_rom_name, looks_like_title_id, region_hints, search_head, too_short_for_recherche,
+    clean_rom_name, looks_like_title_id, region_hints, search_term, too_short_for_recherche,
 };
 use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
 use super::state::SharedState;
@@ -291,13 +291,13 @@ fn resolve(
     // No hash hit: one title search, preferring the ROM file name — the
     // library title is user-editable and drifts from the dump, while the
     // file name is what the scene shipped. The word search is a substring
-    // match over ScreenScraper's own names, whose separator spacing
-    // disagrees with the scene (and between systems), so the search head
-    // — main title, or two words when the name has no separator — goes
-    // out and the acceptance comparison, which flattens punctuation,
-    // matches the full name against the candidates. A stem that is only
-    // a bare title id cannot be searched at all, so the library title
-    // stands in.
+    // match over ScreenScraper's own names, byte-sensitive about
+    // separator spacing, and a series head buries the game among its
+    // siblings — so the search goes out with the distinctive tail
+    // (rom_name::search_term) and the acceptance comparison, which
+    // flattens punctuation, matches the full name against the
+    // candidates. A stem that is only a bare title id cannot be searched
+    // at all, so the library title stands in.
     let stem = std::path::Path::new(&abs)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -310,7 +310,7 @@ fn resolve(
     // Region tags never gate anything — plenty of dumps carry none — they
     // only matter when two candidates match equally well.
     let hints = region_hints(&stem);
-    let term = search_head(&full);
+    let term = search_term(&full);
     if term.is_empty() || too_short_for_recherche(&term) {
         eprintln!("SS batch: [{platform_id}] no usable search term");
         return Some(SsOutcome::Miss);
@@ -406,27 +406,43 @@ fn normalized_for_match(name: &str) -> String {
         .join(" ")
 }
 
-/// How tightly a candidate name fits the target: 3 the names are equal,
-/// 2 one is the other plus decoration in front or behind — subtitle and
-/// region chopping tolerated ("(Japan)", "Advance") — 1 the weaker
-/// suffix shape, a brand the region's name carries in front of the title
-/// ("Simple 2000 Series Vol. 50 : The Daibijin" is "The Daibijin" with
-/// a prefix in front). A number leading the extension is a sequel, not
-/// decoration: "Advance Wars" is not "Advance Wars 2". `None` is not the
-/// game at all.
+/// How tightly a candidate name fits the target, from strongest down:
+/// the names equal; the same words in a different order — ScreenScraper
+/// titles lead with their brand where the dump leads with the game
+/// ("Emio – The Smiling Man: Famicom Detective Club" against "Famicom
+/// Detective Club - Emio The Smiling Man"); one being the other plus
+/// decoration in front or behind, subtitle and region chopping tolerated
+/// ("(Japan)", "Advance"); and weakest, a brand the region's name
+/// carries in front of the title ("Simple 2000 Series Vol. 50 : The
+/// Daibijin" is "The Daibijin" with a prefix in front). A number leading
+/// the extension is a sequel, not decoration: "Advance Wars" is not
+/// "Advance Wars 2". `None` is not the game at all.
 fn match_rank(target: &str, candidate: &str) -> Option<u8> {
     if target.is_empty() || candidate.is_empty() {
         return None;
     }
     if candidate == target {
-        Some(3)
-    } else if prefix_extension_ok(target, candidate) || prefix_extension_ok(candidate, target) {
-        Some(2)
-    } else if suffix_extension_ok(target, candidate) || suffix_extension_ok(candidate, target) {
-        Some(1)
-    } else {
-        None
+        return Some(4);
     }
+    if same_words(target, candidate) {
+        return Some(3);
+    }
+    if prefix_extension_ok(target, candidate) || prefix_extension_ok(candidate, target) {
+        return Some(2);
+    }
+    if suffix_extension_ok(target, candidate) || suffix_extension_ok(candidate, target) {
+        return Some(1);
+    }
+    None
+}
+
+/// Whether two names hold exactly the same words, order aside.
+fn same_words(a: &str, b: &str) -> bool {
+    let mut left: Vec<&str> = a.split_whitespace().collect();
+    let mut right: Vec<&str> = b.split_whitespace().collect();
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
 }
 
 /// The best candidate from a search answer, in order: the one whose
@@ -617,7 +633,7 @@ mod tests {
         let target = normalized_for_match("Dragon Quest I & II");
         assert_eq!(
             match_rank(&target, &normalized_for_match("Dragon Quest I & II")),
-            Some(3)
+            Some(4)
         );
         assert!(match_rank(
             &target,
@@ -717,6 +733,33 @@ mod tests {
                 .collect(),
             ..scraped(ss_id, names)
         }
+    }
+
+    #[test]
+    fn test_match_rank_accepts_reordered_words() {
+        // ScreenScraper titles lead with their brand where the dump leads
+        // with the game (live switch answer for "Emio": "Famicom
+        // Detective Club - Emio The Smiling Man").
+        let target = normalized_for_match("Emio – The Smiling Man: Famicom Detective Club");
+        assert_eq!(
+            match_rank(
+                &target,
+                &normalized_for_match("Famicom Detective Club - Emio The Smiling Man")
+            ),
+            Some(3)
+        );
+        // A sibling entry with different words stays out.
+        assert!(match_rank(
+            &target,
+            &normalized_for_match("Famicom Detective Club - The Missing Heir")
+        )
+        .is_none());
+        // Reorder is weaker than exact, stronger than prefix decoration.
+        let target = normalized_for_match("Dragon Quest I & II");
+        assert_eq!(
+            match_rank(&target, &normalized_for_match("Dragon Quest I & II (Japan)")),
+            Some(2)
+        );
     }
 
     #[test]

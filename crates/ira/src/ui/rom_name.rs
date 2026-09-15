@@ -50,42 +50,58 @@ pub(crate) fn looks_like_title_id(term: &str) -> bool {
     term.len() == 16 && term.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// The name up to its first subtitle separator — the part before a
-/// space-adjacent `-`, `:`, `–` or `—`. ScreenScraper's word search is a
-/// substring match over its own name strings, and those disagree with the
-/// scene (and with each other) about the separator: the same subtitle is
-/// "Ace Combat 04 : Shattered Skies" on PS2 and "Phoenix Wright: Ace
-/// Attorney Trilogy" on Switch, so no full-title spelling matches both.
-/// The main title alone is a substring of every variant, and the
-/// acceptance comparison — which ignores punctuation — still tells the
-/// right candidate from its sequels. A dash or colon inside a word
-/// ("Pac-Man", "Link's Awakening DX: no") has no adjacent space and is
-/// not a separator.
-pub(crate) fn main_title(name: &str) -> String {
-    let chars: Vec<(usize, char)> = name.char_indices().collect();
-    for (pos, &(idx, c)) in chars.iter().enumerate() {
+/// The name split at space-adjacent separators — the segments of
+/// "Ace Combat 04 - Shattered Skies" are "Ace Combat 04" and "Shattered
+/// Skies"; a trailing separator contributes nothing.
+fn separator_segments(name: &str) -> Vec<&str> {
+    let bytes = name.as_bytes();
+    let mut segments: Vec<&str> = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let c = name[i..].chars().next().unwrap_or(' ');
+        let len = c.len_utf8();
         let separator = matches!(c, '-' | ':' | '\u{2013}' | '\u{2014}');
-        let spaced = pos > 0 && chars[pos - 1].1 == ' '
-            || chars.get(pos + 1).is_some_and(|&(_, n)| n == ' ');
+        let spaced = (i > 0 && bytes[i - 1] == b' ') || bytes.get(i + len) == Some(&b' ');
         if separator && spaced {
-            return name[..idx].trim().to_string();
+            segments.push(&name[start..i]);
+            i += len;
+            while i < bytes.len() && bytes[i] == b' ' {
+                i += 1;
+            }
+            start = i;
+            continue;
         }
+        i += len;
     }
-    name.trim().to_string()
+    let tail = &name[start..];
+    if !tail.trim().is_empty() {
+        segments.push(tail);
+    }
+    segments
 }
 
-/// The one term the word search gets: the main title, capped at two words
-/// when the name carries no separator at all — ScreenScraper's own name
-/// may still hold one ("Phoenix Wright: Ace Attorney Trilogy" against a
-/// dump named "Phoenix Wright Ace Attorney Trilogy"), and two words stay
-/// a substring as long as the separator sits past them. The acceptance
-/// comparison still judges candidates against the full name.
-pub(crate) fn search_head(name: &str) -> String {
-    let main = main_title(name);
-    if main != name {
-        return main;
+/// The one term the word search gets. Live probes against jeuRecherche:
+/// searching a series head buries the game among its siblings or drops
+/// it entirely ("Simple 2000 Series Vol. 50" answers 28 other volumes
+/// and not the one whose name starts with exactly that), while the
+/// distinctive tail hit the target in every probed case — "Shattered
+/// Skies", "The Daibijin", "Ace Attorney Trilogy", "Smiling Man", "Full
+/// Body", "San Andreas" all answer one or two games, ours included.
+/// So: the last separator segment, the part dump names and ScreenScraper
+/// names agree is the game's own. Names with no separator keep a
+/// two-word head — ScreenScraper's name may still hold one ("Phoenix
+/// Wright: Ace Attorney Trilogy" against a dump named "Phoenix Wright
+/// Ace Attorney Trilogy"), and two words stay a prefix as long as the
+/// separator sits past them. The acceptance comparison still judges
+/// candidates against the full name.
+pub(crate) fn search_term(name: &str) -> String {
+    let segments = separator_segments(name);
+    if segments.len() > 1 {
+        return segments[segments.len() - 1].trim().to_string();
     }
-    let head: Vec<&str> = main.split_whitespace().take(2).collect();
+    let only = name.trim();
+    let head: Vec<&str> = only.split_whitespace().take(2).collect();
     head.join(" ")
 }
 
@@ -155,8 +171,7 @@ fn bracket_groups(name: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_rom_name, looks_like_title_id, main_title, region_hints, search_head,
-        too_short_for_recherche,
+        clean_rom_name, looks_like_title_id, region_hints, search_term, too_short_for_recherche,
     };
 
     #[test]
@@ -211,30 +226,25 @@ mod tests {
     }
 
     #[test]
-    fn test_main_title_cuts_at_space_adjacent_separators() {
-        assert_eq!(main_title("Ace Combat 04 - Shattered Skies"), "Ace Combat 04");
-        assert_eq!(main_title("13 Sentinels: Aegis Rim"), "13 Sentinels");
-        assert_eq!(main_title("Phoenix Wright : Ace Attorney Trilogy"), "Phoenix Wright");
-        // In-word dashes and colons are not separators.
-        assert_eq!(main_title("Pac-Man World"), "Pac-Man World");
-        assert_eq!(main_title("Zelda No Densetsu"), "Zelda No Densetsu");
-        // A separator glued to the end still cuts.
-        assert_eq!(main_title("Katamari Damacy -"), "Katamari Damacy");
-    }
-
-    #[test]
-    fn test_search_head_caps_separatorless_names_at_two_words() {
-        // A dump named without any separator cannot match a name that has
-        // one inside; two words survive a separator past them.
+    fn test_search_term_prefers_the_distinctive_tail() {
+        // The last segment is what both the dump and ScreenScraper's name
+        // agree is the game's own; series heads bury the game.
+        assert_eq!(search_term("Ace Combat 04 - Shattered Skies"), "Shattered Skies");
         assert_eq!(
-            search_head("Phoenix Wright Ace Attorney Trilogy"),
+            search_term("Simple 2000 Series Vol. 50 - The Daibijin"),
+            "The Daibijin"
+        );
+        assert_eq!(search_term("13 Sentinels: Aegis Rim"), "Aegis Rim");
+        // A trailing separator contributes nothing.
+        assert_eq!(search_term("Katamari Damacy -"), "Katamari Damacy");
+        // Separator-less names keep a two-word head: ScreenScraper's name
+        // may hold a separator our words don't.
+        assert_eq!(
+            search_term("Phoenix Wright Ace Attorney Trilogy"),
             "Phoenix Wright"
         );
-        // Two-word and one-word names pass through.
-        assert_eq!(search_head("Katamari Damacy"), "Katamari Damacy");
-        assert_eq!(search_head("Okami"), "Okami");
-        // Names with a separator keep their whole main title.
-        assert_eq!(search_head("Ace Combat 04 - Shattered Skies"), "Ace Combat 04");
+        assert_eq!(search_term("Katamari Damacy"), "Katamari Damacy");
+        assert_eq!(search_term("Okami"), "Okami");
     }
 
     #[test]

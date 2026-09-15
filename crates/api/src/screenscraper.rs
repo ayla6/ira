@@ -19,6 +19,10 @@ const API_URL_BASE: &str = "https://www.screenscraper.fr/api2";
 pub struct ScrapedGame {
     pub ss_id: String,
     pub name: String,
+    /// Every region's name for the game, the picked one included. Matching
+    /// must judge all of them: a Japan-only dump carries the Japanese
+    /// title while the picked display name is the English one.
+    pub names: Vec<String>,
     /// The display date: the first dated region in the fallback order.
     pub release_date: String,
     /// Every dated region as `(region, YYYY-MM-DD)` pairs.
@@ -353,6 +357,12 @@ struct SsMedia {
     url: String,
 }
 
+/// The miss text the exact endpoints answer with — "Erreur : Rom/Iso/
+/// Dossier non trouvée !" — whatever HTTP status carries it.
+fn is_rom_miss(body: &str) -> bool {
+    body.trim_start().starts_with("Erreur : Rom")
+}
+
 /// Parse a `jeuRecherche`/`jeuInfos` XML answer into candidates. Applies
 /// ES-DE's cleanups: HTML entities ScreenScraper leaves in the text, the
 /// "ZZZ(notgame)" placeholder results, and duplicate game ids that one
@@ -361,10 +371,10 @@ pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
     // Plain French text answers, not XML. A rom miss is an empty result;
     // anything else — rejected credentials above all — is a real error
     // the caller must see instead of "no match".
-    let trimmed = xml.trim_start();
-    if trimmed.starts_with("Erreur : Rom") {
+    if is_rom_miss(xml) {
         return Ok(Vec::new());
     }
+    let trimmed = xml.trim_start();
     if trimmed.starts_with("Erreur") {
         if trimmed.contains("login") || trimmed.contains("identifiants") {
             return Err(
@@ -502,9 +512,24 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
     let screenshot = medias.and_then(|m| media_url(&m.media, "ss", &regions));
     let box2d = medias.and_then(|m| media_url(&m.media, "box-2D", &regions));
     let title_screen = medias.and_then(|m| media_url(&m.media, "sstitle", &regions));
+    // Every region's name, deduplicated; the picked display name is part
+    // of the set (and first, when the region preference found one).
+    let mut names: Vec<String> = Vec::new();
+    if !name.is_empty() && !names.contains(&name) {
+        names.push(name.clone());
+    }
+    if let Some(noms) = jeu.noms.as_ref() {
+        for nom in &noms.nom {
+            let text = nom.text.replace('\n', "").trim().to_string();
+            if !text.is_empty() && !names.contains(&text) {
+                names.push(text);
+            }
+        }
+    }
     ScrapedGame {
         ss_id: jeu.id.clone(),
         name,
+        names,
         release_date,
         release_dates,
         developers: entity_list(&jeu.developers),
@@ -718,6 +743,13 @@ impl SteamDataClient {
         let body = resp
             .text()
             .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
+        // A miss is a miss whatever the status line says: the exact
+        // endpoints answer "Erreur : Rom/Iso/Dossier non trouvée !" with
+        // an error status, and reading that as a failed request would
+        // block the whole fallback chain.
+        if is_rom_miss(&body) {
+            return Ok(Vec::new());
+        }
         if !status.is_success() {
             return Err(status_hint(status.as_u16(), &body));
         }
@@ -879,6 +911,10 @@ mod tests {
         // Region preference keeps the US name over the world one, with
         // the numeric entity decoded.
         assert_eq!(game.name, "Dragon Quest I & II");
+        // Every region's name is kept for matching, the picked one first.
+        assert!(game.names.len() >= 3);
+        assert_eq!(game.names[0], "Dragon Quest I & II");
+        assert!(game.names.iter().any(|n| n.contains("ドラゴンクエスト")));
         assert_eq!(game.release_date, "1993-12-18");
         // Every region's date lands in the list.
         assert_eq!(

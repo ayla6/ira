@@ -370,7 +370,8 @@ fn resolve(
                 }
                 None => {
                     eprintln!(
-                        "SS batch: '{term}' [{platform_id}] no hash hit and no acceptable candidate"
+                        "SS batch: '{term}' [{platform_id}] no acceptable candidate ({} candidate(s) arrived)",
+                        candidates.len()
                     );
                     Some(SsOutcome::Miss)
                 }

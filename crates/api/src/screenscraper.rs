@@ -743,15 +743,32 @@ impl SteamDataClient {
 
     fn screenscraper_get(&self, url: &str) -> Result<Vec<ScrapedGame>, String> {
         let _s = tracing::info_span!("screenscraper_get", url = redact_url(url)).entered();
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .map_err(|e| format!("ScreenScraper request failed: {}", redact_text(&e.to_string(), url)))?;
-        let status = resp.status();
-        let body = resp
-            .text()
-            .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
+        // The service drops connections under load; one retry a moment
+        // later saves the batch pass from a spurious failure. Status-level
+        // answers are final and never retried.
+        let (status, body) = match self.http.get(url).send() {
+            Ok(resp) => {
+                let status = resp.status();
+                let body = resp
+                    .text()
+                    .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
+                (status, body)
+            }
+            Err(first) => {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                let resp = self.http.get(url).send().map_err(|second| {
+                    format!(
+                        "ScreenScraper request failed: {} (and the retry: {second})",
+                        redact_text(&first.to_string(), url)
+                    )
+                })?;
+                let status = resp.status();
+                let body = resp
+                    .text()
+                    .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
+                (status, body)
+            }
+        };
         // A miss is a miss whatever the status line says: the exact
         // endpoints answer "Erreur : Rom/Iso/Dossier non trouvée !" with
         // an error status, and reading that as a failed request would

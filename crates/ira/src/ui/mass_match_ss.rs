@@ -93,26 +93,6 @@ pub(super) fn start_ss_batch_matching(
             missed,
         )
     };
-    // Quota management is obligatory per ScreenScraper: read the account's
-    // counters once and stand down for the day when the scrape quota is
-    // spent, instead of feeding it doomed requests.
-    match steam.screenscraper_user_infos(&creds) {
-        Ok(infos) => {
-            eprintln!(
-                "ScreenScraper batch: quota {}/{} requests today ({} not found, max {}), {}/min",
-                infos.requests_today,
-                infos.max_requests_per_day,
-                infos.requests_ko_today,
-                infos.max_requests_ko_per_day,
-                infos.max_requests_per_min
-            );
-            if infos.exhausted() {
-                eprintln!("ScreenScraper batch: daily quota exhausted, skipping the pass");
-                return;
-            }
-        }
-        Err(e) => eprintln!("ScreenScraper batch: quota unavailable: {e}"),
-    }
     let queue: Vec<BatchItem> = needs_matching
         .iter()
         .enumerate()
@@ -128,22 +108,66 @@ pub(super) fn start_ss_batch_matching(
     }
     eprintln!("ScreenScraper batch: {} game(s) to resolve", queue.len());
 
-    run_batch(
+    // Quota management is obligatory per ScreenScraper — stand down for
+    // the day when the scrape quota is spent — but reading the counters
+    // is a blocking request that must never run on the GTK loop, or the
+    // whole app freezes while the dialog opens. The verdict comes back
+    // through a channel and the batch starts from the main loop; a quota
+    // read that fails lets the pass run rather than silently skip it.
+    let quota_steam = Arc::clone(&steam);
+    let quota_creds = creds.clone();
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    std::thread::spawn(move || {
+        let allowed = match quota_steam.screenscraper_user_infos(&quota_creds) {
+            Ok(infos) => {
+                eprintln!(
+                    "ScreenScraper batch: quota {}/{} requests today ({} not found, max {}), {}/min",
+                    infos.requests_today,
+                    infos.max_requests_per_day,
+                    infos.requests_ko_today,
+                    infos.max_requests_ko_per_day,
+                    infos.max_requests_per_min
+                );
+                !infos.exhausted()
+            }
+            Err(e) => {
+                eprintln!("ScreenScraper batch: quota unavailable: {e}");
+                true
+            }
+        };
+        let _ = tx.send(allowed);
+    });
+    let rx = std::cell::RefCell::new(rx);
+    let mut start = Some((
         queue,
-        150,
-        1000,
-        {
-            let steam = Arc::clone(&steam);
-            let db = db.clone();
-            move |item| resolve(&steam, &creds, &db, &cfg, item)
-        },
-        {
-            let state = state.clone();
-            let rows = rows.to_vec();
-            let dialog = dialog.clone();
-            move |hit| apply_hit(&state, &rows, &dialog, hit)
-        },
-    );
+        Arc::clone(&steam),
+        db.clone(),
+        creds.clone(),
+        cfg.clone(),
+        state.clone(),
+        rows.to_vec(),
+        dialog.clone(),
+    ));
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        let Ok(allowed) = rx.borrow_mut().try_recv() else {
+            return glib::ControlFlow::Continue;
+        };
+        if let Some((queue, steam, db, creds, cfg, state, rows, dialog)) = start.take() {
+            if allowed {
+                run_batch(
+                    queue,
+                    150,
+                    1000,
+                    {
+                        let steam = Arc::clone(&steam);
+                        move |item| resolve(&steam, &creds, &db, &cfg, item)
+                    },
+                    move |hit| apply_hit(&state, &rows, &dialog, hit),
+                );
+            }
+        }
+        glib::ControlFlow::Break
+    });
 }
 
 /// Off-thread: the hash search answers authoritatively when the ROM's md5
@@ -174,6 +198,7 @@ fn resolve(
     // exactly what ScreenScraper's rom index stores (ES-DE sends it the
     // same way); the stem alone loses the match.
     if ira_models::screenscraper_hashes_content(&platform_id) {
+        let verbose = verbose_logging();
         // Hash on demand — digest and inner-file size in one streaming
         // pass — and keep the pair stored so this costs nothing next
         // time. The size is the inner ROM's own, never the container's:
@@ -216,13 +241,17 @@ fn resolve(
                 }
                 Ok(games) => {
                     if let Some(game) = games.into_iter().next() {
-                        eprintln!(
-                            "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
-                            game.ss_id, game.name
-                        );
+                        if verbose {
+                            eprintln!(
+                                "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
+                                game.ss_id, game.name
+                            );
+                        }
                         return Some(SsOutcome::Hit(Box::new(game)));
                     }
-                    eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit");
+                    if verbose {
+                        eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit");
+                    }
                 }
             }
         }
@@ -246,10 +275,12 @@ fn resolve(
             }
             Ok(games) => {
                 if let Some(game) = games.into_iter().next() {
-                    eprintln!(
-                        "SS batch: serial '{serial}' [{platform_id}] hit -> ss id {} '{}'",
-                        game.ss_id, game.name
-                    );
+                    if verbose_logging() {
+                        eprintln!(
+                            "SS batch: serial '{serial}' [{platform_id}] hit -> ss id {} '{}'",
+                            game.ss_id, game.name
+                        );
+                    }
                     return Some(SsOutcome::Hit(Box::new(game)));
                 }
             }
@@ -287,20 +318,27 @@ fn resolve(
             Some(SsOutcome::Failed(e))
         }
         Ok(candidates) => {
-            eprintln!(
-                "SS batch: '{term}' [{platform_id}] {} candidate(s)",
-                candidates.len()
-            );
+            let verbose = verbose_logging();
+            if verbose {
+                eprintln!(
+                    "SS batch: '{term}' [{platform_id}] {} candidate(s)",
+                    candidates.len()
+                );
+            }
             let target = normalized_for_match(&full);
             let hit = candidates.into_iter().find(|game| {
-                acceptable(&target, &normalized_for_match(&game.name))
+                game.names
+                    .iter()
+                    .any(|n| acceptable(&target, &normalized_for_match(n)))
             });
             match hit {
                 Some(game) => {
-                    eprintln!(
-                        "SS batch: '{term}' [{platform_id}] no hash hit; name matched ss id {} '{}'",
-                        game.ss_id, game.name
-                    );
+                    if verbose {
+                        eprintln!(
+                            "SS batch: '{term}' [{platform_id}] name matched ss id {} '{}'",
+                            game.ss_id, game.name
+                        );
+                    }
                     Some(SsOutcome::Hit(Box::new(game)))
                 }
                 None => {
@@ -312,6 +350,13 @@ fn resolve(
             }
         }
     }
+}
+
+/// Success lines are development noise now that the pass works: they
+/// only print when `IRA_SS_VERBOSE` is set. Misses and failures always
+/// log, because they are what a bad matching run is diagnosed with.
+fn verbose_logging() -> bool {
+    std::env::var_os("IRA_SS_VERBOSE").is_some()
 }
 
 /// Disc serials — `SLES-52005`, `SLPS-01204`, `RLJE52` — are short
@@ -362,16 +407,20 @@ fn normalized_for_match(name: &str) -> String {
         .join(" ")
 }
 
-/// A candidate counts as the game when the normalized names agree or one
-/// is a prefix of the other — subtitle and region chopping tolerated
-/// ("(Japan)", "Advance"), but a number leading the extension is a
-/// sequel: "Advance Wars" is not "Advance Wars 2".
+/// A candidate counts as the game when the normalized names agree, one
+/// is a prefix of the other, or one ends with the other — subtitle and
+/// region chopping tolerated ("(Japan)", "Advance"), and the Japanese
+/// release's brand prefix too ("Simple 2000 Series Vol. 50 : The
+/// Daibijin" is "The Daibijin" with a prefix in front). A number leading
+/// the extension is a sequel: "Advance Wars" is not "Advance Wars 2".
 fn acceptable(target: &str, candidate: &str) -> bool {
     !target.is_empty()
         && !candidate.is_empty()
         && (candidate == target
             || prefix_extension_ok(target, candidate)
-            || prefix_extension_ok(candidate, target))
+            || prefix_extension_ok(candidate, target)
+            || suffix_extension_ok(target, candidate)
+            || suffix_extension_ok(candidate, target))
 }
 
 fn prefix_extension_ok(short: &str, long: &str) -> bool {
@@ -388,6 +437,22 @@ fn prefix_extension_ok(short: &str, long: &str) -> bool {
             !c.is_ascii_digit() && at_word_boundary
         }
     }
+}
+
+/// The suffix mirror of the prefix rule, for names that carry a brand in
+/// front of the title. The short side must hold at least two words — a
+/// one-word suffix ("Mario" inside "Super Mario") is just a word, and
+/// matching on it would swallow neighbors. Sequels are safe by
+/// direction: their number sits at the end, so the base title is never
+/// their suffix.
+fn suffix_extension_ok(short: &str, long: &str) -> bool {
+    if !long.ends_with(short)
+        || long.len() <= short.len()
+        || !short.as_bytes().contains(&b' ')
+    {
+        return false;
+    }
+    long.as_bytes()[long.len() - short.len() - 1] == b' '
 }
 
 /// UI loop: persist a hit's metadata and repaint the row's SS box; only a
@@ -479,9 +544,11 @@ mod tests {
             &target,
             &normalized_for_match("Dragon Quest Monsters")
         ));
-        // A leading brand word the target lacks is a different title, not
-        // the game with decoration.
-        assert!(!acceptable(
+        // A brand word in front of the target is the same game under its
+        // full name: the search only returned the candidate because some
+        // region's name matched, and sequel guards above keep the
+        // lookalikes out.
+        assert!(acceptable(
             &normalized_for_match("Ace Attorney Justice for All"),
             &normalized_for_match("Phoenix Wright Ace Attorney Justice for All")
         ));
@@ -506,5 +573,31 @@ mod tests {
             .iter()
             .find(|c| acceptable(&full, &normalized_for_match(c)));
         assert_eq!(*hit.unwrap(), "Ace Combat 04 : Shattered Skies");
+    }
+
+    #[test]
+    fn test_acceptable_tolerates_brand_prefixed_japanese_names() {
+        // A Japan-region dump named after the subtitle matches the
+        // entry whose Japanese name carries a brand in front (live
+        // Demolition Girl answer).
+        let target = normalized_for_match("The Daibijin");
+        let jp_name = normalized_for_match("Simple 2000 Series Vol. 50 : The Daibijin");
+        assert!(acceptable(&target, &jp_name));
+        // The English name of the same entry matches a file named the
+        // English way.
+        assert!(acceptable(
+            &normalized_for_match("Demolition Girl"),
+            &normalized_for_match("Demolition Girl")
+        ));
+        // One-word suffixes never match: "Mario" is not "Super Mario".
+        assert!(!acceptable(
+            &normalized_for_match("Mario"),
+            &normalized_for_match("Super Mario")
+        ));
+        // The base title is not a sequel's suffix.
+        assert!(!acceptable(
+            &normalized_for_match("Advance Wars"),
+            &normalized_for_match("Advance Wars 2 : Black Hole Rising")
+        ));
     }
 }

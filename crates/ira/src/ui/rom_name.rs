@@ -8,7 +8,11 @@
 /// group, including the bracketed switch/3DS title ids — and the
 /// underscores scene names use for spaces, so a title search sees a
 /// title. Punctuation stays: the source's search needs it, and the
-/// acceptance comparison is what ignores it.
+/// acceptance comparison is what ignores it. Console-fed titles bring
+/// their own noise, which never survives into a search: the trademark
+/// glyphs Nintendo's metadata loves ("Bayonetta™") and the
+/// filesystem-safe colon switch titles use instead of a real one
+/// ("Catherine꞉ Full Body").
 pub(crate) fn clean_rom_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut depth = 0usize;
@@ -16,6 +20,8 @@ pub(crate) fn clean_rom_name(name: &str) -> String {
         match c {
             '(' | '[' => depth += 1,
             ')' | ']' => depth = depth.saturating_sub(1),
+            '\u{2122}' | '\u{00ae}' | '\u{00a9}' | '\u{2120}' => {}
+            '\u{a789}' => out.push(':'),
             _ if depth == 0 => out.push(c),
             _ => {}
         }
@@ -99,6 +105,16 @@ mod tests {
         // Unbalanced opening brackets still keep the text.
         assert_eq!(clean_rom_name("Half Life (Source"), "Half Life");
         assert_eq!(clean_rom_name("   "), "");
+    }
+
+    #[test]
+    fn test_clean_rom_name_normalizes_console_title_noise() {
+        // Switch metadata titles carry trademark glyphs and the
+        // filesystem-safe colon.
+        assert_eq!(clean_rom_name("Bayonetta\u{2122}"), "Bayonetta");
+        assert_eq!(clean_rom_name("Catherine\u{a789} Full Body"), "Catherine: Full Body");
+        // In-word dashes survive (Pac-Man must keep searching as Pac-Man).
+        assert_eq!(clean_rom_name("Pac-Man Collection (USA)"), "Pac-Man Collection");
     }
 
     #[test]

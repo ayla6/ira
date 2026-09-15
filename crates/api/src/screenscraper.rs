@@ -786,8 +786,9 @@ impl SteamDataClient {
                 std::thread::sleep(std::time::Duration::from_millis(1500));
                 let resp = self.http.get(url).send().map_err(|second| {
                     format!(
-                        "ScreenScraper request failed: {} (and the retry: {second})",
-                        redact_text(&first.to_string(), url)
+                        "ScreenScraper request failed: {} (and the retry: {})",
+                        redact_text(&first.to_string(), url),
+                        redact_text(&second.to_string(), url)
                     )
                 })?;
                 let status = resp.status();

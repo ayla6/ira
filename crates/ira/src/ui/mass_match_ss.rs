@@ -482,26 +482,20 @@ fn resolve_pc(
         }
         Ok(candidates) => candidates,
     };
-    if candidates.is_empty() {
-        eprintln!("SS batch: '{term}' [pc] no acceptable candidate (0 candidate(s) arrived)");
-        return Some(SsOutcome::Miss);
-    }
 
     // The Steam diff. Companies decide identity — dates and titles are
-    // shared by ports and remakes, but the developer is the studio.
+    // shared by ports and remakes, but the developer is the studio. An
+    // exact-title candidate that carries no companies at all is accepted
+    // too: nothing contradicts it, and ScreenScraper leaves many entries
+    // company-less ("Metaphor: ReFantazio" would never match otherwise).
     let steam_info = platform_id
         .parse::<u32>()
         .ok()
         .and_then(|app_id| steam.fetch_steamcmd_info(&app_id.to_string()))
         .filter(|info| !info.developer.trim().is_empty() || !info.publisher.trim().is_empty());
-    if let Some(info) = steam_info {
-        let diffed: Vec<ScrapedGame> = candidates
-            .iter()
-            .filter(|game| companies_overlap(&info, game))
-            .cloned()
-            .collect();
-        if let Some(game) = pick_candidate(&diffed, &target, &[]) {
-            let mut game = game.clone();
+    if let Some(info) = steam_info.as_ref() {
+        if let Some(game) = verified_pick(&candidates, &target, Some(info)) {
+            let mut game = game;
             game.release_date = steam_release_date(info.release_timestamp);
             if verbose {
                 eprintln!(
@@ -511,33 +505,95 @@ fn resolve_pc(
             }
             return Some(SsOutcome::Hit(Box::new(game)));
         }
-        eprintln!(
-            "SS batch: '{term}' [pc] no acceptable candidate ({} candidate(s) arrived, none matching Steam's companies)",
-            candidates.len()
-        );
-        return Some(SsOutcome::Miss);
-    }
-
-    // No Steam data to diff with: ScreenScraper's ranked pick over every
-    // system is the answer.
-    match pick_candidate(&candidates, &target, &[]) {
-        Some(game) => {
+    } else {
+        // No Steam data to diff with: ScreenScraper's ranked pick over
+        // every system is the answer.
+        if let Some(game) = pick_candidate(&candidates, &target, &[]) {
             if verbose {
                 eprintln!(
                     "SS batch: '{term}' [pc] matched ss id {} '{}'",
                     game.ss_id, game.name
                 );
             }
-            Some(SsOutcome::Hit(Box::new(game.clone())))
-        }
-        None => {
-            eprintln!(
-                "SS batch: '{term}' [pc] no acceptable candidate ({} candidate(s) arrived)",
-                candidates.len()
-            );
-            Some(SsOutcome::Miss)
+            return Some(SsOutcome::Hit(Box::new(game.clone())));
         }
     }
+
+    // One widening try with the full name before the miss: the two-word
+    // head loses the distinctive words ("Doki Doki" drowns "Doki Doki
+    // Literature Club" under its own fangames) and the source's answer
+    // table caps at thirty.
+    if term != full {
+        match steam.screenscraper_search_in(creds, &full, None) {
+            Err(e) => {
+                eprintln!("SS batch: '{full}' [pc] wide search failed: {e}");
+                return Some(SsOutcome::Failed(e));
+            }
+            Ok(widened) => {
+                if let Some(info) = steam_info.as_ref() {
+                    if let Some(game) = verified_pick(&widened, &target, Some(info)) {
+                        let mut game = game;
+                        game.release_date = steam_release_date(info.release_timestamp);
+                        if verbose {
+                            eprintln!(
+                                "SS batch: '{full}' [pc] Steam-diffed to ss id {} '{}'",
+                                game.ss_id, game.name
+                            );
+                        }
+                        return Some(SsOutcome::Hit(Box::new(game)));
+                    }
+                } else if let Some(game) = pick_candidate(&widened, &target, &[]) {
+                    if verbose {
+                        eprintln!(
+                            "SS batch: '{full}' [pc] matched ss id {} '{}'",
+                            game.ss_id, game.name
+                        );
+                    }
+                    return Some(SsOutcome::Hit(Box::new(game.clone())));
+                }
+            }
+        }
+    }
+    eprintln!(
+        "SS batch: '{term}' [pc] no acceptable candidate ({} candidate(s) arrived)",
+        candidates.len()
+    );
+    Some(SsOutcome::Miss)
+}
+
+/// Whether a candidate carries company data at all.
+fn has_companies(game: &ScrapedGame) -> bool {
+    !game.developers.is_empty() || !game.publishers.is_empty()
+}
+
+/// Whether any of a candidate's names is the target, letter for letter
+/// after normalization.
+fn exact_title(target: &str, game: &ScrapedGame) -> bool {
+    game.names
+        .iter()
+        .any(|(_, name)| match_rank(target, &normalized_for_match(name)) == Some(4))
+}
+
+/// The candidates the Steam diff confirms: companies agree with Steam's,
+/// or the title is exact while the candidate carries no companies to
+/// contradict it. The best-ranked of those wins.
+fn verified_pick(
+    set: &[ScrapedGame],
+    target: &str,
+    info: Option<&SteamCmdInfo>,
+) -> Option<ScrapedGame> {
+    let agreeing: Vec<ScrapedGame> = set
+        .iter()
+        .filter(|game| match info {
+            Some(info) => {
+                companies_overlap(info, game)
+                    || (exact_title(target, game) && !has_companies(game))
+            }
+            None => false,
+        })
+        .cloned()
+        .collect();
+    pick_candidate(&agreeing, target, &[]).cloned()
 }
 
 /// The corporate words a store appends to a studio's name — Steam says
@@ -1125,6 +1181,37 @@ mod tests {
             id: "1".into(),
             name: name.into(),
         }
+    }
+
+    #[test]
+    fn test_verified_pick_accepts_exact_titles_without_companies() {
+        // ScreenScraper leaves many entries company-less; an exact-title
+        // candidate with no companies verifies where nothing contradicts
+        // it (the live "Metaphor: ReFantazio" answer).
+        let info = SteamCmdInfo {
+            developer: "ATLUS".into(),
+            publisher: "Sega".into(),
+            ..Default::default()
+        };
+        let target = normalized_for_match("Metaphor: ReFantazio");
+        let candidates = [scraped("359000", &[("us", "Metaphor: ReFantazio")])];
+        assert!(super::verified_pick(&candidates, &target, Some(&info)).is_some());
+        // An exact title WITH disagreeing companies stays out.
+        let contradicting = ScrapedGame {
+            developers: vec![entity("Nintendo")],
+            publishers: vec![entity("Nintendo")],
+            ..scraped("359001", &[("us", "Metaphor: ReFantazio")])
+        };
+        assert!(
+            super::verified_pick(
+                std::slice::from_ref(&contradicting),
+                &target,
+                Some(&info)
+            )
+            .is_none()
+        );
+        // No Steam info verifies nothing.
+        assert!(super::verified_pick(&candidates, &target, None).is_none());
     }
 
     #[test]

@@ -159,7 +159,13 @@ pub(crate) fn search_term(name: &str) -> String {
         return segments[segments.len() - 1].trim().to_string();
     }
     let only = name.trim();
-    let head: Vec<&str> = only.split_whitespace().take(2).collect();
+    // Words with no letters or digits — a bare "&" — are not words;
+    // searching "Fear &" finds nothing "Fear Hunger" wouldn't.
+    let head: Vec<&str> = only
+        .split_whitespace()
+        .filter(|word| word.chars().any(|c| c.is_alphanumeric()))
+        .take(2)
+        .collect();
     head.join(" ")
 }
 
@@ -374,6 +380,8 @@ mod tests {
             search_term("Phoenix Wright Ace Attorney Trilogy"),
             "Phoenix Wright"
         );
+        // Punctuation-only words are not words.
+        assert_eq!(search_term("Fear & Hunger"), "Fear Hunger");
         assert_eq!(search_term("Katamari Damacy"), "Katamari Damacy");
         assert_eq!(search_term("Okami"), "Okami");
     }

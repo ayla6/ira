@@ -39,7 +39,10 @@ pub(crate) fn looks_like_title_id(term: &str) -> bool {
 
 /// The name split at space-adjacent separators — the segments of
 /// "Ace Combat 04 - Shattered Skies" are "Ace Combat 04" and "Shattered
-/// Skies"; a trailing separator contributes nothing.
+/// Skies"; crossover "+" counts too ("Super Mario 3D World + Bowser's
+/// Fury" would bury its tail under every other Mario game otherwise);
+/// a trailing separator contributes nothing and leftover separator
+/// characters at a segment's edges come off with it.
 fn separator_segments(name: &str) -> Vec<&str> {
     let bytes = name.as_bytes();
     let mut segments: Vec<&str> = Vec::new();
@@ -48,7 +51,7 @@ fn separator_segments(name: &str) -> Vec<&str> {
     while i < bytes.len() {
         let c = name[i..].chars().next().unwrap_or(' ');
         let len = c.len_utf8();
-        let separator = matches!(c, '-' | ':' | '\u{2013}' | '\u{2014}');
+        let separator = matches!(c, '-' | ':' | '+' | '\u{2013}' | '\u{2014}');
         let spaced = (i > 0 && bytes[i - 1] == b' ') || bytes.get(i + len) == Some(&b' ');
         if separator && spaced {
             segments.push(&name[start..i]);
@@ -66,6 +69,14 @@ fn separator_segments(name: &str) -> Vec<&str> {
         segments.push(tail);
     }
     segments
+        .iter()
+        .map(|s| {
+            s.trim_matches(|c| {
+                matches!(c, '-' | ':' | '+' | '\u{2013}' | '\u{2014}' | ' ')
+            })
+        })
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// How many separator characters a name carries — hyphens, colons
@@ -249,6 +260,25 @@ mod tests {
         // no errors — the old four-character refusal only cost matches.
         assert_eq!(search_term("Rez"), "Rez");
         assert_eq!(search_term("Pok\u{e9}mon Legends: Z-A"), "Z-A");
+    }
+
+    #[test]
+    fn test_search_term_handles_crossover_plus_and_edge_separators() {
+        // The "+" of a crossover title is a separator: the two-word head
+        // "Super Mario" buries the bundle under every other Mario game
+        // (live answer: 16 hits, ours absent), while the tail answers
+        // alone.
+        assert_eq!(
+            search_term("Super Mario 3D World + Bowser's Fury"),
+            "Bowser's Fury"
+        );
+        // Separator characters hugging a segment come off with it.
+        assert_eq!(
+            search_term("The Hundred Line -Last Defense Academy-"),
+            "Last Defense Academy"
+        );
+        // In-word plus signs and dashes are not separators.
+        assert_eq!(search_term("C++"), "C++");
     }
 
     #[test]

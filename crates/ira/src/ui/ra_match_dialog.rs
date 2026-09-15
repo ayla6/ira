@@ -33,18 +33,18 @@ pub(super) fn persist_ra_match(
     if let Err(e) = ira_db::set_manual_unmatch(&sc.borrow().db, db_id, false) {
         eprintln!("Failed to clear manual unmatch: {}", e);
     }
+    // ScreenScraper's title outranks RA's: a row an SS match already
+    // named keeps that name.
+    let ss_named = {
+        let sc = sc.borrow();
+        ira_db::find_by_db_id(&sc.db, db_id)
+            .ok()
+            .flatten()
+            .is_some_and(|e| !e.screenscraper_id.is_empty())
+    };
     if let Some(g) = sc.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
         g.app_id = app_id;
         g.trophy_source = ira_models::TrophySource::Ra;
-        // ScreenScraper's title outranks RA's: a row an SS match already
-        // named keeps that name.
-        let ss_named = {
-            let sc = sc.borrow();
-            ira_db::find_by_db_id(&sc.db, db_id)
-                .ok()
-                .flatten()
-                .is_some_and(|e| !e.screenscraper_id.is_empty())
-        };
         if !ra_title.is_empty() && !ss_named {
             g.set_name(ra_title);
         }

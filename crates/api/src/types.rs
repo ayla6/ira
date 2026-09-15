@@ -430,7 +430,7 @@ pub(crate) struct SteamCmdPathTransform {
 }
 
 // ── Parsed app details ──────────────────────────────────────────────
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SteamCmdInfo {
     pub name: String,
     pub release_timestamp: i64,

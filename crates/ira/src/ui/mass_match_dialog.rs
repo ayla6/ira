@@ -1,5 +1,6 @@
 use crate::Game;
 use adw::prelude::*;
+use ira_models::GameKind;
 use std::collections::HashSet;
 
 use super::css::*;
@@ -67,13 +68,21 @@ fn needs_ra_match(g: &Game) -> bool {
 }
 
 /// Games the ScreenScraper matcher can enrich: console games on platforms
-/// ScreenScraper covers, until metadata from one is on record. Purely
-/// additive — stored pieces only ever fill blanks.
+/// ScreenScraper covers, until metadata from one is on record, plus PC
+/// games — which search ScreenScraper's Windows/Linux systems and then
+/// diff the whole source against their Steam data. Purely additive —
+/// stored pieces only ever fill blanks.
 fn needs_ss_match(g: &Game) -> bool {
-    (g.kind == ira_models::GameKind::Retro || g.kind.is_console_emulator())
-        && g.screenscraper_id.is_empty()
-        && !g.manual_unmatch
-        && ira_models::screenscraper_system_id(&g.platform_id).is_some()
+    if g.manual_unmatch || !g.screenscraper_id.is_empty() {
+        return false;
+    }
+    match g.kind {
+        GameKind::Wine | GameKind::Linux | GameKind::Steam => true,
+        _ => {
+            (g.kind == GameKind::Retro || g.kind.is_console_emulator())
+                && ira_models::screenscraper_system_id(&g.platform_id).is_some()
+        }
+    }
 }
 
 fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
@@ -416,11 +425,23 @@ mod tests {
         g.screenscraper_id.clear();
         g.manual_unmatch = true;
         assert!(!needs_ss_match(&g));
-        // Wine games enrich from Steam, not ScreenScraper.
-        assert!(!needs_ss_match(&game(ira_models::GameKind::Wine)));
         // Console kinds on platforms ScreenScraper has no system for.
         let mut unmapped = game(ira_models::GameKind::Switch);
         unmapped.platform_id = "madeup".to_string();
         assert!(!needs_ss_match(&unmapped));
+    }
+
+    #[test]
+    fn test_needs_ss_match_covers_pc_games() {
+        // PC games search ScreenScraper's Windows/Linux systems and then
+        // diff the whole source against their Steam data — every PC kind
+        // qualifies, whatever their store-app-id platforms map to.
+        assert!(needs_ss_match(&game(ira_models::GameKind::Wine)));
+        assert!(needs_ss_match(&game(ira_models::GameKind::Linux)));
+        assert!(needs_ss_match(&game(ira_models::GameKind::Steam)));
+        // Manual unmatch still wins over the pass.
+        let mut g = game(ira_models::GameKind::Wine);
+        g.manual_unmatch = true;
+        assert!(!needs_ss_match(&g));
     }
 }

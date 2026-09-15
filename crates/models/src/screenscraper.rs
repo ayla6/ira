@@ -83,6 +83,19 @@ pub fn screenscraper_system_id(platform_id: &str) -> Option<u32> {
         .map(|(_, ss)| *ss)
 }
 
+/// The ScreenScraper system a PC game scrapes under: Windows for Steam
+/// and Wine games (ScreenScraper's own Steam system redirects there, the
+/// same way ES-DE maps Valve Steam), Linux for native Linux games. PC
+/// platform ids are store app ids rather than console names, so the
+/// game's kind is what carries the distinction.
+pub fn screenscraper_pc_system_id(kind: crate::GameKind) -> Option<u32> {
+    match kind {
+        crate::GameKind::Linux => Some(145),
+        crate::GameKind::Wine | crate::GameKind::Steam => Some(138),
+        _ => None,
+    }
+}
+
 /// `(ira platform id, screenscraper systemeid)`.
 const SYSTEM_IDS: &[(&str, u32)] = &[
     ("psx", 57),
@@ -184,10 +197,31 @@ mod tests {
 
     #[test]
     fn test_screenscraper_system_id_unmapped_platforms() {
-        // Steam, Wine and Linux games scrape from Steam/SGDB, not here.
+        // Steam, Wine and Linux games carry store app ids as their
+        // platform, not these names — they map through the kind instead.
         assert_eq!(screenscraper_system_id("steam"), None);
         assert_eq!(screenscraper_system_id("wine"), None);
         assert_eq!(screenscraper_system_id("madeup"), None);
+    }
+
+    #[test]
+    fn test_screenscraper_pc_system_id_follows_the_kind() {
+        use crate::screenscraper_pc_system_id;
+        // Steam and Wine games scrape as Windows, Linux games as Linux;
+        // console kinds have no PC system.
+        assert_eq!(
+            screenscraper_pc_system_id(crate::GameKind::Steam),
+            Some(138)
+        );
+        assert_eq!(
+            screenscraper_pc_system_id(crate::GameKind::Wine),
+            Some(138)
+        );
+        assert_eq!(
+            screenscraper_pc_system_id(crate::GameKind::Linux),
+            Some(145)
+        );
+        assert_eq!(screenscraper_pc_system_id(crate::GameKind::Retro), None);
     }
 
     #[test]

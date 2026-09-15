@@ -13,13 +13,16 @@ use std::sync::Arc;
 use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
-use super::rom_name::{clean_rom_name, pick_search_name, region_hints, search_term};
+use super::rom_name::{
+    clean_rom_name, looks_like_title_id, pick_search_name, region_hints, search_term,
+};
 use unicode_normalization::UnicodeNormalization;
 use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
 use super::state::SharedState;
 use super::steam_search_dialog::status_label;
 use crate::Game;
 use ira_api::screenscraper::ScrapedGame;
+use ira_api::types::SteamCmdInfo;
 use ira_api::{ScraperCreds, SteamDataClient};
 use ira_models::screenscraper_system_id;
 
@@ -182,6 +185,11 @@ fn resolve(
 ) -> Option<SsOutcome> {
     let mut entry = ira_db::find_by_db_id(db, item.db_id).ok().flatten()?;
     let platform_id = entry.platform_id.clone();
+    // PC games search ScreenScraper's own Windows/Linux systems and fall
+    // back to a cross-platform lookup diffed against their Steam data.
+    if entry.kind.is_pc() {
+        return resolve_pc(steam, creds, entry.kind, &platform_id, &entry.title, item);
+    }
     screenscraper_system_id(&platform_id)?;
     // ROM paths are stored relative to the console's folder in the ROM
     // roots; every file access resolves through the config first.
@@ -385,6 +393,160 @@ fn resolve(
 /// log, because they are what a bad matching run is diagnosed with.
 fn verbose_logging() -> bool {
     std::env::var_os("IRA_SS_VERBOSE").is_some()
+}
+
+/// Off-thread PC branch. ScreenScraper barely covers desktop platforms,
+/// so the search widens in circles. First the game's own system —
+/// Windows for Steam and Wine games, Linux for native ones; a hit there
+/// is simply the game. Then the whole ScreenScraper at once: a candidate
+/// on any console whose developers and publishers agree with what Steam
+/// reports is the same game, and it takes Steam's release date, because
+/// the console entry's date is that port's, not the PC one's. Games with
+/// no Steam id behind them — manual additions like a decomp port named
+/// after its original — have nothing to diff against and lean entirely
+/// on ScreenScraper: the ranked pick over every system is the answer,
+/// down to the oldest release for a name shared by remakes.
+fn resolve_pc(
+    steam: &SteamDataClient,
+    creds: &ScraperCreds,
+    kind: ira_models::GameKind,
+    platform_id: &str,
+    title: &str,
+    item: &BatchItem,
+) -> Option<SsOutcome> {
+    let system = ira_models::screenscraper_pc_system_id(kind)?;
+    // PC titles come from Steam or the user, never from dump tags: the
+    // title leads and the executable stem is last resort.
+    let full = [clean_rom_name(title), clean_rom_name(&item.name)]
+        .into_iter()
+        .find(|t| !t.is_empty() && !looks_like_title_id(t))
+        .unwrap_or_default();
+    let term = search_term(&full);
+    if term.is_empty() {
+        eprintln!("SS batch: [pc] no usable search term");
+        return Some(SsOutcome::Failed("no usable search term".to_string()));
+    }
+    let target = normalized_for_match(&full);
+    let verbose = verbose_logging();
+
+    // The game's own system first — a hit there is simply the game.
+    match steam.screenscraper_search_in(creds, &term, Some(system)) {
+        Err(e) => {
+            eprintln!("SS batch: '{term}' [pc] search failed: {e}");
+            return Some(SsOutcome::Failed(e));
+        }
+        Ok(candidates) => {
+            if let Some(game) = pick_candidate(&candidates, &target, &[]) {
+                if verbose {
+                    eprintln!(
+                        "SS batch: '{term}' [pc] matched ss id {} '{}'",
+                        game.ss_id, game.name
+                    );
+                }
+                return Some(SsOutcome::Hit(Box::new(game.clone())));
+            }
+            if verbose {
+                eprintln!("SS batch: '{term}' [pc] nothing on the pc system");
+            }
+        }
+    }
+
+    // Widening: every system at once.
+    let candidates = match steam.screenscraper_search_in(creds, &term, None) {
+        Err(e) => {
+            eprintln!("SS batch: '{term}' [pc] wide search failed: {e}");
+            return Some(SsOutcome::Failed(e));
+        }
+        Ok(candidates) => candidates,
+    };
+    if candidates.is_empty() {
+        eprintln!("SS batch: '{term}' [pc] no acceptable candidate (0 candidate(s) arrived)");
+        return Some(SsOutcome::Miss);
+    }
+
+    // The Steam diff. Companies decide identity — dates and titles are
+    // shared by ports and remakes, but the developer is the studio.
+    let steam_info = platform_id
+        .parse::<u32>()
+        .ok()
+        .and_then(|app_id| steam.fetch_steamcmd_info(&app_id.to_string()))
+        .filter(|info| !info.developer.trim().is_empty() || !info.publisher.trim().is_empty());
+    if let Some(info) = steam_info {
+        let diffed: Vec<ScrapedGame> = candidates
+            .iter()
+            .filter(|game| companies_overlap(&info, game))
+            .cloned()
+            .collect();
+        if let Some(game) = pick_candidate(&diffed, &target, &[]) {
+            let mut game = game.clone();
+            game.release_date = steam_release_date(info.release_timestamp);
+            if verbose {
+                eprintln!(
+                    "SS batch: '{term}' [pc] Steam-diffed to ss id {} '{}'",
+                    game.ss_id, game.name
+                );
+            }
+            return Some(SsOutcome::Hit(Box::new(game)));
+        }
+        eprintln!(
+            "SS batch: '{term}' [pc] no acceptable candidate ({} candidate(s) arrived, none matching Steam's companies)",
+            candidates.len()
+        );
+        return Some(SsOutcome::Miss);
+    }
+
+    // No Steam data to diff with: ScreenScraper's ranked pick over every
+    // system is the answer.
+    match pick_candidate(&candidates, &target, &[]) {
+        Some(game) => {
+            if verbose {
+                eprintln!(
+                    "SS batch: '{term}' [pc] matched ss id {} '{}'",
+                    game.ss_id, game.name
+                );
+            }
+            Some(SsOutcome::Hit(Box::new(game.clone())))
+        }
+        None => {
+            eprintln!(
+                "SS batch: '{term}' [pc] no acceptable candidate ({} candidate(s) arrived)",
+                candidates.len()
+            );
+            Some(SsOutcome::Miss)
+        }
+    }
+}
+
+/// Whether a ScreenScraper candidate's developer or publisher agrees with
+/// the Steam ones: one normalized name in common. Accents, case and
+/// punctuation fold away, so "ATLUS" meets "Atlus"; an empty answer on
+/// either side never agrees.
+fn companies_overlap(info: &SteamCmdInfo, game: &ScrapedGame) -> bool {
+    let steam: std::collections::HashSet<String> = [info.developer.as_str(), info.publisher.as_str()]
+        .into_iter()
+        .flat_map(|field| field.split(','))
+        .map(normalized_for_match)
+        .filter(|name| !name.is_empty())
+        .collect();
+    if steam.is_empty() {
+        return false;
+    }
+    game.developers
+        .iter()
+        .chain(game.publishers.iter())
+        .any(|entity| steam.contains(&normalized_for_match(&entity.name)))
+}
+
+/// Steam's release timestamp as the `YYYY-MM-DD` string the metadata
+/// stores — the PC release, when a diffed console entry carries the
+/// port's date instead.
+fn steam_release_date(timestamp: i64) -> String {
+    use chrono::TimeZone;
+    chrono::Utc
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .map(|date| date.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
 }
 
 /// Disc serials — `SLES-52005`, `SLPS-01204`, `RLJE52` — are short
@@ -637,6 +799,7 @@ fn apply_hit(
 mod tests {
     use super::{match_rank, normalized_for_match, pick_candidate};
     use ira_api::screenscraper::ScrapedGame;
+    use ira_api::types::SteamCmdInfo;
 
     #[test]
     fn test_normalized_for_match_ignores_punctuation_and_case() {
@@ -850,6 +1013,54 @@ mod tests {
         ];
         let picked = pick_candidate(&candidates, &target, &["us"]);
         assert_eq!(picked.unwrap().ss_id, "2");
+    }
+
+    #[test]
+    fn test_companies_overlap_folds_names_and_never_trusts_empty() {
+        let info = SteamCmdInfo {
+            developer: "ATLUS".into(),
+            publisher: "Sega".into(),
+            ..Default::default()
+        };
+        // Case folding meets the source's own spelling.
+        let atlus = ScrapedGame {
+            developers: vec![entity("P-Studio")],
+            publishers: vec![entity("Atlus")],
+            ..Default::default()
+        };
+        assert!(super::companies_overlap(&info, &atlus));
+        // Publishers alone can carry the agreement.
+        let sega = ScrapedGame {
+            publishers: vec![entity("SEGA")],
+            ..Default::default()
+        };
+        assert!(super::companies_overlap(&info, &sega));
+        // No agreement, no match.
+        let other = ScrapedGame {
+            developers: vec![entity("Nintendo")],
+            publishers: vec![entity("Nintendo")],
+            ..Default::default()
+        };
+        assert!(!super::companies_overlap(&info, &other));
+        // A candidate with no companies at all cannot agree.
+        assert!(!super::companies_overlap(&info, &ScrapedGame::default()));
+        // Steam knowing nothing about a game never agrees either.
+        let empty = SteamCmdInfo::default();
+        assert!(!super::companies_overlap(&empty, &atlus));
+    }
+
+    fn entity(name: &str) -> ira_models::ScraperEntity {
+        ira_models::ScraperEntity {
+            id: "1".into(),
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn test_steam_release_date_formats_the_pc_release() {
+        assert_eq!(super::steam_release_date(86_400), "1970-01-02");
+        assert_eq!(super::steam_release_date(1_609_459_200), "2021-01-01");
+        assert_eq!(super::steam_release_date(0), "1970-01-01");
     }
 
     #[test]

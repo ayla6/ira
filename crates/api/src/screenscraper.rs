@@ -188,18 +188,30 @@ pub fn game_info_by_id_url(creds: &ScraperCreds, ss_id: &str) -> String {
 }
 
 /// The wide search URL: `jeuRecherche.php` text matching, for the manual
-/// match dialog.
-pub fn search_url(creds: &ScraperCreds, term: &str, platform_id: &str) -> String {
+/// match dialog. An explicit `system` narrows the answer to one
+/// ScreenScraper system; `None` searches every system at once — the
+/// cross-platform lookup PC games fall back to.
+pub fn search_url_scoped(
+    creds: &ScraperCreds,
+    term: &str,
+    system: Option<u32>,
+) -> String {
     let mut url = format!(
         "{API_URL_BASE}/jeuRecherche.php?{}&softname={}&output=xml&recherche={}",
         creds.auth_params(),
         urlencode(SOFT_NAME),
         urlencode(term),
     );
-    if let Some(system) = screenscraper_system_id(platform_id) {
+    if let Some(system) = system {
         url.push_str(&format!("&systemeid={system}"));
     }
     url
+}
+
+/// The wide search URL: `jeuRecherche.php` text matching, narrowed to the
+/// ScreenScraper system an Ira platform maps to.
+pub fn search_url(creds: &ScraperCreds, term: &str, platform_id: &str) -> String {
+    search_url_scoped(creds, term, screenscraper_system_id(platform_id))
 }
 
 /// Regions tried in order for names, dates and media — ES-DE's fallback
@@ -651,7 +663,23 @@ impl SteamDataClient {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
-        self.screenscraper_get(&search_url(creds, term, platform_id))
+        let system = screenscraper_system_id(platform_id);
+        self.screenscraper_search_in(creds, term, system)
+    }
+
+    /// Run a ScreenScraper wide search narrowed to one system, or across
+    /// every system when `system` is None — the PC games' cross-platform
+    /// lookup.
+    pub fn screenscraper_search_in(
+        &self,
+        creds: &ScraperCreds,
+        term: &str,
+        system: Option<u32>,
+    ) -> Result<Vec<ScrapedGame>, String> {
+        if !creds.is_configured() {
+            return Err("ScreenScraper credentials not configured".to_string());
+        }
+        self.screenscraper_get(&search_url_scoped(creds, term, system))
     }
 
     /// Run a ScreenScraper exact ROM lookup (name + optional hash).

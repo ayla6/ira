@@ -75,6 +75,13 @@ impl GameKind {
         matches!(self, GameKind::Wine | GameKind::Linux)
     }
 
+    /// True for games installed as desktop programs — Steam, Wine and
+    /// native Linux games. Their platform id carries the store's app id
+    /// (or a manual marker), not a console.
+    pub fn is_pc(self) -> bool {
+        matches!(self, GameKind::Wine | GameKind::Linux | GameKind::Steam)
+    }
+
     /// Games discovered by an emulator integration (shadPS4, RPCS3, Vita3K,
     /// Cemu, Azahar, yuzu-family/Ryujinx-family) rather than a store or a
     /// plain ROM folder.

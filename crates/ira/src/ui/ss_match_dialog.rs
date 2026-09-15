@@ -67,7 +67,11 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
 /// and a name that is only a bare title id falls through to the other.
 fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
     let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten()?;
-    let trusted = entry.title_trusted || ira_models::title_from_trusted_source(&entry.platform_id);
+    // PC titles come from Steam or the user — search from them; dump
+    // stems there are executable names at best.
+    let trusted = entry.title_trusted
+        || entry.kind.is_pc()
+        || ira_models::title_from_trusted_source(&entry.platform_id);
     let stem = clean_rom_name(
         &std::path::Path::new(&entry.rom_path)
             .file_stem()

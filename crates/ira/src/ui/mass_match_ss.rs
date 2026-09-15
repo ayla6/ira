@@ -13,9 +13,8 @@ use std::sync::Arc;
 use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
-use super::rom_name::{
-    clean_rom_name, pick_search_name, region_hints, search_term, too_short_for_recherche,
-};
+use super::rom_name::{clean_rom_name, pick_search_name, region_hints, search_term};
+use unicode_normalization::UnicodeNormalization;
 use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
 use super::state::SharedState;
 use super::steam_search_dialog::status_label;
@@ -199,13 +198,16 @@ fn resolve(
     // same way); the stem alone loses the match.
     if ira_models::screenscraper_hashes_content(&platform_id) {
         let verbose = verbose_logging();
+        let pick = rom_extension_pick(&platform_id);
         // Hash on demand — digest and inner-file size in one streaming
         // pass — and keep the pair stored so this costs nothing next
         // time. The size is the inner ROM's own, never the container's:
         // a wrong size reads as a miss, an absent one still matches on
-        // the digest alone.
-        if entry.hashes.md5.is_empty() || entry.hashes.size == 0 {
-            let pick = rom_extension_pick(&platform_id);
+        // the digest alone. A row whose digest is already stored from
+        // the scan but whose size never landed gets only the size —
+        // re-reading whole archives on every run was the batch's CPU
+        // spike.
+        if entry.hashes.md5.is_empty() {
             match ira_platforms::rom_hash::content_md5_and_size(&abs, &pick) {
                 Some((hash, size)) => {
                     for (key, value) in [("md5", hash.clone()), ("size", size.to_string())] {
@@ -217,6 +219,18 @@ fn resolve(
                     entry.hashes.size = size as i64;
                 }
                 None => eprintln!("SS batch: could not hash {}", abs.display()),
+            }
+        } else if entry.hashes.size == 0 {
+            match ira_platforms::archives::entry_size(&abs, &pick) {
+                Some(size) => {
+                    if let Err(e) =
+                        ira_db::set_hash_key(db, item.db_id, "size", &size.to_string())
+                    {
+                        eprintln!("SS batch: failed to store the size: {e}");
+                    }
+                    entry.hashes.size = size as i64;
+                }
+                None => eprintln!("SS batch: could not size {}", abs.display()),
             }
         }
         if !entry.hashes.md5.is_empty() {
@@ -316,15 +330,18 @@ fn resolve(
     ];
     let Some(full) = pick_search_name(trusted, &bases[0], &bases[1], &bases[2]) else {
         eprintln!("SS batch: [{platform_id}] no usable name to search");
-        return Some(SsOutcome::Miss);
+        return Some(SsOutcome::Failed("no usable name".to_string()));
     };
     // Region tags never gate anything — plenty of dumps carry none — they
     // only matter when two candidates match equally well.
     let hints = region_hints(&stem);
     let term = search_term(&full);
-    if term.is_empty() || too_short_for_recherche(&term) {
+    if term.is_empty() {
+        // Not "the source does not know the game" — "we cannot ask yet"
+        // (a title-id-named dump waiting on enrichment). Leave untombed
+        // so the next opening retries with whatever name exists by then.
         eprintln!("SS batch: [{platform_id}] no usable search term");
-        return Some(SsOutcome::Miss);
+        return Some(SsOutcome::Failed("no usable search term".to_string()));
     }
     match steam.screenscraper_search(creds, &term, &platform_id) {
         Err(e) => {
@@ -405,11 +422,14 @@ fn normalize_serial(serial: &str) -> String {
     serial.to_uppercase().replace('_', "-").replace('.', "")
 }
 
-/// Lowercase letters-and-digits only, so `13 Sentinels: Aegis Rim` and
-/// `13 Sentinels - Aegis Rim (US)` compare equal.
+/// Lowercase letters-and-digits only, accents folded away (NFD plus the
+/// combining marks stripped) — ScreenScraper's names keep their accents
+/// ("Pokémon") while scene files write them plain ("Pokemon"), and the
+/// two must compare equal.
 fn normalized_for_match(name: &str) -> String {
     name.to_lowercase()
-        .chars()
+        .nfd()
+        .filter(|c| !matches!(u32::from(*c), 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x20D0..=0x20FF))
         .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
         .collect::<String>()
         .split_whitespace()
@@ -623,7 +643,13 @@ mod tests {
             normalized_for_match("13 Sentinels: Aegis Rim"),
             normalized_for_match("13 Sentinels   Aegis Rim!!")
         );
-        assert_eq!(normalized_for_match("  pokémon! "), "pok mon");
+        // Accents fold to their base letter, never to deletion — the
+        // source writes "Pokémon" where scene files write "Pokemon".
+        assert_eq!(normalized_for_match("  pokémon! "), "pokemon");
+        assert_eq!(
+            normalized_for_match("Pokémon XD: Gale of Darkness"),
+            normalized_for_match("Pokemon XD - Gale of Darkness")
+        );
     }
 
     #[test]

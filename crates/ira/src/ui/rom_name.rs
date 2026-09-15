@@ -30,19 +30,6 @@ pub(crate) fn clean_rom_name(name: &str) -> String {
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// ScreenScraper refuses word searches that stay under four characters
-/// once its own "the " words are gone — "The Box" searches as "Box" and
-/// the API only answers with an error. ES-DE routes these to the exact
-/// romnom lookup; the batch pass instead skips the request: one doomed
-/// call per opening is still a wasted request.
-pub(crate) fn too_short_for_recherche(term: &str) -> bool {
-    let mut stripped = term.to_uppercase().replace("THE ", "");
-    if stripped.ends_with(" THE") {
-        stripped.truncate(stripped.len() - 4);
-    }
-    stripped.trim().chars().count() < 4
-}
-
 /// Switch/3DS dumps are sometimes named nothing but the console's
 /// 16-hex-digit title id — as a search term that is noise, so callers
 /// fall back to the library title.
@@ -141,8 +128,9 @@ pub(crate) fn pick_search_name(
 /// two-word head — ScreenScraper's name may still hold one ("Phoenix
 /// Wright: Ace Attorney Trilogy" against a dump named "Phoenix Wright
 /// Ace Attorney Trilogy"), and two words stay a prefix as long as the
-/// separator sits past them. The acceptance comparison still judges
-/// candidates against the full name.
+/// separator sits past them. Short terms go out as-is: "Rez" and "Z-A"
+/// answer fine, the source errors on none of them. The acceptance
+/// comparison still judges candidates against the full name.
 pub(crate) fn search_term(name: &str) -> String {
     let segments = separator_segments(name);
     if segments.len() > 1 {
@@ -220,7 +208,7 @@ fn bracket_groups(name: &str) -> Vec<String> {
 mod tests {
     use super::{
         clean_rom_name, looks_like_title_id, pick_search_name, region_hints, search_term,
-        separator_richness, too_short_for_recherche,
+        separator_richness,
     };
 
     #[test]
@@ -256,12 +244,11 @@ mod tests {
     }
 
     #[test]
-    fn test_too_short_for_recherche_ignores_the_words() {
-        assert!(too_short_for_recherche("The Box"));
-        assert!(too_short_for_recherche("Box the"));
-        assert!(too_short_for_recherche("GTA"));
-        assert!(!too_short_for_recherche("Okki"));
-        assert!(!too_short_for_recherche("The Matrix"));
+    fn test_search_term_sends_short_titles_as_they_are() {
+        // Live probes: the source answers "Rez" and "Z-A" with hits and
+        // no errors — the old four-character refusal only cost matches.
+        assert_eq!(search_term("Rez"), "Rez");
+        assert_eq!(search_term("Pok\u{e9}mon Legends: Z-A"), "Z-A");
     }
 
     #[test]

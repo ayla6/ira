@@ -1438,15 +1438,7 @@ mod tests {
         let save_dir = tmp.path().join("save").to_str().unwrap().to_string();
 
         // A game already carrying a title id and a custom title is untouched.
-        ira_db::update_game_ids(
-            &db,
-            game.db_id,
-            "",
-            "01007ef00011e000",
-            game.trophy_source,
-            "switch",
-        )
-        .unwrap();
+        ira_db::update_native_id(&db, game.db_id, "01007ef00011e000").unwrap();
         game.app_id = "01007ef00011e000".into();
         game.set_name("My own name");
 

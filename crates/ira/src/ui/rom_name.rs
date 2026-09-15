@@ -89,10 +89,74 @@ pub(crate) fn search_head(name: &str) -> String {
     head.join(" ")
 }
 
+/// Dump-tag words mapped to ScreenScraper's region codes. Matching never
+/// requires them — plenty of dumps, especially on older platforms, carry
+/// no region at all — they only break ties: between equally-shaped
+/// candidates, the one whose matching name comes from the region the
+/// dump says it is wins.
+const REGION_WORDS: &[(&str, &str)] = &[
+    ("japan", "jp"),
+    ("usa", "us"),
+    ("us", "us"),
+    ("united states", "us"),
+    ("europe", "eu"),
+    ("eu", "eu"),
+    ("world", "wor"),
+    ("france", "fr"),
+    ("germany", "de"),
+    ("spain", "es"),
+    ("italy", "it"),
+    ("korea", "kr"),
+    ("china", "cn"),
+    ("taiwan", "tw"),
+    ("hong kong", "hk"),
+    ("australia", "au"),
+    ("canada", "ca"),
+    ("brazil", "br"),
+    ("uk", "uk"),
+    ("england", "uk"),
+];
+
+/// The region codes a ROM's `(...)`/`[...]` tags carry, in ScreenScraper's
+/// vocabulary. Language lists ("En,Fr,De") and revision tags match
+/// nothing and drop out.
+pub(crate) fn region_hints(name: &str) -> Vec<&'static str> {
+    let mut hints: Vec<&'static str> = Vec::new();
+    for tag in bracket_groups(name) {
+        let tag = tag.trim().to_lowercase();
+        if let Some((_, code)) = REGION_WORDS.iter().find(|(word, _)| *word == tag) {
+            if !hints.contains(code) {
+                hints.push(code);
+            }
+        }
+    }
+    hints
+}
+
+/// The text inside every balanced `(...)`/`[...]` group.
+fn bracket_groups(name: &str) -> Vec<String> {
+    let mut groups = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    for c in name.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ if depth > 0 => current.push(c),
+            _ => {}
+        }
+        if depth == 0 && !current.is_empty() {
+            groups.push(std::mem::take(&mut current));
+        }
+    }
+    groups
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_rom_name, looks_like_title_id, main_title, search_head, too_short_for_recherche,
+        clean_rom_name, looks_like_title_id, main_title, region_hints, search_head,
+        too_short_for_recherche,
     };
 
     #[test]
@@ -171,5 +235,20 @@ mod tests {
         assert_eq!(search_head("Okami"), "Okami");
         // Names with a separator keep their whole main title.
         assert_eq!(search_head("Ace Combat 04 - Shattered Skies"), "Ace Combat 04");
+    }
+
+    #[test]
+    fn test_region_hints_reads_dump_tags_only() {
+        assert_eq!(
+            region_hints("The Daibijin (Japan) [b]"),
+            vec!["jp"]
+        );
+        assert_eq!(region_hints("Game (USA) (Europe)"), vec!["us", "eu"]);
+        // Language lists and revisions are not regions; untagged names
+        // and bracket-less names carry nothing.
+        assert!(region_hints("Game (En,Fr,De) (Rev 1)").is_empty());
+        assert!(region_hints("Katamari Damacy").is_empty());
+        // Square brackets count too.
+        assert_eq!(region_hints("Game [World]"), vec!["wor"]);
     }
 }

@@ -14,7 +14,7 @@ use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
 use super::rom_name::{
-    clean_rom_name, looks_like_title_id, search_head, too_short_for_recherche,
+    clean_rom_name, looks_like_title_id, region_hints, search_head, too_short_for_recherche,
 };
 use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
 use super::state::SharedState;
@@ -307,6 +307,9 @@ fn resolve(
         .map(clean_rom_name)
         .find(|t| !t.is_empty() && !looks_like_title_id(t))
         .unwrap_or_default();
+    // Region tags never gate anything — plenty of dumps carry none — they
+    // only matter when two candidates match equally well.
+    let hints = region_hints(&stem);
     let term = search_head(&full);
     if term.is_empty() || too_short_for_recherche(&term) {
         eprintln!("SS batch: [{platform_id}] no usable search term");
@@ -326,11 +329,7 @@ fn resolve(
                 );
             }
             let target = normalized_for_match(&full);
-            let hit = candidates.into_iter().find(|game| {
-                game.names
-                    .iter()
-                    .any(|n| acceptable(&target, &normalized_for_match(n)))
-            });
+            let hit = pick_candidate(&candidates, &target, &hints);
             match hit {
                 Some(game) => {
                     if verbose {
@@ -339,7 +338,7 @@ fn resolve(
                             game.ss_id, game.name
                         );
                     }
-                    Some(SsOutcome::Hit(Box::new(game)))
+                    Some(SsOutcome::Hit(Box::new(game.clone())))
                 }
                 None => {
                     eprintln!(
@@ -407,20 +406,109 @@ fn normalized_for_match(name: &str) -> String {
         .join(" ")
 }
 
-/// A candidate counts as the game when the normalized names agree, one
-/// is a prefix of the other, or one ends with the other — subtitle and
-/// region chopping tolerated ("(Japan)", "Advance"), and the Japanese
-/// release's brand prefix too ("Simple 2000 Series Vol. 50 : The
-/// Daibijin" is "The Daibijin" with a prefix in front). A number leading
-/// the extension is a sequel: "Advance Wars" is not "Advance Wars 2".
-fn acceptable(target: &str, candidate: &str) -> bool {
-    !target.is_empty()
-        && !candidate.is_empty()
-        && (candidate == target
-            || prefix_extension_ok(target, candidate)
-            || prefix_extension_ok(candidate, target)
-            || suffix_extension_ok(target, candidate)
-            || suffix_extension_ok(candidate, target))
+/// How tightly a candidate name fits the target: 3 the names are equal,
+/// 2 one is the other plus decoration in front or behind — subtitle and
+/// region chopping tolerated ("(Japan)", "Advance") — 1 the weaker
+/// suffix shape, a brand the region's name carries in front of the title
+/// ("Simple 2000 Series Vol. 50 : The Daibijin" is "The Daibijin" with
+/// a prefix in front). A number leading the extension is a sequel, not
+/// decoration: "Advance Wars" is not "Advance Wars 2". `None` is not the
+/// game at all.
+fn match_rank(target: &str, candidate: &str) -> Option<u8> {
+    if target.is_empty() || candidate.is_empty() {
+        return None;
+    }
+    if candidate == target {
+        Some(3)
+    } else if prefix_extension_ok(target, candidate) || prefix_extension_ok(candidate, target) {
+        Some(2)
+    } else if suffix_extension_ok(target, candidate) || suffix_extension_ok(candidate, target) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// The best candidate from a search answer, in order: the one whose
+/// names fit the target most tightly (exact over prefix over suffix),
+/// then the dump's region tags, then the earliest release date, and the
+/// source's own probability order (the order the answer came in) last.
+/// Earlier list position never outranks a better shape: a brand-suffixed
+/// lookalike listed above the real game loses.
+///
+/// The date rung is for the plain-named dump whose candidates all carry
+/// subtitles — three same-shape series entries and nothing to tell them
+/// apart. The earliest is the plausible one: the first entry of a series
+/// is the game whose dump ships with no subtitle to lose, while its
+/// sequels' dumps carry theirs. It stays below region because release
+/// names shuffle across regions ("Pokemon Stadium" in the US is Japan's
+/// "Pokemon Stadium 2", and Japan had its own first one) — when the
+/// dump's region and the entry's regional names disagree, that evidence
+/// is stronger than chronology.
+/// A candidate's full rank: match shape, the dump's region agreeing with
+/// the matched name's, and the release date it is compared by.
+type Rank = (u8, bool, Option<String>);
+
+fn pick_candidate<'a>(
+    candidates: &'a [ScrapedGame],
+    target: &str,
+    region_hints: &[&'static str],
+) -> Option<&'a ScrapedGame> {
+    let mut best: Option<(Rank, usize)> = None;
+    for (index, game) in candidates.iter().enumerate() {
+        let mut shape: Option<(u8, bool)> = None;
+        for (region, name) in &game.names {
+            if let Some(strength) = match_rank(target, &normalized_for_match(name)) {
+                let this = (strength, region_hints.contains(&region.as_str()));
+                if shape.is_none_or(|s| this > s) {
+                    shape = Some(this);
+                }
+            }
+        }
+        if let Some(shape) = shape {
+            let rank = (shape.0, shape.1, release_key(game, region_hints));
+            if best.as_ref().is_none_or(|(b, _)| rank_better(&rank, b)) {
+                best = Some((rank, index));
+            }
+        }
+    }
+    best.map(|(_, index)| &candidates[index])
+}
+
+/// Whether rank `a` beats `b`: stronger shape, then the dump's region,
+/// then the earlier release — an absent date loses to a present one, so
+/// a dated entry is always preferred over an undatable one.
+fn rank_better(a: &Rank, b: &Rank) -> bool {
+    if a.0 != b.0 {
+        return a.0 > b.0;
+    }
+    if a.1 != b.1 {
+        return a.1;
+    }
+    match (&a.2, &b.2) {
+        (Some(x), Some(y)) => x < y,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+/// The release date a candidate is ranked by: the dump's region's date
+/// when the tags say one, else the display date, else the earliest of
+/// the rest.
+fn release_key(game: &ScrapedGame, hints: &[&'static str]) -> Option<String> {
+    game.release_dates
+        .iter()
+        .find(|(region, date)| !date.is_empty() && hints.contains(&region.as_str()))
+        .map(|(_, date)| date.clone())
+        .or_else(|| (!game.release_date.is_empty()).then(|| game.release_date.clone()))
+        .or_else(|| {
+            game.release_dates
+                .iter()
+                .filter(|(_, date)| !date.is_empty())
+                .map(|(_, date)| date.as_str())
+                .min()
+                .map(str::to_string)
+        })
 }
 
 fn prefix_extension_ok(short: &str, long: &str) -> bool {
@@ -499,7 +587,8 @@ fn apply_hit(
 
 #[cfg(test)]
 mod tests {
-    use super::{acceptable, normalized_for_match};
+    use super::{match_rank, normalized_for_match, pick_candidate};
+    use ira_api::screenscraper::ScrapedGame;
 
     #[test]
     fn test_normalized_for_match_ignores_punctuation_and_case() {
@@ -524,41 +613,45 @@ mod tests {
     }
 
     #[test]
-    fn test_acceptable_tolerates_subtitles_rejects_sequels() {
+    fn test_match_rank_tolerates_subtitles_rejects_sequels() {
         let target = normalized_for_match("Dragon Quest I & II");
-        assert!(acceptable(&target, &normalized_for_match("Dragon Quest I & II")));
-        assert!(acceptable(
+        assert_eq!(
+            match_rank(&target, &normalized_for_match("Dragon Quest I & II")),
+            Some(3)
+        );
+        assert!(match_rank(
             &target,
             &normalized_for_match("Dragon Quest I & II (Japan)")
-        ));
-        assert!(acceptable(
+        )
+        .is_some());
+        assert!(match_rank(
             &normalized_for_match("Final Fantasy VI Advance"),
             &normalized_for_match("Final Fantasy VI")
-        ));
+        )
+        .is_some());
         // A number leading the extension is a sequel, not decoration.
-        assert!(!acceptable(
+        assert!(match_rank(
             &normalized_for_match("Advance Wars"),
             &normalized_for_match("Advance Wars 2: Black Hole Rising")
-        ));
-        assert!(!acceptable(
-            &target,
-            &normalized_for_match("Dragon Quest Monsters")
-        ));
+        )
+        .is_none());
+        assert!(match_rank(&target, &normalized_for_match("Dragon Quest Monsters")).is_none());
         // A brand word in front of the target is the same game under its
         // full name: the search only returned the candidate because some
         // region's name matched, and sequel guards above keep the
         // lookalikes out.
-        assert!(acceptable(
+        assert!(match_rank(
             &normalized_for_match("Ace Attorney Justice for All"),
             &normalized_for_match("Phoenix Wright Ace Attorney Justice for All")
-        ));
+        )
+        .is_some());
         // Empty sides never match — a nameless candidate is not the game.
-        assert!(!acceptable(&target, ""));
-        assert!(!acceptable("", &target));
+        assert!(match_rank(&target, "").is_none());
+        assert!(match_rank("", &target).is_none());
     }
 
     #[test]
-    fn test_acceptable_picks_the_game_from_main_title_results() {
+    fn test_match_rank_picks_the_game_from_main_title_results() {
         // The search sends only the main title; the answer table holds
         // the whole series, and the full name — punctuation flattened —
         // must select the right row (live jeuRecherche answer for
@@ -571,33 +664,129 @@ mod tests {
         ];
         let hit = candidates
             .iter()
-            .find(|c| acceptable(&full, &normalized_for_match(c)));
+            .find(|c| match_rank(&full, &normalized_for_match(c)).is_some());
         assert_eq!(*hit.unwrap(), "Ace Combat 04 : Shattered Skies");
     }
 
     #[test]
-    fn test_acceptable_tolerates_brand_prefixed_japanese_names() {
+    fn test_match_rank_tolerates_brand_prefixed_japanese_names() {
         // A Japan-region dump named after the subtitle matches the
         // entry whose Japanese name carries a brand in front (live
         // Demolition Girl answer).
         let target = normalized_for_match("The Daibijin");
         let jp_name = normalized_for_match("Simple 2000 Series Vol. 50 : The Daibijin");
-        assert!(acceptable(&target, &jp_name));
+        assert!(match_rank(&target, &jp_name).is_some());
         // The English name of the same entry matches a file named the
         // English way.
-        assert!(acceptable(
+        assert!(match_rank(
             &normalized_for_match("Demolition Girl"),
             &normalized_for_match("Demolition Girl")
-        ));
+        )
+        .is_some());
         // One-word suffixes never match: "Mario" is not "Super Mario".
-        assert!(!acceptable(
+        assert!(match_rank(
             &normalized_for_match("Mario"),
             &normalized_for_match("Super Mario")
-        ));
+        )
+        .is_none());
         // The base title is not a sequel's suffix.
-        assert!(!acceptable(
+        assert!(match_rank(
             &normalized_for_match("Advance Wars"),
             &normalized_for_match("Advance Wars 2 : Black Hole Rising")
-        ));
+        )
+        .is_none());
+    }
+
+    fn scraped(ss_id: &str, names: &[(&str, &str)]) -> ScrapedGame {
+        ScrapedGame {
+            ss_id: ss_id.to_string(),
+            names: names
+                .iter()
+                .map(|(r, n)| (r.to_string(), n.to_string()))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn scraped_dated(ss_id: &str, names: &[(&str, &str)], date: &str) -> ScrapedGame {
+        ScrapedGame {
+            release_date: date.to_string(),
+            release_dates: names
+                .iter()
+                .map(|(r, _)| (r.to_string(), date.to_string()))
+                .collect(),
+            ..scraped(ss_id, names)
+        }
+    }
+
+    #[test]
+    fn test_pick_candidate_ranks_shapes_over_list_order() {
+        // The exact match sits last in the source's answer; a weaker
+        // suffix-shaped candidate first. The exact one must win.
+        let target = normalized_for_match("Ace Attorney Justice for All");
+        let candidates = [
+            scraped(
+                "1",
+                &[("us", "Phoenix Wright Ace Attorney Justice for All")],
+            ),
+            scraped("2", &[("us", "Ace Attorney Justice for All")]),
+        ];
+        let picked = pick_candidate(&candidates, &target, &[]);
+        assert_eq!(picked.unwrap().ss_id, "2");
+    }
+
+    #[test]
+    fn test_pick_candidate_breaks_prefix_ties_on_the_earliest_release() {
+        // The plain-named dump against three subtitled series entries:
+        // the earliest is the plausible one, whatever order the answer
+        // carried them in.
+        let target = normalized_for_match("Super Whatever");
+        let candidates = [
+            scraped_dated("1", &[("us", "Super Whatever: Mystical Awesome")], "2003-05-01"),
+            scraped_dated("2", &[("us", "Super Whatever: Making Dreams")], "2001-11-11"),
+            scraped_dated("3", &[("us", "Super Whatever: Great Danger")], "2004-01-01"),
+        ];
+        let picked = pick_candidate(&candidates, &target, &[]);
+        assert_eq!(picked.unwrap().ss_id, "2");
+        // An entry with no date at all loses to a dated one.
+        let candidates = [
+            scraped("1", &[("us", "Super Whatever: Making Dreams")]),
+            scraped_dated("2", &[("us", "Super Whatever: Great Danger")], "2004-01-01"),
+        ];
+        let picked = pick_candidate(&candidates, &target, &[]);
+        assert_eq!(picked.unwrap().ss_id, "2");
+    }
+
+    #[test]
+    fn test_pick_candidate_region_outranks_the_release_date() {
+        // Names shuffle across regions — a US dump of "Pokemon Stadium"
+        // is Japan's Stadium 2, and Japan had its own older Stadium — so
+        // the dump's region decides before chronology does.
+        let target = normalized_for_match("Same Name");
+        let candidates = [
+            scraped_dated("1", &[("eu", "Same Name")], "1999-01-01"),
+            scraped_dated("2", &[("us", "Same Name")], "2002-01-01"),
+        ];
+        let picked = pick_candidate(&candidates, &target, &["us"]);
+        assert_eq!(picked.unwrap().ss_id, "2");
+    }
+
+    #[test]
+    fn test_pick_candidate_breaks_ties_on_the_dumps_region() {
+        // Two same-shape candidates: one is the Japanese release, the
+        // dump says (Japan) — that one wins without excluding the other.
+        let target = normalized_for_match("The Daibijin");
+        let candidates = [
+            scraped("1", &[("eu", "The Daibijin")]),
+            scraped("2", &[("jp", "The Daibijin")]),
+        ];
+        let picked = pick_candidate(&candidates, &target, &["jp"]);
+        assert_eq!(picked.unwrap().ss_id, "2");
+        // Without region hints the source's own order stands.
+        let picked = pick_candidate(&candidates, &target, &[]);
+        assert_eq!(picked.unwrap().ss_id, "1");
+        // A region hint never rescues a non-match.
+        let candidates = [scraped("1", &[("jp", "Completely Different Game")])];
+        assert!(pick_candidate(&candidates, &target, &["jp"]).is_none());
     }
 }

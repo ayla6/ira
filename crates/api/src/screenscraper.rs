@@ -19,10 +19,11 @@ const API_URL_BASE: &str = "https://www.screenscraper.fr/api2";
 pub struct ScrapedGame {
     pub ss_id: String,
     pub name: String,
-    /// Every region's name for the game, the picked one included. Matching
-    /// must judge all of them: a Japan-only dump carries the Japanese
-    /// title while the picked display name is the English one.
-    pub names: Vec<String>,
+    /// Every region's name for the game as `(region, name)` pairs. Matching
+    /// judges all of them — a Japan-only dump carries the Japanese title
+    /// while the picked display name is the English one — and the region
+    /// tells a tie-break which candidate the dump actually is.
+    pub names: Vec<(String, String)>,
     /// The display date: the first dated region in the fallback order.
     pub release_date: String,
     /// Every dated region as `(region, YYYY-MM-DD)` pairs.
@@ -512,17 +513,14 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
     let screenshot = medias.and_then(|m| media_url(&m.media, "ss", &regions));
     let box2d = medias.and_then(|m| media_url(&m.media, "box-2D", &regions));
     let title_screen = medias.and_then(|m| media_url(&m.media, "sstitle", &regions));
-    // Every region's name, deduplicated; the picked display name is part
-    // of the set (and first, when the region preference found one).
-    let mut names: Vec<String> = Vec::new();
-    if !name.is_empty() && !names.contains(&name) {
-        names.push(name.clone());
-    }
+    // Every region's name, entities decoded so comparisons see real
+    // characters, deduplicated.
+    let mut names: Vec<(String, String)> = Vec::new();
     if let Some(noms) = jeu.noms.as_ref() {
         for nom in &noms.nom {
-            let text = nom.text.replace('\n', "").trim().to_string();
-            if !text.is_empty() && !names.contains(&text) {
-                names.push(text);
+            let text = decode_entities(&nom.text).trim().to_string();
+            if !text.is_empty() && !names.iter().any(|(_, n)| *n == text) {
+                names.push((nom.region.clone(), text));
             }
         }
     }
@@ -555,6 +553,17 @@ fn entity_list(entities: &[SsEntity]) -> Vec<ira_models::ScraperEntity> {
             name: entity.name.trim().to_string(),
         })
         .collect()
+}
+
+/// ScreenScraper leaves non-standard XML entities in its text; decode the
+/// ones that appear in names so comparisons see real characters.
+fn decode_entities(text: &str) -> String {
+    text.replace("&nbsp;", " ")
+        .replace("&#x26;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#039;", "'")
+        .replace("&#39;", "'")
+        .replace('\n', "")
 }
 
 /// The region-picked URL for one media type; the URL's spaces are
@@ -911,10 +920,10 @@ mod tests {
         // Region preference keeps the US name over the world one, with
         // the numeric entity decoded.
         assert_eq!(game.name, "Dragon Quest I & II");
-        // Every region's name is kept for matching, the picked one first.
+        // Every region's name is kept for matching, with its region.
         assert!(game.names.len() >= 3);
-        assert_eq!(game.names[0], "Dragon Quest I & II");
-        assert!(game.names.iter().any(|n| n.contains("ドラゴンクエスト")));
+        assert!(game.names.iter().any(|(r, n)| r == "us" && n == "Dragon Quest I & II"));
+        assert!(game.names.iter().any(|(r, n)| r == "jp" && n.contains("ドラゴンクエスト")));
         assert_eq!(game.release_date, "1993-12-18");
         // Every region's date lands in the list.
         assert_eq!(

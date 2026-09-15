@@ -39,6 +39,8 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
     if replace_title && !picked.name.is_empty() {
         if let Err(e) = ira_db::update_game_title(&state.borrow().db, db_id, &picked.name) {
             eprintln!("Failed to store the ScreenScraper title: {e}");
+        } else if let Err(e) = ira_db::set_title_trusted(&state.borrow().db, db_id, true) {
+            eprintln!("Failed to mark the title trusted: {e}");
         } else {
             new_title = Some(picked.name.clone());
         }
@@ -54,6 +56,17 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
             g.set_name(title);
         }
     }
+}
+
+/// The search dialog starts from the ROM file's own name — the library
+/// title is user-editable and drifts from the dump.
+fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
+    let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten()?;
+    let stem = std::path::Path::new(&entry.rom_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty());
+    Some(stem.unwrap_or_else(|| entry.title.clone()))
 }
 
 /// Whether the row's current title is already authoritative: edited by the
@@ -132,6 +145,12 @@ pub fn show_ss_search_dialog(
     parent: &impl IsA<gtk4::Widget>,
     on_match: Option<Rc<dyn Fn()>>,
 ) {
+    if let Ok(Some(entry)) = ira_db::find_by_db_id(&state.borrow().db, db_id) {
+        if !entry.screenscraper_id.is_empty() {
+            eprintln!("SS search: game {db_id} is already matched");
+            return;
+        }
+    }
     let SearchDialogWidgets {
         dialog,
         entry,
@@ -142,7 +161,7 @@ pub fn show_ss_search_dialog(
         500,
         400,
         500,
-        game_name,
+        &rom_stem(state, db_id).unwrap_or_else(|| game_name.to_string()),
         Some(&crate::tr!("Game name…")),
     );
 

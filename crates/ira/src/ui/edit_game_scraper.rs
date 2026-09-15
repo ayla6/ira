@@ -204,6 +204,38 @@ fn entity_rows(
 
 fn search_row(state: &SharedState, game: &Game, win: &adw::Window) -> adw::ActionRow {
     let row = adw::ActionRow::new();
+    let matched = ira_db::scraper_metadata_for_game(&state.borrow().db, game.db_id)
+        .map(|m| m.is_some())
+        .unwrap_or(false);
+    if matched {
+        // Searching an already-matched game would silently replace it;
+        // removing the match is the explicit first step.
+        row.set_title(&crate::tr!("Matched — unmatch to search again"));
+        let btn = gtk4::Button::with_label(&crate::tr!("Unmatch"));
+        btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
+        btn.set_valign(gtk4::Align::Center);
+        {
+            let state = state.clone();
+            let db_id = game.db_id;
+            btn.connect_clicked(move |_| {
+                if let Err(e) = ira_db::clear_screenscraper_match(&state.borrow().db, db_id) {
+                    eprintln!("Failed to unmatch: {e}");
+                    return;
+                }
+                if let Some(g) = state
+                    .borrow_mut()
+                    .games
+                    .iter_mut()
+                    .find(|g| g.db_id == db_id)
+                {
+                    g.screenscraper_id = String::new();
+                }
+                refresh_scraper_section(&state, db_id);
+            });
+        }
+        row.add_suffix(&btn);
+        return row;
+    }
     row.set_title(&crate::tr!("Search ScreenScraper…"));
     let btn = gtk4::Button::with_label(&crate::tr!("Search"));
     btn.add_css_class(CSS_SUGGESTED_ACTION);

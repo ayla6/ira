@@ -14,7 +14,7 @@ use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
 use super::rom_name::{
-    clean_rom_name, looks_like_title_id, region_hints, search_term, too_short_for_recherche,
+    clean_rom_name, pick_search_name, region_hints, search_term, too_short_for_recherche,
 };
 use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
 use super::state::SharedState;
@@ -302,11 +302,19 @@ fn resolve(
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let full = [stem.as_str(), entry.title.as_str(), item.name.as_str()]
-        .into_iter()
-        .map(clean_rom_name)
-        .find(|t| !t.is_empty() && !looks_like_title_id(t))
-        .unwrap_or_default();
+    // The search base is whichever name carries more punctuation — the
+    // ROM file name, unless it was renamed into punctuation-free form, in
+    // which case the library title (from the trusted console header)
+    // still reads the way ScreenScraper's names do.
+    let bases = [
+        clean_rom_name(&stem),
+        clean_rom_name(&entry.title),
+        clean_rom_name(&item.name),
+    ];
+    let Some(full) = pick_search_name(&bases) else {
+        eprintln!("SS batch: [{platform_id}] no usable name to search");
+        return Some(SsOutcome::Miss);
+    };
     // Region tags never gate anything — plenty of dumps carry none — they
     // only matter when two candidates match equally well.
     let hints = region_hints(&stem);

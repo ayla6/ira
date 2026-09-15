@@ -81,6 +81,36 @@ fn separator_segments(name: &str) -> Vec<&str> {
     segments
 }
 
+/// How many separator characters a name carries — hyphens, colons
+/// (including switch's U+A789), dashes and apostrophes. ScreenScraper's
+/// names keep their punctuation and match byte-sensitively, so the
+/// punctuation-richer of two names is the better search base: a ROM
+/// renamed without its colon ("NieRAutomata The End of YoRHa Edition")
+/// searches as a glued token that exists in no ScreenScraper name, while
+/// the console header's title still reads "NieR:Automata …".
+pub(crate) fn separator_richness(name: &str) -> usize {
+    name.chars()
+        .filter(|c| matches!(c, '-' | ':' | '\u{2013}' | '\u{2014}' | '\u{a789}' | '\''))
+        .count()
+}
+
+/// The name the search builds from: the punctuation-richer of the given
+/// candidates (ROM file name, library title, display name), ties keeping
+/// the file-first order — in a healthy library the scene file name is
+/// punctuation-rich and still wins, and only a name stripped of its
+/// punctuation ("renamed for the filesystem") loses to the header title.
+/// Nameless and bare-title-id candidates never qualify.
+pub(crate) fn pick_search_name(candidates: &[String]) -> Option<String> {
+    candidates
+        .iter()
+        .filter(|t| !t.is_empty() && !looks_like_title_id(t))
+        .fold(None::<&String>, |best, t| match best {
+            Some(b) if separator_richness(b) >= separator_richness(t) => Some(b),
+            _ => Some(t),
+        })
+        .cloned()
+}
+
 /// The one term the word search gets. Live probes against jeuRecherche:
 /// searching a series head buries the game among its siblings or drops
 /// it entirely ("Simple 2000 Series Vol. 50" answers 28 other volumes
@@ -171,7 +201,8 @@ fn bracket_groups(name: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_rom_name, looks_like_title_id, region_hints, search_term, too_short_for_recherche,
+        clean_rom_name, looks_like_title_id, pick_search_name, region_hints, search_term,
+        separator_richness, too_short_for_recherche,
     };
 
     #[test]
@@ -223,6 +254,46 @@ mod tests {
         assert!(!looks_like_title_id("0100A9400C9C200"));
         assert!(!looks_like_title_id("PhoenixWrightAce"));
         assert!(!looks_like_title_id(""));
+    }
+
+    #[test]
+    fn test_pick_search_name_prefers_punctuation_rich_names() {
+        // A file renamed without its colon loses to the console header's
+        // title (live NieR case): the glued token searches at nothing.
+        let bases = [
+            "NieRAutomata The End of YoRHa Edition".to_string(),
+            "NieR:Automata The End of YoRHa Edition".to_string(),
+        ];
+        assert_eq!(
+            pick_search_name(&bases).as_deref(),
+            Some("NieR:Automata The End of YoRHa Edition")
+        );
+        // A healthy library keeps the file-first order: the scene file
+        // carries the separator, a shortened library title does not.
+        let bases = [
+            "Ace Combat 04 - Shattered Skies".to_string(),
+            "Ace Combat 04".to_string(),
+        ];
+        assert_eq!(
+            pick_search_name(&bases).as_deref(),
+            Some("Ace Combat 04 - Shattered Skies")
+        );
+        // Nameless candidates never win.
+        assert_eq!(pick_search_name(&["".to_string()]), None);
+        assert_eq!(
+            pick_search_name(&["".to_string(), "Okami".to_string()]).as_deref(),
+            Some("Okami")
+        );
+    }
+
+    #[test]
+    fn test_separator_richness_counts_search_relevant_punctuation() {
+        assert_eq!(separator_richness("NieRAutomata The End"), 0);
+        assert_eq!(separator_richness("NieR:Automata The End"), 1);
+        assert_eq!(separator_richness("Emio \u{2013} The Smiling Man\u{a789} FDC"), 2);
+        assert_eq!(separator_richness("Baldur's Gate"), 1);
+        // The ™-class glyphs are not separators; clean_rom_name drops them.
+        assert_eq!(separator_richness("Bayonetta\u{2122}"), 0);
     }
 
     #[test]

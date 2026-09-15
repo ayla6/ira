@@ -735,11 +735,15 @@ mod tests {
             }
         });
 
+        // Three seconds comfortably outlasts both swaps (the timer fires
+        // at 700ms and each coalesced reload follows within a couple of
+        // pump intervals) while keeping the test off the old five-second
+        // session that dominated the whole suite's runtime.
         let reloads = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let code = client
             .launch_and_wait(
                 session_request(
-                    vec!["sleep".into(), "5".into()],
+                    vec!["sleep".into(), "3".into()],
                     Some(profile_path.display().to_string()),
                 ),
                 {
@@ -797,7 +801,7 @@ mod tests {
         let mut client = wait_for_server(&path);
 
         let mut request = session_request(
-            vec!["sleep".into(), "2".into()],
+            vec!["sleep".into(), "1".into()],
             Some(first_profile.display().to_string()),
         );
         request.tag = Some(77);
@@ -813,10 +817,22 @@ mod tests {
             (code, reloads)
         });
 
-        // The session needs a moment to start before the switch can land;
-        // an unknown tag must be refused either way.
-        std::thread::sleep(Duration::from_millis(300));
+        // The switch must land on a live session, so poll the status until
+        // the session is active instead of guessing a fixed delay; an
+        // unknown tag must be refused either way.
         let mut switcher = wait_for_server(&path);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !switcher
+            .status()
+            .map(|status| status.session_active)
+            .unwrap_or(false)
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the session never became active"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
         let unknown = switcher.request(Request::ReloadProfile {
             tag: 41,
             profile: second_profile.display().to_string(),

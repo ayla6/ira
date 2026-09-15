@@ -12,6 +12,67 @@ pub fn is_archive_extension(ext: &str) -> bool {
     matches!(ext.to_ascii_lowercase().as_str(), "zip" | "7z" | "zst")
 }
 
+/// The inner ROM's byte count without reading its data: a plain file's
+/// length from metadata, an archive entry's declared size. The digest
+/// search pairs md5 with this count, and recomputing a digest just to
+/// learn a size re-read whole archives on every batch run.
+pub fn entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "zip" => zip_entry_size(path, pick),
+        "7z" => sevenz_entry_size(path, pick),
+        // A zstd stream declares no total; sizing it means decoding.
+        "zst" => None,
+        _ => std::fs::metadata(path).ok().map(|m| m.len()),
+    }
+}
+
+fn zip_entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    let matching: Vec<usize> = (0..archive.len())
+        .filter(|&i| {
+            archive
+                .by_index(i)
+                .map(|entry| pick(entry.name()))
+                .unwrap_or(false)
+        })
+        .collect();
+    if matching.len() != 1 {
+        return None;
+    }
+    archive
+        .by_index(matching[0])
+        .ok()
+        .map(|entry| entry.size())
+}
+
+fn sevenz_entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
+    let mut reader = sevenz_rust::SevenZReader::open(path, sevenz_rust::Password::empty()).ok()?;
+    let mut size = None;
+    let mut match_count = 0usize;
+    reader
+        .for_each_entries(|entry, _data| {
+            if !entry.is_directory() && pick(entry.name()) {
+                match_count += 1;
+                if match_count == 1 {
+                    size = Some(entry.size());
+                }
+            }
+            Ok(match_count < 2)
+        })
+        .ok()?;
+    if match_count == 1 {
+        size
+    } else {
+        None
+    }
+}
+
 /// Runs `f` with a reader over the selected entry of `path`, or over the
 /// file itself when it is not an archive. For `.zst` the whole file is the
 /// entry, so `pick` is not consulted. Returns whatever `f` returns, or
@@ -210,6 +271,25 @@ mod tests {
         })
         .unwrap();
         assert_eq!(read, "ds rom bytes");
+    }
+
+    #[test]
+    fn test_entry_size_reads_metadata_without_decoding() {
+        // Plain files stat, zip entries report their declared size, and a
+        // container without a matching entry is None.
+        let file = temp_file(b"plain rom bytes");
+        assert_eq!(entry_size(file.path(), &|_| true), Some(15));
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("roms.zip");
+        let zip_file = std::fs::File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(zip_file);
+        zip.start_file("game.nds", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        std::io::Write::write_all(&mut zip, b"12 rom bytes").unwrap();
+        zip.finish().unwrap();
+        assert_eq!(entry_size(&path, &|name| name.ends_with(".nds")), Some(12));
+        assert_eq!(entry_size(&path, &|name| name.ends_with(".gba")), None);
     }
 
     #[test]

@@ -5,6 +5,7 @@ use std::path::Path;
 
 use md5::{Digest, Md5};
 
+
 /// Streams a file through MD5 and returns the lowercase hex digest. This is
 /// the ROM's content identity: it lets a scan recognize a game whose file
 /// reappears under a different name or path. On consoles whose

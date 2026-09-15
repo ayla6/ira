@@ -1,9 +1,10 @@
 //! The mass matcher's ScreenScraper pass: console games are resolved
 //! through their stored ROM md5 first — the exact-match search — and fall
-//! back to one platform-narrowed title search with the display name. Every
-//! decision is logged so misses explain themselves, and only a confirmed
-//! miss (the source answered and does not know the game) tombstones the
-//! game; a failed request retries on the next dialog opening.
+//! back to one platform-narrowed title search with the ROM file's clean
+//! name, ES-DE style. No ladder of ever-shorter terms: two requests at
+//! most, and only a confirmed miss (the source answered and does not know
+//! the game) tombstones the game; a failed request retries on the next
+//! dialog opening.
 
 use adw::prelude::*;
 use std::collections::HashSet;
@@ -12,6 +13,7 @@ use std::sync::Arc;
 use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
+use super::rom_name::{clean_rom_name, looks_like_title_id, too_short_for_recherche};
 use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
 use super::state::SharedState;
 use super::steam_search_dialog::status_label;
@@ -143,9 +145,9 @@ pub(super) fn start_ss_batch_matching(
 }
 
 /// Off-thread: the hash search answers authoritatively when the ROM's md5
-/// is known to the source; otherwise one title search runs with the
-/// display name, and its top candidates must plausibly *be* the game to
-/// count — a wrong auto-match would stick forever.
+/// is known to the source; otherwise one title search runs with the ROM
+/// file's clean name, and its top candidates must plausibly *be* the game
+/// to count — a wrong auto-match would stick forever.
 fn resolve(
     steam: &SteamDataClient,
     creds: &ScraperCreds,
@@ -255,20 +257,21 @@ fn resolve(
 
     // No hash hit: one title search, preferring the ROM file name — the
     // library title is user-editable and drifts from the dump, while the
-    // file name is what the scene shipped. Punctuation goes: the colon in
-    // "13 Sentinels: Aegis Rim" poisons ScreenScraper's search (ES-DE
-    // strips parentheses for the same reason).
+    // file name is what the scene shipped. The cleaner takes the dump
+    // tags off (ES-DE's removeParenthesis) but keeps punctuation, which
+    // the source's search needs; a stem that is only a bare title id
+    // cannot be searched at all, so the library title stands in.
     let stem = std::path::Path::new(&abs)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let term = search_term(&[stem.as_str(), entry.title.as_str(), item.name.as_str()]
+    let term = [stem.as_str(), entry.title.as_str(), item.name.as_str()]
         .into_iter()
         .map(clean_rom_name)
-        .find(|t| !t.trim().is_empty())
-        .unwrap_or_default());
-    if term.is_empty() {
-        eprintln!("SS batch: [{platform_id}] no hash hit and no name to search");
+        .find(|t| !t.is_empty() && !looks_like_title_id(t))
+        .unwrap_or_default();
+    if term.is_empty() || too_short_for_recherche(&term) {
+        eprintln!("SS batch: [{platform_id}] no usable search term");
         return Some(SsOutcome::Miss);
     }
     match steam.screenscraper_search(creds, &term, &platform_id) {
@@ -340,23 +343,6 @@ fn normalize_serial(serial: &str) -> String {
     serial.to_uppercase().replace('_', "-").replace('.', "")
 }
 
-/// Strip the dump tags a ROM stem carries — `(USA)`, `[!]`, `(Rev 1)` —
-/// and the separators around them, so the title search sees a title.
-fn clean_rom_name(name: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    let mut depth = 0usize;
-    for c in name.chars() {
-        match c {
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth = depth.saturating_sub(1),
-            _ if depth == 0 => out.push(c),
-            _ => {}
-        }
-    }
-    let cleaned: String = out.replace('_', " ");
-    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 /// Lowercase letters-and-digits only, so `13 Sentinels: Aegis Rim` and
 /// `13 Sentinels - Aegis Rim (US)` compare equal.
 fn normalized_for_match(name: &str) -> String {
@@ -395,14 +381,6 @@ fn prefix_extension_ok(short: &str, long: &str) -> bool {
             !c.is_ascii_digit() && at_word_boundary
         }
     }
-}
-
-/// The term the title search sends: dump tags gone (ES-DE's
-/// removeParenthesis) but punctuation kept — jeuRecherche finds
-/// "Phoenix Wright: Ace Attorney Trilogy" only with the colon intact.
-/// The acceptance comparison is what ignores punctuation.
-fn search_term(name: &str) -> String {
-    clean_rom_name(name)
 }
 
 /// UI loop: persist a hit's metadata and repaint the row's SS box; only a
@@ -449,19 +427,7 @@ fn apply_hit(
 
 #[cfg(test)]
 mod tests {
-    use super::{acceptable, clean_rom_name, normalized_for_match, search_term};
-
-    #[test]
-    fn test_clean_rom_name_strips_dump_tags() {
-        assert_eq!(
-            clean_rom_name("Fire Emblem - Three Houses (USA) (En,Fr,De) [b]"),
-            "Fire Emblem - Three Houses"
-        );
-        assert_eq!(clean_rom_name("Zelda_No_Densetsu [v1.0]"), "Zelda No Densetsu");
-        // Unbalanced opening brackets still keep the text.
-        assert_eq!(clean_rom_name("Half Life (Source"), "Half Life");
-        assert_eq!(clean_rom_name("   "), "");
-    }
+    use super::{acceptable, normalized_for_match};
 
     #[test]
     fn test_normalized_for_match_ignores_punctuation_and_case() {
@@ -483,16 +449,6 @@ mod tests {
         assert!(!super::looks_like_serial("0100A9400C9C2000"));
         assert!(!super::looks_like_serial("YG3E"));
         assert!(!super::looks_like_serial(""));
-    }
-
-    #[test]
-    fn test_search_term_keeps_punctuation_the_source_needs() {
-        assert_eq!(search_term("13 Sentinels: Aegis Rim"), "13 Sentinels: Aegis Rim");
-        assert_eq!(
-            search_term("Ace Attorney - Justice for All (USA)"),
-            "Ace Attorney - Justice for All"
-        );
-        assert_eq!(search_term("Pok\u{e9}mon: Let's Go"), "Pok\u{e9}mon: Let's Go");
     }
 
     #[test]

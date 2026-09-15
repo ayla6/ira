@@ -8,6 +8,7 @@ use std::sync::mpsc;
 
 use super::css::*;
 use super::helpers::{clear_children, poll_channel, replace_row_actions, status_row};
+use super::rom_name::{clean_rom_name, looks_like_title_id};
 use super::steam_search_dialog::{
     build_search_dialog, match_result_row, status_label, SearchDialogWidgets,
 };
@@ -59,14 +60,17 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
 }
 
 /// The search dialog starts from the ROM file's own name — the library
-/// title is user-editable and drifts from the dump.
+/// title is user-editable and drifts from the dump. The cleaner takes the
+/// dump tags off, so a switch dump like `Game [0100ABC…][v0]` searches as
+/// `Game`; a stem that is only a bare title id falls back to the title,
+/// which no source can match either.
 fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
     let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten()?;
     let stem = std::path::Path::new(&entry.rom_path)
         .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .filter(|s| !s.is_empty());
-    Some(stem.unwrap_or_else(|| entry.title.clone()))
+        .map(|s| clean_rom_name(&s.to_string_lossy()))
+        .filter(|s| !s.is_empty() && !looks_like_title_id(s));
+    Some(stem.unwrap_or_else(|| clean_rom_name(&entry.title)))
 }
 
 /// Whether the row's current title is already authoritative: edited by the
@@ -135,8 +139,9 @@ fn populate_results(
 }
 
 /// Search ScreenScraper by title and let the user pick the match for
-/// `db_id`. `on_match` runs after a pick is stored, so callers can repaint
-/// their row.
+/// `db_id`. The prefill is a starting point, nothing more — the request
+/// only goes out when the user searches. `on_match` runs after a pick is
+/// stored, so callers can repaint their row.
 pub fn show_ss_search_dialog(
     state: &SharedState,
     db_id: i64,
@@ -211,7 +216,6 @@ pub fn show_ss_search_dialog(
     });
 
     dialog.present(Some(parent));
-    do_search();
 }
 
 /// A dim "not matched" label plus the manual search button, shown on a

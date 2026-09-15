@@ -31,6 +31,7 @@ mod progress_ring;
 mod play_button_helpers;
 mod ra_match_dialog;
 mod recent_carousel;
+mod rom_name;
 mod recent_row;
 mod sgdb_match_dialog;
 mod selection_ring;

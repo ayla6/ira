@@ -234,6 +234,10 @@ fn pick<'a>(preference: &[&str], items: &'a [(String, String)]) -> Option<&'a st
 struct SsData {
     #[serde(default)]
     jeux: Option<SsJeux>,
+    /// `jeuInfos` answers with the one game directly under `<Data>`, no
+    /// `<jeux>` wrapper.
+    #[serde(default)]
+    jeu: Option<SsJeu>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -373,11 +377,13 @@ pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
     }
     let data: SsData = quick_xml::de::from_str(xml)
         .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
-    let Some(jeux) = data.jeux else {
-        return Ok(Vec::new());
+    // jeuRecherche wraps its table in <jeux>; jeuInfos (md5, serial, gameid)
+    // puts the single game straight under <Data>.
+    let source_games = match data.jeux {
+        Some(jeux) => jeux.games,
+        None => data.jeu.into_iter().collect::<Vec<_>>(),
     };
-    let mut games: Vec<ScrapedGame> = jeux
-        .games
+    let mut games: Vec<ScrapedGame> = source_games
         .iter()
         .map(scraped_game)
         .filter(|g| {
@@ -1031,6 +1037,27 @@ mod tests {
     #[test]
     fn test_parse_games_handles_french_error_text() {
         assert!(parse_games("Erreur : Rom not found").unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_games_reads_the_unwrapped_jeuinfos_shape() {
+        // jeuInfos (md5 / serial / gameid) puts the single game straight
+        // under <Data>, siblings and romid attribute included — exactly
+        // the live serialnum=SLUS-20152 answer's shape.
+        let xml = r#"<Data>
+          <serveurs><cpu1>0</cpu1><threadsmin>4590</threadsmin></serveurs>
+          <ssuser><requeststoday>20</requeststoday></ssuser>
+          <jeu id="22425" romid="888779">
+            <noms><nom region="us">Ace Combat 04 : Shattered Skies</nom></noms>
+            <dates><date region="us">2001-11-01</date></dates>
+          </jeu>
+        </Data>"#;
+        let games = parse_games(xml).unwrap();
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].ss_id, "22425");
+        // The French spaced colon is normalized out of the picked name.
+        assert_eq!(games[0].name, "Ace Combat 04: Shattered Skies");
+        assert_eq!(games[0].release_date, "2001-11-01");
     }
 
     #[test]

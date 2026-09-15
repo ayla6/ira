@@ -13,7 +13,9 @@ use std::sync::Arc;
 use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
-use super::rom_name::{clean_rom_name, looks_like_title_id, too_short_for_recherche};
+use super::rom_name::{
+    clean_rom_name, looks_like_title_id, search_head, too_short_for_recherche,
+};
 use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
 use super::state::SharedState;
 use super::steam_search_dialog::status_label;
@@ -257,19 +259,24 @@ fn resolve(
 
     // No hash hit: one title search, preferring the ROM file name — the
     // library title is user-editable and drifts from the dump, while the
-    // file name is what the scene shipped. The cleaner takes the dump
-    // tags off (ES-DE's removeParenthesis) but keeps punctuation, which
-    // the source's search needs; a stem that is only a bare title id
-    // cannot be searched at all, so the library title stands in.
+    // file name is what the scene shipped. The word search is a substring
+    // match over ScreenScraper's own names, whose separator spacing
+    // disagrees with the scene (and between systems), so the search head
+    // — main title, or two words when the name has no separator — goes
+    // out and the acceptance comparison, which flattens punctuation,
+    // matches the full name against the candidates. A stem that is only
+    // a bare title id cannot be searched at all, so the library title
+    // stands in.
     let stem = std::path::Path::new(&abs)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let term = [stem.as_str(), entry.title.as_str(), item.name.as_str()]
+    let full = [stem.as_str(), entry.title.as_str(), item.name.as_str()]
         .into_iter()
         .map(clean_rom_name)
         .find(|t| !t.is_empty() && !looks_like_title_id(t))
         .unwrap_or_default();
+    let term = search_head(&full);
     if term.is_empty() || too_short_for_recherche(&term) {
         eprintln!("SS batch: [{platform_id}] no usable search term");
         return Some(SsOutcome::Miss);
@@ -284,7 +291,7 @@ fn resolve(
                 "SS batch: '{term}' [{platform_id}] {} candidate(s)",
                 candidates.len()
             );
-            let target = normalized_for_match(&term);
+            let target = normalized_for_match(&full);
             let hit = candidates.into_iter().find(|game| {
                 acceptable(&target, &normalized_for_match(&game.name))
             });
@@ -481,5 +488,23 @@ mod tests {
         // Empty sides never match — a nameless candidate is not the game.
         assert!(!acceptable(&target, ""));
         assert!(!acceptable("", &target));
+    }
+
+    #[test]
+    fn test_acceptable_picks_the_game_from_main_title_results() {
+        // The search sends only the main title; the answer table holds
+        // the whole series, and the full name — punctuation flattened —
+        // must select the right row (live jeuRecherche answer for
+        // "Ace Combat 04" on ps2).
+        let full = normalized_for_match("Ace Combat 04 - Shattered Skies");
+        let candidates = [
+            "Ace Combat 5 : The Unsung War",
+            "Ace Combat Zero : The Belkan War",
+            "Ace Combat 04 : Shattered Skies",
+        ];
+        let hit = candidates
+            .iter()
+            .find(|c| acceptable(&full, &normalized_for_match(c)));
+        assert_eq!(*hit.unwrap(), "Ace Combat 04 : Shattered Skies");
     }
 }

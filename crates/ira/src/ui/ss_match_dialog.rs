@@ -59,18 +59,29 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
     }
 }
 
-/// The search dialog starts from the ROM file's own name — the library
-/// title is user-editable and drifts from the dump. The cleaner takes the
-/// dump tags off, so a switch dump like `Game [0100ABC…][v0]` searches as
-/// `Game`; a stem that is only a bare title id falls back to the title,
-/// which no source can match either.
+/// The search dialog starts from the game's own title when the row's
+/// name comes from a trusted source or the console carries
+/// authoritative internal titles (switch); every other console prefills
+/// the ROM file's name — the library title there is user-editable and
+/// drifts from the dump. The cleaner takes the dump tags off either way,
+/// and a name that is only a bare title id falls through to the other.
 fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
     let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten()?;
-    let stem = std::path::Path::new(&entry.rom_path)
-        .file_stem()
-        .map(|s| clean_rom_name(&s.to_string_lossy()))
-        .filter(|s| !s.is_empty() && !looks_like_title_id(s));
-    Some(stem.unwrap_or_else(|| clean_rom_name(&entry.title)))
+    let trusted = entry.title_trusted || ira_models::title_from_trusted_source(&entry.platform_id);
+    let stem = clean_rom_name(
+        &std::path::Path::new(&entry.rom_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
+    let title = clean_rom_name(&entry.title);
+    let (first, second) = if trusted {
+        (Some(title), Some(stem))
+    } else {
+        (Some(stem), Some(title))
+    };
+    let usable = |s: &String| !s.is_empty() && !looks_like_title_id(s);
+    first.filter(|s| usable(s)).or_else(|| second.filter(|s| usable(s)))
 }
 
 /// Whether the row's current title is already authoritative: edited by the

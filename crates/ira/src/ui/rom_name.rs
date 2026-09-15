@@ -94,21 +94,39 @@ pub(crate) fn separator_richness(name: &str) -> usize {
         .count()
 }
 
-/// The name the search builds from: the punctuation-richer of the given
-/// candidates (ROM file name, library title, display name), ties keeping
-/// the file-first order — in a healthy library the scene file name is
-/// punctuation-rich and still wins, and only a name stripped of its
-/// punctuation ("renamed for the filesystem") loses to the header title.
-/// Nameless and bare-title-id candidates never qualify.
-pub(crate) fn pick_search_name(candidates: &[String]) -> Option<String> {
-    candidates
-        .iter()
-        .filter(|t| !t.is_empty() && !looks_like_title_id(t))
-        .fold(None::<&String>, |best, t| match best {
+/// The name the search builds from. When the title comes from the game's
+/// own data — trusted rows, and consoles whose internal titles are
+/// authoritative (switch's NACP above all) — the title *is* the base:
+/// the game's own name beats any file naming, and the cleaner has
+/// already normalized the ™ and pseudo-colon glyphs it carries. Every
+/// other console searches from the ROM file name (3DS-era titles drift
+/// from the dumps), unless the file was stripped of its punctuation —
+/// renamed for the filesystem — in which case the punctuation-richer
+/// title takes over, because ScreenScraper's names keep their
+/// punctuation and match byte-sensitively. Nameless and bare-title-id
+/// candidates never qualify.
+pub(crate) fn pick_search_name(
+    trusted_title: bool,
+    stem: &str,
+    title: &str,
+    display: &str,
+) -> Option<String> {
+    let all: [&str; 3] = if trusted_title {
+        [title, stem, display]
+    } else {
+        [stem, title, display]
+    };
+    let usable = |t: &&str| !t.is_empty() && !looks_like_title_id(t);
+    if trusted_title {
+        return all.into_iter().find(|t| usable(t)).map(|t| t.to_string());
+    }
+    all.into_iter()
+        .filter(|t| usable(t))
+        .fold(None::<&str>, |best, t| match best {
             Some(b) if separator_richness(b) >= separator_richness(t) => Some(b),
             _ => Some(t),
         })
-        .cloned()
+        .map(str::to_string)
 }
 
 /// The one term the word search gets. Live probes against jeuRecherche:
@@ -257,32 +275,31 @@ mod tests {
     }
 
     #[test]
-    fn test_pick_search_name_prefers_punctuation_rich_names() {
-        // A file renamed without its colon loses to the console header's
-        // title (live NieR case): the glued token searches at nothing.
-        let bases = [
-            "NieRAutomata The End of YoRHa Edition".to_string(),
-            "NieR:Automata The End of YoRHa Edition".to_string(),
-        ];
+    fn test_pick_search_name_trusted_titles_lead_and_richness_rescues_the_rest() {
+        // A trusted title IS the base, even against a punctuation-richer
+        // file name: the game's own name outranks file naming.
         assert_eq!(
-            pick_search_name(&bases).as_deref(),
-            Some("NieR:Automata The End of YoRHa Edition")
+            pick_search_name(true, "Hades - Battle Out of Hell", "Hades", ""),
+            Some("Hades".to_string())
+        );
+        // A stripped file name loses to the console header's title on
+        // untrusted consoles: the glued token searches at nothing.
+        assert_eq!(
+            pick_search_name(false, "FooBar The Quest", "Foo: Bar The Quest", ""),
+            Some("Foo: Bar The Quest".to_string())
         );
         // A healthy library keeps the file-first order: the scene file
         // carries the separator, a shortened library title does not.
-        let bases = [
-            "Ace Combat 04 - Shattered Skies".to_string(),
-            "Ace Combat 04".to_string(),
-        ];
         assert_eq!(
-            pick_search_name(&bases).as_deref(),
-            Some("Ace Combat 04 - Shattered Skies")
+            pick_search_name(false, "Ace Combat 04 - Shattered Skies", "Ace Combat 04", ""),
+            Some("Ace Combat 04 - Shattered Skies".to_string())
         );
         // Nameless candidates never win.
-        assert_eq!(pick_search_name(&["".to_string()]), None);
+        assert_eq!(pick_search_name(false, "", "", ""), None);
+        assert_eq!(pick_search_name(false, "", "Okami", ""), Some("Okami".to_string()));
         assert_eq!(
-            pick_search_name(&["".to_string(), "Okami".to_string()]).as_deref(),
-            Some("Okami")
+            pick_search_name(true, "", "", "Okami"),
+            Some("Okami".to_string())
         );
     }
 

@@ -302,16 +302,19 @@ fn resolve(
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    // The search base is whichever name carries more punctuation — the
-    // ROM file name, unless it was renamed into punctuation-free form, in
-    // which case the library title (from the trusted console header)
-    // still reads the way ScreenScraper's names do.
+    // The search base is the game's own title when the row's name comes
+    // from a trusted source (the console header, an RA/SS match, the
+    // user) or the console carries authoritative internal titles
+    // (switch); every other console searches from the ROM file name,
+    // with the title only taking over when the file lost its
+    // punctuation.
+    let trusted = entry.title_trusted || ira_models::title_from_trusted_source(&platform_id);
     let bases = [
         clean_rom_name(&stem),
         clean_rom_name(&entry.title),
         clean_rom_name(&item.name),
     ];
-    let Some(full) = pick_search_name(&bases) else {
+    let Some(full) = pick_search_name(trusted, &bases[0], &bases[1], &bases[2]) else {
         eprintln!("SS batch: [{platform_id}] no usable name to search");
         return Some(SsOutcome::Miss);
     };

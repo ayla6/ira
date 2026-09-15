@@ -592,6 +592,11 @@ fn resolve_pc(
         "SS batch: '{term}' [pc] no acceptable candidate ({} candidate(s) arrived)",
         candidates.len()
     );
+    // No match does not mean no metadata: the store synopsis and the
+    // cache's companies are still on offer.
+    if let Some(app_id) = app_id {
+        super::enrichment::garnish_pc_ss_metadata(db, steam, item.db_id, app_id);
+    }
     Some(SsOutcome::Miss)
 }
 
@@ -610,27 +615,12 @@ fn finish_pc_pick(
 ) -> Option<ScrapedGame> {
     if game.developers.is_empty() && game.publishers.is_empty() {
         if let Some(info) = info {
-            let fields = [
-                (info.developer.trim(), &mut game.developers),
-                (info.publisher.trim(), &mut game.publishers),
-            ];
-            for (field, target) in fields {
-                for name in field.split(',').map(str::trim).filter(|n| !n.is_empty()) {
-                    let Ok(found) = ira_db::scraper_companies_search(db, name) else {
-                        continue;
-                    };
-                    let wanted = company_tokens(name);
-                    if wanted.is_empty() {
-                        continue;
-                    }
-                    if let Some(entity) = found
-                        .iter()
-                        .find(|entity| company_tokens(&entity.name) == wanted)
-                    {
-                        target.push(entity.clone());
-                    }
-                }
-            }
+            super::enrichment::fill_companies_from_cache(
+                db,
+                info,
+                &mut game.developers,
+                &mut game.publishers,
+            );
         }
     }
     if game.synopses.is_empty() {
@@ -684,28 +674,6 @@ fn verified_pick(
     pick_candidate(&agreeing, target, &[]).cloned()
 }
 
-/// The corporate words a store appends to a studio's name — Steam says
-/// "Naughty Dog, LLC" where ScreenScraper writes "Naughty Dog", "Sega
-/// Games" where it writes "Sega" — dropped before companies compare.
-const COMPANY_FILLER: &[&str] = &[
-    "llc", "inc", "ltd", "limited", "gmbh", "co", "corp", "corporation", "studio", "studios",
-    "games", "entertainment", "interactive", "software", "digital", "sa", "sas", "srl", "bv",
-    "nv", "plc", "ag", "kk",
-];
-
-/// A company name reduced to its identifying tokens: folded, punctuation
-/// gone, corporate filler dropped, order ignored ("Bandai Namco" and
-/// "Namco Bandai" agree).
-fn company_tokens(name: &str) -> Vec<String> {
-    let mut tokens: Vec<String> = normalized_for_match(name)
-        .split_whitespace()
-        .filter(|token| !COMPANY_FILLER.contains(token))
-        .map(str::to_string)
-        .collect();
-    tokens.sort();
-    tokens
-}
-
 /// Whether a ScreenScraper candidate's developer or publisher agrees with
 /// the Steam ones: one company name in common, up to the legal suffixes
 /// and word order. Accents, case and punctuation fold away, so "ATLUS"
@@ -715,7 +683,7 @@ fn companies_overlap(info: &SteamCmdInfo, game: &ScrapedGame) -> bool {
         [info.developer.as_str(), info.publisher.as_str()]
             .into_iter()
             .flat_map(|field| field.split(','))
-            .map(company_tokens)
+            .map(super::enrichment::company_tokens)
             .filter(|tokens| !tokens.is_empty())
             .collect();
     if steam.is_empty() {
@@ -724,7 +692,7 @@ fn companies_overlap(info: &SteamCmdInfo, game: &ScrapedGame) -> bool {
     game.developers
         .iter()
         .chain(game.publishers.iter())
-        .any(|entity| steam.contains(&company_tokens(&entity.name)))
+        .any(|entity| steam.contains(&super::enrichment::company_tokens(&entity.name)))
 }
 
 /// Steam's release timestamp as the `YYYY-MM-DD` string the metadata

@@ -3,6 +3,7 @@ use crate::AppSender;
 use crate::Game;
 use crate::GameEntry;
 use ira_api::SteamDataClient;
+use ira_api::types::SteamCmdInfo;
 use ira_db::DbConn;
 
 use crate::game_loader::load_game;
@@ -148,6 +149,14 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
     }
 
     ensure_default_icon(&mut game, &steam, &cfg, &save_dir);
+
+    // PC games: even with no ScreenScraper match, the store synopsis and
+    // the company cache's ids can fill the metadata record.
+    if game.kind.is_pc() {
+        if let Ok(app_id) = game.platform_id.parse::<u32>() {
+            garnish_pc_ss_metadata(&db, &steam, game.db_id, app_id);
+        }
+    }
 
     let _ = sender.send(AppMessage::EnrichedGame(game));
 }
@@ -420,4 +429,98 @@ fn enrich_ra(params: EnrichRaParams) -> Option<Game> {
     );
 
     Some(game)
+}
+
+/// The corporate words a store appends to a studio's name — Steam says
+/// "Naughty Dog, LLC" where ScreenScraper writes "Naughty Dog", "Sega
+/// Games" where it writes "Sega" — dropped before companies compare.
+const COMPANY_FILLER: &[&str] = &[
+    "llc", "inc", "ltd", "limited", "gmbh", "co", "corp", "corporation", "studio", "studios",
+    "games", "entertainment", "interactive", "software", "digital", "sa", "sas", "srl", "bv",
+    "nv", "plc", "ag", "kk",
+];
+
+/// A company name reduced to its identifying tokens: folded, punctuation
+/// gone, corporate filler dropped, order ignored ("Bandai Namco" and
+/// "Namco Bandai" agree).
+pub(super) fn company_tokens(name: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = name
+        .to_lowercase()
+        .split_whitespace()
+        .filter(|token| !COMPANY_FILLER.contains(token))
+        .map(str::to_string)
+        .collect();
+    tokens.sort();
+    tokens
+}
+
+/// Fill empty developer/publisher lists from our company cache when the
+/// Steam names are known there — carrying the proper ScreenScraper ids
+/// so the metadata editor's entity rows work.
+pub(super) fn fill_companies_from_cache(
+    db: &ira_db::DbConn,
+    info: &SteamCmdInfo,
+    developers: &mut Vec<ira_models::ScraperEntity>,
+    publishers: &mut Vec<ira_models::ScraperEntity>,
+) {
+    let fields = [
+        (info.developer.trim(), developers),
+        (info.publisher.trim(), publishers),
+    ];
+    for (field, target) in fields {
+        for name in field.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+            let Ok(found) = ira_db::scraper_companies_search(db, name) else {
+                continue;
+            };
+            let wanted = company_tokens(name);
+            if wanted.is_empty() {
+                continue;
+            }
+            if let Some(entity) = found
+                .iter()
+                .find(|entity| company_tokens(&entity.name) == wanted)
+            {
+                target.push(entity.clone());
+            }
+        }
+    }
+}
+
+/// Fill a PC game's ScreenScraper-metadata gaps without a match: the
+/// store page's synopsis when none is stored, and the company cache's
+/// ids when Steam's companies are known there. Runs for freshly added
+/// games, enriched games, and after a matcher miss alike.
+pub(super) fn garnish_pc_ss_metadata(
+    db: &ira_db::DbConn,
+    steam: &SteamDataClient,
+    db_id: i64,
+    app_id: u32,
+) {
+    let existing = ira_db::scraper_metadata_for_game(db, db_id).ok().flatten();
+    let needs_companies = existing
+        .as_ref()
+        .is_none_or(|meta| meta.developers.is_empty() && meta.publishers.is_empty());
+    let needs_synopsis = existing.as_ref().is_none_or(|meta| meta.synopses.is_empty());
+    if !needs_companies && !needs_synopsis {
+        return;
+    }
+    let Some(info) = steam.fetch_steamcmd_info(&app_id.to_string()) else {
+        return;
+    };
+    let mut meta = existing.unwrap_or_default();
+    let mut companies = std::mem::take(&mut meta.developers);
+    let mut publishers = std::mem::take(&mut meta.publishers);
+    if needs_companies {
+        fill_companies_from_cache(db, &info, &mut companies, &mut publishers);
+    }
+    meta.developers = companies;
+    meta.publishers = publishers;
+    if needs_synopsis {
+        if let Some(synopsis) = steam.fetch_store_synopsis(&app_id.to_string()) {
+            meta.synopses = vec![("en".to_string(), synopsis)];
+        }
+    }
+    if let Err(e) = ira_db::store_scraper_metadata(db, db_id, &meta) {
+        eprintln!("Could not store PC metadata garnish for {db_id}: {e}");
+    }
 }

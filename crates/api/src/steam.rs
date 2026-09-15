@@ -25,6 +25,19 @@ struct AchEntry {
     icon_gray: String,
 }
 
+#[derive(serde::Deserialize)]
+struct StoreAppDetailsAnswer {
+    success: bool,
+    #[serde(default)]
+    data: Option<StoreAppShortInfo>,
+}
+
+#[derive(serde::Deserialize)]
+struct StoreAppShortInfo {
+    #[serde(default)]
+    short_description: String,
+}
+
 impl SteamDataClient {
     pub fn fetch_global_achievements(
         &self,
@@ -161,6 +174,20 @@ impl SteamDataClient {
             return None;
         }
         header_image_base(&entry.data.as_ref()?.header_image)
+    }
+
+    /// The store page's short description — the synopsis PC matches fall
+    /// back to when ScreenScraper's entry carries none.
+    pub fn fetch_store_synopsis(&self, app_id: &str) -> Option<String> {
+        let url = format!("https://store.steampowered.com/api/appdetails?appids={app_id}&l=english");
+        let resp = self.http.get(&url).send().ok()?;
+        let raw: std::collections::HashMap<String, StoreAppDetailsAnswer> = resp.json().ok()?;
+        let entry = raw.get(app_id)?;
+        if !entry.success {
+            return None;
+        }
+        let synopsis = entry.data.as_ref()?.short_description.trim();
+        (!synopsis.is_empty()).then(|| synopsis.to_string())
     }
 
     pub fn search_steam_store(&self, term: &str) -> Vec<(String, String)> {

@@ -25,7 +25,11 @@ pub(super) fn build_scraper_section(
     let metadata = ira_db::scraper_metadata_for_game(&state.borrow().db, game.db_id)
         .ok()
         .flatten();
-    if metadata.is_none() && ira_models::screenscraper_system_id(&game.platform_id).is_none() {
+    // Every game the SS pass can touch gets the block: consoles on mapped
+    // platforms, and PC games whose diff search fills it too.
+    let eligible = game.kind.is_pc()
+        || ira_models::screenscraper_system_id(&game.platform_id).is_some();
+    if metadata.is_none() && !eligible {
         return None;
     }
     let group = adw::PreferencesGroup::new();

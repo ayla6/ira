@@ -30,6 +30,17 @@ pub(crate) fn clean_rom_name(name: &str) -> String {
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The widening retry when the search term answers nothing: the name's
+/// other side. "Bowser's Fury" arriving empty falls back to "Super Mario
+/// 3D World"; single-segment names have no other side.
+pub(crate) fn alt_search_term(name: &str) -> Option<String> {
+    let segments = separator_segments(name);
+    if segments.len() < 2 {
+        return None;
+    }
+    Some(segments[0].trim().to_string())
+}
+
 /// Switch/3DS dumps are sometimes named nothing but the console's
 /// 16-hex-digit title id — as a search term that is noise, so callers
 /// fall back to the library title.
@@ -218,8 +229,8 @@ fn bracket_groups(name: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_rom_name, looks_like_title_id, pick_search_name, region_hints, search_term,
-        separator_richness,
+        alt_search_term, clean_rom_name, looks_like_title_id, pick_search_name, region_hints,
+        search_term, separator_richness,
     };
 
     #[test]
@@ -252,6 +263,21 @@ mod tests {
             "Ace Attorney - Justice for All"
         );
         assert_eq!(clean_rom_name("Pok\u{e9}mon: Let's Go"), "Pok\u{e9}mon: Let's Go");
+    }
+
+    #[test]
+    fn test_alt_search_term_gives_the_other_side() {
+        assert_eq!(
+            alt_search_term("Super Mario 3D World + Bowser's Fury").as_deref(),
+            Some("Super Mario 3D World")
+        );
+        assert_eq!(
+            alt_search_term("The Hundred Line -Last Defense Academy-").as_deref(),
+            Some("The Hundred Line")
+        );
+        // Single-segment names have no other side.
+        assert_eq!(alt_search_term("Okami"), None);
+        assert_eq!(alt_search_term(""), None);
     }
 
     #[test]

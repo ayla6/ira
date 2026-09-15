@@ -14,7 +14,8 @@ use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
 use super::rom_name::{
-    clean_rom_name, looks_like_title_id, pick_search_name, region_hints, search_term,
+    alt_search_term, clean_rom_name, looks_like_title_id, pick_search_name, region_hints,
+    search_term,
 };
 use unicode_normalization::UnicodeNormalization;
 use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
@@ -358,6 +359,28 @@ fn resolve(
         }
         Ok(candidates) => {
             let verbose = verbose_logging();
+            // A distinctive tail can still arrive empty — the source's
+            // member settings and search index have their moods — so the
+            // name's other side gets one widened try before the miss.
+            let candidates = if candidates.is_empty() {
+                match alt_search_term(&full) {
+                    Some(alt) => match steam.screenscraper_search(creds, &alt, &platform_id) {
+                        Err(e) => {
+                            eprintln!("SS batch: '{alt}' [{platform_id}] search failed: {e}");
+                            return Some(SsOutcome::Failed(e));
+                        }
+                        Ok(widened) => {
+                            if verbose {
+                                eprintln!("SS batch: '{term}' empty, widened to '{alt}'");
+                            }
+                            widened
+                        }
+                    },
+                    None => candidates,
+                }
+            } else {
+                candidates
+            };
             if verbose {
                 eprintln!(
                     "SS batch: '{term}' [{platform_id}] {} candidate(s)",
@@ -836,6 +859,12 @@ mod tests {
         assert_eq!(
             normalized_for_match("Pokémon XD: Gale of Darkness"),
             normalized_for_match("Pokemon XD - Gale of Darkness")
+        );
+        // En and em dashes fold like any punctuation — the source writes
+        // "A — B" where dumps write "A - B".
+        assert_eq!(
+            normalized_for_match("Slay the Princess \u{2014} The Pristine Cut"),
+            normalized_for_match("Slay the Princess - The Pristine Cut")
         );
     }
 

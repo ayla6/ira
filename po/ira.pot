@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-14 13:51-0300\n"
+"POT-Creation-Date: 2026-09-15 22:03-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -558,7 +558,7 @@ msgstr ""
 #: crates/ira/src/ui/auto_add_dialog.rs:1745
 #: crates/ira/src/ui/big_picture/all_games.rs:755
 #: crates/ira/src/ui/big_picture/keyboard.rs:405
-#: crates/ira/src/ui/mass_match_dialog.rs:269
+#: crates/ira/src/ui/mass_match_dialog.rs:278
 #: crates/ira/src/ui/message_handler.rs:103
 msgid "OK"
 msgstr ""
@@ -732,7 +732,6 @@ msgid "Remove \"{}\"?"
 msgstr ""
 
 #: crates/ira/src/ui/context_menu_actions.rs:111
-#: crates/ira/src/ui/edit_game_scraper.rs:158
 msgid "Remove"
 msgstr ""
 
@@ -1249,8 +1248,6 @@ msgid "Hours, like 2:30 or 12.5"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_playtime.rs:94
-#: crates/ira/src/ui/edit_game_scraper.rs:178
-#: crates/ira/src/ui/settings_pages.rs:1115
 msgid "Add"
 msgstr ""
 
@@ -1296,53 +1293,77 @@ msgstr ""
 msgid "Choose the entries whose time counts together"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:32
+#: crates/ira/src/ui/edit_game_scraper.rs:38
 #: crates/ira/src/ui/settings_dialog_pages.rs:228
 msgid "ScreenScraper"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:35
-msgid "Not matched yet"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_scraper.rs:78
-msgid "Developer"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_scraper.rs:86
-msgid "Publisher"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_scraper.rs:94
-msgid "Genre"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_scraper.rs:105
-msgid "Players"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_scraper.rs:110
+#: crates/ira/src/ui/edit_game_scraper.rs:48
 msgid "Released"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:117
+#: crates/ira/src/ui/edit_game_scraper.rs:51
+msgid "Players"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:53
 msgid "Rating"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:127
-msgid "Synopsis"
+#: crates/ira/src/ui/edit_game_scraper.rs:119
+msgid "Developer"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:177
-#, rust-format
-msgid "Add {}…"
+#: crates/ira/src/ui/edit_game_scraper.rs:126
+msgid "Publisher"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:207
+#: crates/ira/src/ui/edit_game_scraper.rs:133
+msgid "Genre"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:161
+#: crates/ira/src/ui/input_output_picker.rs:141
+#: crates/ira/src/ui/input_profile_action_sets.rs:217
+#: crates/ira/src/ui/input_profile_input_rows.rs:413
+#: crates/ira/src/ui/input_profile_input_rows.rs:439
+#: crates/ira/src/ui/input_profile_input_rows.rs:452
+#: crates/ira/src/ui/input_profile_region_pages.rs:343
+#: crates/ira/src/ui/input_profile_source_modes.rs:59
+#: crates/ira/src/ui/wine_config_widget.rs:397
+msgid "None"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:166
+msgid "Edit…"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:252
+msgid "Add from ScreenScraper…"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:293
+msgid "Matched — unmatch to search again"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:294
+#: crates/ira/src/ui/game_settings.rs:60
+msgid "Unmatch"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:324
+msgid "Not matched yet"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:327
+msgid "Auto match"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_scraper.rs:345
 msgid "Search ScreenScraper…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:208
+#: crates/ira/src/ui/edit_game_scraper.rs:346
 #: crates/ira/src/ui/steam_search_dialog.rs:61
 #: crates/ira/src/ui/steam_search.rs:34
 msgid "Search"
@@ -1620,10 +1641,6 @@ msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:56
 msgid "Will be unmatched on Save…"
-msgstr ""
-
-#: crates/ira/src/ui/game_settings.rs:60
-msgid "Unmatch"
 msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:91
@@ -2296,17 +2313,6 @@ msgstr ""
 
 #: crates/ira/src/ui/input_output_picker.rs:127
 msgid "Not supported yet"
-msgstr ""
-
-#: crates/ira/src/ui/input_output_picker.rs:141
-#: crates/ira/src/ui/input_profile_action_sets.rs:217
-#: crates/ira/src/ui/input_profile_input_rows.rs:413
-#: crates/ira/src/ui/input_profile_input_rows.rs:439
-#: crates/ira/src/ui/input_profile_input_rows.rs:452
-#: crates/ira/src/ui/input_profile_region_pages.rs:343
-#: crates/ira/src/ui/input_profile_source_modes.rs:59
-#: crates/ira/src/ui/wine_config_widget.rs:397
-msgid "None"
 msgstr ""
 
 #: crates/ira/src/ui/input_output_picker.rs:187
@@ -4357,28 +4363,28 @@ msgstr ""
 msgid "Search log…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:117
+#: crates/ira/src/ui/mass_match_dialog.rs:126
 msgid "Searching Steam..."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:119
+#: crates/ira/src/ui/mass_match_dialog.rs:128
 msgid "Searching SGDB..."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:264
+#: crates/ira/src/ui/mass_match_dialog.rs:273
 msgid "Nothing to match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:266
+#: crates/ira/src/ui/mass_match_dialog.rs:275
 msgid "Every game already has a trophy source and image assets linked."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:275
+#: crates/ira/src/ui/mass_match_dialog.rs:284
 #: crates/ira/src/ui/window.rs:321
 msgid "Match unmatched games"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:283
+#: crates/ira/src/ui/mass_match_dialog.rs:292
 #, rust-format
 msgid "{} game(s) to match"
 msgstr ""
@@ -4399,22 +4405,22 @@ msgstr ""
 msgid "RA: matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ss.rs:46
+#: crates/ira/src/ui/mass_match_ss.rs:63
 msgid "Searching ScreenScraper..."
 msgstr ""
 
-#: crates/ira/src/ui/matching.rs:211
+#: crates/ira/src/ui/matching.rs:214
 msgid "Mark as already unlocked?"
 msgstr ""
 
-#: crates/ira/src/ui/matching.rs:213
+#: crates/ira/src/ui/matching.rs:216
 #, rust-format
 msgid ""
 "This will mark “{}” as earned without a real unlock time. Use this only if "
 "you already unlocked it previously (e.g. before using this tool)."
 msgstr ""
 
-#: crates/ira/src/ui/matching.rs:216
+#: crates/ira/src/ui/matching.rs:219
 msgid "Mark as unlocked"
 msgstr ""
 
@@ -4586,40 +4592,40 @@ msgstr ""
 msgid "Launch via umu-run (required for Proton versions)"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:139
+#: crates/ira/src/ui/ra_match_dialog.rs:148
 #: crates/ira/src/ui/sgdb_match_dialog.rs:242
 #: crates/ira/src/ui/ss_entity_dialog.rs:40
-#: crates/ira/src/ui/ss_match_dialog.rs:73
+#: crates/ira/src/ui/ss_match_dialog.rs:136
 #: crates/ira/src/ui/steam_search_dialog.rs:290
 #: crates/ira/src/ui/steam_search.rs:70
 msgid "No results found"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:144
+#: crates/ira/src/ui/ra_match_dialog.rs:153
 msgid "Exact hash match"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:146
+#: crates/ira/src/ui/ra_match_dialog.rs:155
 msgid "No achievements yet"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:148
+#: crates/ira/src/ui/ra_match_dialog.rs:157
 #, rust-format
 msgid "{} achievements"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:192
+#: crates/ira/src/ui/ra_match_dialog.rs:201
 msgid "Match to RetroAchievements"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:197
+#: crates/ira/src/ui/ra_match_dialog.rs:206
 #: crates/ira/src/ui/sgdb_match_dialog.rs:219
-#: crates/ira/src/ui/ss_match_dialog.rs:115
+#: crates/ira/src/ui/ss_match_dialog.rs:185
 #: crates/ira/src/ui/steam_search.rs:30
 msgid "Game name…"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:228
+#: crates/ira/src/ui/ra_match_dialog.rs:237
 msgid "RetroAchievements credentials not configured"
 msgstr ""
 
@@ -5020,7 +5026,7 @@ msgid "Scan installed Switch titles when Ira starts"
 msgstr ""
 
 #: crates/ira/src/ui/settings_pages.rs:222
-#: crates/ira/src/ui/settings_pages.rs:1193
+#: crates/ira/src/ui/settings_pages.rs:1194
 msgid "API keys"
 msgstr ""
 
@@ -5299,107 +5305,111 @@ msgstr ""
 msgid "Remove language"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1195
+#: crates/ira/src/ui/settings_pages.rs:1104
+msgid "Add a language"
+msgstr ""
+
+#: crates/ira/src/ui/settings_pages.rs:1196
 msgid "SteamGridDB API key"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1201
+#: crates/ira/src/ui/settings_pages.rs:1202
 msgid "Auto-download"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1203
+#: crates/ira/src/ui/settings_pages.rs:1204
 msgid "Which image types are fetched automatically when missing"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1215
+#: crates/ira/src/ui/settings_pages.rs:1216
 msgid "Icons"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1216
+#: crates/ira/src/ui/settings_pages.rs:1217
 msgid "Heroes"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1217
+#: crates/ira/src/ui/settings_pages.rs:1218
 msgid "Capsules"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1218
+#: crates/ira/src/ui/settings_pages.rs:1219
 msgid "Squares"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1219
+#: crates/ira/src/ui/settings_pages.rs:1220
 msgid "Headers"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1220
+#: crates/ira/src/ui/settings_pages.rs:1221
 msgid "Logos"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1232
+#: crates/ira/src/ui/settings_pages.rs:1233
 msgid "Allowed image styles"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1234
+#: crates/ira/src/ui/settings_pages.rs:1235
 msgid ""
 "Enabled styles are fetched automatically and come first in manual image "
 "search; disabled ones sink to the bottom"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1238
+#: crates/ira/src/ui/settings_pages.rs:1239
 msgid "Alternate"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1239
+#: crates/ira/src/ui/settings_pages.rs:1240
 msgid "Blurred"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1240
+#: crates/ira/src/ui/settings_pages.rs:1241
 msgid "White logo"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1241
+#: crates/ira/src/ui/settings_pages.rs:1242
 msgid "Material"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1242
+#: crates/ira/src/ui/settings_pages.rs:1243
 msgid "No logo"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1259
+#: crates/ira/src/ui/settings_pages.rs:1260
 msgid "Search filtered users…"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1262
+#: crates/ira/src/ui/settings_pages.rs:1263
 msgid "Add user…"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1266
+#: crates/ira/src/ui/settings_pages.rs:1267
 msgid "Add user to the filter list"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1324
-#: crates/ira/src/ui/settings_pages.rs:1390
+#: crates/ira/src/ui/settings_pages.rs:1325
+#: crates/ira/src/ui/settings_pages.rs:1391
 msgid "Filtered users"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1326
+#: crates/ira/src/ui/settings_pages.rs:1327
 msgid "Manage the authors whose art is skipped in automatic downloads."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1332
+#: crates/ira/src/ui/settings_pages.rs:1333
 msgid "Open the filtered users manager"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1447
+#: crates/ira/src/ui/settings_pages.rs:1448
 msgid "Remove from filter list"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1499
+#: crates/ira/src/ui/settings_pages.rs:1500
 #, rust-format
 msgid "{} was unfiltered"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1501
+#: crates/ira/src/ui/settings_pages.rs:1502
 msgid "Undo"
 msgstr ""
 
@@ -5500,19 +5510,19 @@ msgstr ""
 msgid "Search…"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:110
+#: crates/ira/src/ui/ss_match_dialog.rs:180
 msgid "Match to ScreenScraper"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:177
+#: crates/ira/src/ui/ss_match_dialog.rs:246
 msgid "SS: not matched"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:178
+#: crates/ira/src/ui/ss_match_dialog.rs:247
 msgid "Search SS…"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:202
+#: crates/ira/src/ui/ss_match_dialog.rs:271
 msgid "SS: matched"
 msgstr ""
 

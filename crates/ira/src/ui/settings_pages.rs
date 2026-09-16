@@ -1096,45 +1096,46 @@ fn count_language_rows(list: &gtk4::ListBox) -> u32 {
     count
 }
 
+/// The add row is a ComboRow: picking a language from it adds the row —
+/// no separate Add button. The model always holds the languages that are
+/// not enabled yet, and resets to "nothing picked" after each add.
 fn add_add_language_row(list: &gtk4::ListBox) {
-    let row = gtk4::ListBoxRow::new();
+    let row = adw::ComboRow::new();
+    row.set_title(&crate::tr!("Add a language"));
     row.set_widget_name("add_language");
     row.set_selectable(false);
+    row.set_enable_search(true);
 
-    let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    hbox.set_margin_start(12);
-    hbox.set_margin_end(12);
-    hbox.set_margin_top(8);
-    hbox.set_margin_bottom(8);
-
-    let initial_strings = available_language_strings(list);
-    let initial_refs: Vec<&str> = initial_strings.iter().map(|s| s.as_str()).collect();
-    let dropdown = gtk4::DropDown::from_strings(&initial_refs);
-    dropdown.set_hexpand(true);
-
-    let add_btn = gtk4::Button::with_label(&crate::tr!("Add"));
-    add_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    add_btn.set_valign(gtk4::Align::Center);
-
-    hbox.append(&dropdown);
-    hbox.append(&add_btn);
-    row.set_child(Some(&hbox));
+    let model_list = list.clone();
+    refresh_add_language_model(&row, &model_list);
 
     let list_c = list.clone();
-    let dropdown_c = dropdown;
-    add_btn.connect_clicked(move |_| {
-        let selected = dropdown_c.selected() as usize;
-        let available = available_language_codes(&list_c);
-        if let Some(code) = available.get(selected) {
-            add_language_row(&list_c, code);
-            let strings = available_language_strings(&list_c);
-            let refs: Vec<&str> = strings.iter().map(|s| s.as_str()).collect();
-            dropdown_c.set_model(Some(&gtk4::StringList::new(&refs)));
-            dropdown_c.set_selected(0);
+    row.connect_selected_item_notify(move |row| {
+        let codes = available_language_codes(&list_c);
+        // GTK_INVALID_LIST_POSITION means "nothing picked" — the reset
+        // after each add lands here.
+        let index = row.selected();
+        if index == gtk4::INVALID_LIST_POSITION {
+            return;
         }
+        let Some(code) = codes.get(index as usize) else {
+            return;
+        };
+        add_language_row(&list_c, code);
+        // Reset the picker: nothing is "being added" until picked again,
+        // and the added language leaves the model on the next refresh.
+        row.set_selected(gtk4::INVALID_LIST_POSITION);
+        refresh_add_language_model(row, &list_c);
     });
 
     list.append(&row);
+}
+
+/// The ComboRow's model: the languages that are not enabled yet.
+fn refresh_add_language_model(row: &adw::ComboRow, list: &gtk4::ListBox) {
+    let names = available_language_strings(list);
+    let refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+    row.set_model(Some(&gtk4::StringList::new(&refs)));
 }
 
 fn enabled_language_codes(list: &gtk4::ListBox) -> Vec<String> {

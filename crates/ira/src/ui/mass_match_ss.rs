@@ -189,15 +189,15 @@ fn resolve(
     // PC games search ScreenScraper's own Windows/Linux systems and fall
     // back to a cross-platform lookup diffed against their Steam data.
     if entry.kind.is_pc() {
-        return resolve_pc(
-            steam,
-            creds,
-            db,
-            entry.kind,
-            &platform_id,
-            &entry.title,
-            item,
-        );
+        let target = PcMatchTarget {
+            kind: entry.kind,
+            platform_id: &platform_id,
+            title: &entry.title,
+            display: &item.name,
+            db_id: item.db_id,
+        };
+        let matched = run_pc_matching(steam, creds, db, &target);
+        return matched.map(Box::new).map(SsOutcome::Hit);
     }
     screenscraper_system_id(&platform_id)?;
     // ROM paths are stored relative to the console's folder in the ROM
@@ -437,30 +437,36 @@ fn verbose_logging() -> bool {
 /// after its original — have nothing to diff against and lean entirely
 /// on ScreenScraper: the ranked pick over every system is the answer,
 /// down to the oldest release for a name shared by remakes.
-fn resolve_pc(
+/// The game identity the PC matching runs against.
+pub(super) struct PcMatchTarget<'a> {
+    pub kind: ira_models::GameKind,
+    pub platform_id: &'a str,
+    pub title: &'a str,
+    pub display: &'a str,
+    pub db_id: i64,
+}
+
+pub(super) fn run_pc_matching(
     steam: &SteamDataClient,
     creds: &ScraperCreds,
     db: &ira_db::DbConn,
-    kind: ira_models::GameKind,
-    platform_id: &str,
-    title: &str,
-    item: &BatchItem,
-) -> Option<SsOutcome> {
-    let system = ira_models::screenscraper_pc_system_id(kind)?;
+    target: &PcMatchTarget,
+) -> Option<ScrapedGame> {
+    let system = ira_models::screenscraper_pc_system_id(target.kind)?;
     // PC titles come from Steam or the user, never from dump tags: the
     // title leads and the executable stem is last resort.
-    let full = [clean_rom_name(title), clean_rom_name(&item.name)]
+    let full = [clean_rom_name(target.title), clean_rom_name(target.display)]
         .into_iter()
         .find(|t| !t.is_empty() && !looks_like_title_id(t))
         .unwrap_or_default();
     let term = search_term(&full);
     if term.is_empty() {
         eprintln!("SS batch: [pc] no usable search term");
-        return Some(SsOutcome::Failed("no usable search term".to_string()));
+        return None;
     }
-    let target = normalized_for_match(&full);
+    let normalized = normalized_for_match(&full);
     let verbose = verbose_logging();
-    let app_id = platform_id.parse::<u32>().ok();
+    let app_id = target.platform_id.parse::<u32>().ok();
     // The Steam diff. Companies decide identity — dates and titles are
     // shared by ports and remakes, but the developer is the studio.
     let steam_info = app_id
@@ -482,10 +488,10 @@ fn resolve_pc(
     match steam.screenscraper_search_in(creds, &term, Some(system)) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [pc] search failed: {e}");
-            return Some(SsOutcome::Failed(e));
+            return None;
         }
         Ok(candidates) => {
-            if let Some(game) = pick_candidate(&candidates, &target, &[]) {
+            if let Some(game) = pick_candidate(&candidates, &normalized, &[]) {
                 if let Some(game) = finish(game.clone()) {
                     if verbose {
                         eprintln!(
@@ -493,7 +499,7 @@ fn resolve_pc(
                             game.ss_id, game.name
                         );
                     }
-                    return Some(SsOutcome::Hit(Box::new(game)));
+                    return Some(game);
                 }
                 if verbose {
                     eprintln!("SS batch: '{term}' [pc] pc-system pick was bare, skipping");
@@ -508,13 +514,13 @@ fn resolve_pc(
     let candidates = match steam.screenscraper_search_in(creds, &term, None) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [pc] wide search failed: {e}");
-            return Some(SsOutcome::Failed(e));
+            return None;
         }
         Ok(candidates) => candidates,
     };
 
     if let Some(info) = steam_info.as_ref() {
-        if let Some(game) = verified_pick(&candidates, &target, Some(info)) {
+        if let Some(game) = verified_pick(&candidates, &normalized, Some(info)) {
             let mut game = game;
             game.release_date = steam_release_date(info.release_timestamp);
             if let Some(game) = finish(game) {
@@ -524,7 +530,7 @@ fn resolve_pc(
                         game.ss_id, game.name
                     );
                 }
-                return Some(SsOutcome::Hit(Box::new(game)));
+                return Some(game);
             }
             if verbose {
                 eprintln!("SS batch: '{term}' [pc] Steam-diffed pick was bare, skipping");
@@ -533,7 +539,7 @@ fn resolve_pc(
     } else {
         // No Steam data to diff with: ScreenScraper's ranked pick over
         // every system is the answer.
-        if let Some(game) = pick_candidate(&candidates, &target, &[]) {
+        if let Some(game) = pick_candidate(&candidates, &normalized, &[]) {
             if let Some(game) = finish(game.clone()) {
                 if verbose {
                     eprintln!(
@@ -541,7 +547,7 @@ fn resolve_pc(
                         game.ss_id, game.name
                     );
                 }
-                return Some(SsOutcome::Hit(Box::new(game)));
+                return Some(game);
             }
             if verbose {
                 eprintln!("SS batch: '{term}' [pc] pick was bare, skipping");
@@ -557,11 +563,11 @@ fn resolve_pc(
         match steam.screenscraper_search_in(creds, &full, None) {
             Err(e) => {
                 eprintln!("SS batch: '{full}' [pc] wide search failed: {e}");
-                return Some(SsOutcome::Failed(e));
+                return None;
             }
             Ok(widened) => {
                 if let Some(info) = steam_info.as_ref() {
-                    if let Some(game) = verified_pick(&widened, &target, Some(info)) {
+                    if let Some(game) = verified_pick(&widened, &normalized, Some(info)) {
                         let mut game = game;
                         game.release_date = steam_release_date(info.release_timestamp);
                         if let Some(game) = finish(game) {
@@ -571,10 +577,10 @@ fn resolve_pc(
                                     game.ss_id, game.name
                                 );
                             }
-                            return Some(SsOutcome::Hit(Box::new(game)));
+                            return Some(game);
                         }
                     }
-                } else if let Some(game) = pick_candidate(&widened, &target, &[]) {
+                } else if let Some(game) = pick_candidate(&widened, &normalized, &[]) {
                     if let Some(game) = finish(game.clone()) {
                         if verbose {
                             eprintln!(
@@ -582,7 +588,7 @@ fn resolve_pc(
                                 game.ss_id, game.name
                             );
                         }
-                        return Some(SsOutcome::Hit(Box::new(game)));
+                        return Some(game);
                     }
                 }
             }
@@ -595,9 +601,9 @@ fn resolve_pc(
     // No match does not mean no metadata: the store synopsis and the
     // cache's companies are still on offer.
     if let Some(app_id) = app_id {
-        super::enrichment::garnish_pc_ss_metadata(db, steam, item.db_id, app_id);
+        super::enrichment::garnish_pc_ss_metadata(db, steam, target.db_id, app_id);
     }
-    Some(SsOutcome::Miss)
+    None
 }
 
 /// Store a PC pick only when it is worth storing: company-less entries

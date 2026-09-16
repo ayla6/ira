@@ -78,11 +78,7 @@ pub fn init_db(db_path: &str) -> DbConn {
                 synopsis TEXT NOT NULL DEFAULT '',
                 screenscraper_id TEXT NOT NULL DEFAULT '',
                 screenscraper_rating REAL NOT NULL DEFAULT -1,
-                release_dates TEXT NOT NULL DEFAULT '',
-                developer_id TEXT NOT NULL DEFAULT '',
-                publisher_id TEXT NOT NULL DEFAULT '',
-                genre_ids TEXT NOT NULL DEFAULT '',
-                classification_ids TEXT NOT NULL DEFAULT ''
+                release_dates TEXT NOT NULL DEFAULT ''
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ra_id_platform ON games(ra_id, platform_id) WHERE ra_id != '';
@@ -129,6 +125,29 @@ pub fn init_db(db_path: &str) -> DbConn {
             CREATE TABLE IF NOT EXISTS scraper_companies (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS scraper_game_companies (
+                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                company_id INTEGER NOT NULL REFERENCES scraper_companies(id) ON DELETE CASCADE,
+                is_developer INTEGER NOT NULL DEFAULT 0,
+                is_publisher INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (game_id, company_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_scraper_game_companies_company
+                ON scraper_game_companies(company_id);
+            CREATE TABLE IF NOT EXISTS scraper_game_genres (
+                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                genre_id INTEGER NOT NULL REFERENCES scraper_genres(id) ON DELETE CASCADE,
+                PRIMARY KEY (game_id, genre_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_scraper_game_genres_genre
+                ON scraper_game_genres(genre_id);
+            CREATE TABLE IF NOT EXISTS scraper_game_classifications (
+                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL DEFAULT '',
+                classification_id INTEGER NOT NULL
+                    REFERENCES scraper_classifications(id) ON DELETE CASCADE,
+                PRIMARY KEY (game_id, kind, classification_id)
             );
             CREATE TABLE IF NOT EXISTS scraper_genres (
                 id INTEGER PRIMARY KEY,

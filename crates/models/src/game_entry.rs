@@ -123,17 +123,6 @@ pub struct GameEntry {
     /// Every dated region as a JSON object `{"us": "1993-12-18", ...}`
     /// (empty = never scraped or undated).
     pub release_dates: String,
-    /// The developer's ScreenScraper id — the name lives in the
-    /// `scraper_companies` table (empty = never scraped).
-    pub developer_id: String,
-    /// The publisher's ScreenScraper id, same table.
-    pub publisher_id: String,
-    /// Genre ids as a JSON array of strings, primary first — names live
-    /// in the `scraper_genres` table (empty = never scraped).
-    pub genre_ids: String,
-    /// Classification ids as a JSON array of strings — boards and names
-    /// live in the `scraper_classifications` table (empty = never scraped).
-    pub classification_ids: String,
 }
 
 impl GameEntry {
@@ -196,10 +185,6 @@ impl GameEntry {
             screenscraper_id: String::new(),
             screenscraper_rating: -1.0,
             release_dates: String::new(),
-            developer_id: String::new(),
-            publisher_id: String::new(),
-            genre_ids: String::new(),
-            classification_ids: String::new(),
         }
     }
 
@@ -250,10 +235,6 @@ impl GameEntry {
             screenscraper_id: String::new(),
             screenscraper_rating: -1.0,
             release_dates: String::new(),
-            developer_id: String::new(),
-            publisher_id: String::new(),
-            genre_ids: String::new(),
-            classification_ids: String::new(),
         }
     }
 

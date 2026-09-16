@@ -52,19 +52,6 @@ fn store_entities(
     Ok(())
 }
 
-/// The id list of one entity field, as the JSON array the games row
-/// stores — `[]` when the field is empty, so a deliberate clear still
-/// overwrites a previous value.
-fn entity_ids_json(entities: &[ira_models::ScraperEntity]) -> String {
-    serde_json::to_string(
-        &entities
-            .iter()
-            .map(|entity| entity.id.clone())
-            .collect::<Vec<_>>(),
-    )
-    .unwrap_or_default()
-}
-
 /// Upsert the age-rating boards: ids are stable, the board kind and the
 /// entry name follow the source.
 fn store_classifications(
@@ -94,10 +81,23 @@ pub fn store_scraper_metadata(
     game_id: i64,
     metadata: &ira_models::ScraperMetadata,
 ) -> Result<(), String> {
-    let mut companies: Vec<(i64, String)> = Vec::new();
-    for entity in metadata.developers.iter().chain(&metadata.publishers) {
+    // One row per company with role flags: a studio credited as both
+    // developer and publisher is a single company, not two.
+    let mut companies: std::collections::BTreeMap<i64, (String, bool, bool)> = Default::default();
+    for entity in &metadata.developers {
         if let Ok(id) = entity.id.parse::<i64>() {
-            companies.push((id, entity.name.clone()));
+            companies
+                .entry(id)
+                .or_insert((entity.name.trim().to_string(), false, false))
+                .1 = true;
+        }
+    }
+    for entity in &metadata.publishers {
+        if let Ok(id) = entity.id.parse::<i64>() {
+            companies
+                .entry(id)
+                .or_insert((entity.name.trim().to_string(), false, false))
+                .2 = true;
         }
     }
     let genres: Vec<(i64, String)> = metadata
@@ -110,16 +110,6 @@ pub fn store_scraper_metadata(
         .iter()
         .filter_map(|c| c.id.parse::<i64>().ok().map(|id| (id, c.kind.clone(), c.name.clone())))
         .collect();
-    let developer_id = entity_ids_json(&metadata.developers);
-    let publisher_id = entity_ids_json(&metadata.publishers);
-    let genre_ids = serde_json::to_string(
-        &genres.iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(),
-    )
-    .unwrap_or_default();
-    let classification_ids = serde_json::to_string(
-        &classifications.iter().map(|(id, _, _)| id.to_string()).collect::<Vec<_>>(),
-    )
-    .unwrap_or_default();
     let synopses_json = serde_json::to_string(&metadata.synopses).unwrap_or_default();
     let dates_json = serde_json::to_string(
         &metadata
@@ -137,7 +127,52 @@ pub fn store_scraper_metadata(
     let tx = c
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(err)?;
-    store_entities(&tx, "scraper_companies", &companies)?;
+    let company_rows: Vec<(i64, String)> = companies
+        .iter()
+        .map(|(id, (name, _, _))| (*id, name.clone()))
+        .collect();
+    store_entities(&tx, "scraper_companies", &company_rows)?;
+    tx.execute(
+        "DELETE FROM scraper_game_companies WHERE game_id = ?1",
+        params![game_id],
+    )
+    .map_err(err)?;
+    for (id, (_, is_developer, is_publisher)) in &companies {
+        tx.execute(
+            "INSERT INTO scraper_game_companies
+                (game_id, company_id, is_developer, is_publisher)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![game_id, id, *is_developer as i64, *is_publisher as i64],
+        )
+        .map_err(err)?;
+    }
+    tx.execute(
+        "DELETE FROM scraper_game_genres WHERE game_id = ?1",
+        params![game_id],
+    )
+    .map_err(err)?;
+    for (id, name) in &genres {
+        store_entities(&tx, "scraper_genres", &[(*id, name.clone())])?;
+        tx.execute(
+            "INSERT OR IGNORE INTO scraper_game_genres (game_id, genre_id) VALUES (?1, ?2)",
+            params![game_id, id],
+        )
+        .map_err(err)?;
+    }
+    tx.execute(
+        "DELETE FROM scraper_game_classifications WHERE game_id = ?1",
+        params![game_id],
+    )
+    .map_err(err)?;
+    for (id, kind, name) in &classifications {
+        store_classifications(&tx, &[(*id, kind.clone(), name.clone())])?;
+        tx.execute(
+            "INSERT OR IGNORE INTO scraper_game_classifications
+                (game_id, kind, classification_id) VALUES (?1, ?2, ?3)",
+            params![game_id, kind, id],
+        )
+        .map_err(err)?;
+    }
     reconcile_local_companies(&tx, &companies)?;
     store_entities(&tx, "scraper_genres", &genres)?;
     store_classifications(&tx, &classifications)?;
@@ -147,25 +182,17 @@ pub fn store_scraper_metadata(
             release_date = CASE WHEN ?2 != '' THEN ?2 ELSE release_date END,
             release_timestamp = CASE WHEN ?3 != 0 THEN ?3 ELSE release_timestamp END,
             release_dates = CASE WHEN ?4 != '' THEN ?4 ELSE release_dates END,
-            developer_id = CASE WHEN ?5 != '' THEN ?5 ELSE developer_id END,
-            publisher_id = CASE WHEN ?6 != '' THEN ?6 ELSE publisher_id END,
-            genre_ids = CASE WHEN ?7 != '' THEN ?7 ELSE genre_ids END,
-            players = CASE WHEN ?8 != '' THEN ?8 ELSE players END,
-            screenscraper_rating = CASE WHEN ?9 > 0 THEN ?9 ELSE screenscraper_rating END,
-            classification_ids = CASE WHEN ?10 != '' THEN ?10 ELSE classification_ids END,
-            synopsis = CASE WHEN ?11 != '' THEN ?11 ELSE synopsis END
-         WHERE id = ?12",
+            players = CASE WHEN ?5 != '' THEN ?5 ELSE players END,
+            screenscraper_rating = CASE WHEN ?6 > 0 THEN ?6 ELSE screenscraper_rating END,
+            synopsis = CASE WHEN ?7 != '' THEN ?7 ELSE synopsis END
+         WHERE id = ?8",
         params![
             metadata.ss_id,
             metadata.release_date,
             metadata.release_timestamp,
             dates_json,
-            developer_id,
-            publisher_id,
-            genre_ids,
             metadata.players,
             metadata.rating,
-            classification_ids,
             synopses_json,
             game_id
         ],
@@ -263,7 +290,7 @@ pub fn steam_company_entity(conn: &DbConn, name: &str) -> Option<ira_models::Scr
 /// storing match metadata, so it never surfaces as an event.
 fn reconcile_local_companies(
     tx: &rusqlite::Transaction,
-    companies: &[(i64, String)],
+    companies: &std::collections::BTreeMap<i64, (String, bool, bool)>,
 ) -> Result<(), String> {
     let locals: Vec<(i64, String)> = {
         let mut stmt = tx
@@ -279,7 +306,7 @@ fn reconcile_local_companies(
     if locals.is_empty() {
         return Ok(());
     }
-    for (id, name) in companies {
+    for (id, (name, _, _)) in companies {
         if *id < 0 {
             continue;
         }
@@ -291,14 +318,26 @@ fn reconcile_local_companies(
             if ira_models::company_tokens(local_name) != tokens {
                 continue;
             }
-            let (from, to) = (format!("\"{local_id}\""), format!("\"{id}\""));
-            let like = format!("%{from}%");
+            // Games whose real row already exists just adopt the local
+            // row's flags; the rest move over whole.
             tx.execute(
-                "UPDATE games SET
-                    developer_id = replace(developer_id, ?1, ?2),
-                    publisher_id = replace(publisher_id, ?1, ?2)
-                 WHERE developer_id LIKE ?3 OR publisher_id LIKE ?3",
-                rusqlite::params![from, to, like],
+                "UPDATE scraper_game_companies AS dst
+                 SET is_developer = MAX(dst.is_developer,
+                     COALESCE((SELECT src.is_developer FROM scraper_game_companies src
+                               WHERE src.game_id = dst.game_id AND src.company_id = ?1), 0)),
+                     is_publisher = MAX(dst.is_publisher,
+                     COALESCE((SELECT src.is_publisher FROM scraper_game_companies src
+                               WHERE src.game_id = dst.game_id AND src.company_id = ?1), 0))
+                 WHERE company_id = ?2
+                   AND EXISTS (SELECT 1 FROM scraper_game_companies src
+                               WHERE src.game_id = dst.game_id AND src.company_id = ?1)",
+                rusqlite::params![id, local_id],
+            )
+            .map_err(err)?;
+            tx.execute(
+                "UPDATE OR REPLACE scraper_game_companies SET company_id = ?1
+                 WHERE company_id = ?2",
+                rusqlite::params![id, local_id],
             )
             .map_err(err)?;
             tx.execute(
@@ -366,7 +405,6 @@ pub fn scraper_metadata_for_game(
     let row = crate::query_optional(
         conn,
         "SELECT screenscraper_id, release_date, release_timestamp, release_dates,
-                developer_id, publisher_id, genre_ids, classification_ids,
                 players, screenscraper_rating, synopsis
          FROM games WHERE id = ?1",
         params![game_id],
@@ -377,12 +415,8 @@ pub fn scraper_metadata_for_game(
                 row.get::<_, i64>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
+                row.get::<_, f64>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, String>(8)?,
-                row.get::<_, f64>(9)?,
-                row.get::<_, String>(10)?,
             ))
         },
     )?;
@@ -391,10 +425,6 @@ pub fn scraper_metadata_for_game(
         release_date,
         release_timestamp,
         release_dates,
-        developer_id,
-        publisher_id,
-        genre_ids,
-        classification_ids,
         players,
         rating,
         synopsis,
@@ -402,9 +432,6 @@ pub fn scraper_metadata_for_game(
     else {
         return Ok(None);
     };
-    if ss_id.is_empty() {
-        return Ok(None);
-    }
     let dates: std::collections::HashMap<String, String> = if release_dates.is_empty() {
         Default::default()
     } else {
@@ -422,63 +449,99 @@ pub fn scraper_metadata_for_game(
         release_date,
         release_timestamp,
         release_dates,
-        developers: expand_entities(conn, &developer_id, scraper_company_name)?,
-        publishers: expand_entities(conn, &publisher_id, scraper_company_name)?,
-        genres: expand_entities(conn, &genre_ids, scraper_genre_name)?,
+        developers: game_companies(conn, game_id, true)?,
+        publishers: game_companies(conn, game_id, false)?,
+        genres: game_genres(conn, game_id)?,
         players,
         rating,
-        classifications: classification_ids
-            .split_json_ids()
-            .into_iter()
-            .filter_map(|id| {
-                let numeric = id.parse::<i64>().ok()?;
-                scraper_classification(conn, numeric)
-                    .ok()
-                    .flatten()
-                    .map(|(kind, name)| ira_models::ScraperClassification { kind, id, name })
-            })
-            .collect(),
+        classifications: game_classifications(conn, game_id)?,
         synopses,
     }))
 }
 
-/// The entities behind one stored id array; ids whose lookup row is gone
-/// resolve to nothing.
-fn expand_entities(
+/// The companies credited to a game through one junction row per
+/// company — a studio that is both developer and publisher surfaces in
+/// both lists from the same row.
+fn game_companies(
     conn: &DbConn,
-    ids_json: &str,
-    lookup: impl Fn(&DbConn, i64) -> Result<Option<String>, String>,
+    game_id: i64,
+    developer: bool,
 ) -> Result<Vec<ira_models::ScraperEntity>, String> {
-    Ok(ids_json
-        .split_json_ids()
-        .into_iter()
-        .filter_map(|id| {
-            let numeric = id.parse::<i64>().ok()?;
-            let name = lookup(conn, numeric).ok().flatten()?;
-            Some(ira_models::ScraperEntity { id, name })
+    let flag = if developer { "is_developer" } else { "is_publisher" };
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT c.id, c.name FROM scraper_game_companies gc
+             JOIN scraper_companies c ON c.id = gc.company_id
+             WHERE gc.game_id = ?1 AND gc.{flag} = 1
+             ORDER BY c.name"
+        ))
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![game_id], |row| {
+            Ok(ira_models::ScraperEntity {
+                id: row.get::<_, i64>(0)?.to_string(),
+                name: row.get(1)?,
+            })
         })
-        .collect())
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
 }
 
-/// The id list of a games-row JSON column, tolerating the empty string a
-/// fresh row carries.
-trait SplitJsonIds {
-    fn split_json_ids(&self) -> Vec<String>;
+/// The genres of a game, stored order first.
+fn game_genres(conn: &DbConn, game_id: i64) -> Result<Vec<ira_models::ScraperEntity>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(
+            "SELECT g.id, g.name FROM scraper_game_genres gg
+             JOIN scraper_genres g ON g.id = gg.genre_id
+             WHERE gg.game_id = ?1
+             ORDER BY gg.rowid",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![game_id], |row| {
+            Ok(ira_models::ScraperEntity {
+                id: row.get::<_, i64>(0)?.to_string(),
+                name: row.get(1)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
 }
 
-impl SplitJsonIds for str {
-    fn split_json_ids(&self) -> Vec<String> {
-        if self.is_empty() {
-            Vec::new()
-        } else {
-            serde_json::from_str::<Vec<String>>(self).unwrap_or_default()
-        }
-    }
+/// The age-rating boards of a game.
+fn game_classifications(
+    conn: &DbConn,
+    game_id: i64,
+) -> Result<Vec<ira_models::ScraperClassification>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(
+            "SELECT cl.kind, cl.id, cl.name FROM scraper_game_classifications gc
+             JOIN scraper_classifications cl ON cl.id = gc.classification_id
+             WHERE gc.game_id = ?1
+             ORDER BY cl.kind",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![game_id], |row| {
+            Ok(ira_models::ScraperClassification {
+                kind: row.get(0)?,
+                id: row.get::<_, i64>(1)?.to_string(),
+                name: row.get(2)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
 }
 
-/// Local companies whose name contains the filter, case-insensitive and
-/// alphabetically capped — the search index is the cache itself, since the
-/// source has no company list endpoint.
 pub fn scraper_companies_search(
     conn: &DbConn,
     filter: &str,
@@ -609,12 +672,24 @@ mod tests {
         assert_eq!(entry.screenscraper_id, "2124");
         assert_eq!(entry.release_date, "1993-12-18");
         assert!(entry.release_timestamp > 0);
-        // The entry keeps only the references, as id arrays; the names
-        // live in the lookup tables.
-        assert_eq!(entry.developer_id, r#"["2911"]"#);
-        assert_eq!(entry.publisher_id, r#"["1299"]"#);
-        assert_eq!(entry.genre_ids, r#"["2620"]"#);
-        assert_eq!(entry.classification_ids, r#"["279"]"#);
+        // The entry keeps only the references; the rows live in the
+        // junction tables, the names in the lookup tables.
+        let roles: Vec<(i64, i64, i64)> = {
+            let pooled = conn.get().unwrap();
+            let mut stmt = pooled
+                .prepare(
+                    "SELECT company_id, is_developer, is_publisher
+                     FROM scraper_game_companies WHERE game_id = ?1",
+                )
+                .unwrap();
+            stmt.query_map(params![id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect()
+        };
+        assert_eq!(roles, vec![(1299, 0, 1), (2911, 1, 0)]);
         assert_eq!(entry.players, "1-4");
         assert_eq!(entry.screenscraper_rating, 18.0);
         assert_eq!(scraper_company_name(&conn, 2911).unwrap().as_deref(), Some("Chunsoft"));
@@ -675,8 +750,10 @@ mod tests {
         )
         .unwrap();
 
-        // Never matched: nothing to read back.
-        assert!(scraper_metadata_for_game(&conn, id).unwrap().is_none());
+        // Never matched: an empty record the editors can fill by hand.
+        let empty = scraper_metadata_for_game(&conn, id).unwrap().unwrap();
+        assert!(empty.ss_id.is_empty());
+        assert!(empty.developers.is_empty());
 
         store_scraper_metadata(
             &conn,
@@ -811,7 +888,6 @@ mod tests {
         assert_eq!(entry.release_date, "15 Sep, 2014");
         assert_eq!(entry.release_timestamp, 1410000000);
         assert_eq!(entry.screenscraper_rating, -1.0);
-        assert_eq!(entry.developer_id, r#"["1"]"#);
         assert_eq!(
             scraper_company_name(&conn, 1).unwrap().as_deref(),
             Some("id")
@@ -906,19 +982,8 @@ mod tests {
             ..Default::default()
         };
         store_scraper_metadata(&conn, game_id, &meta).unwrap();
-        let stored_before: Vec<String> = {
-            let developer_id: String = conn
-                .get()
-                .unwrap()
-                .query_row(
-                    "SELECT developer_id FROM games WHERE id = ?1",
-                    rusqlite::params![game_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            serde_json::from_str(&developer_id).unwrap()
-        };
-        assert!(stored_before.contains(&local.id));
+        let metadata = scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        assert!(metadata.developers.iter().any(|d| d.id == local.id));
 
         // A later match credits the same studio under its real
         // ScreenScraper id: the game's reference swaps and the local row
@@ -931,21 +996,13 @@ mod tests {
             }],
             ..Default::default()
         };
-        store_scraper_metadata(&conn, 7, &real_meta).unwrap();
-        let stored: Vec<String> = {
-            let developer_id: String = conn
-                .get()
-                .unwrap()
-                .query_row(
-                    "SELECT developer_id FROM games WHERE id = ?1",
-                    rusqlite::params![game_id],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            serde_json::from_str(&developer_id).unwrap()
-        };
-        assert!(stored.contains(&"123".to_string()), "local {local_id} must migrate to 123");
-        assert!(!stored.contains(&local.id));
+        store_scraper_metadata(&conn, game_id, &real_meta).unwrap();
+        let metadata = scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        assert!(
+            metadata.developers.iter().any(|d| d.id == "123"),
+            "local {local_id} must migrate to 123"
+        );
+        assert!(!metadata.developers.iter().any(|d| d.id == local.id));
         let count: i64 = conn
             .get()
             .unwrap()

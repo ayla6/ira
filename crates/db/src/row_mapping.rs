@@ -2,7 +2,7 @@ use crate::DbConn;
 use ira_models::{GameEntry, GameKind, TrophySource};
 use r2d2_sqlite::SqliteConnectionManager;
 
-pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, ra_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, hashes, vanished, developer, publisher, genre, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, developer_id, publisher_id, genre_ids, classification_ids, title_trusted, native_id";
+pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, ra_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, hashes, vanished, developer, publisher, genre, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, title_trusted, native_id";
 
 pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameEntry> {
     Ok(GameEntry {
@@ -44,12 +44,8 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
         screenscraper_id: row.get(35)?,
         screenscraper_rating: row.get(36)?,
         release_dates: row.get(37)?,
-        developer_id: row.get(38)?,
-        publisher_id: row.get(39)?,
-        genre_ids: row.get(40)?,
-        classification_ids: row.get(41)?,
-        title_trusted: row.get::<_, i64>(42)? != 0,
-        native_id: row.get::<_, String>(43)?,
+        title_trusted: row.get::<_, i64>(38)? != 0,
+        native_id: row.get::<_, String>(39)?,
     })
 }
 

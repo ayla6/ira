@@ -62,8 +62,38 @@ fn rebuild_output_stack(
     new_mapper: MappingEngine,
     trace: &mut TraceState,
 ) {
-    rebuild_output_devices(outputs, trace);
+    emit_outputs(
+        outputs.mapper.reset(),
+        OutputTargets {
+            gamepad: outputs.gamepad,
+            keyboard: outputs.keyboard.as_mut(),
+            mouse: outputs.mouse.as_mut(),
+            pad: outputs.pad,
+        },
+        trace,
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("ira-input: failed to release outputs before the controller swap: {error}")
+    });
+    // The mapper must be swapped BEFORE the stack is built: the stack takes
+    // the profile from the mapper, and building first would recreate the
+    // previous controller instead of the one just saved.
     *outputs.mapper = new_mapper;
+    let stack = super::output_stack::build_virtual_stack(
+        outputs.pipeline.motion_alive(),
+        outputs.motion_enabled,
+        outputs.mapper.profile(),
+        outputs.native_passthrough,
+    );
+    *outputs.gamepad = stack.gamepad;
+    *outputs.keyboard = stack.keyboard;
+    *outputs.mouse = stack.mouse;
+    outputs.pipeline.motion = stack.motion;
+    outputs.pipeline.motion_device = stack.motion_device;
+    outputs.pipeline.ds4_hid = stack.ds4_hid;
+    outputs.pipeline.dualsense_hid = stack.dualsense_hid;
+    outputs.pipeline.switch_pro_hid = stack.switch_pro_hid;
+    outputs.pipeline.imu_hid = stack.imu_hid;
     eprintln!(
         "ira-input: controller kind changed; the game sees a new {:?} controller",
         outputs.mapper.profile().backend

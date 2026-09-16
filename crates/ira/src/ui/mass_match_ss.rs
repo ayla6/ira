@@ -264,7 +264,7 @@ pub(super) fn start_ss_batch_matching(
                 run_batch(
                     queue,
                     150,
-                    1000,
+                    0,
                     {
                         let steam = Arc::clone(&steam);
                         move |item| resolve(&steam, &creds, &db, &cfg, item)

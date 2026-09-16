@@ -36,9 +36,10 @@ pub(super) struct RowActions {
 /// Shared shape of every batch pass: one sequential worker thread computes
 /// matches over `queue`, and results are applied on the UI loop every
 /// `interval_ms` until the queue drains. `worker` runs off-thread and must
-/// not touch GTK; it waits `pace_ms` before every request but the first,
-/// so a rate-limited service sees one request per pace, never a burst.
-/// `on_result` runs on the main loop.
+/// not touch GTK; a nonzero `pace_ms` sleeps before every request but the
+/// first, for services that document per-second limits — sequential
+/// requests alone are already the politest shape there is. `on_result`
+/// runs on the main loop.
 pub(super) fn run_batch<T: Send + 'static>(
     queue: Vec<BatchItem>,
     interval_ms: u64,

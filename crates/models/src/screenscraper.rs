@@ -73,6 +73,30 @@ pub fn title_from_trusted_source(platform_id: &str) -> bool {
     matches!(platform_id, "ps3" | "ps4" | "psvita" | "switch" | "wiiu")
 }
 
+/// The corporate words a store appends to a studio's name — Steam says
+/// "Naughty Dog, LLC" where ScreenScraper writes "Naughty Dog", "Sega
+/// Games" where it writes "Sega" — dropped when companies compare.
+const COMPANY_FILLER: &[&str] = &[
+    "llc", "inc", "ltd", "limited", "gmbh", "co", "corp", "corporation", "studio", "studios",
+    "games", "entertainment", "interactive", "software", "digital", "sa", "sas", "srl", "bv",
+    "nv", "plc", "ag", "kk",
+];
+
+/// A company name reduced to its identifying tokens: lowercased, split
+/// on everything non-alphanumeric ("Inc." splits clean away), corporate
+/// filler dropped, order ignored ("Bandai Namco" and "Namco Bandai"
+/// agree).
+pub fn company_tokens(name: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = name
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|token| !token.is_empty() && !COMPANY_FILLER.contains(token))
+        .map(str::to_string)
+        .collect();
+    tokens.sort();
+    tokens
+}
+
 /// The ScreenScraper system id for an Ira platform id, or `None` when the
 /// platform has no mapping — callers search without a system, exactly
 /// like ES-DE does for unmapped platforms.
@@ -202,6 +226,26 @@ mod tests {
         assert_eq!(screenscraper_system_id("steam"), None);
         assert_eq!(screenscraper_system_id("wine"), None);
         assert_eq!(screenscraper_system_id("madeup"), None);
+    }
+
+    #[test]
+    fn test_company_tokens_drop_filler_and_order() {
+        assert_eq!(
+            super::company_tokens("Naughty Dog, LLC"),
+            super::company_tokens("naughty dog")
+        );
+        // Punctuation rides on the token ("Inc." is not "inc") — split
+        // before the filler compare.
+        assert_eq!(
+            super::company_tokens("Team Salvato Inc."),
+            super::company_tokens("Team Salvato")
+        );
+        assert_eq!(
+            super::company_tokens("Bandai Namco"),
+            super::company_tokens("Namco Bandai")
+        );
+        assert!(super::company_tokens("LLC").is_empty());
+        assert!(super::company_tokens("Studios, Inc.").is_empty());
     }
 
     #[test]

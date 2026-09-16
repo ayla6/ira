@@ -615,7 +615,7 @@ fn finish_pc_pick(
 ) -> Option<ScrapedGame> {
     if game.developers.is_empty() && game.publishers.is_empty() {
         if let Some(info) = info {
-            super::enrichment::fill_companies_from_cache(
+            super::enrichment::fill_steam_companies(
                 db,
                 info,
                 &mut game.developers,
@@ -683,7 +683,7 @@ fn companies_overlap(info: &SteamCmdInfo, game: &ScrapedGame) -> bool {
         [info.developer.as_str(), info.publisher.as_str()]
             .into_iter()
             .flat_map(|field| field.split(','))
-            .map(super::enrichment::company_tokens)
+            .map(ira_models::company_tokens)
             .filter(|tokens| !tokens.is_empty())
             .collect();
     if steam.is_empty() {
@@ -692,7 +692,7 @@ fn companies_overlap(info: &SteamCmdInfo, game: &ScrapedGame) -> bool {
     game.developers
         .iter()
         .chain(game.publishers.iter())
-        .any(|entity| steam.contains(&super::enrichment::company_tokens(&entity.name)))
+        .any(|entity| steam.contains(&ira_models::company_tokens(&entity.name)))
 }
 
 /// Steam's release timestamp as the `YYYY-MM-DD` string the metadata
@@ -1311,7 +1311,8 @@ mod tests {
             finished.synopses.first().map(|(l, t)| (l.as_str(), t.as_str())),
             Some(("en", "A poetry horror."))
         );
-        // A company the cache does not know cannot be invented.
+        // A company the cache does not know becomes a local under a
+        // negative id, spelled the way Steam spelled it.
         let unknown = SteamCmdInfo {
             developer: "Whoever".into(),
             publisher: "Whoever".into(),
@@ -1324,16 +1325,19 @@ mod tests {
             ..Default::default()
         };
         let finished = super::finish_pc_pick(&conn, game, Some(&unknown), None).unwrap();
-        assert!(finished.developers.is_empty());
-        // A pick that stays bare after everything is skipped. The
-        // parser's no-rating sentinel is -1.
+        assert_eq!(finished.developers.len(), 1);
+        assert!(finished.developers[0].id.parse::<i64>().unwrap() < 0);
+        assert_eq!(finished.developers[0].name, "Whoever");
+        // A pick that stays bare after everything is skipped — no Steam
+        // info means no companies, and the parser's no-rating sentinel
+        // is -1.
         let bare = ScrapedGame {
             ss_id: "70001".into(),
             name: "Some Bare Entry".into(),
             rating: -1.0,
             ..Default::default()
         };
-        assert!(super::finish_pc_pick(&conn, bare, Some(&unknown), None).is_none());
+        assert!(super::finish_pc_pick(&conn, bare, None, None).is_none());
     }
 
     #[test]

@@ -431,33 +431,10 @@ fn enrich_ra(params: EnrichRaParams) -> Option<Game> {
     Some(game)
 }
 
-/// The corporate words a store appends to a studio's name — Steam says
-/// "Naughty Dog, LLC" where ScreenScraper writes "Naughty Dog", "Sega
-/// Games" where it writes "Sega" — dropped before companies compare.
-const COMPANY_FILLER: &[&str] = &[
-    "llc", "inc", "ltd", "limited", "gmbh", "co", "corp", "corporation", "studio", "studios",
-    "games", "entertainment", "interactive", "software", "digital", "sa", "sas", "srl", "bv",
-    "nv", "plc", "ag", "kk",
-];
-
-/// A company name reduced to its identifying tokens: folded, punctuation
-/// gone, corporate filler dropped, order ignored ("Bandai Namco" and
-/// "Namco Bandai" agree).
-pub(super) fn company_tokens(name: &str) -> Vec<String> {
-    let mut tokens: Vec<String> = name
-        .to_lowercase()
-        .split_whitespace()
-        .filter(|token| !COMPANY_FILLER.contains(token))
-        .map(str::to_string)
-        .collect();
-    tokens.sort();
-    tokens
-}
-
-/// Fill empty developer/publisher lists from our company cache when the
-/// Steam names are known there — carrying the proper ScreenScraper ids
-/// so the metadata editor's entity rows work.
-pub(super) fn fill_companies_from_cache(
+/// Fill empty developer/publisher lists for the Steam-side names: the
+/// company cache first — proper ScreenScraper ids — and a local company
+/// under a negative id when ScreenScraper has no entry for the studio.
+pub(super) fn fill_steam_companies(
     db: &ira_db::DbConn,
     info: &SteamCmdInfo,
     developers: &mut Vec<ira_models::ScraperEntity>,
@@ -469,18 +446,8 @@ pub(super) fn fill_companies_from_cache(
     ];
     for (field, target) in fields {
         for name in field.split(',').map(str::trim).filter(|n| !n.is_empty()) {
-            let Ok(found) = ira_db::scraper_companies_search(db, name) else {
-                continue;
-            };
-            let wanted = company_tokens(name);
-            if wanted.is_empty() {
-                continue;
-            }
-            if let Some(entity) = found
-                .iter()
-                .find(|entity| company_tokens(&entity.name) == wanted)
-            {
-                target.push(entity.clone());
+            if let Some(entity) = ira_db::steam_company_entity(db, name) {
+                target.push(entity);
             }
         }
     }
@@ -511,7 +478,7 @@ pub(super) fn garnish_pc_ss_metadata(
     let mut companies = std::mem::take(&mut meta.developers);
     let mut publishers = std::mem::take(&mut meta.publishers);
     if needs_companies {
-        fill_companies_from_cache(db, &info, &mut companies, &mut publishers);
+        fill_steam_companies(db, &info, &mut companies, &mut publishers);
     }
     meta.developers = companies;
     meta.publishers = publishers;

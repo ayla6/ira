@@ -133,6 +133,7 @@ pub fn store_scraper_metadata(
     let c = crate::lock_db(conn)?;
     let tx = c.unchecked_transaction().map_err(err)?;
     store_entities(&tx, "scraper_companies", &companies)?;
+    reconcile_local_companies(&tx, &companies)?;
     store_entities(&tx, "scraper_genres", &genres)?;
     store_classifications(&tx, &classifications)?;
     tx.execute(
@@ -166,6 +167,142 @@ pub fn store_scraper_metadata(
     )
     .map_err(err)?;
     tx.commit().map_err(err)?;
+    Ok(())
+}
+
+/// The company entity for a Steam-side name: a cached ScreenScraper
+/// company when one's identifying tokens match, else a freshly allocated
+/// local company under a negative id — the namespace ScreenScraper's
+/// positive ids can never reach. `None` only for names with no
+/// identifying tokens at all.
+pub fn steam_company_entity(conn: &DbConn, name: &str) -> Option<ira_models::ScraperEntity> {
+    let tokens = ira_models::company_tokens(name);
+    if tokens.is_empty() {
+        return None;
+    }
+    // Identity scan over the whole table — a LIKE prefilter cannot work
+    // here because the query spelling may be longer or shorter than the
+    // stored one ("Team Salvato Inc." vs "Team Salvato"). Real
+    // ScreenScraper ids beat local ones, and the oldest local wins among
+    // spellings.
+    {
+        let c = crate::lock_db(conn).ok()?;
+        let Ok(mut stmt) = c.prepare(
+            "SELECT id, name FROM scraper_companies ORDER BY (id < 0), id DESC",
+        ) else {
+            return None;
+        };
+        let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        }) else {
+            return None;
+        };
+        for pair in rows.filter_map(Result::ok) {
+            if ira_models::company_tokens(&pair.1) == tokens {
+                return Some(ira_models::ScraperEntity {
+                    id: pair.0.to_string(),
+                    name: pair.1,
+                });
+            }
+        }
+    }
+    let c = crate::lock_db(conn).ok()?;
+    let min: i64 = c
+        .query_row(
+            "SELECT COALESCE(MIN(id), 0) FROM scraper_companies WHERE id < 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let id = min - 1;
+    let name = name.trim().to_string();
+    // A concurrent allocation of the same company loses the insert and
+    // the re-scan below hands back the winner, whatever spelling it kept.
+    let _ = c.execute(
+        "INSERT INTO scraper_companies (id, name) VALUES (?1, ?2)",
+        rusqlite::params![id, name],
+    );
+    // A concurrent allocation of the same company loses the insert and
+    // the re-scan below hands back the winner, whatever spelling it kept.
+    let locals: Vec<(i64, String)> = {
+        let Ok(mut stmt) =
+            c.prepare("SELECT id, name FROM scraper_companies WHERE id < 0 ORDER BY id DESC")
+        else {
+            return None;
+        };
+        let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        }) else {
+            return None;
+        };
+        rows.filter_map(Result::ok).collect()
+    };
+    if let Some((local_id, local_name)) = locals
+        .iter()
+        .find(|(_, n)| ira_models::company_tokens(n) == tokens)
+    {
+        return Some(ira_models::ScraperEntity {
+            id: local_id.to_string(),
+            name: local_name.clone(),
+        });
+    }
+    Some(ira_models::ScraperEntity {
+        id: id.to_string(),
+        name,
+    })
+}
+
+/// Local companies graduate the day a real ScreenScraper match carries
+/// the same studio: every game referencing the negative id swaps to the
+/// proper one and the local row goes away. Runs as a side effect of
+/// storing match metadata, so it never surfaces as an event.
+fn reconcile_local_companies(
+    tx: &rusqlite::Transaction,
+    companies: &[(i64, String)],
+) -> Result<(), String> {
+    let locals: Vec<(i64, String)> = {
+        let mut stmt = tx
+            .prepare("SELECT id, name FROM scraper_companies WHERE id < 0")
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        rows
+    };
+    if locals.is_empty() {
+        return Ok(());
+    }
+    for (id, name) in companies {
+        if *id < 0 {
+            continue;
+        }
+        let tokens = ira_models::company_tokens(name);
+        if tokens.is_empty() {
+            continue;
+        }
+        for (local_id, local_name) in &locals {
+            if ira_models::company_tokens(local_name) != tokens {
+                continue;
+            }
+            let (from, to) = (format!("\"{local_id}\""), format!("\"{id}\""));
+            let like = format!("%{from}%");
+            tx.execute(
+                "UPDATE games SET
+                    developer_id = replace(developer_id, ?1, ?2),
+                    publisher_id = replace(publisher_id, ?1, ?2)
+                 WHERE developer_id LIKE ?3 OR publisher_id LIKE ?3",
+                rusqlite::params![from, to, like],
+            )
+            .map_err(err)?;
+            tx.execute(
+                "DELETE FROM scraper_companies WHERE id = ?1",
+                rusqlite::params![local_id],
+            )
+            .map_err(err)?;
+        }
+    }
     Ok(())
 }
 
@@ -715,4 +852,105 @@ mod tests {
         assert_eq!(scraper_release_timestamp(""), 0);
         assert_eq!(scraper_release_timestamp("TBA"), 0);
     }
+
+
+    #[test]
+    fn test_steam_company_entity_allocates_and_reuses_locals() {
+        let (conn, _tmp) = setup_db();
+        // First sighting allocates a negative id under the store's
+        // spelling; the second spelling of the same studio reuses it.
+        let first = steam_company_entity(&conn, "Whoever Studios").unwrap();
+        assert!(first.id.parse::<i64>().unwrap() < 0);
+        assert_eq!(first.name, "Whoever Studios");
+        let second = steam_company_entity(&conn, "Whoever Studios LLC").unwrap();
+        assert_eq!(second.id, first.id);
+        // The cache's real ids win over locals.
+        conn.get()
+            .unwrap()
+            .execute(
+                "INSERT INTO scraper_companies (id, name) VALUES (54774, 'Team Salvato')",
+                [],
+            )
+            .unwrap();
+        let salvato = steam_company_entity(&conn, "Team Salvato Inc.").unwrap();
+        assert_eq!(salvato.id, "54774");
+        // A filler-only name agrees with nothing.
+        assert!(steam_company_entity(&conn, "LLC").is_none());
+    }
+
+    #[test]
+    fn test_storing_a_match_reconciles_local_companies() {
+        let (conn, _tmp) = setup_db();
+        let game_id = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "",
+            "",
+            "",
+            "Whoever's Game",
+        )
+        .unwrap();
+        let local = steam_company_entity(&conn, "Whoever Studios").unwrap();
+        let local_id: i64 = local.id.parse().unwrap();
+
+        // A game carries the local company in its metadata.
+        let meta = ira_models::ScraperMetadata {
+            ss_id: "1".into(),
+            developers: vec![local.clone()],
+            ..Default::default()
+        };
+        store_scraper_metadata(&conn, game_id, &meta).unwrap();
+        let stored_before: Vec<String> = {
+            let developer_id: String = conn
+                .get()
+                .unwrap()
+                .query_row(
+                    "SELECT developer_id FROM games WHERE id = ?1",
+                    rusqlite::params![game_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            serde_json::from_str(&developer_id).unwrap()
+        };
+        assert!(stored_before.contains(&local.id));
+
+        // A later match credits the same studio under its real
+        // ScreenScraper id: the game's reference swaps and the local row
+        // goes away.
+        let real_meta = ira_models::ScraperMetadata {
+            ss_id: "1".into(),
+            developers: vec![ira_models::ScraperEntity {
+                id: "123".into(),
+                name: "Whoever Studios".into(),
+            }],
+            ..Default::default()
+        };
+        store_scraper_metadata(&conn, 7, &real_meta).unwrap();
+        let stored: Vec<String> = {
+            let developer_id: String = conn
+                .get()
+                .unwrap()
+                .query_row(
+                    "SELECT developer_id FROM games WHERE id = ?1",
+                    rusqlite::params![game_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            serde_json::from_str(&developer_id).unwrap()
+        };
+        assert!(stored.contains(&"123".to_string()), "local {local_id} must migrate to 123");
+        assert!(!stored.contains(&local.id));
+        let count: i64 = conn
+            .get()
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM scraper_companies WHERE id = ?1",
+                rusqlite::params![local_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "the superseded local row must be gone");
+    }
 }
+

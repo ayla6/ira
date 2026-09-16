@@ -468,7 +468,8 @@ pub(super) fn garnish_pc_ss_metadata(
         .as_ref()
         .is_none_or(|meta| meta.developers.is_empty() && meta.publishers.is_empty());
     let needs_synopsis = existing.as_ref().is_none_or(|meta| meta.synopses.is_empty());
-    if !needs_companies && !needs_synopsis {
+    let needs_ratings = existing.as_ref().is_none_or(|meta| meta.classifications.is_empty());
+    if !needs_companies && !needs_synopsis && !needs_ratings {
         return;
     }
     let Some(info) = steam.fetch_steamcmd_info(&app_id.to_string()) else {
@@ -482,9 +483,21 @@ pub(super) fn garnish_pc_ss_metadata(
     }
     meta.developers = companies;
     meta.publishers = publishers;
-    if needs_synopsis {
-        if let Some(synopsis) = steam.fetch_store_synopsis(&app_id.to_string()) {
-            meta.synopses = vec![("en".to_string(), synopsis)];
+    if needs_synopsis || needs_ratings {
+        if let Some(extras) = steam.fetch_store_extras(&app_id.to_string()) {
+            if needs_synopsis && !extras.synopsis.is_empty() {
+                meta.synopses = vec![("en".to_string(), extras.synopsis.clone())];
+            }
+            if needs_ratings {
+                meta.classifications = extras
+                    .ratings
+                    .iter()
+                    .map(|(board, value)| ira_models::ScraperClassification {
+                        kind: board.clone(),
+                        value: value.clone(),
+                    })
+                    .collect();
+            }
         }
     }
     if let Err(e) = ira_db::store_scraper_metadata(db, db_id, &meta) {

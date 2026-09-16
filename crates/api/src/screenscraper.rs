@@ -348,10 +348,8 @@ struct SsClassifications {
 struct SsClassificationRow {
     #[serde(rename = "@type", default)]
     kind: String,
-    #[serde(rename = "@id", default)]
-    id: String,
     #[serde(default, rename = "$text")]
-    name: String,
+    value: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -485,8 +483,7 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
                 .iter()
                 .map(|row| ira_models::ScraperClassification {
                     kind: row.kind.clone(),
-                    id: row.id.clone(),
-                    name: row.name.clone(),
+                    value: row.value.trim().to_string(),
                 })
                 .collect()
         })
@@ -1005,11 +1002,10 @@ mod tests {
         );
         assert_eq!(game.players, "1-4");
         assert_eq!(game.rating, 18.0);
-        // All three boards arrive with their ids.
+        // All three boards arrive as board + assigned value.
         assert_eq!(game.classifications.len(), 3);
         assert_eq!(game.classifications[1].kind, "PEGI");
-        assert_eq!(game.classifications[1].id, "279");
-        assert_eq!(game.classifications[1].name, "PEGI:3");
+        assert_eq!(game.classifications[1].value, "PEGI:3");
         // Every language's synopsis is kept, entities cleaned up.
         assert_eq!(game.synopses.len(), 2);
         assert_eq!(

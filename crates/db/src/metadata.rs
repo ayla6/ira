@@ -52,23 +52,6 @@ fn store_entities(
     Ok(())
 }
 
-/// Upsert the age-rating boards: ids are stable, the board kind and the
-/// entry name follow the source.
-fn store_classifications(
-    conn: &rusqlite::Connection,
-    entities: &[(i64, String, String)],
-) -> Result<(), String> {
-    for (id, kind, name) in entities {
-        conn.execute(
-            "INSERT INTO scraper_classifications (id, kind, name) VALUES (?1, ?2, ?3)
-             ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name",
-            params![id, kind, name],
-        )
-        .map_err(err)?;
-    }
-    Ok(())
-}
-
 /// Store what a ScreenScraper match found. The entry keeps only the
 /// references — company/genre/classification ids — while the names land
 /// in the `scraper_*` lookup tables, in the same transaction: every
@@ -104,11 +87,6 @@ pub fn store_scraper_metadata(
         .genres
         .iter()
         .filter_map(|genre| genre.id.parse::<i64>().ok().map(|id| (id, genre.name.clone())))
-        .collect();
-    let classifications: Vec<(i64, String, String)> = metadata
-        .classifications
-        .iter()
-        .filter_map(|c| c.id.parse::<i64>().ok().map(|id| (id, c.kind.clone(), c.name.clone())))
         .collect();
     let synopses_json = serde_json::to_string(&metadata.synopses).unwrap_or_default();
     let dates_json = serde_json::to_string(
@@ -164,18 +142,15 @@ pub fn store_scraper_metadata(
         params![game_id],
     )
     .map_err(err)?;
-    for (id, kind, name) in &classifications {
-        store_classifications(&tx, &[(*id, kind.clone(), name.clone())])?;
+    for class in &metadata.classifications {
         tx.execute(
             "INSERT OR IGNORE INTO scraper_game_classifications
-                (game_id, kind, classification_id) VALUES (?1, ?2, ?3)",
-            params![game_id, kind, id],
+                (game_id, kind, value) VALUES (?1, ?2, ?3)",
+            params![game_id, class.kind, class.value],
         )
         .map_err(err)?;
     }
     reconcile_local_companies(&tx, &companies)?;
-    store_entities(&tx, "scraper_genres", &genres)?;
-    store_classifications(&tx, &classifications)?;
     tx.execute(
         "UPDATE games SET
             screenscraper_id = ?1,
@@ -350,6 +325,66 @@ fn reconcile_local_companies(
     Ok(())
 }
 
+/// Merge a fresh ScreenScraper answer into a stored record, filling only
+/// gaps — a refetch never overwrites what's already there, and a match's
+/// id stays its own. Returns whether anything was stored.
+pub fn merge_missing_scraper_metadata(
+    conn: &DbConn,
+    game_id: i64,
+    fresh: &ira_models::ScraperMetadata,
+) -> Result<bool, String> {
+    let mut meta = scraper_metadata_for_game(conn, game_id)?.unwrap_or_default();
+    let mut changed = false;
+    if meta.ss_id.is_empty() && !fresh.ss_id.is_empty() {
+        meta.ss_id = fresh.ss_id.clone();
+        changed = true;
+    }
+    if meta.release_date.is_empty() && !fresh.release_date.is_empty() {
+        meta.release_date = fresh.release_date.clone();
+        meta.release_timestamp = fresh.release_timestamp;
+        meta.release_dates = fresh.release_dates.clone();
+        changed = true;
+    }
+    if meta.players.is_empty() && !fresh.players.is_empty() {
+        meta.players = fresh.players.clone();
+        changed = true;
+    }
+    if meta.rating <= 0.0 && fresh.rating > 0.0 {
+        meta.rating = fresh.rating;
+        changed = true;
+    }
+    if meta.synopses.is_empty() && !fresh.synopses.is_empty() {
+        meta.synopses = fresh.synopses.clone();
+        changed = true;
+    }
+    for (list, fresh_list) in [
+        (&mut meta.developers, &fresh.developers),
+        (&mut meta.publishers, &fresh.publishers),
+        (&mut meta.genres, &fresh.genres),
+    ] {
+        for entity in fresh_list {
+            if !list.iter().any(|e| e.id == entity.id) {
+                list.push(entity.clone());
+                changed = true;
+            }
+        }
+    }
+    for class in &fresh.classifications {
+        if !meta
+            .classifications
+            .iter()
+            .any(|c| c.kind.eq_ignore_ascii_case(&class.kind))
+        {
+            meta.classifications.push(class.clone());
+            changed = true;
+        }
+    }
+    if changed {
+        store_scraper_metadata(conn, game_id, &meta)?;
+    }
+    Ok(changed)
+}
+
 /// Remember that a game's ScreenScraper search came up empty, so the mass
 /// matcher stops re-asking for a ROM the source does not know. Manual
 /// picks and later matches clear it again.
@@ -514,7 +549,7 @@ fn game_genres(conn: &DbConn, game_id: i64) -> Result<Vec<ira_models::ScraperEnt
     Ok(rows)
 }
 
-/// The age-rating boards of a game.
+/// The age-rating boards of a game, board name alphabetical.
 fn game_classifications(
     conn: &DbConn,
     game_id: i64,
@@ -522,18 +557,16 @@ fn game_classifications(
     let c = crate::lock_db(conn)?;
     let mut stmt = c
         .prepare(
-            "SELECT cl.kind, cl.id, cl.name FROM scraper_game_classifications gc
-             JOIN scraper_classifications cl ON cl.id = gc.classification_id
-             WHERE gc.game_id = ?1
-             ORDER BY cl.kind",
+            "SELECT kind, value FROM scraper_game_classifications
+             WHERE game_id = ?1
+             ORDER BY kind",
         )
         .map_err(err)?;
     let rows = stmt
         .query_map(params![game_id], |row| {
             Ok(ira_models::ScraperClassification {
                 kind: row.get(0)?,
-                id: row.get::<_, i64>(1)?.to_string(),
-                name: row.get(2)?,
+                value: row.get(1)?,
             })
         })
         .map_err(err)?
@@ -573,20 +606,6 @@ pub fn scraper_genre_name(conn: &DbConn, id: i64) -> Result<Option<String>, Stri
         conn,
         "SELECT name FROM scraper_genres WHERE id = ?1",
         params![id],
-    )
-}
-
-/// The board kind and entry name a ScreenScraper classification id
-/// refers to, per the lookup table.
-pub fn scraper_classification(
-    conn: &DbConn,
-    id: i64,
-) -> Result<Option<(String, String)>, String> {
-    crate::query_optional(
-        conn,
-        "SELECT kind, name FROM scraper_classifications WHERE id = ?1",
-        params![id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
     )
 }
 
@@ -660,8 +679,7 @@ mod tests {
                 rating: 18.0,
                 classifications: vec![ira_models::ScraperClassification {
                     kind: "PEGI".into(),
-                    id: "279".into(),
-                    name: "PEGI:3".into(),
+                    value: "PEGI:3".into(),
                 }],
                 synopses: vec![("en".into(), "The first two quests.".into())],
             },
@@ -697,10 +715,6 @@ mod tests {
         assert_eq!(
             scraper_genre_name(&conn, 2620).unwrap().as_deref(),
             Some("Role Playing Game")
-        );
-        assert_eq!(
-            scraper_classification(&conn, 279).unwrap(),
-            Some(("PEGI".to_string(), "PEGI:3".to_string()))
         );
         // Unknown ids resolve to nothing.
         assert_eq!(scraper_company_name(&conn, 1).unwrap(), None);

@@ -12,14 +12,15 @@ pub struct ScraperEntity {
     pub name: String,
 }
 
-/// One age-rating classification (CERO / PEGI / ESRB / ...).
+/// One age-rating classification (CERO / PEGI / ESRB / ...): the board
+/// and the value it assigned. Game answers carry no classification ids —
+/// board and value are the whole identity.
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScraperClassification {
     /// The board's name as ScreenScraper reports it ("PEGI", "CERO", ...).
-    #[serde(rename = "type")]
     pub kind: String,
-    pub id: String,
-    pub name: String,
+    /// The value the board assigned ("18", "A", "E10+", ...).
+    pub value: String,
 }
 
 /// The metadata a ScreenScraper match provides, ready for storage.

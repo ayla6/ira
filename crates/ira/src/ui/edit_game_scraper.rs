@@ -51,6 +51,14 @@ pub(super) fn build_scraper_section(
             .then(|| format!("{} {}", crate::tr!("Players"), metadata.players)),
         (metadata.rating > 0.0)
             .then(|| format!("{} {}/20", crate::tr!("Rating"), metadata.rating)),
+        (!metadata.classifications.is_empty()).then(|| {
+            metadata
+                .classifications
+                .iter()
+                .map(|c| format!("{} {}", c.kind, c.value))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        }),
     ]
     .into_iter()
     .flatten()
@@ -290,16 +298,33 @@ fn search_row(state: &SharedState, game: &Game, win: &adw::Window) -> adw::Actio
         .map(|m| m.is_some())
         .unwrap_or(false);
     if matched {
-        // Searching an already-matched game would silently replace it;
-        // removing the match is the explicit first step.
-        row.set_title(&crate::tr!("Matched — unmatch to search again"));
-        let btn = gtk4::Button::with_label(&crate::tr!("Unmatch"));
-        btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
-        btn.set_valign(gtk4::Align::Center);
+        // The entry's id is known, so gaps can be filled without any
+        // rematch ambiguity: one exact fetch by id, merged over what's
+        // stored. Unmatch stays for genuinely wrong matches.
+        row.set_title(&crate::tr!("Matched"));
+        let fetch = gtk4::Button::with_label(&crate::tr!("Fetch missing"));
+        fetch.add_css_class(CSS_SUGGESTED_ACTION);
+        fetch.set_valign(gtk4::Align::Center);
+        {
+            let state = state.clone();
+            let game = game.clone();
+            fetch.connect_clicked(move |btn| {
+                btn.set_sensitive(false);
+                let state = state.clone();
+                let game = game.clone();
+                run_refetch_missing(&state, &game, move |state, db_id| {
+                    refresh_scraper_section(state, db_id);
+                });
+            });
+        }
+        row.add_suffix(&fetch);
+        let unmatch = gtk4::Button::with_label(&crate::tr!("Unmatch"));
+        unmatch.add_css_class(CSS_FLAT);
+        unmatch.set_valign(gtk4::Align::Center);
         {
             let state = state.clone();
             let db_id = game.db_id;
-            btn.connect_clicked(move |_| {
+            unmatch.connect_clicked(move |_| {
                 if let Err(e) = ira_db::clear_screenscraper_match(&state.borrow().db, db_id) {
                     eprintln!("Failed to unmatch: {e}");
                     return;
@@ -315,7 +340,7 @@ fn search_row(state: &SharedState, game: &Game, win: &adw::Window) -> adw::Actio
                 refresh_scraper_section(&state, db_id);
             });
         }
-        row.add_suffix(&btn);
+        row.add_suffix(&unmatch);
         return row;
     }
 
@@ -415,6 +440,78 @@ fn run_auto_match(
             persist_ss_match(&state, db_id, game);
         }
         on_done(&state, db_id, matched.is_some());
+    });
+}
+
+/// Re-fetch the matched entry by its own id — no search, no ambiguity —
+/// and merge only what's missing into the stored metadata. Off-thread;
+/// `on_done` runs on the main loop.
+fn run_refetch_missing(
+    state: &SharedState,
+    game: &Game,
+    on_done: impl Fn(&SharedState, i64) + 'static,
+) {
+    let (steam, creds, db) = {
+        let s = state.borrow();
+        (
+            s.steam.clone(),
+            ScraperCreds::from_account(
+                s.cfg.screenscraper_id.clone(),
+                s.cfg.screenscraper_password.clone(),
+            ),
+            s.db.clone(),
+        )
+    };
+    let Some(ss_id) = ira_db::find_by_db_id(&db, game.db_id)
+        .ok()
+        .flatten()
+        .map(|e| e.screenscraper_id)
+        .filter(|id| !id.is_empty())
+    else {
+        on_done(state, game.db_id);
+        return;
+    };
+    let db_id = game.db_id;
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    std::thread::spawn(move || {
+        let fresh = steam
+            .screenscraper_game(&creds, &ss_id)
+            .ok()
+            .and_then(|games| games.into_iter().next());
+        let changed = fresh
+            .and_then(|game| {
+                let fresh_meta = ira_models::ScraperMetadata {
+                    ss_id: ss_id.clone(),
+                    release_date: game.release_date.clone(),
+                    release_timestamp: ira_db::scraper_release_timestamp(&game.release_date),
+                    release_dates: game.release_dates.clone(),
+                    developers: game.developers.clone(),
+                    publishers: game.publishers.clone(),
+                    genres: game.genres.clone(),
+                    players: game.players.clone(),
+                    rating: game.rating,
+                    classifications: game.classifications.clone(),
+                    synopses: game
+                        .synopses
+                        .iter()
+                        .find(|(l, _)| l == "en")
+                        .or_else(|| game.synopses.first())
+                        .cloned()
+                        .into_iter()
+                        .collect(),
+                };
+                ira_db::merge_missing_scraper_metadata(&db, db_id, &fresh_meta).ok()
+            })
+            .unwrap_or(false);
+        let _ = tx.send(changed);
+    });
+    let state = state.clone();
+    let db_id = game.db_id;
+    poll_channel(rx, move |changed| {
+        if changed {
+            eprintln!("SS refetch: filled missing metadata for {db_id}");
+        }
+        on_done(&state, db_id);
     });
 }
 

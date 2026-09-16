@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::css::*;
-use super::helpers::replace_row_actions;
+use super::helpers::{poll_channel, replace_row_actions};
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
 use super::rom_name::{
     alt_search_term, clean_rom_name, looks_like_title_id, pick_search_name, region_hints,
@@ -34,6 +34,110 @@ enum SsOutcome {
     Hit(Box<ScrapedGame>),
     Miss,
     Failed(String),
+}
+
+/// One batch pass over matched games whose stored metadata has gaps:
+/// each costs one exact fetch by the entry's own id and merges only
+/// what's missing. ScreenScraper's quota makes this the expensive kind
+/// of helpful, so it runs only when asked for.
+pub(super) fn start_ss_refetch_pass(state: &SharedState, button: &gtk4::Button) {
+    let queue: Vec<i64> = {
+        let s = state.borrow();
+        s.games
+            .iter()
+            .filter(|g| !g.screenscraper_id.is_empty())
+            .filter(|g| {
+                ira_db::scraper_metadata_for_game(&s.db, g.db_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|meta| metadata_has_gaps(&meta))
+            })
+            .map(|g| g.db_id)
+            .collect()
+    };
+    if queue.is_empty() {
+        return;
+    }
+    let total = queue.len();
+    button.set_sensitive(false);
+    button.set_label(&crate::tr!("Fetching 0/{total}…"));
+
+    let (steam, creds) = {
+        let s = state.borrow();
+        (
+            s.steam.clone(),
+            ScraperCreds::from_account(
+                s.cfg.screenscraper_id.clone(),
+                s.cfg.screenscraper_password.clone(),
+            ),
+        )
+    };
+    let db = state.borrow().db.clone();
+    let (tx, rx) = std::sync::mpsc::channel::<usize>();
+    std::thread::spawn(move || {
+        for (done, db_id) in queue.iter().enumerate() {
+            if done > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+            }
+            if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, *db_id) {
+                if let Ok(games) =
+                    steam.screenscraper_game(&creds, &entry.screenscraper_id)
+                {
+                    if let Some(game) = games.into_iter().next() {
+                        let fresh_meta = ira_models::ScraperMetadata {
+                            ss_id: entry.screenscraper_id.clone(),
+                            release_date: game.release_date.clone(),
+                            release_timestamp: ira_db::scraper_release_timestamp(
+                                &game.release_date,
+                            ),
+                            release_dates: game.release_dates.clone(),
+                            developers: game.developers.clone(),
+                            publishers: game.publishers.clone(),
+                            genres: game.genres.clone(),
+                            players: game.players.clone(),
+                            rating: game.rating,
+                            classifications: game.classifications.clone(),
+                            synopses: game
+                                .synopses
+                                .iter()
+                                .find(|(l, _)| l == "en")
+                                .or_else(|| game.synopses.first())
+                                .cloned()
+                                .into_iter()
+                                .collect(),
+                        };
+                        if let Ok(true) =
+                            ira_db::merge_missing_scraper_metadata(&db, *db_id, &fresh_meta)
+                        {
+                            eprintln!("SS refetch: filled gaps for game {db_id}");
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(done + 1);
+        }
+    });
+
+    let button = button.clone();
+    poll_channel(rx, move |done| {
+        button.set_label(&crate::tr!("Fetching {done}/{total}…").replacen("{done}", &done.to_string(), 1).replacen("{total}", &total.to_string(), 1));
+        if done >= total {
+            button.set_sensitive(true);
+            button.set_label(&crate::tr!("Fetch missing metadata"));
+        }
+    });
+}
+
+/// Whether a stored record is missing any piece a refetch could bring.
+fn metadata_has_gaps(meta: &ira_models::ScraperMetadata) -> bool {
+    meta.release_date.is_empty()
+        || meta.players.is_empty()
+        || meta.rating <= 0.0
+        || meta.synopses.is_empty()
+        || meta.classifications.is_empty()
+        || meta.developers.is_empty()
+        || meta.publishers.is_empty()
+        || meta.genres.is_empty()
 }
 
 /// The status box of a match-list row's ScreenScraper pass, added as its
@@ -472,16 +576,16 @@ pub(super) fn run_pc_matching(
     let steam_info = app_id
         .and_then(|app_id| steam.fetch_steamcmd_info(&app_id.to_string()))
         .filter(|info| !info.developer.trim().is_empty() || !info.publisher.trim().is_empty());
-    let synopsis_for = |game: &ScrapedGame| {
-        if game.synopses.is_empty() {
-            app_id.and_then(|id| steam.fetch_store_synopsis(&id.to_string()))
+    let extras_for = |game: &ScrapedGame| {
+        if game.synopses.is_empty() || game.classifications.is_empty() {
+            app_id.and_then(|id| steam.fetch_store_extras(&id.to_string()))
         } else {
             None
         }
     };
     let finish = |game: ScrapedGame| -> Option<ScrapedGame> {
-        let synopsis = synopsis_for(&game);
-        finish_pc_pick(db, game, steam_info.as_ref(), synopsis)
+        let extras = extras_for(&game);
+        finish_pc_pick(db, game, steam_info.as_ref(), extras.as_ref())
     };
 
     // The game's own system first — a hit there is simply the game.
@@ -617,7 +721,7 @@ fn finish_pc_pick(
     db: &ira_db::DbConn,
     mut game: ScrapedGame,
     info: Option<&SteamCmdInfo>,
-    synopsis: Option<String>,
+    extras: Option<&ira_api::steam::StoreExtras>,
 ) -> Option<ScrapedGame> {
     if game.developers.is_empty() && game.publishers.is_empty() {
         if let Some(info) = info {
@@ -630,8 +734,21 @@ fn finish_pc_pick(
         }
     }
     if game.synopses.is_empty() {
-        if let Some(synopsis) = synopsis {
-            game.synopses.push(("en".to_string(), synopsis));
+        if let Some(extras) = extras {
+            if !extras.synopsis.is_empty() {
+                game.synopses.push(("en".to_string(), extras.synopsis.clone()));
+            }
+        }
+    }
+    if game.classifications.is_empty() {
+        if let Some(extras) = extras {
+            for (board, value) in &extras.ratings {
+                game.classifications
+                    .push(ira_models::ScraperClassification {
+                        kind: board.clone(),
+                        value: value.clone(),
+                    });
+            }
         }
     }
     let bare = game.release_date.is_empty()
@@ -1302,9 +1419,12 @@ mod tests {
             publisher: "Team Salvato".into(),
             ..Default::default()
         };
+        let extras = ira_api::steam::StoreExtras {
+            synopsis: "A poetry horror.".into(),
+            ratings: vec![],
+        };
         let finished =
-            super::finish_pc_pick(&conn, game.clone(), Some(&info), Some("A poetry horror.".into()))
-                .unwrap();
+            super::finish_pc_pick(&conn, game.clone(), Some(&info), Some(&extras)).unwrap();
         assert_eq!(
             finished
                 .developers

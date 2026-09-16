@@ -289,13 +289,33 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
-    let header = gtk4::Label::new(Some(&crate::tr!("{} game(s) to match").replacen(
+    let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    let count = gtk4::Label::new(Some(&crate::tr!("{} game(s) to match").replacen(
         "{}",
         &needs_matching.len().to_string(),
         1,
     )));
-    header.set_xalign(0.0);
-    header.add_css_class(CSS_HEADING);
+    count.set_halign(gtk4::Align::Start);
+    count.set_hexpand(true);
+    count.add_css_class(CSS_HEADING);
+    header.append(&count);
+    // Matched games with holes in their metadata: one exact fetch per
+    // entry by its own id, merged without any rematch. Only appears when
+    // ScreenScraper credentials exist; quota makes it opt-in.
+    let has_ss_creds = {
+        let s = state.borrow();
+        !s.cfg.screenscraper_id.is_empty()
+    };
+    let refetch_btn = gtk4::Button::with_label(&crate::tr!("Fetch missing metadata"));
+    refetch_btn.add_css_class(CSS_FLAT);
+    refetch_btn.set_sensitive(has_ss_creds);
+    {
+        let state = state.clone();
+        refetch_btn.connect_clicked(move |btn| {
+            super::mass_match_ss::start_ss_refetch_pass(&state, btn);
+        });
+    }
+    header.append(&refetch_btn);
     content.append(&super::helpers::clamped(&header, 600, (12, 8, 12, 12)));
 
     let (scrolled, list) = super::helpers::clamped_boxed_list(600);

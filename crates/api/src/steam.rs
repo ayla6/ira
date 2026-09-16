@@ -25,6 +25,14 @@ struct AchEntry {
     icon_gray: String,
 }
 
+/// What the PC garnish takes from the store page: the short
+/// description and every age-rating board that answered.
+#[derive(Debug, Clone)]
+pub struct StoreExtras {
+    pub synopsis: String,
+    pub ratings: Vec<(String, String)>,
+}
+
 #[derive(serde::Deserialize)]
 struct StoreAppDetailsAnswer {
     success: bool,
@@ -36,6 +44,14 @@ struct StoreAppDetailsAnswer {
 struct StoreAppShortInfo {
     #[serde(default)]
     short_description: String,
+    #[serde(default)]
+    ratings: Option<std::collections::HashMap<String, StoreBoardRating>>,
+}
+
+#[derive(serde::Deserialize)]
+struct StoreBoardRating {
+    #[serde(default)]
+    rating: String,
 }
 
 impl SteamDataClient {
@@ -176,9 +192,13 @@ impl SteamDataClient {
         header_image_base(&entry.data.as_ref()?.header_image)
     }
 
-    /// The store page's short description — the synopsis PC matches fall
-    /// back to when ScreenScraper's entry carries none.
-    pub fn fetch_store_synopsis(&self, app_id: &str) -> Option<String> {
+    /// The store page's short description plus the per-board age
+    /// ratings — the synopsis PC matches fall back to when
+    /// ScreenScraper's entry carries none, and the age classification
+    /// boards (`PEGI 18`, `ESRB M`, ...) that PC entries never have.
+    /// The store answers with the boards for the requester's region
+    /// plus whatever else it holds.
+    pub fn fetch_store_extras(&self, app_id: &str) -> Option<StoreExtras> {
         let url = format!("https://store.steampowered.com/api/appdetails?appids={app_id}&l=english");
         let resp = self.http.get(&url).send().ok()?;
         let raw: std::collections::HashMap<String, StoreAppDetailsAnswer> = resp.json().ok()?;
@@ -186,8 +206,26 @@ impl SteamDataClient {
         if !entry.success {
             return None;
         }
-        let synopsis = entry.data.as_ref()?.short_description.trim();
-        (!synopsis.is_empty()).then(|| synopsis.to_string())
+        let data = entry.data.as_ref()?;
+        let synopsis = data.short_description.trim();
+        let mut ratings: Vec<(String, String)> = data
+            .ratings
+            .as_ref()
+            .map(|boards| {
+                boards
+                    .iter()
+                    .filter(|(_, board)| !board.rating.trim().is_empty())
+                    .map(|(board, info)| {
+                        (board.to_uppercase(), info.rating.trim().to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        ratings.sort();
+        Some(StoreExtras {
+            synopsis: synopsis.to_string(),
+            ratings,
+        })
     }
 
     pub fn search_steam_store(&self, term: &str) -> Vec<(String, String)> {

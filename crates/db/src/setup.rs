@@ -144,18 +144,12 @@ pub fn init_db(db_path: &str) -> DbConn {
                 ON scraper_game_genres(genre_id);
             CREATE TABLE IF NOT EXISTS scraper_game_classifications (
                 game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-                kind TEXT NOT NULL DEFAULT '',
-                classification_id INTEGER NOT NULL
-                    REFERENCES scraper_classifications(id) ON DELETE CASCADE,
-                PRIMARY KEY (game_id, kind, classification_id)
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (game_id, kind)
             );
             CREATE TABLE IF NOT EXISTS scraper_genres (
                 id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL DEFAULT ''
-            );
-            CREATE TABLE IF NOT EXISTS scraper_classifications (
-                id INTEGER PRIMARY KEY,
-                kind TEXT NOT NULL DEFAULT '',
                 name TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS scraper_misses (

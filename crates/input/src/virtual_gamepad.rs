@@ -52,17 +52,18 @@ const DUAL_SENSE_GUID: &str = "030000004c050000e60c000011010000";
 // remapper stands between them and the hardware. The evdev node keeps an
 // Ira-prefixed name (like every backend) so the hub never routes our own
 // pad as a physical controller; the mapping string below is what renames it
-// "Steam Virtual Gamepad" inside SDL games. A non-zero version keeps SDL's
-// GUID CRC bytes zeroed, matching that mapping's GUID.
+// "Steam Virtual Gamepad" inside SDL games. The version matches the
+// controller database entry for this identity so browser consumers GUID-
+// match it instead of falling back to positional button binding.
 const STEAM_INPUT_VENDOR: u16 = 0x28de;
 const STEAM_INPUT_PRODUCT: u16 = 0x11ff;
-const STEAM_INPUT_VERSION: u16 = 0x0110;
+const STEAM_INPUT_VERSION: u16 = 0x0100;
 const STEAM_INPUT_NAME: &str = "Ira Virtual Steam Input Controller";
-const STEAM_INPUT_GUID: &str = "03000000de280000ff11000010010000";
+const STEAM_INPUT_GUID: &str = "03000000de280000ff11000000010000";
 /// The name the SDL mapping carries: games ask SDL for the controller's
 /// name, and SDL answers with the mapping's.
 const STEAM_INPUT_SDL_NAME: &str = "Steam Virtual Gamepad";
-const STEAM_INPUT_SDL_BINDINGS: &str = "a:b0,b:b1,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:a2,righttrigger:a5,back:b8,start:b9,guide:b10,leftstick:b11,rightstick:b12,dpup:b13,dpdown:b14,dpleft:b15,dpright:b16,leftx:a0,lefty:a1,rightx:a3,righty:a4,platform:Linux";
+const STEAM_INPUT_SDL_BINDINGS: &str = "a:b0,b:b1,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:a2,righttrigger:a5,back:b6,start:b7,guide:b8,leftstick:b9,rightstick:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,rightx:a3,righty:a4,platform:Linux";
 
 fn sony_sdl_bindings() -> &'static str {
     "a:b0,b:b1,x:b2,y:b3,back:b8,start:b9,guide:b12,leftstick:b10,rightstick:b11,leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftx:a0,lefty:a1,rightx:a2,righty:a5,lefttrigger:a3,righttrigger:a4,misc1:b13,platform:Linux"
@@ -329,10 +330,15 @@ impl VirtualGamepad {
         Some(InputEvent::new(EventType::ABSOLUTE.0, code.0, value))
     }
 
-    /// The DirectInput d-pad's hat half; the keys are emitted by `emit`
-    /// beside it.
-    fn direct_input_hat_event(&mut self, button: GamepadButton, pressed: bool) -> Option<InputEvent> {
-        if self.backend != VirtualGamepadBackend::DirectInput {
+    /// The hat 0 half mirrored beside the d-pad keys for the backends that
+    /// report the d-pad both ways (Xbox, DirectInput, Steam Input).
+    fn mirrored_hat_event(&mut self, button: GamepadButton, pressed: bool) -> Option<InputEvent> {
+        if !matches!(
+            self.backend,
+            VirtualGamepadBackend::XInput
+                | VirtualGamepadBackend::DirectInput
+                | VirtualGamepadBackend::SteamInput
+        ) {
             return None;
         }
         let (code, value) = self.update_hat(button, pressed)?;
@@ -426,8 +432,6 @@ fn gamepad_buttons(backend: VirtualGamepadBackend) -> AttributeSet<KeyCode> {
         KeyCode::BTN_WEST,
         KeyCode::BTN_TL,
         KeyCode::BTN_TR,
-        KeyCode::BTN_TL2,
-        KeyCode::BTN_TR2,
         KeyCode::BTN_SELECT,
         KeyCode::BTN_START,
         KeyCode::BTN_MODE,
@@ -436,6 +440,19 @@ fn gamepad_buttons(backend: VirtualGamepadBackend) -> AttributeSet<KeyCode> {
     ]
     .into_iter()
     .collect();
+    // The Xbox identities must mirror the real xpad key set, which has no
+    // digital trigger keys (triggers are analog only): consumers enumerate
+    // buttons by key code and every database entry for those identities
+    // binds back/start/guide/stick clicks to slots 6-10, which only line up
+    // without BTN_TL2/BTN_TR2 shifting SELECT and everything after it two
+    // places down.
+    if !matches!(
+        backend,
+        VirtualGamepadBackend::XInput | VirtualGamepadBackend::SteamInput
+    ) {
+        buttons.insert(KeyCode::BTN_TL2);
+        buttons.insert(KeyCode::BTN_TR2);
+    }
     if backend == VirtualGamepadBackend::SwitchPro {
         buttons.insert(KeyCode::BTN_Z);
     } else if sony_layout(backend) {
@@ -556,8 +573,14 @@ fn axis_setups(backend: VirtualGamepadBackend) -> Vec<UinputAbsSetup> {
         axis_setup(AbsoluteAxisCode::ABS_RX, -32768, 32767),
         axis_setup(AbsoluteAxisCode::ABS_RY, -32768, 32767),
     ]);
-    if backend == VirtualGamepadBackend::DirectInput {
-        // Standard DirectInput d-pad: hat 0 beside the d-pad keys.
+    if matches!(
+        backend,
+        VirtualGamepadBackend::DirectInput
+            | VirtualGamepadBackend::XInput
+            | VirtualGamepadBackend::SteamInput
+    ) {
+        // Hat 0 beside the d-pad keys: the databases and auto-mappings for
+        // these identities bind the d-pad to the hat.
         setups.extend([
             axis_setup(AbsoluteAxisCode::ABS_HAT0X, -1, 1),
             axis_setup(AbsoluteAxisCode::ABS_HAT0Y, -1, 1),
@@ -595,8 +618,24 @@ fn button_code(backend: VirtualGamepadBackend, button: GamepadButton) -> Option<
         GamepadButton::Y => KeyCode::BTN_WEST,
         GamepadButton::LeftShoulder => KeyCode::BTN_TL,
         GamepadButton::RightShoulder => KeyCode::BTN_TR,
-        GamepadButton::LeftTrigger => KeyCode::BTN_TL2,
-        GamepadButton::RightTrigger => KeyCode::BTN_TR2,
+        // The Xbox identities carry no digital trigger keys (analog only);
+        // trigger outputs there ride the axes.
+        GamepadButton::LeftTrigger
+            if !matches!(
+                backend,
+                VirtualGamepadBackend::XInput | VirtualGamepadBackend::SteamInput
+            ) =>
+        {
+            KeyCode::BTN_TL2
+        }
+        GamepadButton::RightTrigger
+            if !matches!(
+                backend,
+                VirtualGamepadBackend::XInput | VirtualGamepadBackend::SteamInput
+            ) =>
+        {
+            KeyCode::BTN_TR2
+        }
         GamepadButton::Back => KeyCode::BTN_SELECT,
         GamepadButton::Start => KeyCode::BTN_START,
         GamepadButton::Guide => KeyCode::BTN_MODE,
@@ -998,6 +1037,36 @@ mod tests {
     }
 
     #[test]
+    fn test_xinput_mirrors_the_dpad_as_hat0_for_database_mappings() {
+        // Every controller database entry for the Xbox identity binds the
+        // d-pad to hat 0 (dpup:h0.1); a keys-only d-pad reads as dead there.
+        for backend in [XInput, crate::VirtualGamepadBackend::SteamInput] {
+            let mut pad = VirtualGamepad::shadow_only(backend);
+            pad.emit(&OutputEvent::GamepadButton {
+                button: GamepadButton::DpadLeft,
+                pressed: true,
+            })
+            .unwrap();
+            let queued = std::mem::take(&mut pad.pending);
+            assert_eq!(
+                queued.len(),
+                2,
+                "{backend:?}: the d-left key and its hat 0 movement both ship"
+            );
+            assert!(queued.iter().any(|event| event.event_type() == evdev::EventType::KEY
+                && event.code() == KeyCode::BTN_DPAD_LEFT.0
+                && event.value() == 1));
+            assert!(queued.iter().any(|event| event.event_type() == evdev::EventType::ABSOLUTE
+                && event.code() == evdev::AbsoluteAxisCode::ABS_HAT0X.0
+                && event.value() == -1));
+            // The hat axes are declared so consumers discover them.
+            let codes: Vec<_> = axis_setups(backend).iter().map(|setup| setup.code()).collect();
+            assert!(codes.contains(&evdev::AbsoluteAxisCode::ABS_HAT0X.0));
+            assert!(codes.contains(&evdev::AbsoluteAxisCode::ABS_HAT0Y.0));
+        }
+    }
+
+    #[test]
     fn test_direct_input_sdl_mapping_matches_identity() {
         assert!(VirtualGamepad::direct_input_sdl_mapping()
             .starts_with("0600f799524900000100000001000000,Ira Virtual DirectInput Controller,"));
@@ -1021,7 +1090,7 @@ mod tests {
         assert_eq!(device_name(SteamInput), "Ira Virtual Steam Input Controller");
         assert_eq!(
             device_id(SteamInput),
-            InputId::new(evdev::BusType::BUS_USB, 0x28de, 0x11ff, 0x0110)
+            InputId::new(evdev::BusType::BUS_USB, 0x28de, 0x11ff, 0x0100)
         );
         // XInput-style layout: d-pad keys, analog triggers on ABS_Z/ABS_RZ.
         assert_eq!(
@@ -1034,23 +1103,28 @@ mod tests {
             Some(evdev::AbsoluteAxisCode::ABS_Z)
         );
         assert_eq!(
-            axis_code(SteamInput, GamepadAxis::RightY),
-            Some(evdev::AbsoluteAxisCode::ABS_RY)
+            device_id(SteamInput),
+            InputId::new(evdev::BusType::BUS_USB, 0x28de, 0x11ff, 0x0100)
         );
         // The env mapping must carry the exact GUID the uinput node gets:
         // bus USB, vendor/product/version little-endian, zero CRC.
         let mapping = VirtualGamepad::steam_input_sdl_mapping();
         assert!(mapping.starts_with(
-            "03000000de280000ff11000010010000,Steam Virtual Gamepad,a:b0,b:b1"
+            "03000000de280000ff11000000010000,Steam Virtual Gamepad,a:b0,b:b1"
         ));
-        assert!(mapping.contains("dpup:b13,dpdown:b14,dpleft:b15,dpright:b16"));
+        assert!(mapping.contains("dpup:b11,dpdown:b12,dpleft:b13,dpright:b14"));
+        assert!(mapping.contains("back:b6,start:b7,guide:b8,leftstick:b9,rightstick:b10"));
         assert!(mapping.contains("lefttrigger:a2,righttrigger:a5"));
     }
 
     #[test]
     fn test_axis_value_maps_sticks_and_triggers() {
-        assert_eq!(axis_value(GamepadAxis::LeftX, -1.0), -32767);
+        // Both deflection endpoints must land on the evdev range's own
+        // endpoints (-32768..32767) or consumers read full pulls as
+        // -0.9999x / +0.9999x.
+        assert_eq!(axis_value(GamepadAxis::LeftX, -1.0), -32768);
         assert_eq!(axis_value(GamepadAxis::LeftX, 1.0), 32767);
+        assert_eq!(axis_value(GamepadAxis::RightY, 0.0), 0);
         assert_eq!(axis_value(GamepadAxis::LeftTrigger, 0.5), 128);
         assert_eq!(axis_value(GamepadAxis::LeftTrigger, -1.0), 0);
     }

@@ -331,7 +331,7 @@ mod tests {
         // because it never shares Valve's identity.
         assert!(sdl_mapping_for_backend(VirtualGamepadBackend::SteamInput)
             .unwrap()
-            .starts_with("03000000de280000ff11000010010000,Steam Virtual Gamepad,"));
+            .starts_with("03000000de280000ff11000000010000,Steam Virtual Gamepad,"));
         assert_eq!(
             ignored_device_for_target(0x2dc8, 0x3106, VirtualGamepadBackend::SteamInput),
             Some("0x2dc8/0x3106".to_string())
@@ -343,7 +343,7 @@ mod tests {
         )));
         assert!(envs.iter().any(
             |(key, value)| key == "SDL_GAMECONTROLLERCONFIG"
-                && value.starts_with("03000000de280000ff11000010010000")
+                && value.starts_with("03000000de280000ff11000000010000")
         ));
     }
 

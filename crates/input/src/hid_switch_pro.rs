@@ -85,19 +85,30 @@ const BAT_WIRED_USB: u8 = 0x40;
 const USB_REPORT_LEN: usize = 64;
 
 /// The twin's HID report descriptor, describing the 0x30 report the way
-/// the wire actually lays it out — 24 button bits, a vibration byte, then
-/// the two sticks as four 12-bit fields — so the kernel's `hid-generic`
-/// driver produces a clean evdev gamepad (centered sticks, standard
-/// gamepad-namespace buttons). The IMU bytes ride undescribed: motion
-/// reaches games through SDL's hidapi driver reading the raw report, and
-/// an accelerometer node of our own would only risk being listed as a
-/// phantom joystick. The subcommand/rumble report IDs stay declared so
-/// hidraw consumers can see them.
+/// the wire actually lays it out — two constant bytes (timer + battery),
+/// 24 button bits, then the two sticks as four 12-bit fields, with the
+/// vibration byte and IMU samples left undescribed — so the kernel's
+/// `hid-generic` driver produces a clean evdev gamepad (centered sticks,
+/// standard gamepad-namespace buttons). Every byte before the buttons
+/// must be declared even as a constant: hid-generic reads fields at
+/// descriptor offsets, so an undeclared leading byte shifts the buttons
+/// onto the timer (a counter that flips phantom buttons every report)
+/// and the sticks onto the button bytes. Motion rides the undescribed
+/// tail: it reaches games through SDL's hidapi driver reading the raw
+/// report, and an accelerometer node of our own would only risk being
+/// listed as a phantom joystick. The subcommand/rumble report IDs stay
+/// declared so hidraw consumers can see them. The sticks keep Nintendo's
+/// wire orientation (up reads as a larger raw value) because SDL's
+/// hidapi driver applies `~axis` to Y; raw evdev consumers therefore see
+/// an inverted Y, the price of serving both parsers from one report.
 const REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x01, // Usage Page (Generic Desktop)
     0x09, 0x05, // Usage (Game Pad)
     0xA1, 0x01, // Collection (Application)
     0x85, 0x30, //   Report ID (0x30 standard input)
+    0x75, 0x08, //   Report Size (8)
+    0x95, 0x02, //   Report Count (2)
+    0x81, 0x03, //   Input (Constant) — timer + battery bytes
     0x05, 0x09, //   Usage Page (Button)
     0x19, 0x01, //   Usage Minimum (Button 1)
     0x29, 0x18, //   Usage Maximum (Button 24)
@@ -106,9 +117,6 @@ const REPORT_DESCRIPTOR: &[u8] = &[
     0x75, 0x01, //   Report Size (1)
     0x95, 0x18, //   Report Count (24)
     0x81, 0x02, //   Input (Data, Variable, Absolute)
-    0x75, 0x08, //   Report Size (8)
-    0x95, 0x01, //   Report Count (1)
-    0x81, 0x03, //   Input (Constant) — vibration byte
     0x05, 0x01, //   Usage Page (Generic Desktop)
     0x09, 0x30, //   Usage (X)
     0x09, 0x31, //   Usage (Y)
@@ -120,7 +128,7 @@ const REPORT_DESCRIPTOR: &[u8] = &[
     0x95, 0x04, //   Report Count (4)
     0x81, 0x02, //   Input (Data, Variable, Absolute)
     0x75, 0x08, //   Report Size (8)
-    0x95, 0x24, //   Report Count (36) — undescribed IMU samples
+    0x95, 0x25, //   Report Count (37) — vibration byte + undescribed IMU tail
     0x81, 0x03, //   Input (Constant)
     0x06, 0x00, 0xFF, //   Usage Page (Vendor Defined 0xFF00)
     0x85, 0x21, //   Report ID (0x21 subcommand reply)
@@ -551,9 +559,9 @@ mod tests {
 
     #[test]
     fn test_descriptor_describes_the_wire_layout() {
-        // Game Pad collection, 24 button bits at the start of the 0x30
-        // report, the two sticks as four 12-bit fields right after the
-        // vibration byte, and the seven protocol report IDs declared.
+        // Game Pad collection, two constant leading bytes, 24 button
+        // bits, the two sticks as four 12-bit fields, and the seven
+        // protocol report IDs declared.
         assert_eq!(REPORT_DESCRIPTOR[6], 0x85); // report id item
         assert_eq!(REPORT_DESCRIPTOR[7], 0x30);
         assert_eq!(*REPORT_DESCRIPTOR.last().unwrap(), 0xC0);
@@ -575,6 +583,70 @@ mod tests {
         // tail and the paired sensor twin, never a phantom axis set here.
         assert!(!REPORT_DESCRIPTOR.windows(2).any(|w| w == [0x09, 0x33]
             && REPORT_DESCRIPTOR.windows(2).any(|w2| w2 == [0x09, 0x32])));
+    }
+
+    /// The 0x30 report's input fields as (flags, body-relative bit
+    /// offset), tracking report size/count like hid-core's parser. The
+    /// walk stops at the next report id: every report restarts at offset
+    /// zero. Only the item forms our descriptor uses are recognized.
+    fn input_field_offsets(descriptor: &[u8]) -> Vec<(u8, u32)> {
+        let mut fields = Vec::new();
+        let (mut size, mut count, mut offset) = (0u32, 0u32, 0u32);
+        let mut seen_report_id = false;
+        let mut i = 0;
+        while i < descriptor.len() {
+            let data = match descriptor[i] {
+                0x85 if seen_report_id => break,
+                0x85 => {
+                    seen_report_id = true;
+                    1
+                }
+                0x75 => {
+                    size = u32::from(descriptor[i + 1]);
+                    1
+                }
+                0x95 => {
+                    count = u32::from(descriptor[i + 1]);
+                    1
+                }
+                0x81 => {
+                    fields.push((descriptor[i + 1], offset));
+                    offset += size * count;
+                    1
+                }
+                0x06 | 0x26 | 0x46 => 2,
+                _ => 1,
+            };
+            i += 1 + data;
+        }
+        fields
+    }
+
+    #[test]
+    fn test_descriptor_fields_align_with_the_wire_report() {
+        // hid-generic reads fields at descriptor bit offsets behind the
+        // report id: the timer+battery constant must occupy the two bytes
+        // before the buttons, so the 24 button bits land on wire bytes
+        // 3..5 and the sticks on the packed stick bytes 6..11 that
+        // standard_report writes. A descriptor that skips the leading
+        // constant parses the timer as buttons (phantom presses flipping
+        // every report) and the button bytes as sticks.
+        let fields = input_field_offsets(REPORT_DESCRIPTOR);
+        assert_eq!(
+            fields,
+            vec![
+                (0x03, 0),   // constant: timer + battery
+                (0x02, 16),  // buttons, wire bytes 3..5
+                (0x02, 40),  // sticks, wire bytes 6..11
+                (0x03, 88),  // constant: vibrator + IMU tail
+            ]
+        );
+        // The button and stick offsets agree with where standard_report
+        // puts those bytes: south (B) is bit 2 of wire byte 3, and the
+        // centered left stick packs into wire bytes 6..8.
+        let report = standard_report(0, &PadState::default(), [0.0; 3], [0.0; 3]);
+        assert_eq!(report[3], 0);
+        assert_eq!(&report[6..9], &[0x00, 0x08, 0x80]);
     }
 
     #[test]

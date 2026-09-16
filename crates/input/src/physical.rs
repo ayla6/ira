@@ -727,8 +727,27 @@ fn normalize_signed(value: i32, minimum: i32, maximum: i32) -> f32 {
     if minimum >= maximum {
         return 0.0;
     }
-    let normalized = ((value - minimum) as f32 / (maximum - minimum) as f32) * 2.0 - 1.0;
-    normalized.clamp(AXIS_MIN, AXIS_MAX)
+    // The standard signed 16-bit gamepad range is a two's-complement
+    // artifact: firmware emits symmetric ±32767 and never the bottom step,
+    // so scaling by the declared half-range (32767.5) would leave full
+    // deflection at ±0.99997. Scale by 32767; the half-step snap puts both
+    // center steps (-1, 0) at rest, same as every other range gets.
+    if minimum == -32768 && maximum == 32767 {
+        if value.abs() <= 1 {
+            return 0.0;
+        }
+        return (value as f32 / 32767.0).clamp(AXIS_MIN, AXIS_MAX);
+    }
+    // An integer range has no exact center (0..255 centers between 127 and
+    // 128), so a pad resting on either step beside the midpoint is
+    // centered, not half a step off it. Without the snap, every
+    // symmetric-range pad feeds the virtual output a permanent ±1/255
+    // bias that reads as stick drift no real controller shows.
+    let center = (minimum as f32 + maximum as f32) / 2.0;
+    if (value as f32 - center).abs() <= 0.5 {
+        return 0.0;
+    }
+    ((value as f32 - center) / ((maximum - minimum) as f32 / 2.0)).clamp(AXIS_MIN, AXIS_MAX)
 }
 
 fn normalize_trigger(value: i32, minimum: i32, maximum: i32) -> f32 {
@@ -1103,9 +1122,20 @@ mod tests {
 
     #[test]
     fn test_normalize_signed_controller_axis() {
-        assert!((normalize_signed(127, 0, 255) + 0.0039).abs() < 0.01);
+        // The standard s16 range is symmetric in practice: full deflection
+        // is ±32767 (firmware never sends the two's-complement bottom step).
+        assert_eq!(normalize_signed(-32767, -32768, 32767), -1.0);
+        assert_eq!(normalize_signed(32767, -32768, 32767), 1.0);
+        assert_eq!(normalize_signed(-32768, -32768, 32767), -1.0);
+        assert_eq!(normalize_signed(-1, -32768, 32767), 0.0);
+        assert_eq!(normalize_signed(0, -32768, 32767), 0.0);
+        // A symmetric-range axis reads honestly: both center steps are
+        // rest, the ends are exact, everything between passes through.
+        assert_eq!(normalize_signed(127, 0, 255), 0.0);
+        assert_eq!(normalize_signed(128, 0, 255), 0.0);
         assert_eq!(normalize_signed(0, 0, 255), -1.0);
         assert_eq!(normalize_signed(255, 0, 255), 1.0);
+        assert!((normalize_signed(126, 0, 255) + 0.0118).abs() < 0.001);
         assert_eq!(normalize_signed(10, 10, 10), 0.0);
     }
 

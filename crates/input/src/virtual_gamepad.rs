@@ -648,6 +648,12 @@ fn axis_value(axis: GamepadAxis, value: f32) -> i32 {
         GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger => {
             ((value.max(0.0)) * 255.0).round() as i32
         }
+        // The evdev stick range is the XInput one, -32768..32767: the
+        // negative half is one step wider, so scaling both sides by 32767
+        // would leave -1.0 one short of the axis minimum and every consumer
+        // (SDL, Chrome) would read full deflection as -0.9999x. Scale each
+        // half by its own width so both endpoints land exactly.
+        _ if value < 0.0 => (value * 32768.0).round() as i32,
         _ => (value * 32767.0).round() as i32,
     }
 }
@@ -655,13 +661,48 @@ fn axis_value(axis: GamepadAxis, value: f32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        axis_code, axis_value, button_code, device_id, device_name, gamepad_buttons, hat_value,
-        sony_layout, VirtualGamepad, DIRECT_INPUT_NAME, DIRECT_INPUT_PRODUCT, DIRECT_INPUT_VENDOR,
-        DIRECT_INPUT_VERSION,
+        axis_code, axis_setups, axis_value, button_code, device_id, device_name, gamepad_buttons,
+        hat_value, playback_command, sony_layout, VirtualGamepad, DIRECT_INPUT_NAME,
+        DIRECT_INPUT_PRODUCT, DIRECT_INPUT_VENDOR, DIRECT_INPUT_VERSION,
     };
+    use crate::rumble::{stop_command, RumbleCommand};
     use crate::VirtualGamepadBackend::{DirectInput, DualSense, DualShock4, SwitchPro, XInput};
     use crate::{GamepadAxis, GamepadButton, OutputEvent};
-    use evdev::{InputId, KeyCode};
+    use std::collections::HashMap;
+    use evdev::{FFEffectCode, InputId, KeyCode};
+
+    #[test]
+    fn test_playback_start_replays_the_stored_effect() {
+        let mut effects = HashMap::new();
+        effects.insert(3, RumbleCommand {
+            strong: 10,
+            weak: 20,
+            duration_ms: 300,
+        });
+        assert_eq!(
+            playback_command(&effects, FFEffectCode(3), 1),
+            Some(RumbleCommand {
+                strong: 10,
+                weak: 20,
+                duration_ms: 300
+            })
+        );
+    }
+
+    #[test]
+    fn test_playback_stop_stops_regardless_of_known_id() {
+        let effects = HashMap::new();
+        assert_eq!(
+            playback_command(&effects, FFEffectCode(9), 0),
+            Some(stop_command())
+        );
+    }
+
+    #[test]
+    fn test_playback_of_unknown_effect_is_ignored() {
+        let effects = HashMap::new();
+        assert_eq!(playback_command(&effects, FFEffectCode(4), 1), None);
+    }
 
     #[test]
     fn test_emit_queues_and_flush_drains() {

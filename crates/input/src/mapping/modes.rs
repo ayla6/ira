@@ -391,20 +391,44 @@ fn apply_stick_processing(
         return (0.0, 0.0);
     }
     let scaled = ((magnitude - inner) / (outer - inner).max(VALUE_EPSILON)).clamp(0.0, 1.0);
-    let (dx, dy) = (
-        x / magnitude.max(VALUE_EPSILON),
-        y / magnitude.max(VALUE_EPSILON),
-    );
-    let (x, y) = match response_axis_style {
-        ResponseAxisStyle::Distance => {
-            let curved = scaled.powf(curve);
-            (dx * curved, dy * curved)
+    // A fully deflected vector sits at magnitude 1.0, but rounding anywhere
+    // in the chain can land it a hair past the outer radius — and
+    // renormalizing the direction then would shave the pulled axis below
+    // 1.0. Within the saturation tolerance, output the raw per-axis values
+    // instead; a digital d-pad's ±1/±1 diagonal overranges far past the
+    // tolerance and still normalizes to the unit circle.
+    const SATURATION_TOLERANCE: f32 = 1.0 / 256.0;
+    let (x, y) = if scaled < 1.0 {
+        let (dx, dy) = (
+            x / magnitude.max(VALUE_EPSILON),
+            y / magnitude.max(VALUE_EPSILON),
+        );
+        match response_axis_style {
+            ResponseAxisStyle::Distance => {
+                let curved = scaled.powf(curve);
+                (dx * curved, dy * curved)
+            }
+            ResponseAxisStyle::PerAxis => {
+                let curved_x = (dx.abs() * scaled).powf(curve) * dx.signum();
+                let curved_y = (dy.abs() * scaled).powf(curve) * dy.signum();
+                (curved_x, curved_y)
+            }
         }
-        ResponseAxisStyle::PerAxis => {
-            let curved_x = (dx.abs() * scaled).powf(curve) * dx.signum();
-            let curved_y = (dy.abs() * scaled).powf(curve) * dy.signum();
-            (curved_x, curved_y)
+    } else if magnitude <= outer * (1.0 + SATURATION_TOLERANCE) {
+        match response_axis_style {
+            // Full scale: the response curve is identity here, so the
+            // honest output is the vector itself, clamped per axis.
+            ResponseAxisStyle::Distance => (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0)),
+            ResponseAxisStyle::PerAxis => (
+                (x.abs() * scaled).powf(curve) * x.signum(),
+                (y.abs() * scaled).powf(curve) * y.signum(),
+            ),
         }
+    } else {
+        (
+            x / magnitude.max(VALUE_EPSILON),
+            y / magnitude.max(VALUE_EPSILON),
+        )
     };
     let x = x * sensitivity_x * if invert_x { -1.0 } else { 1.0 };
     let y = y * sensitivity_y * if invert_y { -1.0 } else { 1.0 };
@@ -503,6 +527,45 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadAxis { axis: GamepadAxis::LeftX, value } if (value - 0.5).abs() < 0.001
+        )));
+    }
+
+    #[test]
+    fn test_joystick_saturation_keeps_full_deflection_at_one() {
+        // A full pull must come out exactly 1.0 even when rounding anywhere
+        // in the chain pushes the vector magnitude a hair past the outer
+        // radius; the direction renormalization must not shave it.
+        let profile = mode_profile(SourceMode::Joystick(JoystickSettings::new(StickOutput::Left)));
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.process(stick(InputSource::Axis(GamepadAxis::LeftX), 0.0));
+        engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 1.0));
+        let events = engine.tick(8_000);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                OutputEvent::GamepadAxis { axis: GamepadAxis::LeftY, value } if *value == 1.0
+            )),
+            "full deflection must reach exactly 1.0, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn test_joystick_saturation_tolerates_cross_axis_jitter() {
+        // Sub-percent jitter on the idle axis must not shave the pulled
+        // axis either: magnitude lands just past 1.0, and the pulled axis
+        // stays exactly 1.0 while the jitter passes through honestly.
+        let profile = mode_profile(SourceMode::Joystick(JoystickSettings::new(StickOutput::Left)));
+        let mut engine = MappingEngine::new(profile).unwrap();
+        engine.process(stick(InputSource::Axis(GamepadAxis::LeftX), -0.0118));
+        engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 1.0));
+        let events = engine.tick(8_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis { axis: GamepadAxis::LeftY, value } if *value == 1.0
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis { axis: GamepadAxis::LeftX, value } if (*value + 0.0118).abs() < 0.0001
         )));
     }
 

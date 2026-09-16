@@ -130,8 +130,13 @@ pub fn store_scraper_metadata(
     )
     .unwrap_or_default();
 
-    let c = crate::lock_db(conn)?;
-    let tx = c.unchecked_transaction().map_err(err)?;
+    // Immediate: this store runs on enricher threads while the matcher's
+    // worker writes too, and a deferred transaction that read first only
+    // finds out at write time — as an immediate "database is locked".
+    let mut c = crate::lock_db(conn)?;
+    let tx = c
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(err)?;
     store_entities(&tx, "scraper_companies", &companies)?;
     reconcile_local_companies(&tx, &companies)?;
     store_entities(&tx, "scraper_genres", &genres)?;

@@ -152,6 +152,7 @@ fn field_row(
     metadata: &ScraperMetadata,
 ) {
     let row = adw::ActionRow::new();
+    row.set_use_markup(false);
     row.set_title(&field.label);
     let names: Vec<String> = (field.get)(metadata)
         .iter()
@@ -224,6 +225,7 @@ fn fill_entity_list(
         .unwrap_or_default();
     for entity in (field.get)(&metadata) {
         let row = adw::ActionRow::new();
+        row.set_use_markup(false);
         row.set_title(&entity.name);
         let remove = gtk4::Button::from_icon_name("user-trash-symbolic");
         remove.add_css_class(CSS_FLAT);

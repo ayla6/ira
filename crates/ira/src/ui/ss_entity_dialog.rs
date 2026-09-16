@@ -99,20 +99,38 @@ pub(super) fn show_entity_picker(
     }
 
     let repaint: Rc<dyn Fn(&str)> = Rc::new({
+        let state = state.clone();
         let entries = entries.clone();
         let list = list.clone();
         let dialog = dialog.clone();
         let on_pick = on_pick.clone();
         move |filter: &str| {
             clear_children(&list);
-            let needle = filter.to_lowercase();
-            let rows: Vec<ScraperEntity> = entries
-                .borrow()
-                .iter()
-                .filter(|e| needle.is_empty() || e.name.to_lowercase().contains(&needle))
-                .take(60)
-                .cloned()
-                .collect();
+            // Companies re-query the cache with the filter: the unnamed
+            // snapshot caps at sixty rows, so a studio past it would read
+            // as "no results" however it was spelled. Genres hold the
+            // whole table already and filter in memory.
+            let rows: Vec<ScraperEntity> = match kind {
+                EntityKind::Developer | EntityKind::Publisher => {
+                    match companies(&state, filter) {
+                        Ok(rows) => rows,
+                        Err(e) => {
+                            list.append(&status_row(&e));
+                            return;
+                        }
+                    }
+                }
+                EntityKind::Genre => {
+                    let needle = filter.to_lowercase();
+                    entries
+                        .borrow()
+                        .iter()
+                        .filter(|e| needle.is_empty() || e.name.to_lowercase().contains(&needle))
+                        .take(60)
+                        .cloned()
+                        .collect()
+                }
+            };
             if rows.is_empty() {
                 list.append(&status_row(&kind.empty_text()));
                 return;
@@ -125,6 +143,7 @@ pub(super) fn show_entity_picker(
                     on_pick(picked.clone());
                     dlg.close();
                 });
+                row.set_use_markup(false);
                 list.append(&row);
             }
         }

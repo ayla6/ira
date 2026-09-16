@@ -513,16 +513,6 @@ fn add_controller_row(
     let expander = adw::ExpanderRow::new();
     expander.set_title(&esc(&device_name));
 
-    let action_row = adw::ActionRow::new();
-    action_row.set_title(&crate::tr!("Controller mapping"));
-    action_row.set_subtitle(&crate::tr!("Edit controller-specific bindings"));
-    let edit = icon_button(
-        "document-edit-symbolic",
-        &crate::tr!("Edit controller mapping"),
-    );
-    action_row.add_suffix(&edit);
-    expander.add_row(&action_row);
-
     let layout = ControllerDefaultLayout::new(
         &expander,
         parent,
@@ -533,7 +523,18 @@ fn add_controller_row(
     );
     let enabled = state.config.mode != ControllerInputMode::Disabled;
     expander.set_expanded(enabled);
+    // The edit button rides the layout picker: it opens exactly what the
+    // picker shows, so a second row would only restate the same choice.
+    let edit = icon_button(
+        "document-edit-symbolic",
+        &crate::tr!("Edit controller mapping"),
+    );
+    layout.row.add_suffix(&edit);
     edit.set_sensitive(layout.row.selected() != 0);
+    let edit_for_selection = edit.clone();
+    layout.row.connect_selected_notify(move |row| {
+        edit_for_selection.set_sensitive(row.selected() != 0);
+    });
     let layout_for_edit = layout.clone();
     edit.connect_clicked(move |_| {
         let Some(path) = layout_for_edit.chosen.borrow().clone() else {

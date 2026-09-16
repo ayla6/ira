@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-16 00:57-0300\n"
+"POT-Creation-Date: 2026-09-16 01:54-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -212,7 +212,7 @@ msgstr ""
 #: crates/ira/src/ui/input_profile_editor.rs:450
 #: crates/ira/src/ui/input_profile_editor_save.rs:129
 #: crates/ira/src/ui/input_profile_output_capture.rs:55
-#: crates/ira/src/ui/input_profile_settings.rs:958
+#: crates/ira/src/ui/input_profile_settings.rs:959
 #: crates/ira/src/ui/installer_add_dialog.rs:643
 #: crates/ira/src/ui/message_handler.rs:126
 #: crates/ira/src/ui/play_history.rs:222
@@ -660,7 +660,7 @@ msgstr ""
 #: crates/ira/src/ui/group_dialog.rs:116
 #: crates/ira/src/ui/input_output_keys.rs:104
 #: crates/ira/src/ui/input_output_keys.rs:219
-#: crates/ira/src/ui/input_profile_settings.rs:959
+#: crates/ira/src/ui/input_profile_settings.rs:960
 #: crates/ira/src/ui/installer_add_dialog.rs:799
 #: crates/ira/src/ui/play_history.rs:223
 #: crates/ira/src/ui/profile_dialog.rs:199
@@ -892,8 +892,8 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:350
 #: crates/ira/src/ui/input_profile_settings.rs:188
-#: crates/ira/src/ui/input_profile_settings.rs:593
-#: crates/ira/src/ui/input_profile_settings.rs:703
+#: crates/ira/src/ui/input_profile_settings.rs:594
+#: crates/ira/src/ui/input_profile_settings.rs:704
 msgid "Disabled"
 msgstr ""
 
@@ -916,7 +916,7 @@ msgid "Current layout"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:409
-#: crates/ira/src/ui/input_profile_settings.rs:902
+#: crates/ira/src/ui/input_profile_settings.rs:903
 #: crates/ira/src/ui/profile_dialog.rs:160
 #: crates/ira/src/ui/profile_dialog.rs:254
 #: crates/ira/src/ui/wine_profile_picker.rs:66
@@ -925,7 +925,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:412
 #: crates/ira/src/ui/edit_game_controller.rs:439
-#: crates/ira/src/ui/input_profile_settings.rs:903
+#: crates/ira/src/ui/input_profile_settings.rs:904
 #: crates/ira/src/ui/profile_dialog.rs:187
 #: crates/ira/src/ui/profile_dialog.rs:195
 msgid "Delete profile"
@@ -3794,7 +3794,7 @@ msgid "Only layouts published for this game"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_search.rs:97
-#: crates/ira/src/ui/input_profile_settings.rs:815
+#: crates/ira/src/ui/input_profile_settings.rs:816
 msgid "Import layout from Steam"
 msgstr ""
 
@@ -3875,70 +3875,62 @@ msgstr ""
 msgid "No controllers detected"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:517
-msgid "Controller mapping"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_settings.rs:518
-msgid "Edit controller-specific bindings"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_settings.rs:521
+#: crates/ira/src/ui/input_profile_settings.rs:530
 msgid "Edit controller mapping"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:595
+#: crates/ira/src/ui/input_profile_settings.rs:596
 msgid "Default layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:725
+#: crates/ira/src/ui/input_profile_settings.rs:726
 msgid "Input virtualization disabled"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:726
+#: crates/ira/src/ui/input_profile_settings.rs:727
 msgid "Virtual XInput layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:727
+#: crates/ira/src/ui/input_profile_settings.rs:728
 msgid "Virtual DirectInput layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:729
+#: crates/ira/src/ui/input_profile_settings.rs:730
 msgid "Nintendo Switch Pro Controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:731
+#: crates/ira/src/ui/input_profile_settings.rs:732
 msgid "DualShock 4 Controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:732
+#: crates/ira/src/ui/input_profile_settings.rs:733
 msgid "DualSense Controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:733
+#: crates/ira/src/ui/input_profile_settings.rs:734
 msgid "Steam Input Controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:734
+#: crates/ira/src/ui/input_profile_settings.rs:735
 msgid "DSU (cemuhook) controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:737
+#: crates/ira/src/ui/input_profile_settings.rs:738
 #, rust-format
 msgid "{} | Linux reports {}"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:849
+#: crates/ira/src/ui/input_profile_settings.rs:850
 #: crates/ira/src/ui/profile_dialog.rs:63
 #: crates/ira/src/ui/profile_dialog.rs:256
 msgid "Create profile"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:955
+#: crates/ira/src/ui/input_profile_settings.rs:956
 msgid "Delete layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:956
+#: crates/ira/src/ui/input_profile_settings.rs:957
 msgid "This removes the game layout from Ira."
 msgstr ""
 

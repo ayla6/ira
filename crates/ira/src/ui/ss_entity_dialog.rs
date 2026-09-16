@@ -143,7 +143,6 @@ pub(super) fn show_entity_picker(
                     on_pick(picked.clone());
                     dlg.close();
                 });
-                row.set_use_markup(false);
                 list.append(&row);
             }
         }

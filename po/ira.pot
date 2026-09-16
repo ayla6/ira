@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-16 01:54-0300\n"
+"POT-Creation-Date: 2026-09-16 12:58-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1311,15 +1311,15 @@ msgid "Rating"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:127
-msgid "Developer"
+msgid "Developers"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:134
-msgid "Publisher"
+msgid "Publishers"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:141
-msgid "Genre"
+msgid "Genres"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:170
@@ -1338,36 +1338,36 @@ msgstr ""
 msgid "Edit…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:262
+#: crates/ira/src/ui/edit_game_scraper.rs:274
 msgid "Add from ScreenScraper…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:304
+#: crates/ira/src/ui/edit_game_scraper.rs:316
 msgid "Matched"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:305
+#: crates/ira/src/ui/edit_game_scraper.rs:317
 msgid "Fetch missing"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:321
+#: crates/ira/src/ui/edit_game_scraper.rs:333
 #: crates/ira/src/ui/game_settings.rs:60
 msgid "Unmatch"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:351
+#: crates/ira/src/ui/edit_game_scraper.rs:363
 msgid "Not matched yet"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:354
+#: crates/ira/src/ui/edit_game_scraper.rs:366
 msgid "Auto match"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:372
+#: crates/ira/src/ui/edit_game_scraper.rs:384
 msgid "Search ScreenScraper…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:373
+#: crates/ira/src/ui/edit_game_scraper.rs:385
 #: crates/ira/src/ui/steam_search_dialog.rs:61
 #: crates/ira/src/ui/steam_search.rs:34
 msgid "Search"

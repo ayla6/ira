@@ -124,21 +124,21 @@ struct EntityField {
 fn entity_fields() -> [EntityField; 3] {
     [
         EntityField {
-            label: crate::tr!("Developer"),
+            label: crate::tr!("Developers"),
             kind: EntityKind::Developer,
             get: |m| &m.developers,
             remove: |m, gone| m.developers.retain(|e| e.id != gone.id),
             push: |m, entity| m.developers.push(entity),
         },
         EntityField {
-            label: crate::tr!("Publisher"),
+            label: crate::tr!("Publishers"),
             kind: EntityKind::Publisher,
             get: |m| &m.publishers,
             remove: |m, gone| m.publishers.retain(|e| e.id != gone.id),
             push: |m, entity| m.publishers.push(entity),
         },
         EntityField {
-            label: crate::tr!("Genre"),
+            label: crate::tr!("Genres"),
             kind: EntityKind::Genre,
             get: |m| &m.genres,
             remove: |m, gone| m.genres.retain(|e| e.id != gone.id),
@@ -202,12 +202,19 @@ fn show_entity_edit_dialog(
 ) {
     let dialog = adw::Dialog::new();
     dialog.set_title(&field.label);
-    dialog.set_content_width(420);
-    dialog.set_content_height(320);
-
+    dialog.set_content_width(460);
+    // No fixed height: the scrolled window reports its natural size, so
+    // the dialog hugs one company and scrolls only past the cap.
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&adw::HeaderBar::new());
-    let (scrolled, list) = super::helpers::clamped_boxed_list(420);
+    let (scrolled, list) = super::helpers::clamped_boxed_list(460);
+    scrolled.set_propagate_natural_height(true);
+    scrolled.set_min_content_height(150);
+    scrolled.set_max_content_height(420);
+    scrolled.set_margin_top(12);
+    scrolled.set_margin_bottom(12);
+    scrolled.set_margin_start(12);
+    scrolled.set_margin_end(12);
     toolbar.set_content(Some(&scrolled));
     dialog.set_child(Some(&toolbar));
 

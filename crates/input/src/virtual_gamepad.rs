@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 
 use evdev::uinput::VirtualDevice;
@@ -95,6 +96,23 @@ pub struct VirtualGamepad {
     /// `flush`. The pipeline runs at the controller's report rate, where one
     /// write per output event dominated the daemon's idle cost.
     pending: Vec<InputEvent>,
+    /// Rumble effects the game uploaded (EVIOCSFF), keyed by kernel effect
+    /// id, waiting for the playback event that runs them.
+    rumble_effects: HashMap<i16, RumbleCommand>,
+}
+
+/// Turns one playback event (EV_FF, `value` 1 = run, 0 = stop) for `id`
+/// into the command to replay. Starting an effect the pad never saw is
+/// ignored; any stop always stops, whether or not its effect is known.
+fn playback_command(
+    effects: &HashMap<i16, RumbleCommand>,
+    id: FFEffectCode,
+    value: i32,
+) -> Option<RumbleCommand> {
+    if value == 0 {
+        return Some(crate::rumble::stop_command());
+    }
+    effects.get(&(id.0 as i16)).copied()
 }
 
 impl VirtualGamepad {
@@ -111,6 +129,7 @@ impl VirtualGamepad {
             backend,
             hat_dpad: [false; 4],
             pending: Vec::new(),
+            rumble_effects: HashMap::new(),
         }
     }
 
@@ -140,13 +159,19 @@ impl VirtualGamepad {
             backend,
             hat_dpad: [false; 4],
             pending: Vec::new(),
+            rumble_effects: HashMap::new(),
         })
     }
 
-    /// Drains force-feedback uploads the game made on this pad. uinput never
-    /// surfaces the play/stop writes that follow an upload, so every upload
-    /// of a rumble effect means "run these motors for the effect's duration"
-    /// — the same contract every userspace uinput bridge works under.
+    /// Drains force-feedback traffic the game produced on this pad, turned
+    /// into replay commands. Uploads (EVIOCSFF) only *register* an effect's
+    /// motor strengths under its kernel effect id; the playback events that
+    /// actually drive the motors arrive as ordinary EV_FF events — value 1
+    /// runs the stored effect, value 0 is an explicit stop. Chrome-style
+    /// consumers upload with a safety-max length and always stop through a
+    /// play event; SDL-style consumers upload with the real length and rely
+    /// on the pad's own timer, so the uploaded length stays the safety cap.
+    /// Erased effects (haptic close, gone consumer) stop the motors too.
     pub fn poll_rumble(&mut self) -> Vec<RumbleCommand> {
         let Some(device) = self.device.as_mut() else {
             return Vec::new();
@@ -169,7 +194,7 @@ impl VirtualGamepad {
                             if let Some(command) =
                                 crate::rumble::rumble_command_from_effect(&request.effect())
                             {
-                                commands.push(command);
+                                self.rumble_effects.insert(request.effect_id(), command);
                             }
                         }
                         Err(error) => {
@@ -180,6 +205,13 @@ impl VirtualGamepad {
                 EventSummary::UInput(erase, code, _) if code == UInputCode::UI_FF_ERASE => {
                     if let Err(error) = device.process_ff_erase(erase) {
                         eprintln!("ira-input: answering rumble erase failed: {error}");
+                    }
+                    self.rumble_effects.clear();
+                    commands.push(crate::rumble::stop_command());
+                }
+                EventSummary::ForceFeedback(_, code, value) => {
+                    if let Some(command) = playback_command(&self.rumble_effects, code, value) {
+                        commands.push(command);
                     }
                 }
                 _ => {}
@@ -204,10 +236,12 @@ impl VirtualGamepad {
                 };
                 self.pending
                     .push(InputEvent::new(EventType::KEY.0, code.0, i32::from(*pressed)));
-                if let Some(input) = self.direct_input_hat_event(*button, *pressed) {
-                    // DirectInput declares hat 0 beside the d-pad keys:
-                    // SDL3's auto-mapping binds the d-pad to the hat, while
-                    // DirectInput-era games read the keys.
+                if let Some(input) = self.mirrored_hat_event(*button, *pressed) {
+                    // The Xbox and DirectInput identities ship the d-pad
+                    // keys AND mirror it as hat 0: every controller database
+                    // entry for those identities binds the d-pad to the hat
+                    // (dpup:h0.1), while games that read keys directly get
+                    // the keys.
                     self.pending.push(input);
                 }
             }
@@ -722,6 +756,56 @@ mod tests {
         assert!(pad.pending.is_empty(), "flush drains the queue");
         // A second flush with nothing queued stays a no-op.
         pad.flush().unwrap();
+    }
+
+    #[test]
+    fn test_xinput_enumerates_buttons_like_the_real_xpad_driver() {
+        // Consumers enumerate buttons by ascending key code and controller
+        // database entries for the Xbox identity bind back/start/guide/stick
+        // clicks to slots 6..10, written against xpad's 11-key set. The
+        // virtual pad must carry exactly those codes so the slots line up.
+        let expected: Vec<KeyCode> = [
+            KeyCode::BTN_SOUTH,   // b0
+            KeyCode::BTN_EAST,    // b1
+            KeyCode::BTN_NORTH,   // b2
+            KeyCode::BTN_WEST,    // b3
+            KeyCode::BTN_TL,      // b4
+            KeyCode::BTN_TR,      // b5
+            KeyCode::BTN_SELECT,  // b6 (back)
+            KeyCode::BTN_START,   // b7
+            KeyCode::BTN_MODE,    // b8 (guide)
+            KeyCode::BTN_THUMBL,  // b9 (left stick click)
+            KeyCode::BTN_THUMBR,  // b10 (right stick click)
+        ]
+        .into_iter()
+        .chain([
+            KeyCode::BTN_DPAD_UP,
+            KeyCode::BTN_DPAD_DOWN,
+            KeyCode::BTN_DPAD_LEFT,
+            KeyCode::BTN_DPAD_RIGHT,
+        ])
+        .collect();
+        let mut buttons: Vec<KeyCode> = gamepad_buttons(XInput).iter().collect();
+        buttons.sort_by_key(|code| code.0);
+        assert_eq!(buttons, expected);
+        assert!(!gamepad_buttons(XInput).contains(KeyCode::BTN_TL2));
+        assert!(!gamepad_buttons(XInput).contains(KeyCode::BTN_TR2));
+        // Same for the Steam Input identity, whose database entries use the
+        // same xpad-shaped slot table.
+        assert!(!gamepad_buttons(crate::VirtualGamepadBackend::SteamInput)
+            .contains(KeyCode::BTN_TL2));
+        // Triggers are analog-only there: no digital trigger key events.
+        assert_eq!(button_code(XInput, GamepadButton::LeftTrigger), None);
+        assert_eq!(button_code(XInput, GamepadButton::RightTrigger), None);
+        assert_eq!(
+            button_code(
+                crate::VirtualGamepadBackend::SteamInput,
+                GamepadButton::LeftTrigger
+            ),
+            None
+        );
+        // DirectInput pads keep their digital trigger keys.
+        assert!(gamepad_buttons(DirectInput).contains(KeyCode::BTN_TL2));
     }
 
     #[test]

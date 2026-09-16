@@ -26,6 +26,22 @@ pub struct RumbleCommand {
     pub duration_ms: u16,
 }
 
+/// The zero-magnitude command consumers send to end a rumble: an EV_FF
+/// value-0 playback event on uinput pads, a zeroed packet on the Nintendo
+/// wire. Replaying it must silence the motors, never spin them up.
+pub(crate) fn stop_command() -> RumbleCommand {
+    RumbleCommand {
+        strong: 0,
+        weak: 0,
+        duration_ms: 0,
+    }
+}
+
+/// Whether a command carries no motor strength at all — a stop, not a run.
+pub(crate) fn is_stop_command(command: &RumbleCommand) -> bool {
+    command.strong == 0 && command.weak == 0
+}
+
 /// Translates an uploaded effect into a rumble command; non-rumble effects
 /// (constant force on wheels, springs) have no gamepad equivalent and are
 /// ignored.
@@ -51,7 +67,8 @@ const MAX_DURATION_MS: u16 = 5_000;
 const MIN_DURATION_MS: u16 = 20;
 
 enum Backend {
-    /// Kernel force feedback: the kernel stops the effect on its own timer.
+    /// Kernel force feedback: the kernel stops the effect on its own timer,
+    /// and explicit stop commands end it early.
     Evdev {
         device: Box<Device>,
         effect: Option<FFEffect>,
@@ -135,8 +152,13 @@ impl PhysicalRumble {
 
     /// Runs the motors. Evdev re-uploads keep the same effect id, so
     /// repeated commands are a cheap ioctl plus one event write; hidraw is
-    /// one output report whose self-timed deadline is refreshed.
+    /// one output report whose self-timed deadline is refreshed. A
+    /// zero-magnitude command stops immediately instead of playing.
     pub fn play(&mut self, command: RumbleCommand) {
+        if is_stop_command(&command) {
+            self.stop();
+            return;
+        }
         let duration = command.duration_ms.clamp(MIN_DURATION_MS, MAX_DURATION_MS);
         match &mut self.backend {
             Backend::Evdev { device, effect } => {
@@ -155,9 +177,14 @@ impl PhysicalRumble {
                 let result = match effect.as_mut() {
                     Some(effect) => effect.update(data).and_then(|()| effect.play(1)),
                     None => match device.upload_ff_effect(data) {
-                        Ok(uploaded) => {
-                            *effect = Some(uploaded);
-                            Ok(())
+                        // The first command must play, not just upload, or a
+                        // one-shot rumble never reaches the motors at all.
+                        Ok(mut uploaded) => {
+                            let played = uploaded.play(1);
+                            if played.is_ok() {
+                                *effect = Some(uploaded);
+                            }
+                            played
                         }
                         Err(error) => Err(error),
                     },
@@ -268,8 +295,26 @@ impl std::fmt::Debug for PhysicalRumble {
 
 #[cfg(test)]
 mod tests {
-    use super::{rumble_command_from_effect, RumbleCommand, MAX_DURATION_MS, MIN_DURATION_MS};
+    use super::{
+        is_stop_command, rumble_command_from_effect, stop_command, RumbleCommand,
+        MAX_DURATION_MS, MIN_DURATION_MS,
+    };
     use evdev::{FFEffectData, FFEffectKind, FFReplay, FFTrigger};
+
+    #[test]
+    fn test_zero_magnitude_command_is_a_stop() {
+        assert!(is_stop_command(&stop_command()));
+        assert!(is_stop_command(&RumbleCommand {
+            strong: 0,
+            weak: 0,
+            duration_ms: 250
+        }));
+        assert!(!is_stop_command(&RumbleCommand {
+            strong: 1,
+            weak: 0,
+            duration_ms: 100
+        }));
+    }
 
     #[test]
     fn test_rumble_command_fields_round_trip() {

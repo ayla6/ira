@@ -113,6 +113,33 @@ pub fn build_ra_games(
     })
 }
 
+/// The fallback Game when a stored entry fails to load: the console's
+/// identity, the best id the entry carries (steam id, then RA id, then
+/// the native product code), and the title — or the ROM path when the
+/// entry has no title yet.
+fn fallback_game(
+    entry: &ira_models::GameEntry,
+    console: &ActiveConsole,
+    name: String,
+) -> Game {
+    let app_id = if !entry.steam_id.is_empty() {
+        entry.steam_id.clone()
+    } else if !entry.ra_id.is_empty() {
+        entry.ra_id.clone()
+    } else {
+        entry.native_id.clone()
+    };
+    Game {
+        app_id,
+        kind: console.def.game_kind(),
+        trophy_source: entry.trophy_source,
+        platform_id: entry.platform_id.clone(),
+        db_id: entry.id,
+        name,
+        ..Default::default()
+    }
+}
+
 fn build_ra_games_for_console(
     db: &ira_db::DbConn,
     save_dir: &str,
@@ -320,25 +347,13 @@ fn build_ra_games_for_console(
             }
 
             let _gs = tracing::info_span!("load_game", app_id = &entry.steam_id).entered();
-            let mut g = load_game(&entry, save_dir).unwrap_or_else(|_| Game {
-                app_id: if !entry.steam_id.is_empty() {
-                    entry.steam_id.clone()
-                } else if !entry.ra_id.is_empty() {
-                    entry.ra_id.clone()
-                } else {
-                    entry.native_id.clone()
-                },
-                kind: console.def.game_kind(),
-                trophy_source: entry.trophy_source,
-                platform_id: entry.platform_id.clone(),
-                db_id: entry.id,
-                name: if entry.title.is_empty() {
-                    rom_path_str.clone()
-                } else {
-                    entry.title.clone()
-                },
-                ..Default::default()
-            });
+            let name = if entry.title.is_empty() {
+                rom_path_str.clone()
+            } else {
+                entry.title.clone()
+            };
+            let mut g = load_game(&entry, save_dir)
+                .unwrap_or_else(|_| fallback_game(&entry, console, name));
             if g.name_lower.is_empty() {
                 g.name_lower = g.name.to_lowercase();
             }
@@ -492,19 +507,13 @@ fn build_ra_games_for_console(
                             eprintln!("Failed to set ROM path: {}", e);
                         }
                     }
-                    let mut g = load_game(&e, save_dir).unwrap_or_else(|_| Game {
-                        app_id: e.external_id().to_string(),
-                        kind: console.def.game_kind(),
-                        trophy_source: e.trophy_source,
-                        platform_id: e.platform_id.clone(),
-                        db_id: e.id,
-                        name: if e.title.is_empty() {
-                            title.clone()
-                        } else {
-                            e.title.clone()
-                        },
-                        ..Default::default()
-                    });
+                    let name = if e.title.is_empty() {
+                        title.clone()
+                    } else {
+                        e.title.clone()
+                    };
+                    let mut g =
+                        load_game(&e, save_dir).unwrap_or_else(|_| fallback_game(&e, console, name));
                     if g.name_lower.is_empty() {
                         g.name_lower = g.name.to_lowercase();
                     }

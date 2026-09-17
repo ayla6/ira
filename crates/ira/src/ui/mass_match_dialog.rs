@@ -4,7 +4,9 @@ use ira_models::GameKind;
 use std::collections::HashSet;
 
 use super::css::*;
-use super::mass_match_batch::{run_batch, BatchItem, RowActions};
+use super::helpers::replace_row_actions;
+use super::mass_match_batch::{run_batch, BatchItem, RowActions, BATCH_FINISHED};
+use super::mass_match_ss::RefetchOutcome;
 use super::mass_match_ra::{attach_ra_actions, ra_pass_available, start_ra_batch_matching};
 use super::mass_match_ss::{attach_ss_actions, start_ss_batch_matching};
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
@@ -86,6 +88,29 @@ fn needs_ss_match(g: &Game) -> bool {
     }
 }
 
+/// Console games whose metadata misses something Steam can give: the
+/// exact-title Steam garnish serves them without ever touching their
+/// console identity.
+fn needs_steam_title_match(state: &SharedState, g: &Game) -> bool {
+    if g.manual_unmatch
+        || g.name.trim().is_empty()
+        || !(g.kind.is_console_emulator() || g.kind == ira_models::GameKind::Retro)
+    {
+        return false;
+    }
+    let s = state.borrow();
+    match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
+        Ok(None) => true,
+        Ok(Some(meta)) => {
+            super::mass_match_ss::release_date_is_broken(&meta.release_date)
+                || (meta.developers.is_empty() && meta.publishers.is_empty())
+                || meta.synopses.is_empty()
+                || meta.classifications.is_empty()
+        }
+        Err(_) => false,
+    }
+}
+
 fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
     let s = state.borrow();
     let games = s.games.clone();
@@ -135,7 +160,9 @@ fn populate_match_list(
                 .then(|| attach_ra_actions(&row, state, game, dialog, ra_available));
             let ss = needs_ss_match(game)
                 .then(|| attach_ss_actions(&row, state, game, dialog, ss_missed.contains(&game.db_id)));
-            RowActions { main, ra, ss }
+            let steam = needs_steam_title_match(state, game)
+                .then(|| attach_steam_title_actions(&row));
+            RowActions { main, ra, ss, steam }
         })
         .collect()
 }
@@ -264,6 +291,78 @@ fn start_sgdb_batch_matching(
     );
 }
 
+/// The row's Steam box: a dim status while the exact-title pass runs.
+fn attach_steam_title_actions(row: &adw::ActionRow) -> gtk4::Box {
+    let steam_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    steam_box.set_valign(gtk4::Align::Center);
+    steam_box.append(&status_label(
+        &crate::tr!("Searching Steam store..."),
+        CSS_DIM_LABEL,
+    ));
+    row.add_suffix(&steam_box);
+    steam_box
+}
+
+/// The console→Steam pass: every row with a Steam box gets an exact
+/// title search over the store, and whatever matches is garnished
+/// metadata-only — the game's console identity is never touched.
+fn start_steam_title_matching(state: &SharedState, needs_matching: &[Game], rows: &[RowActions]) {
+    let queue: Vec<BatchItem> = needs_matching
+        .iter()
+        .enumerate()
+        .filter(|(i, g)| {
+            rows.get(*i).is_some_and(|r| r.steam.is_some())
+                && needs_steam_title_match(state, g)
+        })
+        .map(|(row_idx, g)| BatchItem {
+            name: g.name.clone(),
+            db_id: g.db_id,
+            row_idx,
+        })
+        .collect();
+    if queue.is_empty() {
+        return;
+    }
+    eprintln!("Steam title pass: {} game(s)", queue.len());
+
+    let steam = state.borrow().steam.clone();
+    let db = state.borrow().db.clone();
+    let rows = rows.to_vec();
+    run_batch(
+        queue,
+        400, // a title search plus up to two metadata reads per game
+        None,
+        {
+            let steam = steam.clone();
+            let db = db.clone();
+            move |item| {
+                match super::fetch_metadata::steam_refetch_one(&steam, &db, item.db_id) {
+                    RefetchOutcome::Filled => Some(true),
+                    _ => Some(false),
+                }
+            }
+        },
+        move |hit| {
+            if hit.row_idx == BATCH_FINISHED {
+                return;
+            }
+            let Some(steam_box) = rows.get(hit.row_idx).and_then(|r| r.steam.clone()) else {
+                return;
+            };
+            replace_row_actions(&steam_box, |ab| match hit.matched {
+                Some(true) => ab.append(&status_label(
+                    &crate::tr!("Steam: matched"),
+                    CSS_SUCCESS_LABEL,
+                )),
+                _ => ab.append(&status_label(
+                    &crate::tr!("No Steam match"),
+                    CSS_DIM_LABEL,
+                )),
+            });
+        },
+    );
+}
+
 pub fn show_mass_match_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
 
@@ -343,6 +442,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     start_sgdb_batch_matching(state, &needs_matching, &rows, &dialog);
     start_ra_batch_matching(state, &needs_matching, &rows, &dialog);
     start_ss_batch_matching(state, &needs_matching, &rows, &dialog);
+    start_steam_title_matching(state, &needs_matching, &rows);
 }
 
 /// One list row: the game's title plus its main action box, which starts

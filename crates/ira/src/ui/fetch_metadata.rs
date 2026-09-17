@@ -200,7 +200,7 @@ fn spawn_steam_refetch_worker(
 /// wins for the release date, the store page's parsed date fills in
 /// when it has none — and an epoch date an old bug wrote counts as
 /// missing, so refetches repair it.
-fn steam_refetch_one(
+pub(crate) fn steam_refetch_one(
     steam: &ira_api::SteamDataClient,
     db: &ira_db::DbConn,
     db_id: i64,

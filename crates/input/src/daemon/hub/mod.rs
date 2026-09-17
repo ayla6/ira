@@ -35,6 +35,11 @@ const SENSOR_POLL: Duration = Duration::from_millis(1);
 /// How long a Switch-protocol takeover without any report may last before
 /// the hub abandons it and returns to the evdev input path.
 const SWITCH_DRIVER_SILENCE_LIMIT: Duration = Duration::from_secs(3);
+/// How long a Stop for a session that never subscribed is remembered. A
+/// session that has not joined the hub within this window was never really
+/// running (its spawn failed, or it exited before subscribing), so the
+/// pending stop outlived its purpose.
+const PENDING_STOP_TTL: Duration = Duration::from_secs(10);
 
 /// Everything a session receives from the physical side.
 #[derive(Debug, Clone)]
@@ -153,6 +158,7 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
     let mut routes: HashMap<u64, RouteEntry> = HashMap::new();
     let mut focus_counter: u64 = 0;
     let mut routed: Option<u64> = None;
+    let mut pending_stops: HashMap<u64, Instant> = HashMap::new();
 
     loop {
         if STOP_REQUESTED.load(Ordering::Relaxed) {
@@ -164,6 +170,7 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
             &mut focus_counter,
             &mut pad,
             &routed,
+            &mut pending_stops,
         ) {
             // Every handle is gone: a standalone session finished and its
             // private hub has no reason to outlive it.
@@ -335,7 +342,9 @@ fn drain_commands(
     focus_counter: &mut u64,
     pad: &mut PhysicalPad,
     routed: &Option<u64>,
+    pending_stops: &mut HashMap<u64, Instant>,
 ) -> bool {
+    pending_stops.retain(|_, requested_at| requested_at.elapsed() < PENDING_STOP_TTL);
     loop {
         match commands.try_recv() {
             // Every handle is gone: a standalone session finished and its
@@ -349,6 +358,12 @@ fn drain_commands(
             }
             Ok(HubCommand::Subscribe(subscribe)) => {
                 let events = subscribe.events.clone();
+                // A Stop for a session that has not subscribed yet (the
+                // daemon stops a desktop session whose spawn is still
+                // settling) must not be lost: answer the subscribe with
+                // the stop so the session exits instead of running forever
+                // unrouted.
+                let stop_pending = pending_stops.remove(&subscribe.id).is_some();
                 if pad.calibration.is_none() {
                     pad.calibration = subscribe.calibration.clone();
                 }
@@ -395,6 +410,11 @@ fn drain_commands(
                         product: info.product,
                     });
                 }
+                // Only after the handshake: the session's setup is still
+                // waiting on the snapshot reply above.
+                if stop_pending {
+                    let _ = events.send(PadEvent::Stop);
+                }
             }
             Ok(HubCommand::Unsubscribe(id)) => {
                 routes.remove(&id);
@@ -419,8 +439,14 @@ fn drain_commands(
                 }
             }
             Ok(HubCommand::Stop(id)) => {
-                if let Some(entry) = routes.get(&id) {
-                    let _ = entry.events.send(PadEvent::Stop);
+                match routes.get(&id) {
+                    Some(entry) => {
+                        let _ = entry.events.send(PadEvent::Stop);
+                    }
+                    None => {
+                        // Not subscribed yet; held until it does.
+                        pending_stops.insert(id, Instant::now());
+                    }
                 }
             }
         }

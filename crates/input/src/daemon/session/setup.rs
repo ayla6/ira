@@ -101,17 +101,17 @@ fn spawn_session_child(
     }
     let mut command = std::process::Command::new(&arguments.command[0]);
     command.args(target_args);
-    for (key, value) in &target_envs {
-        command.env(key, value);
-    }
-    if let Some(env) = &arguments.env {
+    if arguments.env.is_some() {
         // The request environment is complete: the launcher's list already
         // excludes everything it wants filtered, so start from zero rather
         // than leaking the daemon's own desktop environment into the game.
         command.env_clear();
-        for (key, value) in env {
-            command.env(key, value);
-        }
+    }
+    // Target envs land last: they are what hides the physical pad from the
+    // game's SDL, and they must survive both the wipe above and anything
+    // the launch config carries under the same keys.
+    for (key, value) in child_env_overrides(arguments.env.as_deref(), &target_envs) {
+        command.env(key, value);
     }
     if let Some(dir) = &arguments.working_dir {
         command.current_dir(dir);
@@ -141,6 +141,24 @@ fn spawn_session_child(
         pump_output(child.stderr.take(), events);
     }
     Some(child)
+}
+
+/// Assembles the child's environment overrides in application order: the
+/// request environment first (it defines the complete environment), then
+/// the SDL target environment, which must win — an `env_clear` in the
+/// caller is what keeps the daemon's desktop environment out, and the
+/// target envs are what keep the physical pad out of the game.
+fn child_env_overrides<'a>(
+    request_env: Option<&'a [(String, String)]>,
+    target_envs: &'a [(String, String)],
+) -> Vec<(&'a str, &'a str)> {
+    let mut env: Vec<(&str, &str)> = request_env
+        .into_iter()
+        .flatten()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    env.extend(target_envs.iter().map(|(key, value)| (key.as_str(), value.as_str())));
+    env
 }
 
 /// Forwards the game's stdout/stderr to clients line by line. The pipes EOF
@@ -382,8 +400,44 @@ fn profile_wake_pump(fd: libc::c_int, events: std::sync::mpsc::Sender<PadEvent>)
 
 #[cfg(test)]
 mod tests {
+    use super::child_env_overrides;
     use super::native_passthrough_for;
     use crate::profile::VirtualGamepadBackend as Backend;
+
+    #[test]
+    fn test_child_env_overrides_let_the_target_env_win() {
+        // The launcher's environment is applied first and the SDL target
+        // environment last: a stale SDL variable in the launch config must
+        // not resurrect the physical pad inside the game.
+        let request = vec![
+            ("DISPLAY".to_string(), ":0".to_string()),
+            (
+                "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
+                "0x1111/0x2222".to_string(),
+            ),
+        ];
+        let target = vec![(
+            "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
+            "0x2dc8/0x3106".to_string(),
+        )];
+        let env = child_env_overrides(Some(&request), &target);
+        let position = |value: &str| {
+            env.iter()
+                .position(|(_, value_at)| *value_at == value)
+                .unwrap_or_else(|| panic!("{value} missing from the child env"))
+        };
+        assert!(position("0x2dc8/0x3106") > position("0x1111/0x2222"));
+        assert!(env.contains(&("DISPLAY", ":0")));
+    }
+
+    #[test]
+    fn test_child_env_overrides_without_a_request_env() {
+        let target = vec![("SDL_JOYSTICK_HIDAPI".to_string(), "0".to_string())];
+        assert_eq!(
+            child_env_overrides(None, &target),
+            vec![("SDL_JOYSTICK_HIDAPI", "0")]
+        );
+    }
 
     #[test]
     fn test_native_passthrough_follows_the_backend_protocol() {

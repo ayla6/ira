@@ -2,50 +2,54 @@ use crate::DbConn;
 use ira_models::{GameEntry, GameKind, TrophySource};
 use r2d2_sqlite::SqliteConnectionManager;
 
-pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, ra_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, hashes, vanished, developer, publisher, genre, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, title_trusted, native_id";
+/// Every games column the app reads, in one place so queries and the
+/// row mapper can't drift. `game_entry_from_row` reads them by name —
+/// positional reads here have bitten before (inserting a column used to
+/// silently shift every field after it).
+pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, ra_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, hashes, vanished, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, title_trusted, native_id";
 
 pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameEntry> {
     Ok(GameEntry {
-        id: row.get(0)?,
-        kind: GameKind::from_string(&row.get::<_, String>(1)?),
-        trophy_source: TrophySource::from_string(&row.get::<_, String>(2)?),
-        steam_id: row.get(3)?,
-        ra_id: row.get(4)?,
-        platform_id: row.get(5)?,
-        title: row.get(6)?,
-        hidden: row.get(7)?,
-        sgdb_id: row.get(8)?,
-        logo_position: row.get(9)?,
-        logo_size: row.get(10)?,
-        manual_unmatch: row.get(11)?,
-        sort_title: row.get(12)?,
-        shadps4_version: row.get(13)?,
-        last_played: row.get(14)?,
-        release_date: row.get(15)?,
-        release_timestamp: row.get(16)?,
-        metacritic_score: row.get(17)?,
-        steam_review_score: row.get(18)?,
-        steam_review_count: row.get(19)?,
-        ra_core: row.get(20)?,
-        emulator_override: row.get(21)?,
-        rom_path: row.get(22)?,
-        game_folder: row.get(23)?,
-        playtime: row.get(24)?,
-        cached_earned_count: row.get(25)?,
-        cached_total_count: row.get(26)?,
-        cached_achievement_mtime: row.get(27)?,
+        id: row.get("id")?,
+        kind: GameKind::from_string(&row.get::<_, String>("kind")?),
+        trophy_source: TrophySource::from_string(&row.get::<_, String>("trophy_source")?),
+        steam_id: row.get("steam_id")?,
+        ra_id: row.get("ra_id")?,
+        platform_id: row.get("platform_id")?,
+        title: row.get("title")?,
+        hidden: row.get("hidden")?,
+        sgdb_id: row.get("sgdb_id")?,
+        logo_position: row.get("logo_position")?,
+        logo_size: row.get("logo_size")?,
+        manual_unmatch: row.get("manual_unmatch")?,
+        sort_title: row.get("sort_title")?,
+        shadps4_version: row.get("shadps4_version")?,
+        last_played: row.get("last_played")?,
+        release_date: row.get("release_date")?,
+        release_timestamp: row.get("release_timestamp")?,
+        metacritic_score: row.get("metacritic_score")?,
+        steam_review_score: row.get("steam_review_score")?,
+        steam_review_count: row.get("steam_review_count")?,
+        ra_core: row.get("ra_core")?,
+        emulator_override: row.get("emulator_override")?,
+        rom_path: row.get("rom_path")?,
+        game_folder: row.get("game_folder")?,
+        playtime: row.get("playtime")?,
+        cached_earned_count: row.get("cached_earned_count")?,
+        cached_total_count: row.get("cached_total_count")?,
+        cached_achievement_mtime: row.get("cached_achievement_mtime")?,
         hashes: serde_json::from_str(
-            &row.get::<_, String>(28)?,
+            &row.get::<_, String>("hashes")?,
         )
         .unwrap_or_default(),
-        vanished: row.get(29)?,
-        players: row.get(33)?,
-        synopsis: row.get(34)?,
-        screenscraper_id: row.get(35)?,
-        screenscraper_rating: row.get(36)?,
-        release_dates: row.get(37)?,
-        title_trusted: row.get::<_, i64>(38)? != 0,
-        native_id: row.get::<_, String>(39)?,
+        vanished: row.get("vanished")?,
+        players: row.get("players")?,
+        synopsis: row.get("synopsis")?,
+        screenscraper_id: row.get("screenscraper_id")?,
+        screenscraper_rating: row.get("screenscraper_rating")?,
+        release_dates: row.get("release_dates")?,
+        title_trusted: row.get::<_, i64>("title_trusted")? != 0,
+        native_id: row.get::<_, String>("native_id")?,
     })
 }
 

@@ -23,7 +23,7 @@ pub(super) fn attach_ra_actions(
     row: &adw::ActionRow,
     state: &SharedState,
     game: &Game,
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
     will_search: bool,
     vis: &super::mass_match_dialog::RowVis,
 ) -> gtk4::Box {
@@ -47,17 +47,19 @@ pub(super) fn ra_pass_available(state: &SharedState) -> bool {
     s.cfg.ra_enabled && RaClient::from_config(&s.cfg).is_some()
 }
 
+/// The row's not-matched end state: the manual search button says it —
+/// a "not matched" label beside it would only add text.
 fn show_unmatched(
     ra_box: &gtk4::Box,
     state: &SharedState,
     db_id: i64,
     game_name: &str,
     platform_id: &str,
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
 ) {
-    ra_box.append(&status_label(&crate::tr!("RA: not matched"), CSS_DIM_LABEL));
-    let btn = gtk4::Button::with_label(&crate::tr!("Search RA…"));
-    btn.add_css_class(CSS_SUGGESTED_ACTION);
+    let btn = gtk4::Button::with_label(&crate::tr!("Search RA"));
+    btn.add_css_class(CSS_PILL);
+    btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     let gn = game_name.to_string();
     let pid = platform_id.to_string();
@@ -91,7 +93,7 @@ pub(super) fn start_ra_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
     rows: &[RowActions],
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
     vis: super::mass_match_dialog::RowVis,
 ) {
     if !ra_pass_available(state) {
@@ -161,7 +163,7 @@ fn resolve(
 fn apply_hit(
     state: &SharedState,
     rows: &[RowActions],
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
     hit: BatchHit<(String, String)>,
     vis: &super::mass_match_dialog::RowVis,
 ) {

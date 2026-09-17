@@ -241,7 +241,7 @@ fn populate_match_list(
     list: &gtk4::ListBox,
     needs_matching: &[Game],
     state: &SharedState,
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
     ss_missed: &HashSet<i64>,
     vis: &RowVis,
 ) -> Vec<RowActions> {
@@ -282,7 +282,7 @@ fn start_steam_batch_matching(
     needs_matching: &[Game],
     title_map: Vec<(String, String, String)>,
     rows: &[RowActions],
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
 ) {
     let queue: Vec<BatchItem> = needs_matching
         .iter()
@@ -352,7 +352,7 @@ fn start_sgdb_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
     rows: &[RowActions],
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
 ) {
     let queue: Vec<BatchItem> = needs_matching
         .iter()
@@ -406,7 +406,7 @@ fn attach_steam_title_actions(row: &adw::ActionRow) -> gtk4::Box {
     let steam_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     steam_box.set_valign(gtk4::Align::Center);
     steam_box.append(&status_label(
-        &crate::tr!("Searching Steam store..."),
+        &crate::tr!("Searching Steam..."),
         CSS_DIM_LABEL,
     ));
     row.add_suffix(&steam_box);
@@ -497,35 +497,34 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         return;
     }
 
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&crate::tr!("Match unmatched games"));
-    dialog.set_content_width(600);
+    // A plain window, not an adw::Dialog — the list wants the space and
+    // the user the resize handle.
+    let dialog = adw::Window::new();
+    dialog.set_title(Some(&crate::tr!("Match unmatched games")));
+    dialog.set_modal(true);
+    dialog.set_transient_for(Some(&window));
+    dialog.set_default_size(640, 560);
 
     let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
 
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-
-    let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let count = gtk4::Label::new(Some(&crate::tr!("{} game(s) to match").replacen(
-        "{}",
-        &needs_matching.len().to_string(),
-        1,
-    )));
-    count.set_halign(gtk4::Align::Start);
-    count.set_hexpand(true);
-    count.add_css_class(CSS_HEADING);
-    header.append(&count);
+    let header = adw::HeaderBar::new();
+    let count = needs_matching.len();
+    let subtitle = if count == 1 {
+        crate::tr!("1 game to match")
+    } else {
+        crate::tr!("{} games to match").replacen("{}", &count.to_string(), 1)
+    };
+    let title = adw::WindowTitle::new(&crate::tr!("Match unmatched games"), &subtitle);
+    header.set_title_widget(Some(&title));
     // Matched and PC games with holes in their metadata: every source
     // at once — Steam fills what it can, ScreenScraper gets exact
     // refetches by id. The job runs on the sidebar strip, so this
-    // button hands it off and the dialog is free to close.
+    // button hands it off and the window is free to close.
     let (has_ss_creds, ss_busy) = {
         let s = state.borrow();
         (!s.cfg.screenscraper_id.is_empty(), s.ss_job_busy.get())
     };
     let refetch_btn = gtk4::Button::with_label(&crate::tr!("Fetch missing metadata"));
-    refetch_btn.add_css_class(CSS_FLAT);
     refetch_btn.set_sensitive(has_ss_creds && !ss_busy);
     {
         let state = state.clone();
@@ -533,20 +532,13 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             super::fetch_metadata::start_full_refetch(&state);
         });
     }
-    header.append(&refetch_btn);
-    let hide_toggle = adw::SwitchRow::new();
-    hide_toggle.set_title(&crate::tr!("Hide done and failed"));
-    hide_toggle.set_active(true);
-    hide_toggle.add_css_class(CSS_CAPTION);
-    hide_toggle.set_valign(gtk4::Align::Center);
-    header.append(&hide_toggle);
-    content.append(&super::helpers::clamped(&header, 600, (12, 8, 12, 12)));
+    header.pack_end(&refetch_btn);
+    toolbar.add_top_bar(&header);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
 
     let (scrolled, list) = super::helpers::clamped_boxed_list(600);
-    // Size to the rows when few, cap and scroll when many.
-    scrolled.set_propagate_natural_height(true);
-    scrolled.set_min_content_height(160);
-    scrolled.set_max_content_height(500);
+    scrolled.set_vexpand(true);
     let ss_missed: HashSet<i64> = match ira_db::scraper_missed_ids(&state.borrow().db) {
         Ok(ids) => ids.into_iter().collect(),
         Err(e) => {
@@ -554,27 +546,43 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             HashSet::new()
         }
     };
-    let show_finished = Rc::new(Cell::new(true));
+    // Hiding starts on, matching the active switch below: done and
+    // failed rows stay out of the list until it is switched off.
+    let show_finished = Rc::new(Cell::new(false));
     let vis = RowVis::new(state, needs_matching.to_vec(), show_finished.clone());
     let vis_toggle = vis.clone();
-    let rows = populate_match_list(&list, &needs_matching, state, &dialog, &ss_missed, &vis);
+    let rows = populate_match_list(&list, &needs_matching, state, dialog.upcast_ref(), &ss_missed, &vis);
     vis.set_rows(rows.iter().map(|r| r.row.clone()).collect());
     vis.apply_all();
     let show_finished_c = show_finished.clone();
-    hide_toggle.connect_active_notify(move |toggle| {
-        show_finished_c.set(toggle.is_active());
+    let hide_switch = gtk4::Switch::new();
+    hide_switch.set_active(true);
+    hide_switch.set_valign(gtk4::Align::Center);
+    hide_switch.connect_active_notify(move |toggle| {
+        show_finished_c.set(!toggle.is_active());
         vis_toggle.apply_all();
     });
+    let hide_label = gtk4::Label::new(Some(&crate::tr!("Hide done and failed")));
+    hide_label.set_valign(gtk4::Align::Center);
+    let bottom = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    bottom.set_halign(gtk4::Align::End);
+    bottom.set_margin_start(12);
+    bottom.set_margin_end(12);
+    bottom.set_margin_top(6);
+    bottom.set_margin_bottom(6);
+    bottom.append(&hide_label);
+    bottom.append(&hide_switch);
+    toolbar.add_bottom_bar(&bottom);
     content.append(&scrolled);
 
     toolbar.set_content(Some(&content));
-    dialog.set_child(Some(&toolbar));
-    dialog.present(Some(&window));
+    dialog.set_content(Some(&toolbar));
+    dialog.present();
 
-    start_steam_batch_matching(state, &needs_matching, title_map, &rows, &dialog);
-    start_sgdb_batch_matching(state, &needs_matching, &rows, &dialog);
-    start_ra_batch_matching(state, &needs_matching, &rows, &dialog, vis.clone());
-    start_ss_batch_matching(state, &needs_matching, &rows, &dialog, vis.clone());
+    start_steam_batch_matching(state, &needs_matching, title_map, &rows, dialog.upcast_ref());
+    start_sgdb_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref());
+    start_ra_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref(), vis.clone());
+    start_ss_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref(), vis.clone());
     start_steam_title_matching(state, &needs_matching, &rows, vis);
 }
 

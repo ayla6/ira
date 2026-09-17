@@ -139,7 +139,7 @@ pub(super) fn handle_steam_search_result(
     game_name: &str,
     db_id: i64,
     matched: Option<(String, String)>,
-    parent_dialog: &adw::Dialog,
+    parent_dialog: &gtk4::Widget,
 ) {
     clear_children(action_box);
 
@@ -149,7 +149,8 @@ pub(super) fn handle_steam_search_result(
         let label = status_label(&matched_text(&sid, &matched_name), CSS_SUCCESS_LABEL);
         action_box.append(&label);
     } else {
-        action_box.append(&status_label(&crate::tr!("Not found"), CSS_DIM_LABEL));
+        // No label — the three buttons already say "not found": the row
+        // stays quiet and the affordances stay obvious.
 
         let ab = action_box.clone();
         let on_match: MatchCallback = Rc::new(move |sid, name| {
@@ -162,6 +163,7 @@ pub(super) fn handle_steam_search_result(
         });
 
         let id_btn = gtk4::Button::with_label(&crate::tr!("Enter ID"));
+        id_btn.add_css_class(CSS_PILL);
         let sc = state.clone();
         let name = game_name.to_string();
         let cb = on_match.clone();
@@ -180,6 +182,7 @@ pub(super) fn handle_steam_search_result(
         action_box.append(&id_btn);
 
         let steam_btn = gtk4::Button::with_label(&crate::tr!("Search Steam"));
+        steam_btn.add_css_class(CSS_PILL);
         let sc2 = state.clone();
         let name2 = game_name.to_string();
         let steam2 = steam.clone();
@@ -201,6 +204,7 @@ pub(super) fn handle_steam_search_result(
         action_box.append(&steam_btn);
 
         let sgdb_btn = gtk4::Button::with_label(&crate::tr!("Search SGDB"));
+        sgdb_btn.add_css_class(CSS_PILL);
         let sc3 = state.clone();
         let name3 = game_name.to_string();
         let steam3 = steam.clone();

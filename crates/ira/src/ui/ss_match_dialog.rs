@@ -293,18 +293,10 @@ pub(super) fn show_unmatched(
     db_id: i64,
     game_name: &str,
     platform_id: &str,
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
 ) {
     replace_row_actions(ss_box, |ab| {
-        unmatched_actions(
-            ab,
-            &crate::tr!("SS: not matched"),
-            state,
-            db_id,
-            game_name,
-            platform_id,
-            dialog,
-        );
+        unmatched_actions(ab, "", state, db_id, game_name, platform_id, dialog);
     });
 }
 
@@ -317,7 +309,7 @@ pub(super) fn show_background_match(
     db_id: i64,
     game_name: &str,
     platform_id: &str,
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
 ) {
     replace_row_actions(ss_box, |ab| {
         unmatched_actions(
@@ -332,8 +324,10 @@ pub(super) fn show_background_match(
     });
 }
 
-/// The dim status label plus the manual search button shared by both
-/// end states of a mass matcher row's ScreenScraper box.
+/// The end state of a mass matcher row's ScreenScraper box. `label` is
+/// only for states that still need words — the background-match note —
+/// since a plain miss says it with the search button alone: less text
+/// per row, and the button is the affordance that matters.
 fn unmatched_actions(
     ab: &gtk4::Box,
     label: &str,
@@ -341,11 +335,13 @@ fn unmatched_actions(
     db_id: i64,
     game_name: &str,
     platform_id: &str,
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
 ) {
-    ab.append(&status_label(label, CSS_DIM_LABEL));
-    let btn = gtk4::Button::with_label(&crate::tr!("Search SS…"));
-    btn.add_css_class(CSS_SUGGESTED_ACTION);
+    if !label.is_empty() {
+        ab.append(&status_label(label, CSS_DIM_LABEL));
+    }
+    let btn = gtk4::Button::with_label(&crate::tr!("Search SS"));
+    btn.add_css_class(CSS_PILL);
     btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     let gn = game_name.to_string();

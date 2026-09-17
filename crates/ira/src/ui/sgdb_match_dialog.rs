@@ -21,13 +21,13 @@ fn matched_sgdb_text(matched_name: &str) -> String {
     crate::tr!("Matched to SGDB: {}").replacen("{}", matched_name, 1)
 }
 
-/// A "Search SGDB…" button that reopens the SGDB search for this game and,
+/// A "Search SGDB" button that reopens the SGDB search for this game and,
 /// once a new match is accepted, repaints the action box with the green
 /// "Matched to SGDB" label.
 fn manual_sgdb_search_button(
     state: &SharedState,
     action_box: &gtk4::Box,
-    parent_dialog: &adw::Dialog,
+    parent_dialog: &gtk4::Widget,
     db_id: i64,
     game_name: &str,
 ) -> gtk4::Button {
@@ -35,7 +35,8 @@ fn manual_sgdb_search_button(
     let action_box = action_box.clone();
     let parent_dialog = parent_dialog.clone();
     let game_name = game_name.to_string();
-    let btn = gtk4::Button::with_label(&crate::tr!("Search SGDB…"));
+    let btn = gtk4::Button::with_label(&crate::tr!("Search SGDB"));
+    btn.add_css_class(CSS_PILL);
     btn.connect_clicked(move |_| {
         let cb: MatchCallback = Rc::new({
             let action_box = action_box.clone();
@@ -57,20 +58,11 @@ pub(super) fn handle_unified_sgdb_result(
     db_id: i64,
     game_name: &str,
     matched: Option<(String, String)>,
-    parent_dialog: &adw::Dialog,
+    parent_dialog: &gtk4::Widget,
 ) {
     // Only update if the action box still shows a searching state
     // (don't overwrite a Steam match result)
-    let has_result = action_box.last_child().is_some_and(|c| {
-        c.downcast_ref::<gtk4::Label>().is_some_and(|l| {
-            l.text().starts_with("Matched")
-                || l.text().starts_with("Not found")
-                || l.text().starts_with("Enter")
-        })
-    });
-    if has_result {
-        // Steam result already shown — just add SGDB status beside it
-        // Skip for now; the user can manually search SGDB
+    if row_shows_result(action_box) {
         return;
     }
 
@@ -174,7 +166,6 @@ pub(super) fn handle_unified_sgdb_result(
             }
             // Update the mass match row to show unmatched state with manual search
             replace_row_actions(&action_box_c, |ab| {
-                ab.append(&status_label(&crate::tr!("SGDB: unmatched"), CSS_DIM_LABEL));
                 ab.append(&manual_sgdb_search_button(
                     &sc,
                     ab,
@@ -186,8 +177,8 @@ pub(super) fn handle_unified_sgdb_result(
         });
         action_box.append(&undo_btn);
     } else {
-        action_box.append(&status_label(&crate::tr!("SGDB: not found"), CSS_DIM_LABEL));
-
+        // No label — the search button alone says "not found" and is the
+        // one thing worth clicking.
         action_box.append(&manual_sgdb_search_button(
             state,
             action_box,
@@ -196,6 +187,26 @@ pub(super) fn handle_unified_sgdb_result(
             game_name,
         ));
     }
+}
+
+/// Whether the box already carries a painted result: any button (the
+/// fail states and the SGDB undo pair are buttons) or any success label
+/// (a Steam match is label-only). The Steam and SGDB batch passes share
+/// this box, and the later arriving source must not wipe the earlier
+/// one's word.
+fn row_shows_result(action_box: &gtk4::Box) -> bool {
+    let mut child = action_box.first_child();
+    while let Some(widget) = child {
+        if widget.downcast_ref::<gtk4::Button>().is_some()
+            || widget
+                .downcast_ref::<gtk4::Label>()
+                .is_some_and(|l| l.has_css_class(CSS_SUCCESS_LABEL))
+        {
+            return true;
+        }
+        child = widget.next_sibling();
+    }
+    false
 }
 
 pub fn show_sgdb_search_dialog(

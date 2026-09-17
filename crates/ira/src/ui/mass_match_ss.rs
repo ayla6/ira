@@ -166,7 +166,7 @@ pub(super) fn attach_ss_actions(
     row: &adw::ActionRow,
     state: &SharedState,
     game: &Game,
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
     missed: bool,
     vis: &super::mass_match_dialog::RowVis,
 ) -> gtk4::Box {
@@ -186,7 +186,7 @@ pub(super) fn attach_ss_actions(
         );
     } else {
         ss_box.append(&status_label(
-            &crate::tr!("Searching ScreenScraper..."),
+            &crate::tr!("Searching SS..."),
             CSS_DIM_LABEL,
         ));
     }
@@ -204,7 +204,7 @@ pub(super) fn start_ss_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
     rows: &[RowActions],
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
     vis: super::mass_match_dialog::RowVis,
 ) {
     let missed: HashSet<i64> = match ira_db::scraper_missed_ids(&state.borrow().db) {
@@ -288,7 +288,7 @@ pub(super) fn start_ss_batch_matching(
     });
     let batch_state = std::rc::Rc::clone(state);
     let batch_rows = rows.to_vec();
-    let batch_dialog = adw::Dialog::clone(dialog);
+    let batch_dialog = dialog.clone();
     super::helpers::once_channel(rx, move |allowed| {
         let (queue, steam, db, creds, cfg, state, rows, dialog) = (
             queue,
@@ -1165,7 +1165,7 @@ fn suffix_extension_ok(short: &str, long: &str) -> bool {
 fn apply_hit(
     state: &SharedState,
     rows: &[RowActions],
-    dialog: &adw::Dialog,
+    dialog: &gtk4::Widget,
     hit: BatchHit<SsOutcome>,
     matched: &Cell<usize>,
     vis: &super::mass_match_dialog::RowVis,

@@ -96,22 +96,33 @@ fn run(save_dir: String) {
     }
 }
 
-/// Resolves the connected controller's desktop behaviour: managed by default,
-/// native when its controller settings say Disabled. The first enabled pad
-/// wins, mirroring the game-launch resolution order.
+/// Resolves the connected controller's desktop behaviour: managed by
+/// default, native when its controller settings say Disabled. The wish
+/// applies to the pad the hub actually manages — the first in discovery
+/// order — so a second controller's Enabled setting must not drag the
+/// first (Disabled) one into a remap it was exempted from.
 fn desired_for(config: &Config, save_dir: &str) -> Desired {
     let mut devices = discover_gamepads();
     devices.sort_by(|left, right| left.path.cmp(&right.path));
-    for device in devices {
-        if let Some(desired) = desired_for_device(config, save_dir, &device) {
-            return desired;
+    desired_for_pads(config, save_dir, &devices)
+}
+
+fn desired_for_pads(config: &Config, save_dir: &str, devices: &[DeviceInfo]) -> Desired {
+    match devices.first() {
+        Some(device) => {
+            desired_for_device(config, save_dir, device)
+                .unwrap_or(Desired {
+                    enabled: false,
+                    profile: None,
+                })
         }
-    }
-    // Nothing connected (or everything disabled): the daemon releases the
-    // pad, and its idle timer may retire it until Ira needs it again.
-    Desired {
-        enabled: false,
-        profile: None,
+        // Nothing connected (or everything disabled): the daemon releases
+        // the pad, and its idle timer may retire it until Ira needs it
+        // again.
+        None => Desired {
+            enabled: false,
+            profile: None,
+        },
     }
 }
 
@@ -176,5 +187,43 @@ mod tests {
             None,
             "an explicitly disabled controller keeps native desktop input"
         );
+    }
+
+    #[test]
+    fn test_desired_for_pads_follows_the_hubs_pad_not_the_first_enabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.controller_defaults.insert(
+            "2dc8:6012".to_string(),
+            ira_config::ControllerInputConfig {
+                mode: ControllerInputMode::Disabled,
+                profile: String::new(),
+            },
+        );
+        // The hub manages the FIRST pad; the second pad being enabled must
+        // not drag the disabled first pad into a remap.
+        let pads = [device(0x2dc8, 0x6012), device(0x054c, 0x0ce6)];
+        assert!(
+            !desired_for_pads(&config, tmp.path().to_str().unwrap(), &pads).enabled,
+            "the managed pad's Disabled setting must win the wish"
+        );
+    }
+
+    #[test]
+    fn test_desired_for_pads_enables_the_managed_pad() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pads = [device(0x2dc8, 0x6012)];
+        assert!(desired_for_pads(
+            &Config::default(),
+            tmp.path().to_str().unwrap(),
+            &pads
+        )
+        .enabled);
+    }
+
+    #[test]
+    fn test_desired_for_pads_releases_with_nothing_connected() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!desired_for_pads(&Config::default(), tmp.path().to_str().unwrap(), &[]).enabled);
     }
 }

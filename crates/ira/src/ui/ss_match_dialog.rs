@@ -31,6 +31,11 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
     let merged = match existing {
         Some(current) => {
             let mut m = current;
+            // The match is the point of the call: the just-picked entry's
+            // id always wins, whatever was stored before. Without this
+            // the store kept the old (often empty) id — the row looked
+            // matched until the game reloaded from the database.
+            m.ss_id = fresh.ss_id.clone();
             if !fresh.release_date.is_empty() {
                 m.release_date = fresh.release_date.clone();
                 m.release_timestamp = fresh.release_timestamp;

@@ -297,8 +297,8 @@ mod tests {
             GameKind::Linux,
             TrophySource::Empty,
             "",
-            "manual_1",
-            "manual_1",
+            "",
+            "",
             "No Folder",
         )
         .unwrap();

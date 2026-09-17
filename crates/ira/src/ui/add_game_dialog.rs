@@ -320,13 +320,9 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         } else if !gog_product_id.is_empty() {
             gog_product_id
         } else {
-            format!(
-                "manual_{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-            )
+            // No store id — the fields stay empty. The exact-title Steam
+            // garnish finds the game's metadata when it runs.
+            String::new()
         };
 
         let selected_profile_id = if is_wine {

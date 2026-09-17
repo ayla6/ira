@@ -102,24 +102,27 @@ pub fn start_steam_refetch(state: &SharedState) -> bool {
     true
 }
 
-/// Games whose stored metadata misses something Steam can give — PC
-/// games by their platform's app id, console games by a careful exact
-/// title search over the store — including games with no record at all,
-/// and the epoch dates an old diff bug wrote.
+/// Games whose stored metadata misses something Steam can give: games
+/// with a store app id on their platform are refetched by it; everyone
+/// else — consoles, and manually added PC games that never had one — is
+/// found by an exact title search over the store. Includes games with
+/// no record at all, and the epoch dates an old diff bug wrote.
 fn steam_refetch_queue(state: &SharedState) -> Vec<i64> {
     let s = state.borrow();
     s.games
         .iter()
         .filter(|g| {
-            if g.kind.is_pc() {
-                g.platform_id.parse::<u32>().is_ok()
-            } else {
-                // Consoles are found by title, so the title must be one
-                // — and a game the user unmatched stays unmatched.
-                !g.manual_unmatch
-                    && (g.kind.is_console_emulator() || g.kind == ira_models::GameKind::Retro)
-                    && !g.name.trim().is_empty()
+            let by_app_id = g.kind.is_pc() && g.platform_id.parse::<u32>().is_ok();
+            if by_app_id {
+                return true;
             }
+            // Title-searched games respect manual unmatch, and the
+            // title must be one.
+            !g.manual_unmatch
+                && (g.kind.is_pc()
+                    || g.kind.is_console_emulator()
+                    || g.kind == ira_models::GameKind::Retro)
+                && !g.name.trim().is_empty()
         })
         .filter(|g| match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
             Ok(None) => true,
@@ -192,10 +195,12 @@ fn spawn_steam_refetch_worker(
     rx
 }
 
-/// One game's Steam re-read, merged over what's stored. SteamCMD's
-/// timestamp wins for the release date, the store page's parsed date
-/// fills in when it has none — and an epoch date an old bug wrote
-/// counts as missing, so refetches repair it.
+/// One game's Steam re-read, merged over what's stored. Games with a
+/// store app id on their platform go straight to it; everyone else is
+/// found by an exact title search over the store. SteamCMD's timestamp
+/// wins for the release date, the store page's parsed date fills in
+/// when it has none — and an epoch date an old bug wrote counts as
+/// missing, so refetches repair it.
 fn steam_refetch_one(
     steam: &ira_api::SteamDataClient,
     db: &ira_db::DbConn,
@@ -204,14 +209,13 @@ fn steam_refetch_one(
     let Some(entry) = ira_db::find_by_db_id(db, db_id).ok().flatten() else {
         return RefetchOutcome::Failed("game not found".to_string());
     };
-    // PC games carry the app id on their platform; consoles are found
-    // by an exact title search over the store. The match is metadata
-    // only — no app id, no Steam enrichment ever lands on the game.
-    let app_id = if entry.kind.is_pc() {
-        entry.platform_id.parse::<u32>().ok()
-    } else {
-        exact_title_hit(&steam.search_steam_store(&entry.title), &entry.title)
-    };
+    // The match is metadata only — no app id, no Steam enrichment ever
+    // lands on the game.
+    let app_id = entry
+        .platform_id
+        .parse::<u32>()
+        .ok()
+        .or_else(|| exact_title_hit(&steam.search_steam_store(&entry.title), &entry.title));
     let Some(app_id) = app_id else {
         return RefetchOutcome::Unchanged;
     };

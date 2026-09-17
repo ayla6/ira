@@ -661,34 +661,68 @@ pub(crate) fn clamped_boxed_list(max_width: i32) -> (gtk4::ScrolledWindow, gtk4:
     (scrolled, list)
 }
 
-/// Poll a worker-thread channel on the GTK main loop without blocking it;
-/// one value is delivered to `on_value`. A dropped sender ends polling
-/// silently — a panicking worker has nothing useful to report anyway.
+/// A channel whose receiving end wakes the GTK main loop on every
+/// message — worker threads send, the UI never polls. Attach `rx` with
+/// [`once_channel`], [`watch_channel`], or `glib::spawn_future_local`.
+pub(crate) fn ui_channel<T: Send + 'static>() -> (
+    async_channel::Sender<T>,
+    async_channel::Receiver<T>,
+) {
+    async_channel::unbounded()
+}
+
+/// Deliver the single value a worker sends to `on_value` on the main
+/// loop, then stop.
+pub(crate) fn once_channel<T: Send + 'static>(
+    rx: async_channel::Receiver<T>,
+    on_value: impl FnOnce(T) + 'static,
+) {
+    glib::spawn_future_local(async move {
+        if let Ok(value) = rx.recv().await {
+            on_value(value);
+        }
+    });
+}
+
+/// Deliver every message to `on_message` on the main loop until it
+/// returns Break or every sender is gone.
+pub(crate) fn watch_channel<T: Send + 'static>(
+    rx: async_channel::Receiver<T>,
+    mut on_message: impl FnMut(T) -> glib::ControlFlow + 'static,
+) {
+    glib::spawn_future_local(async move {
+        loop {
+            match rx.recv().await {
+                Ok(value) => {
+                    if on_message(value) == glib::ControlFlow::Break {
+                        return;
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+    });
+}
+
+/// One value from a worker-thread `std::sync::mpsc` channel, delivered
+/// to `on_value` on the GTK main loop without blocking or busy-waiting.
+/// A dropped sender ends it silently — a panicking worker has nothing
+/// useful to report anyway.
 pub(crate) fn poll_channel<T: Send + 'static>(
     rx: std::sync::mpsc::Receiver<T>,
     on_value: impl FnOnce(T) + 'static,
 ) {
-    let rx = Rc::new(RefCell::new(Some(rx)));
-    let on_value = Rc::new(RefCell::new(Some(on_value)));
-    glib::source::idle_add_local_full(glib::Priority::DEFAULT, move || {
-        let polled = {
-            let rx = rx.borrow();
-            rx.as_ref().map(|receiver| receiver.try_recv())
-        };
-        let Some(polled) = polled else {
-            return glib::ControlFlow::Break;
-        };
-        match polled {
-            Ok(value) => {
-                if let Some(on_value) = on_value.borrow_mut().take() {
-                    on_value(value);
-                }
-                glib::ControlFlow::Break
+    let (bridge_tx, bridge_rx) = ui_channel();
+    std::thread::spawn(move || {
+        // Forwards the mpsc to the main loop; blocks without burning
+        // CPU, and the app exiting tears it down.
+        for value in rx {
+            if bridge_tx.try_send(value).is_err() {
+                break;
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
         }
     });
+    once_channel(bridge_rx, on_value);
 }
 
 /// A button with an icon next to its label. Composed from plain gtk4

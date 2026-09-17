@@ -99,9 +99,9 @@ pub(crate) fn spawn_refetch_worker(
     creds: ScraperCreds,
     db: ira_db::DbConn,
     cancel: Option<Arc<AtomicBool>>,
-) -> std::sync::mpsc::Receiver<RefetchProgress> {
+) -> async_channel::Receiver<RefetchProgress> {
     let total = queue.len();
-    let (tx, rx) = std::sync::mpsc::channel::<RefetchProgress>();
+    let (tx, rx) = super::helpers::ui_channel();
     std::thread::spawn(move || {
         for (done, db_id) in queue.into_iter().enumerate() {
             if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
@@ -116,7 +116,7 @@ pub(crate) fn spawn_refetch_worker(
                 .map(|entry| entry.title)
                 .unwrap_or_default();
             let outcome = refetch_one(&steam, &creds, &db, db_id);
-            let _ = tx.send(RefetchProgress {
+            let _ = tx.try_send(RefetchProgress {
                 done: done + 1,
                 total,
                 db_id,
@@ -261,7 +261,7 @@ pub(super) fn start_ss_batch_matching(
     // read that fails lets the pass run rather than silently skip it.
     let quota_steam = Arc::clone(&steam);
     let quota_creds = creds.clone();
-    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    let (tx, rx) = super::helpers::ui_channel::<bool>();
     std::thread::spawn(move || {
         let allowed = match quota_steam.screenscraper_user_infos(&quota_creds) {
             Ok(infos) => {
@@ -280,24 +280,22 @@ pub(super) fn start_ss_batch_matching(
                 true
             }
         };
-        let _ = tx.send(allowed);
+        let _ = tx.try_send(allowed);
     });
-    let rx = std::cell::RefCell::new(rx);
-    let mut start = Some((
-        queue,
-        Arc::clone(&steam),
-        db.clone(),
-        creds.clone(),
-        cfg.clone(),
-        state.clone(),
-        rows.to_vec(),
-        dialog.clone(),
-    ));
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        let Ok(allowed) = rx.borrow_mut().try_recv() else {
-            return glib::ControlFlow::Continue;
-        };
-        if let Some((queue, steam, db, creds, cfg, state, rows, dialog)) = start.take() {
+    let batch_state = std::rc::Rc::clone(state);
+    let batch_rows = rows.to_vec();
+    let batch_dialog = adw::Dialog::clone(dialog);
+    super::helpers::once_channel(rx, move |allowed| {
+        let (queue, steam, db, creds, cfg, state, rows, dialog) = (
+            queue,
+            steam,
+            db,
+            creds,
+            cfg,
+            batch_state,
+            batch_rows,
+            batch_dialog,
+        );
             if allowed {
                 state.borrow().ss_job_busy.set(true);
                 // The strip shows the pass and carries its cancel
@@ -320,7 +318,6 @@ pub(super) fn start_ss_batch_matching(
                 let matched = Cell::new(0usize);
                 run_batch(
                     queue,
-                    150,
                     0,
                     cancel,
                     {
@@ -369,8 +366,6 @@ pub(super) fn start_ss_batch_matching(
                 }
                 eprintln!("ScreenScraper batch: quota exhausted, standing down for today");
             }
-        }
-        glib::ControlFlow::Break
     });
 }
 

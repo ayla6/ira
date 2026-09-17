@@ -2,7 +2,6 @@
 //! per source computes matches off the GTK loop, and results land on the
 //! list rows through the UI loop.
 
-use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -41,22 +40,20 @@ pub(super) struct RowActions {
 }
 
 /// Shared shape of every batch pass: one sequential worker thread computes
-/// matches over `queue`, and results are applied on the main loop every
-/// `interval_ms` until the queue drains. `worker` runs off-thread and must
-/// not touch GTK; it waits `pace_ms` before every request but the first,
-/// so a rate-limited service sees one request per pace, never a burst. It
-/// stands down between items when `cancel` says so. `on_result` runs on
-/// the main loop, with a [`BATCH_FINISHED`] hit closing the pass.
+/// matches over `queue`, and each result is applied on the main loop as
+/// it arrives. `worker` runs off-thread and must not touch GTK; it waits
+/// `pace_ms` before every request but the first, so a rate-limited
+/// service sees one request per pace, never a burst. It stands down
+/// between items when `cancel` says so. `on_result` runs on the main
+/// loop, with a [`BATCH_FINISHED`] hit closing the pass.
 pub(super) fn run_batch<T: Send + 'static>(
     queue: Vec<BatchItem>,
-    interval_ms: u64,
     pace_ms: u64,
     cancel: Option<Arc<AtomicBool>>,
     worker: impl Fn(&BatchItem) -> Option<T> + Send + 'static,
     on_result: impl Fn(BatchHit<T>) + 'static,
 ) {
-    let total = queue.len();
-    let (tx, rx) = std::sync::mpsc::channel::<BatchHit<T>>();
+    let (tx, rx) = super::helpers::ui_channel();
     std::thread::spawn(move || {
         for (index, item) in queue.iter().enumerate() {
             if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
@@ -66,14 +63,14 @@ pub(super) fn run_batch<T: Send + 'static>(
                 std::thread::sleep(std::time::Duration::from_millis(pace_ms));
             }
             let matched = worker(item);
-            let _ = tx.send(BatchHit {
+            let _ = tx.try_send(BatchHit {
                 row_idx: item.row_idx,
                 db_id: item.db_id,
                 name: item.name.clone(),
                 matched,
             });
         }
-        let _ = tx.send(BatchHit {
+        let _ = tx.try_send(BatchHit {
             row_idx: BATCH_FINISHED,
             db_id: 0,
             name: String::new(),
@@ -81,18 +78,10 @@ pub(super) fn run_batch<T: Send + 'static>(
         });
     });
 
-    let rx = std::cell::RefCell::new(rx);
-    // The sentinel closes the pass, so it takes a slot of its own.
-    let remaining = Cell::new(total + 1);
-    glib::timeout_add_local(std::time::Duration::from_millis(interval_ms), move || {
-        if let Ok(hit) = rx.borrow_mut().try_recv() {
-            on_result(hit);
-            let left = remaining.get();
-            if left <= 1 {
-                return glib::ControlFlow::Break;
-            }
-            remaining.set(left - 1);
-        }
+    // The sentinel hit closes the pass; afterwards the senders are gone
+    // and the watch loop ends on its own.
+    super::helpers::watch_channel(rx, move |hit| {
+        on_result(hit);
         glib::ControlFlow::Continue
     });
 }

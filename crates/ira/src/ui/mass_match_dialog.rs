@@ -165,7 +165,6 @@ fn start_steam_batch_matching(
     let steam = state.borrow().steam.clone();
     run_batch(
         queue,
-        50,
         0,
         None,
         {
@@ -236,7 +235,6 @@ fn start_sgdb_batch_matching(
     let steam = state.borrow().steam.clone();
     run_batch(
         queue,
-        150,
         0,
         None,
         {

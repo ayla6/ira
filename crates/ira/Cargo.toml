@@ -32,6 +32,7 @@ tracing-chrome = { version = "0.7", optional = true }
 ira-input = { version = "0.1.0", path = "../input" }
 gettext-rs = { version = "0.7", features = ["gettext-system"] }
 unicode-normalization = "0.1.25"
+async-channel = "2.5.0"
 [dev-dependencies]
 tempfile = "3"
 

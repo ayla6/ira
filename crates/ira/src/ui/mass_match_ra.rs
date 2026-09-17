@@ -117,7 +117,6 @@ pub(super) fn start_ra_batch_matching(
     let client = Arc::new(client);
     run_batch(
         queue,
-        150,
         0,
         None,
         move |item| resolve(&client, &db, &save_dir, item),

@@ -21,8 +21,6 @@ use std::time::Duration;
 /// How long the strip stays revealed after the job finishes, mirroring
 /// Nautilus's remove-finished timeout.
 const HIDE_AFTER_MS: u64 = 3_000;
-/// How often the indicator polls the job's progress channel.
-const POLL_MS: u64 = 100;
 
 /// Progress report sent from the fetch thread to the indicator.
 struct FetchUpdate {
@@ -92,7 +90,7 @@ pub fn start_missing_images_fetch(state: &SharedState) {
         .set_text(&crate::tr!("Fetching missing images…"));
     indicator.bar.set_fraction(0.0);
 
-    let (tx, rx) = std::sync::mpsc::channel::<FetchUpdate>();
+    let (tx, rx) = super::helpers::ui_channel::<FetchUpdate>();
     let (steam, sender, save_dir, db) = {
         let s = state.borrow();
         (
@@ -151,7 +149,7 @@ pub fn start_missing_images_fetch(state: &SharedState) {
                 fetched += 1;
                 let _ = sender.send(crate::AppMessage::SquareReady(game.db_id));
             }
-            let _ = tx.send(FetchUpdate {
+            let _ = tx.try_send(FetchUpdate {
                 done: done + 1,
                 total,
                 current: game.name.clone(),
@@ -159,7 +157,7 @@ pub fn start_missing_images_fetch(state: &SharedState) {
                 fetched,
             });
         }
-        let _ = tx.send(FetchUpdate {
+        let _ = tx.try_send(FetchUpdate {
             done: total,
             total,
             current: String::new(),
@@ -449,7 +447,7 @@ fn count_present(dir: &std::path::Path) -> usize {
         .count()
 }
 
-fn drain_updates(indicator: &FetchIndicator, rx: std::sync::mpsc::Receiver<FetchUpdate>) {
+fn drain_updates(indicator: &FetchIndicator, rx: async_channel::Receiver<FetchUpdate>) {
     let indicator = indicator.clone();
     let last = Rc::new(RefCell::new(FetchUpdate {
         done: 0,
@@ -458,71 +456,48 @@ fn drain_updates(indicator: &FetchIndicator, rx: std::sync::mpsc::Receiver<Fetch
         finished: false,
         fetched: 0,
     }));
-    glib::timeout_add_local(Duration::from_millis(POLL_MS), move || {
-        let mut fresh = false;
-        let mut disconnected = false;
-        loop {
-            match rx.try_recv() {
-                Ok(update) => {
-                    *last.borrow_mut() = update;
-                    fresh = true;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                // The thread may finish between two polls, leaving the
-                // final updates buffered next to the disconnect: drain
-                // everything first, render below, and only then tear down.
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    disconnected = true;
-                    break;
-                }
-            }
-        }
-        if fresh {
-            let update = last.borrow();
-            let cancelled = indicator.cancel.load(Ordering::Relaxed);
-            if update.finished {
-                // A cancelled run froze on the click; keep that picture and
-                // only schedule the strip's exit, like Nautilus.
-                if !cancelled {
-                    indicator.ring.set_fraction(1.0);
-                    indicator
-                        .ring
-                        .animate_done("file-operation-finished-symbolic");
-                    indicator.short.set_text(
-                        &crate::tr!("{} games needed new art")
-                            .replacen("{}", &update.fetched.to_string(), 1),
-                    );
-                    indicator
-                        .status
-                        .set_text(&crate::tr!("Images fetched"));
-                    indicator.details.set_markup(&details_text(&update));
-                    indicator.bar.set_fraction(1.0);
-                    indicator.close_btn.set_sensitive(false);
-                    indicator
-                        .close_btn
-                        .set_icon_name("object-select-symbolic");
-                }
-                indicator.running.set(false);
-                let indicator = indicator.clone();
-                glib::timeout_add_local_once(Duration::from_millis(HIDE_AFTER_MS), move || {
-                    indicator.popover.popdown();
-                    indicator.reveal(false);
-                    indicator.close_btn.set_sensitive(true);
-                });
-                return glib::ControlFlow::Break;
-            }
-            // After a cancel the click already froze the labels; later
-            // in-flight updates don't undo that picture.
+    super::helpers::watch_channel(rx, move |update| {
+        let cancelled = indicator.cancel.load(Ordering::Relaxed);
+        *last.borrow_mut() = update;
+        let update = last.borrow();
+        if update.finished {
+            // A cancelled run froze on the click; keep that picture and
+            // only schedule the strip's exit, like Nautilus.
             if !cancelled {
-                let fraction = update.done as f64 / update.total.max(1) as f64;
-                indicator.bar.set_fraction(fraction);
-                indicator.ring.set_fraction(fraction);
+                indicator.ring.set_fraction(1.0);
+                indicator
+                    .ring
+                    .animate_done("file-operation-finished-symbolic");
+                indicator.short.set_text(
+                    &crate::tr!("{} games needed new art")
+                        .replacen("{}", &update.fetched.to_string(), 1),
+                );
+                indicator
+                    .status
+                    .set_text(&crate::tr!("Images fetched"));
                 indicator.details.set_markup(&details_text(&update));
+                indicator.bar.set_fraction(1.0);
+                indicator.close_btn.set_sensitive(false);
+                indicator
+                    .close_btn
+                    .set_icon_name("object-select-symbolic");
             }
-        }
-        if disconnected {
             indicator.running.set(false);
+            let indicator = indicator.clone();
+            glib::timeout_add_local_once(Duration::from_millis(HIDE_AFTER_MS), move || {
+                indicator.popover.popdown();
+                indicator.reveal(false);
+                indicator.close_btn.set_sensitive(true);
+            });
             return glib::ControlFlow::Break;
+        }
+        // After a cancel the click already froze the labels; later
+        // in-flight updates don't undo that picture.
+        if !cancelled {
+            let fraction = update.done as f64 / update.total.max(1) as f64;
+            indicator.bar.set_fraction(fraction);
+            indicator.ring.set_fraction(fraction);
+            indicator.details.set_markup(&details_text(&update));
         }
         glib::ControlFlow::Continue
     });
@@ -532,7 +507,7 @@ fn drain_updates(indicator: &FetchIndicator, rx: std::sync::mpsc::Receiver<Fetch
 /// sidebar strip. Clone the handle into the background thread.
 #[derive(Clone)]
 pub struct SaveProgress {
-    tx: std::sync::mpsc::Sender<SaveUpdate>,
+    tx: async_channel::Sender<SaveUpdate>,
 }
 
 #[derive(Clone)]
@@ -546,7 +521,7 @@ struct SaveUpdate {
 impl SaveProgress {
     /// One image of the job has landed (copied, converted, thumb built).
     pub fn update(&self, done: usize, total: usize, current: &str) {
-        let _ = self.tx.send(SaveUpdate {
+        let _ = self.tx.try_send(SaveUpdate {
             done,
             total,
             current: current.to_string(),
@@ -556,7 +531,7 @@ impl SaveProgress {
 
     /// The job is done — everything that will be saved is saved.
     pub fn finish(&self) {
-        let _ = self.tx.send(SaveUpdate {
+        let _ = self.tx.try_send(SaveUpdate {
             done: 0,
             total: 0,
             current: String::new(),
@@ -586,53 +561,35 @@ pub fn begin_image_save(state: &SharedState, title: &str) -> Option<SaveProgress
         .set_text(&crate::tr!("Saving images for {}").replacen("{}", title, 1));
     indicator.bar.set_fraction(0.0);
 
-    let (tx, rx) = std::sync::mpsc::channel::<SaveUpdate>();
+    let (tx, rx) = super::helpers::ui_channel::<SaveUpdate>();
     let indicator = indicator.clone();
-    glib::timeout_add_local(Duration::from_millis(POLL_MS), move || {
-        let mut last: Option<SaveUpdate> = None;
-        let mut disconnected = false;
-        loop {
-            match rx.try_recv() {
-                Ok(update) => last = Some(update),
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    disconnected = true;
-                    break;
-                }
-            }
-        }
-        if let Some(update) = last {
-            if update.finished {
-                indicator.ring.set_fraction(1.0);
-                indicator.ring.animate_done("object-select-symbolic");
-                indicator.short.set_text(&crate::tr!("Images saved"));
-                indicator
-                    .status
-                    .set_text(&crate::tr!("Edited images saved"));
-                indicator.bar.set_fraction(1.0);
-                let indicator = indicator.clone();
-                glib::timeout_add_local_once(Duration::from_millis(HIDE_AFTER_MS), move || {
-                    indicator.popover.popdown();
-                    indicator.reveal(false);
-                    indicator.close_btn.set_sensitive(true);
-                });
-                return glib::ControlFlow::Break;
-            }
-            let fraction = update.done as f64 / update.total.max(1) as f64;
-            indicator.bar.set_fraction(fraction);
-            indicator.ring.set_fraction(fraction);
-            indicator.details.set_markup(&format!(
-                "<span size='small'>{}</span>",
-                super::helpers::esc(&format!(
-                    "{} / {} · {}",
-                    update.done, update.total, update.current
-                ))
-            ));
-        }
-        if disconnected {
-            indicator.running.set(false);
+    super::helpers::watch_channel(rx, move |update| {
+        if update.finished {
+            indicator.ring.set_fraction(1.0);
+            indicator.ring.animate_done("object-select-symbolic");
+            indicator.short.set_text(&crate::tr!("Images saved"));
+            indicator
+                .status
+                .set_text(&crate::tr!("Edited images saved"));
+            indicator.bar.set_fraction(1.0);
+            let indicator = indicator.clone();
+            glib::timeout_add_local_once(Duration::from_millis(HIDE_AFTER_MS), move || {
+                indicator.popover.popdown();
+                indicator.reveal(false);
+                indicator.close_btn.set_sensitive(true);
+            });
             return glib::ControlFlow::Break;
         }
+        let fraction = update.done as f64 / update.total.max(1) as f64;
+        indicator.bar.set_fraction(fraction);
+        indicator.ring.set_fraction(fraction);
+        indicator.details.set_markup(&format!(
+            "<span size='small'>{}</span>",
+            super::helpers::esc(&format!(
+                "{} / {} · {}",
+                update.done, update.total, update.current
+            ))
+        ));
         glib::ControlFlow::Continue
     });
     Some(SaveProgress { tx })

@@ -496,8 +496,7 @@ pub(super) fn build_api_emulator_page(
             // double-run.
             btn.set_sensitive(false);
             let btn = btn.clone();
-            let (tx, rx) = std::sync::mpsc::channel::<()>();
-            let rx = std::cell::RefCell::new(rx);
+            let (tx, rx) = super::helpers::ui_channel::<()>();
             std::thread::spawn(move || {
                 if let Err(e) = std::process::Command::new(&gen_path)
                     .current_dir(&settings_dir)
@@ -505,16 +504,10 @@ pub(super) fn build_api_emulator_page(
                 {
                     eprintln!("generate_interfaces failed: {e}");
                 }
-                let _ = tx.send(());
+                let _ = tx.try_send(());
             });
-            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-                match rx.borrow_mut().try_recv() {
-                    Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                }
+            super::helpers::once_channel(rx, move |_| {
+                btn.set_sensitive(true);
             });
         });
         let gen_row = adw::ActionRow::new();

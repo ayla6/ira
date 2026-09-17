@@ -1170,7 +1170,7 @@ fn run_refetch_missing(
     };
     let rx = spawn_refetch_worker(vec![db_id], steam, creds, db, None);
     let state = state.clone();
-    poll_channel(rx, move |progress| {
+    super::helpers::once_channel(rx, move |progress| {
         state.borrow().ss_job_busy.set(false);
         on_done(&state, db_id, progress.outcome);
     });

@@ -10,7 +10,6 @@
 //! additionally owns the quota gate, so it and the matching pass never
 //! stack their requests.
 
-use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use super::mass_match_dialog::normalize_title;
@@ -164,11 +163,11 @@ fn spawn_steam_refetch_worker(
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     db: ira_db::DbConn,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
-) -> std::sync::mpsc::Receiver<RefetchProgress> {
+) -> async_channel::Receiver<RefetchProgress> {
     use std::sync::atomic::Ordering;
 
     let total = queue.len();
-    let (tx, rx) = std::sync::mpsc::channel::<RefetchProgress>();
+    let (tx, rx) = super::helpers::ui_channel();
     std::thread::spawn(move || {
         for (done, db_id) in queue.into_iter().enumerate() {
             if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
@@ -183,7 +182,7 @@ fn spawn_steam_refetch_worker(
                 .map(|entry| entry.title)
                 .unwrap_or_default();
             let outcome = steam_refetch_one(&steam, &db, db_id);
-            let _ = tx.send(RefetchProgress {
+            let _ = tx.try_send(RefetchProgress {
                 done: done + 1,
                 total,
                 db_id,
@@ -355,11 +354,11 @@ fn spawn_full_refetch_worker(
     creds: ira_api::ScraperCreds,
     db: ira_db::DbConn,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
-) -> std::sync::mpsc::Receiver<RefetchProgress> {
+) -> async_channel::Receiver<RefetchProgress> {
     use std::sync::atomic::Ordering;
 
     let total = jobs.len();
-    let (tx, rx) = std::sync::mpsc::channel::<RefetchProgress>();
+    let (tx, rx) = super::helpers::ui_channel();
     std::thread::spawn(move || {
         for (index, (source, db_id)) in jobs.into_iter().enumerate() {
             if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
@@ -381,7 +380,7 @@ fn spawn_full_refetch_worker(
                 Source::Steam => steam_refetch_one(&steam, &db, db_id),
                 Source::Ss => super::mass_match_ss::refetch_one(&steam, &creds, &db, db_id),
             };
-            let _ = tx.send(RefetchProgress {
+            let _ = tx.try_send(RefetchProgress {
                 done: index + 1,
                 total,
                 db_id,
@@ -400,19 +399,20 @@ fn spawn_full_refetch_worker(
 fn poll_refetch(
     state: SharedState,
     job: super::fetch_images::StripJob,
-    rx: std::sync::mpsc::Receiver<RefetchProgress>,
+    rx: async_channel::Receiver<RefetchProgress>,
     short_done: String,
     status_done: String,
     on_finish: impl Fn(&SharedState) + 'static,
 ) {
-    let rx = RefCell::new(rx);
-    let filled = Cell::new(0usize);
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+    // The receiver wakes the main loop on every message; the worker's
+    // disconnect (done, cancelled, or failed) is the finish signal.
+    glib::spawn_future_local(async move {
+        let mut filled = 0usize;
         loop {
-            match rx.borrow_mut().try_recv() {
+            match rx.recv().await {
                 Ok(progress) => {
                     if matches!(progress.outcome, RefetchOutcome::Filled) {
-                        filled.set(filled.get() + 1);
+                        filled += 1;
                         // Only repaints when the refilled game's settings
                         // window is the one open right now.
                         super::edit_game_scraper::refresh_scraper_section(
@@ -422,17 +422,14 @@ fn poll_refetch(
                     }
                     job.progress(&state, progress.done, progress.total, &progress.current);
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    return glib::ControlFlow::Continue;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Err(_) => {
                     on_finish(&state);
                     job.finish(
                         &state,
-                        &short_done.replacen("{}", &filled.get().to_string(), 1),
+                        &short_done.replacen("{}", &filled.to_string(), 1),
                         &status_done,
                     );
-                    return glib::ControlFlow::Break;
+                    return;
                 }
             }
         }

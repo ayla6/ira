@@ -38,6 +38,10 @@ pub fn run_daemon() -> Result<i32, String> {
 struct Client {
     stream: UnixStream,
     buffer: Vec<u8>,
+    /// Connection identity for requests that live as long as the client:
+    /// a desktop hold dies with the connection that made it, so a crashed
+    /// app can never leave the controller suspended forever.
+    id: u64,
 }
 
 struct SessionHandle {
@@ -70,6 +74,10 @@ struct SessionTable {
     sessions: Vec<SessionHandle>,
     next_session_id: u64,
     desktop_wish: Option<DesktopWish>,
+    /// Clients holding the desktop behaviour off (a game that bypasses the
+    /// daemon must not be remapped underneath). The desktop session neither
+    /// starts nor keeps running while this is non-empty.
+    desktop_holds: std::collections::HashSet<u64>,
 }
 
 pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
@@ -93,6 +101,7 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
     eprintln!("ira-input: daemon listening on {}", path.display());
 
     let mut clients: Vec<Client> = Vec::new();
+    let mut next_client_id: u64 = 0;
     // One hub for the daemon's lifetime: it owns every physical controller
     // and routes them to whichever session holds focus.
     let (controller_tx, controller_rx) = std::sync::mpsc::channel();
@@ -113,10 +122,10 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
         let timeout = loop_timeout(!table.sessions.is_empty(), idle_since);
         let ready = poll_sockets(&listener, &clients, timeout)?;
         if ready[0] {
-            accept(&listener, &mut clients);
+            accept(&listener, &mut clients, &mut next_client_id);
         }
         for index in (0..clients.len()).rev() {
-            let (requests, disconnected) = read_client(&mut clients, index);
+            let (requests, released) = read_client(&mut clients, index);
             for request in requests {
                 process_request(
                     &mut clients,
@@ -127,12 +136,15 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
                     request,
                 );
             }
-            if disconnected && clients.is_empty() {
-                // The last app went away: the desktop behaviour was theirs.
-                // Releasing the desktop session also lets the daemon idle
-                // out instead of holding the pad forever.
-                table.desktop_wish = None;
-                stop_desktop_session(&hub, &table.sessions);
+            if let Some(id) = released {
+                table.desktop_holds.remove(&id);
+                if clients.is_empty() {
+                    // The last app went away: the desktop behaviour was
+                    // theirs. Releasing the desktop session also lets the
+                    // daemon idle out instead of holding the pad forever.
+                    table.desktop_wish = None;
+                    stop_desktop_session(&hub, &table.sessions);
+                }
             }
         }
         if clients.is_empty() && table.sessions.is_empty() {
@@ -184,7 +196,10 @@ fn pump_sessions(table: &mut SessionTable, clients: &mut Vec<Client>, hub: &HubH
             broadcast(clients, &Event::SessionEnded { session: handle.id, code });
         }
     }
-    if table.sessions.is_empty() && !shutdown {
+    if table.sessions.is_empty()
+        && !shutdown
+        && table.desktop_holds.is_empty()
+    {
         if let Some(wish) = table.desktop_wish.clone() {
             if !clients.is_empty() {
                 start_desktop_session(&wish, hub, table);
@@ -296,17 +311,19 @@ fn poll_sockets(
     Ok(descriptors.iter().map(|d| d.revents & libc::POLLIN != 0).collect())
 }
 
-fn accept(listener: &UnixListener, clients: &mut Vec<Client>) {
+fn accept(listener: &UnixListener, clients: &mut Vec<Client>, next_client_id: &mut u64) {
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
                 if stream.set_nonblocking(true).is_err() {
                     continue;
                 }
-                eprintln!("ira-input: client connected");
+                *next_client_id += 1;
+                eprintln!("ira-input: client {} connected", *next_client_id);
                 clients.push(Client {
                     stream,
                     buffer: Vec::new(),
+                    id: *next_client_id,
                 });
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
@@ -316,22 +333,24 @@ fn accept(listener: &UnixListener, clients: &mut Vec<Client>) {
 }
 
 /// Reads everything currently available from one client and returns the
-/// complete requests found, plus whether the client was dropped (EOF or
-/// socket error).
-fn read_client(clients: &mut Vec<Client>, index: usize) -> (Vec<Request>, bool) {
+/// complete requests found, plus the client's id when it was dropped (EOF
+/// or socket error) so connection-scoped state can be cleaned up.
+fn read_client(clients: &mut Vec<Client>, index: usize) -> (Vec<Request>, Option<u64>) {
+    let client_id = clients[index].id;
     let mut chunk = [0u8; 4096];
     loop {
         match clients[index].stream.read(&mut chunk) {
             Ok(0) => {
-                eprintln!("ira-input: client disconnected");
+                eprintln!("ira-input: client {client_id} disconnected");
                 clients.remove(index);
-                return (Vec::new(), true);
+                return (Vec::new(), Some(client_id));
             }
             Ok(read) => clients[index].buffer.extend_from_slice(&chunk[..read]),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
             Err(_) => {
+                eprintln!("ira-input: client {client_id} errored");
                 clients.remove(index);
-                return (Vec::new(), true);
+                return (Vec::new(), Some(client_id));
             }
         }
     }
@@ -346,7 +365,7 @@ fn read_client(clients: &mut Vec<Client>, index: usize) -> (Vec<Request>, bool) 
             requests.push(request);
         }
     }
-    (requests, false)
+    (requests, None)
 }
 
 fn process_request(
@@ -365,6 +384,7 @@ fn process_request(
                 pid: std::process::id(),
                 protocol_version: PROTOCOL_VERSION,
                 session_active: table.sessions.iter().any(|session| !session.desktop),
+                desktop_active: table.sessions.iter().any(|session| session.desktop),
             }),
         ),
         Request::Launch(launch) => {
@@ -415,7 +435,10 @@ fn process_request(
                         if table.sessions.iter().all(|session| session.desktop) {
                             stop_desktop_session(hub, &table.sessions);
                         }
-                        if table.sessions.is_empty() && !clients.is_empty() {
+                        if table.sessions.is_empty()
+                            && table.desktop_holds.is_empty()
+                            && !clients.is_empty()
+                        {
                             start_desktop_session(&wish, hub, table);
                         }
                     }
@@ -445,6 +468,21 @@ fn process_request(
                     },
                 ),
             }
+        }
+        Request::HoldDesktop { hold } => {
+            let client_id = clients[index].id;
+            if hold {
+                table.desktop_holds.insert(client_id);
+            } else {
+                table.desktop_holds.remove(&client_id);
+            }
+            // An in-flight desktop session must stop before the caller's
+            // game spawns; the pump only restarts it once every hold is
+            // gone.
+            if !table.desktop_holds.is_empty() {
+                stop_desktop_session(hub, &table.sessions);
+            }
+            respond(clients, index, Response::Applied);
         }
         Request::Shutdown { stop_running } => {
             if !stop_running && table.sessions.iter().any(|session| !session.desktop) {
@@ -656,6 +694,77 @@ mod tests {
             other => panic!("expected bye, got {other:?}"),
         }
         let _ = server.join();
+    }
+
+    /// Waits until the desktop session's presence matches `active`; a hold
+    /// or release only lands after the pump and the session wind-down, both
+    /// of which run on their own cadences.
+    fn wait_desktop_active(client: &mut DaemonClient, active: bool, label: &str) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if let Ok(status) = client.status() {
+                if status.desktop_active == active {
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("desktop session never became {active} ({label})");
+    }
+
+    #[test]
+    fn test_daemon_hold_suspends_and_releases_the_desktop_session() {
+        let dir = temp_test_dir("hold");
+        let path = dir.join("test.sock");
+        let server = std::thread::spawn({
+            let path = path.clone();
+            move || run_daemon_on(&path)
+        });
+        let mut wish_client = wait_for_server(&path);
+        wish_client
+            .request(Request::DesktopDefault {
+                enabled: true,
+                profile: None,
+                calibration: None,
+                motion_port: Some(0),
+            })
+            .unwrap();
+        wait_desktop_active(&mut wish_client, true, "after the wish");
+
+        // A holding client suspends the desktop behaviour for as long as it
+        // stays connected.
+        let mut holder = wait_for_server(&path);
+        match holder
+            .request(Request::HoldDesktop { hold: true })
+            .unwrap()
+        {
+            Response::Applied => {}
+            other => panic!("expected applied, got {other:?}"),
+        }
+        wait_desktop_active(&mut wish_client, false, "while held");
+
+        // Releasing explicitly (without disconnecting) resumes it.
+        match holder
+            .request(Request::HoldDesktop { hold: false })
+            .unwrap()
+        {
+            Response::Applied => {}
+            other => panic!("expected applied, got {other:?}"),
+        }
+        wait_desktop_active(&mut wish_client, true, "after explicit release");
+
+        // A new hold ends when the client disappears: a crashed app must
+        // not leave the controller suspended forever.
+        let mut crasher = wait_for_server(&path);
+        crasher
+            .request(Request::HoldDesktop { hold: true })
+            .unwrap();
+        wait_desktop_active(&mut wish_client, false, "while held again");
+        drop(crasher);
+        wait_desktop_active(&mut wish_client, true, "after the holder vanished");
+
+        shutdown_and_join(&mut wish_client, server);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

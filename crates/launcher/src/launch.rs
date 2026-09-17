@@ -265,6 +265,15 @@ pub fn launch_game(
             }
         }
     }
+    // The game bypasses the daemon, so the daemon's desktop-default session
+    // would keep remapping the pad underneath it — the exact bug that makes
+    // "input remapping: disabled" look ignored. Hold the desktop behaviour
+    // off for the game's lifetime; dropping the client releases it.
+    let desktop_hold = if matches!(launch.input_mode, Some(ControllerInputMode::Enabled)) {
+        None
+    } else {
+        super::input_daemon::hold_desktop_for_game()
+    };
     super::env_builder::wrap_with_input_mode(
         &mut command,
         launch.input_mode,
@@ -332,6 +341,9 @@ pub fn launch_game(
         working_dir: game_dir.clone(),
     };
     std::thread::spawn(move || {
+        // Held until monitoring ends: the pad stays native for exactly as
+        // long as the game lives.
+        let _desktop_hold = desktop_hold;
         super::wrapper::monitor_process(child, child_pid, mc);
     });
 

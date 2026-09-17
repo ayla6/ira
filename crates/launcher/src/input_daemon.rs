@@ -4,7 +4,11 @@
 //! cannot be reached or refuses, every caller falls back to the classic
 //! wrapper spawn — the game itself must always start.
 
-use ira_input_ipc::{LaunchRequest, Request, Response};
+use std::time::{Duration, Instant};
+
+use ira_input_ipc::{
+    socket_path, DaemonStatus, LaunchRequest, Request, Response, PROTOCOL_VERSION,
+};
 pub use ira_input_ipc::DaemonClient;
 use ira_models::ControllerInputMode;
 
@@ -81,6 +85,51 @@ pub fn send_desktop_default(
         Response::Error { message } => Err(message),
         _ => Err("unexpected response to the desktop-default wish".to_string()),
     }
+}
+
+/// Suspends the daemon's desktop-default controller behaviour for the
+/// lifetime of the returned client: a game that bypasses the daemon (input
+/// remapping disabled or inherited-off) must not be remapped underneath by
+/// the idle desktop session. Dropping the client releases the hold, so a
+/// crash can never leave the controller suspended. `None` means no daemon
+/// is running (the pad is already native) or one from an older build is;
+/// either way the game launches untouched.
+pub fn hold_desktop_for_game() -> Option<DaemonClient> {
+    let mut client = DaemonClient::connect(&socket_path()).ok()?;
+    let status = match client.status() {
+        Ok(status) => status,
+        Err(_) => return None,
+    };
+    if status.protocol_version != PROTOCOL_VERSION {
+        eprintln!(
+            "launch: daemon speaks protocol {}, this build speaks {PROTOCOL_VERSION}; \
+             its desktop remap stays up for this game",
+            status.protocol_version
+        );
+        return None;
+    }
+    match client.request(Request::HoldDesktop { hold: true }) {
+        Ok(Response::Applied) => {}
+        Ok(Response::Error { message }) => {
+            eprintln!("launch: desktop hold refused: {message}");
+            return None;
+        }
+        _ => return None,
+    }
+    // The desktop session winds down asynchronously; give it a moment so
+    // the game never sees its virtual pad, but spawn regardless — a stuck
+    // daemon must not block the game.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        match client.status() {
+            Ok(DaemonStatus { desktop_active, .. }) if !desktop_active => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    client.drain_in_background();
+    Some(client)
 }
 
 /// Tells the daemon running `tag`'s game session to switch to the layout at

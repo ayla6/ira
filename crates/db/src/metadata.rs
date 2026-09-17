@@ -146,7 +146,11 @@ pub fn store_scraper_metadata(
         tx.execute(
             "INSERT OR IGNORE INTO scraper_game_classifications
                 (game_id, kind, value) VALUES (?1, ?2, ?3)",
-            params![game_id, class.kind, class.value],
+            params![
+                game_id,
+                canonical_board_kind(&class.kind),
+                class.value
+            ],
         )
         .map_err(err)?;
     }
@@ -552,6 +556,16 @@ fn game_genres(conn: &DbConn, game_id: i64) -> Result<Vec<ira_models::ScraperEnt
     Ok(rows)
 }
 
+/// The stored kind for a classification: the canonical board id from
+/// the ratings table ("STEAM_GERMANY" is USK, "DEJUS" is ClassInd), so
+/// the same board arriving from two sources under two names lands in
+/// one row instead of showing twice. Unknown kinds stay as they are.
+fn canonical_board_kind(kind: &str) -> String {
+    ira_models::ratings::find_board(kind)
+        .map(|board| board.id.to_string())
+        .unwrap_or_else(|| kind.to_string())
+}
+
 /// The age-rating boards of a game, board name alphabetical.
 fn game_classifications(
     conn: &DbConn,
@@ -575,7 +589,13 @@ fn game_classifications(
         .map_err(err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(err)?;
-    Ok(rows)
+    Ok(rows
+        .into_iter()
+        .map(|class| ira_models::ScraperClassification {
+            kind: canonical_board_kind(&class.kind),
+            value: class.value,
+        })
+        .collect())
 }
 
 pub fn scraper_companies_search(
@@ -1030,6 +1050,51 @@ mod tests {
         assert_eq!(salvato.id, "54774");
         // A filler-only name agrees with nothing.
         assert!(steam_company_entity(&conn, "LLC").is_none());
+    }
+
+    #[test]
+    fn test_board_aliases_collapse_into_one_row() {
+        let (conn, _tmp) = setup_db();
+        let game_id = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "",
+            "",
+            "",
+            "Twice Rated",
+        )
+        .unwrap();
+        // The same board arriving under two spellings — ScreenScraper's
+        // and Steam's — is one rating, not two.
+        let meta = ira_models::ScraperMetadata {
+            ss_id: "1".into(),
+            classifications: vec![
+                ira_models::ScraperClassification {
+                    kind: "USK".into(),
+                    value: "16".into(),
+                },
+                ira_models::ScraperClassification {
+                    kind: "STEAM_GERMANY".into(),
+                    value: "16".into(),
+                },
+                ira_models::ScraperClassification {
+                    kind: "PEGI".into(),
+                    value: "12".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        store_scraper_metadata(&conn, game_id, &meta).unwrap();
+        let metadata = scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        assert_eq!(
+            metadata
+                .classifications
+                .iter()
+                .map(|c| (c.kind.as_str(), c.value.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("PEGI", "12"), ("USK", "16")]
+        );
     }
 
     #[test]

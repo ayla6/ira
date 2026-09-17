@@ -119,10 +119,33 @@ impl DaemonClient {
         }
     }
 
+    /// Discards the daemon's broadcasts on a cloned descriptor for the rest
+    /// of this client's life. A client that holds its connection open but
+    /// never reads (a launch holding the desktop behaviour off while the
+    /// game runs) would otherwise let the socket buffer fill and stall the
+    /// daemon's writes to every client.
+    pub fn drain_in_background(&self) {
+        let Ok(stream) = self.stream.try_clone() else {
+            return;
+        };
+        std::thread::Builder::new()
+            .name("ira-daemon-drain".to_string())
+            .spawn(move || {
+                let mut stream = stream;
+                let mut sink = [0u8; 4096];
+                loop {
+                    match std::io::Read::read(&mut stream, &mut sink) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                }
+            })
+            .ok();
+    }
+
     /// Hands a game to the daemon. `Err` means the daemon refused (busy,
     /// stale) and the caller should fall back to the wrapper launch.
-    pub fn begin_launch(&mut self, request: LaunchRequest) -> Result<u64, String> {
-        match self.request(Request::Launch(request))? {
+    pub fn begin_launch(&mut self, request: LaunchRequest) -> Result<u64, String> {        match self.request(Request::Launch(request))? {
             Response::Launched { session } => {
                 self.session = Some(session);
                 Ok(session)

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking message change; the daemon answers `status` with
 /// its version so a stale client can bail out cleanly.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -33,6 +33,12 @@ pub enum Request {
         calibration: Option<String>,
         motion_port: Option<u16>,
     },
+    /// A game that will not be remapped is about to start, so the
+    /// desktop-default session must not remap the pad underneath it: the
+    /// desktop behaviour is suspended while `hold` is true. The hold lives
+    /// on the requesting client connection — disconnecting (a crash, a
+    /// finished game) releases it, so no explicit resume is needed.
+    HoldDesktop { hold: bool },
 }
 
 /// A game session handed to the daemon. `command` is the fully built game
@@ -80,6 +86,10 @@ pub struct DaemonStatus {
     pub pid: u32,
     pub protocol_version: u32,
     pub session_active: bool,
+    /// Whether the no-game desktop-default session is currently running.
+    /// A launch that bypasses the daemon waits for this to go false before
+    /// spawning, so its game never sees the desktop's remapped pad.
+    pub desktop_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +209,16 @@ mod tests {
                 assert_eq!(calibration.as_deref(), Some("/calibration.json"));
                 assert_eq!(motion_port, Some(26760));
             }
+            other => panic!("wrong wire message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_wire_hold_desktop_roundtrip() {
+        let request = Wire::Request(Request::HoldDesktop { hold: true });
+        let line = serde_json::to_string(&request).unwrap();
+        match serde_json::from_str::<Wire>(&line).unwrap() {
+            Wire::Request(Request::HoldDesktop { hold }) => assert!(hold),
             other => panic!("wrong wire message: {other:?}"),
         }
     }

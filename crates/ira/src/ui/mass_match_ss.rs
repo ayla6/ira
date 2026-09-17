@@ -168,11 +168,14 @@ pub(super) fn attach_ss_actions(
     game: &Game,
     dialog: &adw::Dialog,
     missed: bool,
+    vis: &super::mass_match_dialog::RowVis,
 ) -> gtk4::Box {
     let ss_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     ss_box.set_valign(gtk4::Align::Center);
     let console = ira_models::scraper_console_id(game.kind, &game.platform_id);
     if missed {
+        // Already tombstoned by an earlier pass: terminal from the start.
+        vis.mark_attempted(game.db_id);
         show_unmatched(
             &ss_box,
             state,
@@ -202,6 +205,7 @@ pub(super) fn start_ss_batch_matching(
     needs_matching: &[Game],
     rows: &[RowActions],
     dialog: &adw::Dialog,
+    vis: super::mass_match_dialog::RowVis,
 ) {
     let missed: HashSet<i64> = match ira_db::scraper_missed_ids(&state.borrow().db) {
         Ok(ids) => ids.into_iter().collect(),
@@ -338,7 +342,7 @@ pub(super) fn start_ss_batch_matching(
                             return;
                         }
                         let name = hit.name.clone();
-                        apply_hit(&state, &rows, &dialog, hit, &matched);
+                        apply_hit(&state, &rows, &dialog, hit, &matched, &vis);
                         let finished = done.get() + 1;
                         done.set(finished);
                         if let Some(job) = &job {
@@ -1164,6 +1168,7 @@ fn apply_hit(
     dialog: &adw::Dialog,
     hit: BatchHit<SsOutcome>,
     matched: &Cell<usize>,
+    vis: &super::mass_match_dialog::RowVis,
 ) {
     let platform_id = state
         .borrow()
@@ -1179,6 +1184,7 @@ fn apply_hit(
             if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {
                 show_matched(&ss_box);
             }
+            vis.pass_done(hit.row_idx);
         }
         Some(SsOutcome::Miss) => {
             if let Err(e) = ira_db::tombstone_scraper_miss(&state.borrow().db, hit.db_id) {
@@ -1189,6 +1195,7 @@ fn apply_hit(
                     show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
                 });
             }
+            vis.pass_done(hit.row_idx);
         }
         Some(SsOutcome::Failed(e)) => {
             eprintln!(
@@ -1200,6 +1207,7 @@ fn apply_hit(
                     show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
                 });
             }
+            vis.pass_done(hit.row_idx);
         }
         None => {}
     }

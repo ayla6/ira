@@ -101,3 +101,10 @@ pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<()
         .map_err(err)?;
     tx.commit().map_err(err)
 }
+
+/// The Steam app id a console game was matched to by title — metadata
+/// only. Separate from `steam_id` (the trophy id) so linking a console
+/// game to Steam never turns it into a Steam game.
+pub fn set_steam_link_id(conn: &DbConn, id: i64, link_id: &str) -> Result<(), String> {
+    update_field(conn, id, "steam_link_id", &link_id)
+}

@@ -5,6 +5,9 @@ use super::kind::{GameKind, TrophySource};
 #[derive(Debug, Clone)]
 pub struct Game {
     pub app_id: String,
+    /// Steam app id a console game was matched to by title — metadata
+    /// only, never used for Steam enrichment or image folders.
+    pub steam_link_id: String,
     pub kind: GameKind,
     pub trophy_source: TrophySource,
     pub platform_id: String,
@@ -70,6 +73,7 @@ impl Default for Game {
     fn default() -> Self {
         Game {
             app_id: String::new(),
+            steam_link_id: String::new(),
             kind: GameKind::default(),
             trophy_source: TrophySource::default(),
             platform_id: String::new(),

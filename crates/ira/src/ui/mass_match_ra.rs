@@ -25,12 +25,15 @@ pub(super) fn attach_ra_actions(
     game: &Game,
     dialog: &adw::Dialog,
     will_search: bool,
+    vis: &super::mass_match_dialog::RowVis,
 ) -> gtk4::Box {
     let ra_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     ra_box.set_valign(gtk4::Align::Center);
     if will_search {
         ra_box.append(&status_label(&crate::tr!("Searching RA..."), CSS_DIM_LABEL));
     } else {
+        // Nothing will run for this row: terminal from the start.
+        vis.mark_attempted(game.db_id);
         show_unmatched(&ra_box, state, game.db_id, &game.name, &game.platform_id, dialog);
     }
     row.add_suffix(&ra_box);
@@ -89,6 +92,7 @@ pub(super) fn start_ra_batch_matching(
     needs_matching: &[Game],
     rows: &[RowActions],
     dialog: &adw::Dialog,
+    vis: super::mass_match_dialog::RowVis,
 ) {
     if !ra_pass_available(state) {
         return;
@@ -124,7 +128,7 @@ pub(super) fn start_ra_batch_matching(
             let state = state.clone();
             let rows = rows.to_vec();
             let dialog = dialog.clone();
-            move |hit| apply_hit(&state, &rows, &dialog, hit)
+            move |hit| apply_hit(&state, &rows, &dialog, hit, &vis)
         },
     );
 }
@@ -159,6 +163,7 @@ fn apply_hit(
     rows: &[RowActions],
     dialog: &adw::Dialog,
     hit: BatchHit<(String, String)>,
+    vis: &super::mass_match_dialog::RowVis,
 ) {
     let Some(ra_box) = rows.get(hit.row_idx).and_then(|r| r.ra.clone()) else {
         return;
@@ -182,4 +187,5 @@ fn apply_hit(
             show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
         }),
     }
+    vis.pass_done(hit.row_idx);
 }

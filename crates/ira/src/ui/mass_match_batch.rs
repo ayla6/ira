@@ -34,6 +34,7 @@ pub(super) const BATCH_FINISHED: usize = usize::MAX;
 /// the ScreenScraper one, so the sources never overwrite each other.
 #[derive(Clone)]
 pub(super) struct RowActions {
+    pub(super) row: gtk4::ListBoxRow,
     pub(super) main: gtk4::Box,
     pub(super) ra: Option<gtk4::Box>,
     pub(super) ss: Option<gtk4::Box>,

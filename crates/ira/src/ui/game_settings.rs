@@ -486,6 +486,7 @@ fn build_service_ids_section(
         if let Some(hash) = rom_hash_for(state, game.db_id) {
             add_id_row(&crate::tr!("ROM hash"), &hash);
         }
+        add_steam_link_row(parent, state, win, game);
         return (true, None);
     }
 
@@ -493,8 +494,48 @@ fn build_service_ids_section(
     if game.kind.is_trophy_console() {
         add_id_row(&crate::tr!("NPWR code"), &game.app_id);
         add_id_row(&crate::tr!("Game serial"), &game.platform_id);
+        add_steam_link_row(parent, state, win, game);
         return (true, None);
     }
+
+/// The editable Steam link row for console games: the app id a title
+/// match (or the user) tied this game to for metadata garnish. Editing
+/// it here re-points the link; clearing it unlinks.
+fn add_steam_link_row(
+    parent: &adw::PreferencesGroup,
+    state: &SharedState,
+    win: &adw::Window,
+    game: &Game,
+) {
+    let row = adw::EntryRow::new();
+    row.set_title(&crate::tr!("Steam app ID (linked)"));
+    row.set_text(&game.steam_link_id);
+    row.set_tooltip_text(Some(&crate::tr!(
+        "Links this game to a Steam entry for metadata only"
+    )));
+    {
+        let state = state.clone();
+        let db_id = game.db_id;
+        row.connect_apply(move |row| {
+            let link = row.text().trim().to_string();
+            if !link.is_empty() && link.parse::<u32>().is_err() {
+                row.add_css_class(CSS_ERROR);
+                return;
+            }
+            row.remove_css_class(CSS_ERROR);
+            if let Err(e) = ira_db::set_steam_link_id(&state.borrow().db, db_id, &link) {
+                eprintln!("Failed to store the Steam link: {e}");
+                return;
+            }
+            if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
+                g.steam_link_id = link;
+            }
+            row.remove_css_class(CSS_ERROR);
+        });
+    }
+    let _ = win;
+    parent.add(&row);
+}
 
     // Every remaining kind is a PC game: its store id is always shown. It is
     // editable so a plain PC game can be pointed at its Steam entry — that

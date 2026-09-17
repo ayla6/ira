@@ -209,16 +209,29 @@ pub(crate) fn steam_refetch_one(
         return RefetchOutcome::Failed("game not found".to_string());
     };
     // The match is metadata only — no app id, no Steam enrichment ever
-    // lands on the game.
-    let app_id = entry
-        .platform_id
-        .parse::<u32>()
-        .ok()
-        .or_else(|| exact_title_hit(&steam.search_steam_store(&entry.title), &entry.title));
+    // lands on the game. A console game matched before reuses its
+    // stored link instead of searching again.
+    let app_id = if !entry.steam_link_id.is_empty() {
+        Some(entry.steam_link_id.clone())
+    } else {
+        entry
+            .platform_id
+            .parse::<u32>()
+            .ok()
+            .map(|id| id.to_string())
+            .or_else(|| {
+                exact_title_hit(&steam.search_steam_store(&entry.title), &entry.title)
+                    .map(|id| id.to_string())
+            })
+    };
     let Some(app_id) = app_id else {
         return RefetchOutcome::Unchanged;
     };
-    let app_id = app_id.to_string();
+    // A title-search hit is remembered, so the settings screen can show
+    // and edit the link and later passes skip the search.
+    if entry.steam_link_id.is_empty() && entry.platform_id.parse::<u32>().is_err() {
+        let _ = ira_db::set_steam_link_id(db, db_id, &app_id);
+    }
     let info = steam.fetch_steamcmd_info(&app_id);
     let extras = steam.fetch_store_extras(&app_id);
     if info.is_none() && extras.is_none() {

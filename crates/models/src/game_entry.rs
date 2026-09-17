@@ -58,6 +58,9 @@ pub struct GameEntry {
     /// switch/wiiu/3ds, the manufacturer serial on disc consoles, the
     /// emulator's app id on integration platforms.
     pub native_id: String,
+    /// Steam app id a console game was matched to by title — metadata
+    /// only, never used for Steam enrichment or image folders.
+    pub steam_link_id: String,
     /// SteamGridDB id for games with no achievement source but need images.
     pub sgdb_id: Option<String>,
     /// Per-game logo overlay position (e.g. "bottom-left").
@@ -154,6 +157,7 @@ impl GameEntry {
             steam_id: steam_id.to_string(),
             ra_id: String::new(),
             native_id: native_id.to_string(),
+            steam_link_id: String::new(),
             platform_id: platform_id.to_string(),
             title: String::new(),
             hidden: false,
@@ -200,6 +204,7 @@ impl GameEntry {
             },
             ra_id: String::new(),
             native_id: g.app_id.clone(),
+            steam_link_id: g.steam_link_id.clone(),
             platform_id: g.platform_id.clone(),
             title: g.name.clone(),
             hidden: g.hidden,
@@ -246,6 +251,7 @@ impl GameEntry {
             kind: self.kind,
             trophy_source: self.trophy_source,
             platform_id: self.platform_id.clone(),
+            steam_link_id: self.steam_link_id.clone(),
             db_id: self.id,
             name: self.title.clone(),
             name_lower: self.title.to_lowercase(),

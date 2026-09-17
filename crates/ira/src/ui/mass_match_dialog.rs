@@ -1,7 +1,9 @@
 use crate::Game;
 use adw::prelude::*;
 use ira_models::GameKind;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use super::css::*;
 use super::helpers::replace_row_actions;
@@ -94,6 +96,7 @@ fn needs_ss_match(g: &Game) -> bool {
 fn needs_steam_title_match(state: &SharedState, g: &Game) -> bool {
     if g.manual_unmatch
         || g.name.trim().is_empty()
+        || !g.steam_link_id.is_empty()
         || !(g.kind.is_console_emulator() || g.kind == ira_models::GameKind::Retro)
     {
         return false;
@@ -109,6 +112,103 @@ fn needs_steam_title_match(state: &SharedState, g: &Game) -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// Per-dialog visibility for the match list: rows whose game has
+/// gotten a final word from every pass that applies to it (matched, or
+/// a negative result this session) are hidden while the toggle is on,
+/// so the list only shows games still in play.
+#[derive(Clone)]
+pub(super) struct RowVis {
+    state: SharedState,
+    rows: RefCell<Vec<gtk4::ListBoxRow>>,
+    games: Vec<Game>,
+    show_finished: Rc<Cell<bool>>,
+    attempted: Rc<RefCell<HashSet<i64>>>,
+}
+
+impl RowVis {
+    pub(super) fn new(
+        state: &SharedState,
+        games: Vec<Game>,
+        show_finished: Rc<Cell<bool>>,
+    ) -> Self {
+        Self {
+            state: std::rc::Rc::clone(state),
+            rows: RefCell::new(Vec::new()),
+            games,
+            show_finished,
+            attempted: Rc::new(RefCell::new(HashSet::new())),
+        }
+    }
+
+    /// One widget per game, in order; set right after the rows exist.
+    pub(super) fn set_rows(&self, rows: Vec<gtk4::ListBoxRow>) {
+        *self.rows.borrow_mut() = rows;
+    }
+
+    /// A pass reached a terminal result for this row — count it and
+    /// hide the row when nothing applicable is left open.
+    pub fn pass_done(&self, row_idx: usize) {
+        if let Some(g) = self.games.get(row_idx) {
+            self.attempted.borrow_mut().insert(g.db_id);
+        }
+        self.refresh(row_idx);
+    }
+
+    /// A pass will never run for this row (its box attached already
+    /// concluded) — that counts as its final word too.
+    pub fn mark_attempted(&self, db_id: i64) {
+        self.attempted.borrow_mut().insert(db_id);
+    }
+
+    fn refresh(&self, row_idx: usize) {
+        if self.show_finished.get() {
+            return;
+        }
+        let rows = self.rows.borrow();
+        let (Some(row), Some(game)) = (rows.get(row_idx), self.games.get(row_idx)) else {
+            return;
+        };
+        if game_concluded(&self.state, game, &self.attempted.borrow()) {
+            row.set_visible(false);
+        }
+    }
+
+    /// The toggle flipped: show everything, or re-hide the concluded.
+    fn apply_all(&self) {
+        if self.show_finished.get() {
+            self.rows.borrow().iter().for_each(|row| row.set_visible(true));
+            return;
+        }
+        let rows = self.rows.borrow();
+        for (idx, row) in rows.iter().enumerate() {
+            if let Some(game) = self.games.get(idx) {
+                row.set_visible(!game_concluded(&self.state, game, &self.attempted.borrow()));
+            }
+        }
+    }
+}
+
+/// Whether the game has nothing left to try automatically: every pass
+/// that applies either matched, or gave its negative word this session.
+fn game_concluded(state: &SharedState, g: &Game, attempted: &HashSet<i64>) -> bool {
+    if needs_steam_match(g) && !attempted.contains(&g.db_id) {
+        return false;
+    }
+    if needs_ra_match(g) && !attempted.contains(&g.db_id) {
+        return false;
+    }
+    if needs_sgdb_match(g) && !attempted.contains(&g.db_id) {
+        return false;
+    }
+    if needs_ss_match(g) && !attempted.contains(&g.db_id) {
+        return false;
+    }
+    if needs_steam_title_match(state, g) && !attempted.contains(&g.db_id) {
+        return false;
+    }
+    true
 }
 
 fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
@@ -143,6 +243,7 @@ fn populate_match_list(
     state: &SharedState,
     dialog: &adw::Dialog,
     ss_missed: &HashSet<i64>,
+    vis: &RowVis,
 ) -> Vec<RowActions> {
     let ra_available = ra_pass_available(state);
     needs_matching
@@ -156,13 +257,22 @@ fn populate_match_list(
                 String::new()
             };
             let (row, main) = create_match_row(list, &game.name, &searching_text);
-            let ra = needs_ra_match(game)
-                .then(|| attach_ra_actions(&row, state, game, dialog, ra_available));
-            let ss = needs_ss_match(game)
-                .then(|| attach_ss_actions(&row, state, game, dialog, ss_missed.contains(&game.db_id)));
+            let ra = needs_ra_match(game).then(|| {
+                attach_ra_actions(&row, state, game, dialog, ra_available, vis)
+            });
+            let ss = needs_ss_match(game).then(|| {
+                attach_ss_actions(
+                    &row,
+                    state,
+                    game,
+                    dialog,
+                    ss_missed.contains(&game.db_id),
+                    vis,
+                )
+            });
             let steam = needs_steam_title_match(state, game)
                 .then(|| attach_steam_title_actions(&row));
-            RowActions { main, ra, ss, steam }
+            RowActions { row: row.upcast(), main, ra, ss, steam }
         })
         .collect()
 }
@@ -306,7 +416,12 @@ fn attach_steam_title_actions(row: &adw::ActionRow) -> gtk4::Box {
 /// The console→Steam pass: every row with a Steam box gets an exact
 /// title search over the store, and whatever matches is garnished
 /// metadata-only — the game's console identity is never touched.
-fn start_steam_title_matching(state: &SharedState, needs_matching: &[Game], rows: &[RowActions]) {
+fn start_steam_title_matching(
+    state: &SharedState,
+    needs_matching: &[Game],
+    rows: &[RowActions],
+    vis: RowVis,
+) {
     let queue: Vec<BatchItem> = needs_matching
         .iter()
         .enumerate()
@@ -349,6 +464,7 @@ fn start_steam_title_matching(state: &SharedState, needs_matching: &[Game], rows
             let Some(steam_box) = rows.get(hit.row_idx).and_then(|r| r.steam.clone()) else {
                 return;
             };
+            let vis = vis.clone();
             replace_row_actions(&steam_box, |ab| match hit.matched {
                 Some(true) => ab.append(&status_label(
                     &crate::tr!("Steam: matched"),
@@ -359,6 +475,7 @@ fn start_steam_title_matching(state: &SharedState, needs_matching: &[Game], rows
                     CSS_DIM_LABEL,
                 )),
             });
+            vis.pass_done(hit.row_idx);
         },
     );
 }
@@ -417,6 +534,12 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         });
     }
     header.append(&refetch_btn);
+    let hide_toggle = adw::SwitchRow::new();
+    hide_toggle.set_title(&crate::tr!("Hide done and failed"));
+    hide_toggle.set_active(true);
+    hide_toggle.add_css_class(CSS_CAPTION);
+    hide_toggle.set_valign(gtk4::Align::Center);
+    header.append(&hide_toggle);
     content.append(&super::helpers::clamped(&header, 600, (12, 8, 12, 12)));
 
     let (scrolled, list) = super::helpers::clamped_boxed_list(600);
@@ -431,7 +554,17 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             HashSet::new()
         }
     };
-    let rows = populate_match_list(&list, &needs_matching, state, &dialog, &ss_missed);
+    let show_finished = Rc::new(Cell::new(true));
+    let vis = RowVis::new(state, needs_matching.to_vec(), show_finished.clone());
+    let vis_toggle = vis.clone();
+    let rows = populate_match_list(&list, &needs_matching, state, &dialog, &ss_missed, &vis);
+    vis.set_rows(rows.iter().map(|r| r.row.clone()).collect());
+    vis.apply_all();
+    let show_finished_c = show_finished.clone();
+    hide_toggle.connect_active_notify(move |toggle| {
+        show_finished_c.set(toggle.is_active());
+        vis_toggle.apply_all();
+    });
     content.append(&scrolled);
 
     toolbar.set_content(Some(&content));
@@ -440,9 +573,9 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     start_steam_batch_matching(state, &needs_matching, title_map, &rows, &dialog);
     start_sgdb_batch_matching(state, &needs_matching, &rows, &dialog);
-    start_ra_batch_matching(state, &needs_matching, &rows, &dialog);
-    start_ss_batch_matching(state, &needs_matching, &rows, &dialog);
-    start_steam_title_matching(state, &needs_matching, &rows);
+    start_ra_batch_matching(state, &needs_matching, &rows, &dialog, vis.clone());
+    start_ss_batch_matching(state, &needs_matching, &rows, &dialog, vis.clone());
+    start_steam_title_matching(state, &needs_matching, &rows, vis);
 }
 
 /// One list row: the game's title plus its main action box, which starts

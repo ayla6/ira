@@ -29,6 +29,7 @@ pub fn update_field(
         "rom_path",
         "screenscraper_id",
         "title_trusted",
+        "steam_link_id",
     ];
     if !UPDATABLE_COLUMNS.contains(&column) {
         return Err(format!("update_field: unknown column {column}"));
@@ -87,6 +88,7 @@ pub fn init_db(db_path: &str) -> DbConn {
                 saves_centralized INTEGER NOT NULL DEFAULT 0,
                 hashes TEXT NOT NULL DEFAULT '',
                 title_trusted INTEGER NOT NULL DEFAULT 0,
+                steam_link_id TEXT NOT NULL DEFAULT '',
                 vanished INTEGER NOT NULL DEFAULT 0,
                 developer TEXT NOT NULL DEFAULT '',
                 publisher TEXT NOT NULL DEFAULT '',

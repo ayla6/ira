@@ -583,6 +583,11 @@ pub(super) fn identify_game(
             }
         }
     }
+    // Goldberg-style releases ship their manifests in a bracketed
+    // `[Steam]` folder inside the game directory.
+    if let Some((appid, name)) = ira_platforms::steam::find_appid_in_game_folder(folder) {
+        return (Some(appid), name);
+    }
     let basename = folder
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())

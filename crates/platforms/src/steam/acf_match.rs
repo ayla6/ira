@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::vdf;
@@ -24,6 +25,124 @@ pub fn steamapps_in_path(path: &Path) -> Option<PathBuf> {
     } else {
         None
     }
+}
+
+/// The `[Steam]` folders Goldberg-style game folders carry — release
+/// names like `Cave Story+ [Steam] [Build …]/Cave Story+/` keep their
+/// manifests directly inside a bracketed `[Steam]` subfolder (the
+/// depotcache variant: `appmanifest_*.acf` plus depot `.manifest` files
+/// sit right in `[Steam]`, with no `steamapps` level). Checked inside
+/// `folder` itself and one level down.
+pub fn steam_manifest_dirs_in_game_folder(folder: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![folder.join("[Steam]")];
+    if let Ok(entries) = std::fs::read_dir(folder) {
+        for entry in entries.flatten() {
+            candidates.push(entry.path().join("[Steam]"));
+        }
+    }
+    let has_acf = |dir: &Path| -> bool {
+        std::fs::read_dir(dir).is_ok_and(|entries| {
+            entries.flatten().any(|e| {
+                let n = e.file_name();
+                let n = n.to_string_lossy();
+                n.starts_with("appmanifest_") && n.ends_with(".acf")
+            })
+        })
+    };
+    let mut seen = HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|c| has_acf(c))
+        .filter(|c| seen.insert(c.clone()))
+        .collect()
+}
+
+/// Parse every `appmanifest_*.acf` in `dir` as `(appid, name,
+/// installdir)`.
+fn acfs_in_dir(dir: &Path) -> Vec<(String, String, String)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            (name.starts_with("appmanifest_") && name.ends_with(".acf"))
+                .then_some(entry.path())
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .and_then(|text| vdf::parse_vdf(&text))
+                .and_then(|parsed| {
+                    let appid = vdf::get_str(&parsed, "appid")?.to_string();
+                    let title = vdf::get_str(&parsed, "name").unwrap_or("").to_string();
+                    let installdir = vdf::get_str(&parsed, "installdir").unwrap_or("").to_string();
+                    Some((appid, title, installdir))
+                })
+        })
+        .collect()
+}
+
+/// Scan every `[Steam]` manifest folder inside a game folder and return
+/// the first `(appid, name)` whose installdir or title matches the name
+/// of the folder owning the `[Steam]` directory (or the picked folder
+/// itself). A folder with a single manifest identifies the game
+/// outright.
+pub fn find_appid_in_game_folder(folder: &Path) -> Option<(String, String)> {
+    let mut dirs = vec![folder.join("[Steam]")];
+    if let Ok(entries) = std::fs::read_dir(folder) {
+        for entry in entries.flatten() {
+            dirs.push(entry.path().join("[Steam]"));
+        }
+    }
+
+    let normalize = |name: &str| -> String {
+        name.to_lowercase()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect()
+    };
+
+    let mut single: Option<(String, String)> = None;
+    for dir in dirs {
+        let has_acf = std::fs::read_dir(&dir).is_ok_and(|entries| {
+            entries.flatten().any(|e| {
+                let n = e.file_name();
+                let n = n.to_string_lossy();
+                n.starts_with("appmanifest_") && n.ends_with(".acf")
+            })
+        });
+        if !has_acf {
+            continue;
+        }
+        let owner = dir
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let acfs = acfs_in_dir(&dir);
+        // Exact installdir match against the owning folder first.
+        if let Some((appid, name, _)) =
+            acfs.iter().find(|(_, _, installdir)| {
+                installdir.to_lowercase() == owner.to_lowercase()
+            })
+        {
+            return Some((appid.clone(), name.clone()));
+        }
+        // Normalized installdir/title match second.
+        let normalized_owner = normalize(&owner);
+        if let Some((appid, name, _)) = acfs.iter().find(|(_, title, installdir)| {
+            normalize(installdir) == normalized_owner || normalize(title) == normalized_owner
+        }) {
+            return Some((appid.clone(), name.clone()));
+        }
+        // A lone manifest names the game unambiguously.
+        if acfs.len() == 1 && single.is_none() {
+            let (appid, name, _) = &acfs[0];
+            single = Some((appid.clone(), name.clone()));
+        }
+    }
+    single
 }
 
 /// Lowercased alphanumeric skeleton of a name, so folder names that differ
@@ -201,4 +320,42 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         assert!(find_appid_for_installdir(tmp.path(), "Anything").is_none());
     }
+#[test]
+fn test_steam_manifest_dirs_find_bracketed_steam() {
+    let tmp = TempDir::new().unwrap();
+    let game = tmp.path().join("Cave Story+");
+    let steam_dir = game.join("[Steam]");
+    std::fs::create_dir_all(&steam_dir).unwrap();
+    // The depotcache variant: depot manifests + the acf sit directly
+    // in [Steam], with no steamapps level.
+    std::fs::write(steam_dir.join("200903_1420789391075080371.manifest"), "").unwrap();
+    write_acf(&steam_dir, "200900", "Cave Story+", "Cave Story+");
+
+    assert_eq!(
+        steam_manifest_dirs_in_game_folder(tmp.path()),
+        vec![steam_dir.clone()]
+    );
+}
+
+#[test]
+fn test_find_appid_in_game_folder_matches_owner_name() {
+    let tmp = TempDir::new().unwrap();
+    let game = tmp.path().join("Cave Story+");
+    let steam_dir = game.join("[Steam]");
+    std::fs::create_dir_all(&steam_dir).unwrap();
+    write_acf(&steam_dir, "200900", "Cave Story+", "Cave Story+");
+
+    assert_eq!(
+        find_appid_in_game_folder(tmp.path()),
+        Some(("200900".to_string(), "Cave Story+".to_string()))
+    );
+}
+
+#[test]
+fn test_find_appid_in_game_folder_none_without_steam_dir() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("plain game")).unwrap();
+    assert!(steam_manifest_dirs_in_game_folder(tmp.path()).is_empty());
+    assert_eq!(find_appid_in_game_folder(tmp.path()), None);
+}
 }

@@ -173,17 +173,117 @@ pub fn start_missing_images_fetch(state: &SharedState) {
 
 /// The popover's details line, at Nautilus's one-size-down markup:
 /// counts first, current game after, trimmed by the label's ellipsize.
-fn details_text(update: &FetchUpdate) -> String {
-    let counts = format!("{} / {}", update.done, update.total);
-    if update.current.is_empty() {
+fn details_markup(done: usize, total: usize, current: &str) -> String {
+    let counts = format!("{} / {}", done, total);
+    if current.is_empty() {
         format!("<span size='small'>{counts}</span>")
     } else {
         format!(
             "<span size='small'>{counts} · {}</span>",
-            super::helpers::esc(&update.current)
+            super::helpers::esc(current)
         )
     }
 }
+
+fn details_text(update: &FetchUpdate) -> String {
+    details_markup(update.done, update.total, &update.current)
+}
+
+/// One job driving the sidebar strip, handed out by
+/// [`begin_strip_job`]. Its updates re-resolve the *current* window's
+/// strip on every call, so progress stays visible across a
+/// hide-to-background rebuild — the old widget's labels would be dead.
+#[derive(Clone)]
+pub struct StripJob {
+    cancel: Arc<AtomicBool>,
+}
+
+/// Claim the sidebar strip for a job: reveals it with the running
+/// labels, arms the stop button, and returns the handle to report
+/// progress through. `None` while another job is showing.
+pub fn begin_strip_job(state: &SharedState, short: &str, status: &str) -> Option<StripJob> {
+    let indicator = state.borrow().fetch_progress.borrow().clone()?;
+    if indicator.running.get() {
+        return None;
+    }
+    {
+        let s = state.borrow();
+        if s.strip_job_busy.get() {
+            return None;
+        }
+        s.strip_job_busy.set(true);
+    }
+    indicator.running.set(true);
+    indicator.cancel.store(false, Ordering::Relaxed);
+    indicator.reveal(true);
+    indicator.ring.reset();
+    indicator.close_btn.set_sensitive(true);
+    indicator.close_btn.set_icon_name("process-stop-symbolic");
+    indicator.short.set_text(short);
+    indicator.status.set_text(status);
+    indicator.bar.set_fraction(0.0);
+    Some(StripJob {
+        cancel: Arc::clone(&indicator.cancel),
+    })
+}
+
+fn current_strip(state: &SharedState) -> Option<FetchIndicator> {
+    state.borrow().fetch_progress.borrow().clone()
+}
+
+impl StripJob {
+    /// The flag the job's worker thread polls between items.
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancel)
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+
+    /// One step done of total, currently working on `current`. A
+    /// cancelled job freezes its labels; later updates don't undo that.
+    pub fn progress(&self, state: &SharedState, done: usize, total: usize, current: &str) {
+        if self.cancelled() {
+            return;
+        }
+        let Some(indicator) = current_strip(state) else {
+            return;
+        };
+        let fraction = done as f64 / total.max(1) as f64;
+        indicator.bar.set_fraction(fraction);
+        indicator.ring.set_fraction(fraction);
+        indicator.details.set_markup(&details_markup(done, total, current));
+    }
+
+    /// The job ended: a summary on the strip and the strip scheduled to
+    /// slide away. A cancelled job skips the summary — the cancel click
+    /// already froze the labels and scheduled the exit.
+    pub fn finish(&self, state: &SharedState, short: &str, status: &str) {
+        state.borrow().strip_job_busy.set(false);
+        let Some(indicator) = current_strip(state) else {
+            return;
+        };
+        indicator.running.set(false);
+        if self.cancelled() {
+            return;
+        }
+        indicator.ring.set_fraction(1.0);
+        indicator.ring.animate_done("file-operation-finished-symbolic");
+        indicator.short.set_text(short);
+        indicator.status.set_text(status);
+        indicator.bar.set_fraction(1.0);
+        indicator.close_btn.set_sensitive(false);
+        indicator.close_btn.set_icon_name("object-select-symbolic");
+        let indicator = indicator.clone();
+        glib::timeout_add_local_once(Duration::from_millis(HIDE_AFTER_MS), move || {
+            indicator.popover.popdown();
+            indicator.reveal(false);
+            indicator.close_btn.set_sensitive(true);
+        });
+    }
+}
+
 
 /// Fill one game's square slot: the ROM's native icon for PS4/Switch games
 /// (never SGDB art), the SGDB square for other matched games. Returns the

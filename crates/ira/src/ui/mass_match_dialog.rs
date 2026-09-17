@@ -166,6 +166,7 @@ fn start_steam_batch_matching(
         queue,
         50,
         0,
+        None,
         {
             let steam = steam.clone();
             move |item| {
@@ -236,6 +237,7 @@ fn start_sgdb_batch_matching(
         queue,
         150,
         0,
+        None,
         {
             let steam = steam.clone();
             move |item| {
@@ -299,20 +301,21 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     count.set_hexpand(true);
     count.add_css_class(CSS_HEADING);
     header.append(&count);
-    // Matched games with holes in their metadata: one exact fetch per
-    // entry by its own id, merged without any rematch. Only appears when
-    // ScreenScraper credentials exist; quota makes it opt-in.
-    let has_ss_creds = {
+    // Matched and PC games with holes in their metadata: every source
+    // at once — Steam fills what it can, ScreenScraper gets exact
+    // refetches by id. The job runs on the sidebar strip, so this
+    // button hands it off and the dialog is free to close.
+    let (has_ss_creds, ss_busy) = {
         let s = state.borrow();
-        !s.cfg.screenscraper_id.is_empty()
+        (!s.cfg.screenscraper_id.is_empty(), s.ss_job_busy.get())
     };
     let refetch_btn = gtk4::Button::with_label(&crate::tr!("Fetch missing metadata"));
     refetch_btn.add_css_class(CSS_FLAT);
-    refetch_btn.set_sensitive(has_ss_creds);
+    refetch_btn.set_sensitive(has_ss_creds && !ss_busy);
     {
         let state = state.clone();
-        refetch_btn.connect_clicked(move |btn| {
-            super::mass_match_ss::start_ss_refetch_pass(&state, btn);
+        refetch_btn.connect_clicked(move |_| {
+            super::fetch_metadata::start_full_refetch(&state);
         });
     }
     header.append(&refetch_btn);

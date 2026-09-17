@@ -119,6 +119,7 @@ pub(super) fn start_ra_batch_matching(
         queue,
         150,
         0,
+        None,
         move |item| resolve(&client, &db, &save_dir, item),
         {
             let state = state.clone();

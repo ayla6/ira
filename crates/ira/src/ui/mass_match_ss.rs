@@ -7,18 +7,22 @@
 //! dialog opening.
 
 use adw::prelude::*;
+use std::cell::Cell;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::css::*;
-use super::helpers::{poll_channel, replace_row_actions};
-use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions};
+use super::helpers::replace_row_actions;
+use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions, BATCH_FINISHED};
 use super::rom_name::{
     alt_search_term, clean_rom_name, looks_like_title_id, pick_search_name, region_hints,
     search_term,
 };
 use unicode_normalization::UnicodeNormalization;
-use super::ss_match_dialog::{persist_ss_match, show_matched, show_unmatched};
+use super::ss_match_dialog::{
+    persist_ss_match, show_background_match, show_matched, show_unmatched,
+};
 use super::state::SharedState;
 use super::steam_search_dialog::status_label;
 use crate::Game;
@@ -36,101 +40,9 @@ enum SsOutcome {
     Failed(String),
 }
 
-/// One batch pass over matched games whose stored metadata has gaps:
-/// each costs one exact fetch by the entry's own id and merges only
-/// what's missing. ScreenScraper's quota makes this the expensive kind
-/// of helpful, so it runs only when asked for.
-pub(super) fn start_ss_refetch_pass(state: &SharedState, button: &gtk4::Button) {
-    let queue: Vec<i64> = {
-        let s = state.borrow();
-        s.games
-            .iter()
-            .filter(|g| !g.screenscraper_id.is_empty())
-            .filter(|g| {
-                ira_db::scraper_metadata_for_game(&s.db, g.db_id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|meta| metadata_has_gaps(&meta))
-            })
-            .map(|g| g.db_id)
-            .collect()
-    };
-    if queue.is_empty() {
-        return;
-    }
-    let total = queue.len();
-    button.set_sensitive(false);
-    button.set_label(&crate::tr!("Fetching 0/{total}…"));
-
-    let (steam, creds) = {
-        let s = state.borrow();
-        (
-            s.steam.clone(),
-            ScraperCreds::from_account(
-                s.cfg.screenscraper_id.clone(),
-                s.cfg.screenscraper_password.clone(),
-            ),
-        )
-    };
-    let db = state.borrow().db.clone();
-    let (tx, rx) = std::sync::mpsc::channel::<usize>();
-    std::thread::spawn(move || {
-        for (done, db_id) in queue.iter().enumerate() {
-            if done > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(1000));
-            }
-            if let Ok(Some(entry)) = ira_db::find_by_db_id(&db, *db_id) {
-                if let Ok(games) =
-                    steam.screenscraper_game(&creds, &entry.screenscraper_id)
-                {
-                    if let Some(game) = games.into_iter().next() {
-                        let fresh_meta = ira_models::ScraperMetadata {
-                            ss_id: entry.screenscraper_id.clone(),
-                            release_date: game.release_date.clone(),
-                            release_timestamp: ira_db::scraper_release_timestamp(
-                                &game.release_date,
-                            ),
-                            release_dates: game.release_dates.clone(),
-                            developers: game.developers.clone(),
-                            publishers: game.publishers.clone(),
-                            genres: game.genres.clone(),
-                            players: game.players.clone(),
-                            rating: game.rating,
-                            classifications: game.classifications.clone(),
-                            synopses: game
-                                .synopses
-                                .iter()
-                                .find(|(l, _)| l == "en")
-                                .or_else(|| game.synopses.first())
-                                .cloned()
-                                .into_iter()
-                                .collect(),
-                        };
-                        if let Ok(true) =
-                            ira_db::merge_missing_scraper_metadata(&db, *db_id, &fresh_meta)
-                        {
-                            eprintln!("SS refetch: filled gaps for game {db_id}");
-                        }
-                    }
-                }
-            }
-            let _ = tx.send(done + 1);
-        }
-    });
-
-    let button = button.clone();
-    poll_channel(rx, move |done| {
-        button.set_label(&crate::tr!("Fetching {done}/{total}…").replacen("{done}", &done.to_string(), 1).replacen("{total}", &total.to_string(), 1));
-        if done >= total {
-            button.set_sensitive(true);
-            button.set_label(&crate::tr!("Fetch missing metadata"));
-        }
-    });
-}
-
 /// Whether a stored record is missing any piece a refetch could bring.
 fn metadata_has_gaps(meta: &ira_models::ScraperMetadata) -> bool {
-    meta.release_date.is_empty()
+    release_date_is_broken(&meta.release_date)
         || meta.players.is_empty()
         || meta.rating <= 0.0
         || meta.synopses.is_empty()
@@ -138,6 +50,112 @@ fn metadata_has_gaps(meta: &ira_models::ScraperMetadata) -> bool {
         || meta.developers.is_empty()
         || meta.publishers.is_empty()
         || meta.genres.is_empty()
+}
+
+/// Matched games whose stored record has holes, in list order: the
+/// refetch passes' queue. A matched game with no record at all is all
+/// holes.
+pub(crate) fn refetch_queue(state: &SharedState) -> Vec<i64> {
+    let s = state.borrow();
+    s.games
+        .iter()
+        .filter(|g| !g.screenscraper_id.is_empty())
+        .filter(|g| match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
+            Ok(None) => true,
+            Ok(Some(meta)) => metadata_has_gaps(&meta),
+            Err(_) => false,
+        })
+        .map(|g| g.db_id)
+        .collect()
+}
+
+/// One entry's refetch outcome, for the passes' progress reporting.
+pub(crate) enum RefetchOutcome {
+    /// Something missing was found and merged.
+    Filled,
+    /// The entry answered but everything was already stored.
+    Unchanged,
+    /// The request or the store failed; the game keeps its holes.
+    Failed(String),
+}
+
+/// One queue item's report from the refetch worker.
+pub(crate) struct RefetchProgress {
+    pub done: usize,
+    pub total: usize,
+    pub db_id: i64,
+    pub current: String,
+    pub outcome: RefetchOutcome,
+}
+
+/// One sequential worker over the refetch queue: an exact fetch per entry
+/// by its own id, merged fill-only-gaps over what's stored. One request
+/// per second keeps the pass well inside ScreenScraper's quota; the
+/// worker stands down between items when `cancel` says so. Progress
+/// arrives through the returned channel, read on the UI loop.
+pub(crate) fn spawn_refetch_worker(
+    queue: Vec<i64>,
+    steam: Arc<SteamDataClient>,
+    creds: ScraperCreds,
+    db: ira_db::DbConn,
+    cancel: Option<Arc<AtomicBool>>,
+) -> std::sync::mpsc::Receiver<RefetchProgress> {
+    let total = queue.len();
+    let (tx, rx) = std::sync::mpsc::channel::<RefetchProgress>();
+    std::thread::spawn(move || {
+        for (done, db_id) in queue.into_iter().enumerate() {
+            if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
+                break;
+            }
+            if done > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+            }
+            let current = ira_db::find_by_db_id(&db, db_id)
+                .ok()
+                .flatten()
+                .map(|entry| entry.title)
+                .unwrap_or_default();
+            let outcome = refetch_one(&steam, &creds, &db, db_id);
+            let _ = tx.send(RefetchProgress {
+                done: done + 1,
+                total,
+                db_id,
+                current,
+                outcome,
+            });
+        }
+    });
+    rx
+}
+
+/// One exact fetch by id, merged over what's stored.
+pub(crate) fn refetch_one(
+    steam: &SteamDataClient,
+    creds: &ScraperCreds,
+    db: &ira_db::DbConn,
+    db_id: i64,
+) -> RefetchOutcome {
+    let entry = match ira_db::find_by_db_id(db, db_id) {
+        Ok(Some(entry)) => entry,
+        _ => return RefetchOutcome::Failed("game not found".to_string()),
+    };
+    let games = match steam.screenscraper_game(creds, &entry.screenscraper_id) {
+        Ok(games) => games,
+        Err(e) => return RefetchOutcome::Failed(e),
+    };
+    let Some(game) = games.into_iter().next() else {
+        return RefetchOutcome::Failed("entry not found".to_string());
+    };
+    let timestamp = ira_db::scraper_release_timestamp(&game.release_date);
+    let fresh = game.metadata(timestamp);
+    match ira_db::merge_missing_scraper_metadata(db, db_id, &fresh) {
+        Ok(true) => {
+            eprintln!("SS refetch: filled gaps for game {db_id}");
+            RefetchOutcome::Filled
+        }
+        Ok(false) => RefetchOutcome::Unchanged,
+        Err(e) => RefetchOutcome::Failed(e),
+    }
 }
 
 /// The status box of a match-list row's ScreenScraper pass, added as its
@@ -172,23 +190,43 @@ pub(super) fn attach_ss_actions(
     ss_box
 }
 
-/// Runs the ScreenScraper pass over every row that has an SS box. One
-/// request per second keeps the batch well inside the service's quota.
+/// Runs the ScreenScraper pass over every row that has an SS box. The
+/// pass owns the quota gate (`ss_job_busy`): a dialog reopened while it
+/// runs only relabels the new rows and starts nothing. One request per
+/// second keeps the batch well inside the service's quota; progress
+/// shows on the sidebar strip, so closing the dialog — or the whole
+/// window — stops nothing.
 pub(super) fn start_ss_batch_matching(
     state: &SharedState,
     needs_matching: &[Game],
     rows: &[RowActions],
     dialog: &adw::Dialog,
 ) {
-    let (steam, db, creds, cfg, missed) = {
-        let s = state.borrow();
-        let missed: HashSet<i64> = match ira_db::scraper_missed_ids(&s.db) {
-            Ok(ids) => ids.into_iter().collect(),
-            Err(e) => {
-                eprintln!("ScreenScraper batch: could not read misses: {e}");
-                HashSet::new()
+    let missed: HashSet<i64> = match ira_db::scraper_missed_ids(&state.borrow().db) {
+        Ok(ids) => ids.into_iter().collect(),
+        Err(e) => {
+            eprintln!("ScreenScraper batch: could not read misses: {e}");
+            HashSet::new()
+        }
+    };
+    if state.borrow().ss_job_busy.get() {
+        // The background pass already owns the quota: rows still in
+        // their "searching" phase get the in-flight note instead, with
+        // their manual search button.
+        for (i, g) in needs_matching.iter().enumerate() {
+            let Some(ss_box) = rows.get(i).and_then(|r| r.ss.clone()) else {
+                continue;
+            };
+            if missed.contains(&g.db_id) {
+                continue;
             }
-        };
+            show_background_match(&ss_box, state, g.db_id, &g.name, &g.platform_id, dialog);
+        }
+        return;
+    }
+
+    let (steam, db, creds, cfg) = {
+        let s = state.borrow();
         (
             s.steam.clone(),
             s.db.clone(),
@@ -197,7 +235,6 @@ pub(super) fn start_ss_batch_matching(
                 s.cfg.screenscraper_password.clone(),
             ),
             s.cfg.clone(),
-            missed,
         )
     };
     let queue: Vec<BatchItem> = needs_matching
@@ -261,16 +298,75 @@ pub(super) fn start_ss_batch_matching(
         };
         if let Some((queue, steam, db, creds, cfg, state, rows, dialog)) = start.take() {
             if allowed {
+                state.borrow().ss_job_busy.set(true);
+                // The strip shows the pass and carries its cancel
+                // button; when another job owns the strip the pass
+                // simply runs without visible progress.
+                let (job, cancel) =
+                    match super::fetch_images::begin_strip_job(
+                        &state,
+                        &crate::tr!("Matching games…"),
+                        &crate::tr!("Matching unmatched games…"),
+                    ) {
+                        Some(job) => {
+                            let cancel = job.cancel_flag();
+                            (Some(job), Some(cancel))
+                        }
+                        None => (None, None),
+                    };
+                let total = queue.len();
+                let done = Cell::new(0usize);
+                let matched = Cell::new(0usize);
                 run_batch(
                     queue,
                     150,
                     0,
+                    cancel,
                     {
                         let steam = Arc::clone(&steam);
                         move |item| resolve(&steam, &creds, &db, &cfg, item)
                     },
-                    move |hit| apply_hit(&state, &rows, &dialog, hit),
+                    move |hit| {
+                        if hit.row_idx == BATCH_FINISHED {
+                            state.borrow().ss_job_busy.set(false);
+                            if let Some(job) = &job {
+                                job.finish(
+                                    &state,
+                                    &crate::tr!("{} games matched")
+                                        .replacen("{}", &matched.get().to_string(), 1),
+                                    &crate::tr!("Matching finished"),
+                                );
+                            }
+                            return;
+                        }
+                        let name = hit.name.clone();
+                        apply_hit(&state, &rows, &dialog, hit, &matched);
+                        let finished = done.get() + 1;
+                        done.set(finished);
+                        if let Some(job) = &job {
+                            job.progress(&state, finished, total, &name);
+                        }
+                    },
                 );
+            } else {
+                // Quota spent: the queued rows never get an answer, so
+                // they go straight to the manual search button.
+                for item in &queue {
+                    let Some(ss_box) = rows.get(item.row_idx).and_then(|r| r.ss.clone()) else {
+                        continue;
+                    };
+                    let platform_id = state
+                        .borrow()
+                        .games
+                        .iter()
+                        .find(|g| g.db_id == item.db_id)
+                        .map(|g| g.platform_id.clone())
+                        .unwrap_or_default();
+                    show_unmatched(
+                        &ss_box, &state, item.db_id, &item.name, &platform_id, &dialog,
+                    );
+                }
+                eprintln!("ScreenScraper batch: quota exhausted, standing down for today");
             }
         }
         glib::ControlFlow::Break
@@ -577,7 +673,10 @@ pub(super) fn run_pc_matching(
         .and_then(|app_id| steam.fetch_steamcmd_info(&app_id.to_string()))
         .filter(|info| !info.developer.trim().is_empty() || !info.publisher.trim().is_empty());
     let extras_for = |game: &ScrapedGame| {
-        if game.synopses.is_empty() || game.classifications.is_empty() {
+        if game.synopses.is_empty()
+            || game.classifications.is_empty()
+            || release_date_is_broken(&game.release_date)
+        {
             app_id.and_then(|id| steam.fetch_store_extras(&id.to_string()))
         } else {
             None
@@ -626,7 +725,10 @@ pub(super) fn run_pc_matching(
     if let Some(info) = steam_info.as_ref() {
         if let Some(game) = verified_pick(&candidates, &normalized, Some(info)) {
             let mut game = game;
-            game.release_date = steam_release_date(info.release_timestamp);
+            let steam_date = steam_release_date(info.release_timestamp);
+            if !steam_date.is_empty() {
+                game.release_date = steam_date;
+            }
             if let Some(game) = finish(game) {
                 if verbose {
                     eprintln!(
@@ -673,7 +775,10 @@ pub(super) fn run_pc_matching(
                 if let Some(info) = steam_info.as_ref() {
                     if let Some(game) = verified_pick(&widened, &normalized, Some(info)) {
                         let mut game = game;
-                        game.release_date = steam_release_date(info.release_timestamp);
+                        let steam_date = steam_release_date(info.release_timestamp);
+                        if !steam_date.is_empty() {
+                            game.release_date = steam_date;
+                        }
                         if let Some(game) = finish(game) {
                             if verbose {
                                 eprintln!(
@@ -733,6 +838,13 @@ fn finish_pc_pick(
             );
         }
     }
+    if release_date_is_broken(&game.release_date) {
+        if let Some(extras) = extras {
+            if !extras.release_date.is_empty() {
+                game.release_date = extras.release_date.clone();
+            }
+        }
+    }
     if game.synopses.is_empty() {
         if let Some(extras) = extras {
             if !extras.synopsis.is_empty() {
@@ -751,7 +863,7 @@ fn finish_pc_pick(
             }
         }
     }
-    let bare = game.release_date.is_empty()
+    let bare = release_date_is_broken(&game.release_date)
         && game.developers.is_empty()
         && game.publishers.is_empty()
         && game.genres.is_empty()
@@ -820,14 +932,25 @@ fn companies_overlap(info: &SteamCmdInfo, game: &ScrapedGame) -> bool {
 
 /// Steam's release timestamp as the `YYYY-MM-DD` string the metadata
 /// stores — the PC release, when a diffed console entry carries the
-/// port's date instead.
-fn steam_release_date(timestamp: i64) -> String {
+/// port's date instead. A missing timestamp gives no date: writing the
+/// epoch here once poisoned a batch of entries with 1970-01-01.
+pub(crate) fn steam_release_date(timestamp: i64) -> String {
+    if timestamp <= 0 {
+        return String::new();
+    }
     use chrono::TimeZone;
     chrono::Utc
         .timestamp_opt(timestamp, 0)
         .single()
         .map(|date| date.format("%Y-%m-%d").to_string())
         .unwrap_or_default()
+}
+
+/// Whether a stored release date counts as none: either empty or the
+/// epoch string the old Steam-diff bug wrote. Both are holes the Steam
+/// refetch is allowed to fill.
+pub(crate) fn release_date_is_broken(date: &str) -> bool {
+    date.is_empty() || date == "1970-01-01"
 }
 
 /// Disc serials — `SLES-52005`, `SLPS-01204`, `RLJE52` — are short
@@ -1034,18 +1157,17 @@ fn suffix_extension_ok(short: &str, long: &str) -> bool {
     long.as_bytes()[long.len() - short.len() - 1] == b' '
 }
 
-/// UI loop: persist a hit's metadata and repaint the row's SS box; only a
-/// confirmed miss tombstones the game, and any non-hit grows the manual
-/// search button.
+/// UI loop: persist a hit's result, and repaint the row's SS box when
+/// the dialog still shows it. Persistence runs regardless — the pass
+/// keeps working with the dialog or the whole window closed — and only a
+/// confirmed miss tombstones the game.
 fn apply_hit(
     state: &SharedState,
     rows: &[RowActions],
     dialog: &adw::Dialog,
     hit: BatchHit<SsOutcome>,
+    matched: &Cell<usize>,
 ) {
-    let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) else {
-        return;
-    };
     let platform_id = state
         .borrow()
         .games
@@ -1056,21 +1178,31 @@ fn apply_hit(
     match hit.matched {
         Some(SsOutcome::Hit(game)) => {
             persist_ss_match(state, hit.db_id, &game);
-            show_matched(&ss_box);
+            matched.set(matched.get() + 1);
+            if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {
+                show_matched(&ss_box);
+            }
         }
         Some(SsOutcome::Miss) => {
             if let Err(e) = ira_db::tombstone_scraper_miss(&state.borrow().db, hit.db_id) {
                 eprintln!("ScreenScraper batch: failed to record the miss: {e}");
             }
-            replace_row_actions(&ss_box, |ab| {
-                show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
-            });
+            if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {
+                replace_row_actions(&ss_box, |ab| {
+                    show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
+                });
+            }
         }
         Some(SsOutcome::Failed(e)) => {
-            eprintln!("ScreenScraper batch: '{}': request failed, leaving untombed: {e}", hit.name);
-            replace_row_actions(&ss_box, |ab| {
-                show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
-            });
+            eprintln!(
+                "ScreenScraper batch: '{}': request failed, leaving untombed: {e}",
+                hit.name
+            );
+            if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {
+                replace_row_actions(&ss_box, |ab| {
+                    show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
+                });
+            }
         }
         None => {}
     }
@@ -1422,6 +1554,7 @@ mod tests {
         let extras = ira_api::steam::StoreExtras {
             synopsis: "A poetry horror.".into(),
             ratings: vec![],
+            release_date: String::new(),
         };
         let finished =
             super::finish_pc_pick(&conn, game.clone(), Some(&info), Some(&extras)).unwrap();
@@ -1467,10 +1600,52 @@ mod tests {
     }
 
     #[test]
+    fn test_finish_pc_pick_repairs_broken_release_dates_from_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = ira_db::init_db(dir.path().join("ira.db").to_str().unwrap());
+        std::mem::forget(dir);
+        let extras = ira_api::steam::StoreExtras {
+            synopsis: String::new(),
+            ratings: vec![],
+            release_date: "2015-09-15".into(),
+        };
+        // An empty date fills from the store page.
+        let undated = ScrapedGame {
+            ss_id: "70003".into(),
+            name: "Undated".into(),
+            ..Default::default()
+        };
+        let finished = super::finish_pc_pick(&conn, undated, None, Some(&extras)).unwrap();
+        assert_eq!(finished.release_date, "2015-09-15");
+        // The epoch string the old diff bug wrote counts as no date and
+        // is replaced the same way.
+        let poisoned = ScrapedGame {
+            ss_id: "70004".into(),
+            name: "Poisoned".into(),
+            release_date: "1970-01-01".into(),
+            ..Default::default()
+        };
+        let finished = super::finish_pc_pick(&conn, poisoned, None, Some(&extras)).unwrap();
+        assert_eq!(finished.release_date, "2015-09-15");
+        // A real date is never overwritten.
+        let dated = ScrapedGame {
+            ss_id: "70005".into(),
+            name: "Dated".into(),
+            release_date: "2001-06-21".into(),
+            ..Default::default()
+        };
+        let finished = super::finish_pc_pick(&conn, dated, None, Some(&extras)).unwrap();
+        assert_eq!(finished.release_date, "2001-06-21");
+    }
+
+    #[test]
     fn test_steam_release_date_formats_the_pc_release() {
         assert_eq!(super::steam_release_date(86_400), "1970-01-02");
         assert_eq!(super::steam_release_date(1_609_459_200), "2021-01-01");
-        assert_eq!(super::steam_release_date(0), "1970-01-01");
+        // A missing timestamp gives no date — the epoch string poisoned
+        // a batch of stored entries once.
+        assert_eq!(super::steam_release_date(0), "");
+        assert_eq!(super::steam_release_date(-5), "");
     }
 
     #[test]

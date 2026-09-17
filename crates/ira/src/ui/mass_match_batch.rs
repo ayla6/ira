@@ -3,6 +3,8 @@
 //! list rows through the UI loop.
 
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// One queued batch candidate: the game to match plus which list row its
 /// result belongs to.
@@ -14,13 +16,18 @@ pub(super) struct BatchItem {
 
 /// A finished candidate handed from the worker thread back to the UI loop.
 /// `T` is the worker's match payload: a `(id, title)` pair for Steam/SGDB/RA
-/// and a full `ScrapedGame` for ScreenScraper.
+/// and a full `ScrapedGame` for ScreenScraper. The last hit of a pass —
+/// sent once the queue drains or is cancelled — carries `row_idx` of
+/// [`BATCH_FINISHED`] and nothing else.
 pub(super) struct BatchHit<T> {
     pub(super) row_idx: usize,
     pub(super) db_id: i64,
     pub(super) name: String,
     pub(super) matched: Option<T>,
 }
+
+/// The `row_idx` of a pass's completion sentinel.
+pub(super) const BATCH_FINISHED: usize = usize::MAX;
 
 /// The action boxes of one match-list row: `main` takes the Steam or SGDB
 /// result, `ra` (retro games on RA-covered consoles only) the
@@ -34,16 +41,17 @@ pub(super) struct RowActions {
 }
 
 /// Shared shape of every batch pass: one sequential worker thread computes
-/// matches over `queue`, and results are applied on the UI loop every
+/// matches over `queue`, and results are applied on the main loop every
 /// `interval_ms` until the queue drains. `worker` runs off-thread and must
-/// not touch GTK; a nonzero `pace_ms` sleeps before every request but the
-/// first, for services that document per-second limits — sequential
-/// requests alone are already the politest shape there is. `on_result`
-/// runs on the main loop.
+/// not touch GTK; it waits `pace_ms` before every request but the first,
+/// so a rate-limited service sees one request per pace, never a burst. It
+/// stands down between items when `cancel` says so. `on_result` runs on
+/// the main loop, with a [`BATCH_FINISHED`] hit closing the pass.
 pub(super) fn run_batch<T: Send + 'static>(
     queue: Vec<BatchItem>,
     interval_ms: u64,
     pace_ms: u64,
+    cancel: Option<Arc<AtomicBool>>,
     worker: impl Fn(&BatchItem) -> Option<T> + Send + 'static,
     on_result: impl Fn(BatchHit<T>) + 'static,
 ) {
@@ -51,6 +59,9 @@ pub(super) fn run_batch<T: Send + 'static>(
     let (tx, rx) = std::sync::mpsc::channel::<BatchHit<T>>();
     std::thread::spawn(move || {
         for (index, item) in queue.iter().enumerate() {
+            if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
+                break;
+            }
             if index > 0 && pace_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(pace_ms));
             }
@@ -62,10 +73,17 @@ pub(super) fn run_batch<T: Send + 'static>(
                 matched,
             });
         }
+        let _ = tx.send(BatchHit {
+            row_idx: BATCH_FINISHED,
+            db_id: 0,
+            name: String::new(),
+            matched: None,
+        });
     });
 
     let rx = std::cell::RefCell::new(rx);
-    let remaining = Cell::new(total);
+    // The sentinel closes the pass, so it takes a slot of its own.
+    let remaining = Cell::new(total + 1);
     glib::timeout_add_local(std::time::Duration::from_millis(interval_ms), move || {
         if let Ok(hit) = rx.borrow_mut().try_recv() {
             on_result(hit);

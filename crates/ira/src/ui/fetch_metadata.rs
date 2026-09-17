@@ -1,0 +1,401 @@
+//! Mass metadata refetch on the sidebar strip, one source per job. The
+//! ScreenScraper pass gives matched games whose stored record has holes
+//! one exact fetch by their own id; the Steam pass gives PC games whose
+//! stored metadata misses something Steam can give — release date,
+//! studios, synopsis, age boards — a re-read of their SteamCMD entry and
+//! store page. Both merge only what's missing, both report through the
+//! same bottom-of-sidebar strip the image fetcher uses — so they keep
+//! running, and stay visible, with dialogs or the whole window closed —
+//! and the strip takes one job at a time. The ScreenScraper pass
+//! additionally owns the quota gate, so it and the matching pass never
+//! stack their requests.
+
+use std::cell::{Cell, RefCell};
+use std::sync::Arc;
+
+use super::mass_match_ss::{RefetchOutcome, RefetchProgress};
+use super::state::SharedState;
+
+/// Start refetching missing metadata for every matched game with holes in
+/// its record, revealing the sidebar strip. `false` when a ScreenScraper
+/// job or a strip job is already running, or nothing has gaps.
+pub fn start_metadata_refetch(state: &SharedState) -> bool {
+    let (busy, has_creds) = {
+        let s = state.borrow();
+        (s.ss_job_busy.get(), !s.cfg.screenscraper_id.is_empty())
+    };
+    if busy || !has_creds {
+        return false;
+    }
+    let queue = super::mass_match_ss::refetch_queue(state);
+    if queue.is_empty() {
+        return false;
+    }
+    let Some(job) = super::fetch_images::begin_strip_job(
+        state,
+        &crate::tr!("Fetching ScreenScraper data…"),
+        &crate::tr!("Fetching missing metadata…"),
+    ) else {
+        return false;
+    };
+    state.borrow().ss_job_busy.set(true);
+
+    let (steam, creds, db) = {
+        let s = state.borrow();
+        (
+            s.steam.clone(),
+            ira_api::ScraperCreds::from_account(
+                s.cfg.screenscraper_id.clone(),
+                s.cfg.screenscraper_password.clone(),
+            ),
+            s.db.clone(),
+        )
+    };
+    let cancel = job.cancel_flag();
+    let rx = super::mass_match_ss::spawn_refetch_worker(queue, steam, creds, db, Some(cancel));
+    let state = state.clone();
+    poll_refetch(
+        state,
+        job,
+        rx,
+        crate::tr!("{} games updated"),
+        crate::tr!("Metadata fetched"),
+        |state| state.borrow().ss_job_busy.set(false),
+    );
+    true
+}
+
+/// Start the Steam-only refetch for every PC game whose stored metadata
+/// misses something Steam can give. No ScreenScraper quota involved —
+/// the strip's one-job rule is the only gate.
+pub fn start_steam_refetch(state: &SharedState) -> bool {
+    let queue = steam_refetch_queue(state);
+    if queue.is_empty() {
+        return false;
+    }
+    let Some(job) = super::fetch_images::begin_strip_job(
+        state,
+        &crate::tr!("Fetching Steam data…"),
+        &crate::tr!("Fetching missing Steam data…"),
+    ) else {
+        return false;
+    };
+    let (steam, db) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.db.clone())
+    };
+    let cancel = job.cancel_flag();
+    let rx = spawn_steam_refetch_worker(queue, steam, db, Some(cancel));
+    let state = state.clone();
+    poll_refetch(
+        state,
+        job,
+        rx,
+        crate::tr!("{} games updated"),
+        crate::tr!("Steam data fetched"),
+        |_| {},
+    );
+    true
+}
+
+/// PC games whose stored metadata misses something Steam can give —
+/// including no record at all, and the epoch dates an old diff bug
+/// wrote.
+fn steam_refetch_queue(state: &SharedState) -> Vec<i64> {
+    let s = state.borrow();
+    s.games
+        .iter()
+        .filter(|g| g.kind.is_pc())
+        .filter(|g| g.platform_id.parse::<u32>().is_ok())
+        .filter(|g| match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
+            Ok(None) => true,
+            Ok(Some(meta)) => steam_gaps(&meta),
+            Err(_) => false,
+        })
+        .map(|g| g.db_id)
+        .collect()
+}
+
+/// The holes Steam's own sources can fill: the release date, the
+/// studios, the synopsis, the age boards.
+fn steam_gaps(meta: &ira_models::ScraperMetadata) -> bool {
+    super::mass_match_ss::release_date_is_broken(&meta.release_date)
+        || (meta.developers.is_empty() && meta.publishers.is_empty())
+        || meta.synopses.is_empty()
+        || meta.classifications.is_empty()
+}
+
+/// One sequential worker over the Steam refetch queue: the SteamCMD
+/// entry and the store page per game, merged fill-only-gaps over what's
+/// stored. A short pace keeps steamcmd.net happy; the worker stands
+/// down between items when `cancel` says so.
+fn spawn_steam_refetch_worker(
+    queue: Vec<i64>,
+    steam: std::sync::Arc<ira_api::SteamDataClient>,
+    db: ira_db::DbConn,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+) -> std::sync::mpsc::Receiver<RefetchProgress> {
+    use std::sync::atomic::Ordering;
+
+    let total = queue.len();
+    let (tx, rx) = std::sync::mpsc::channel::<RefetchProgress>();
+    std::thread::spawn(move || {
+        for (done, db_id) in queue.into_iter().enumerate() {
+            if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
+                break;
+            }
+            if done > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            let current = ira_db::find_by_db_id(&db, db_id)
+                .ok()
+                .flatten()
+                .map(|entry| entry.title)
+                .unwrap_or_default();
+            let outcome = steam_refetch_one(&steam, &db, db_id);
+            let _ = tx.send(RefetchProgress {
+                done: done + 1,
+                total,
+                db_id,
+                current,
+                outcome,
+            });
+        }
+    });
+    rx
+}
+
+/// One game's Steam re-read, merged over what's stored. SteamCMD's
+/// timestamp wins for the release date, the store page's parsed date
+/// fills in when it has none — and an epoch date an old bug wrote
+/// counts as missing, so refetches repair it.
+fn steam_refetch_one(
+    steam: &ira_api::SteamDataClient,
+    db: &ira_db::DbConn,
+    db_id: i64,
+) -> RefetchOutcome {
+    let Some(entry) = ira_db::find_by_db_id(db, db_id).ok().flatten() else {
+        return RefetchOutcome::Failed("game not found".to_string());
+    };
+    let Ok(app_id) = entry.platform_id.parse::<u32>() else {
+        return RefetchOutcome::Unchanged;
+    };
+    let app_id = app_id.to_string();
+    let info = steam.fetch_steamcmd_info(&app_id);
+    let extras = steam.fetch_store_extras(&app_id);
+    if info.is_none() && extras.is_none() {
+        return RefetchOutcome::Failed("steam answered nothing".to_string());
+    }
+    let mut meta = ira_db::scraper_metadata_for_game(db, db_id)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let mut changed = false;
+    if super::mass_match_ss::release_date_is_broken(&meta.release_date) {
+        let date = info
+            .as_ref()
+            .filter(|info| info.release_timestamp > 0)
+            .map(|info| super::mass_match_ss::steam_release_date(info.release_timestamp))
+            .filter(|date| !date.is_empty())
+            .or_else(|| {
+                extras
+                    .as_ref()
+                    .map(|extras| extras.release_date.clone())
+                    .filter(|date| !date.is_empty())
+            });
+        if let Some(date) = date {
+            meta.release_timestamp = ira_db::scraper_release_timestamp(&date);
+            meta.release_date = date;
+            changed = true;
+        }
+    }
+    if meta.developers.is_empty() && meta.publishers.is_empty() {
+        if let Some(info) = &info {
+            super::enrichment::fill_steam_companies(
+                db,
+                info,
+                &mut meta.developers,
+                &mut meta.publishers,
+            );
+            changed |= !(meta.developers.is_empty() && meta.publishers.is_empty());
+        }
+    }
+    if let Some(extras) = &extras {
+        if meta.synopses.is_empty() && !extras.synopsis.is_empty() {
+            meta.synopses.push(("en".to_string(), extras.synopsis.clone()));
+            changed = true;
+        }
+        if meta.classifications.is_empty() && !extras.ratings.is_empty() {
+            meta.classifications.extend(extras.ratings.iter().map(|(kind, value)| {
+                ira_models::ScraperClassification {
+                    kind: kind.clone(),
+                    value: value.clone(),
+                }
+            }));
+            changed = true;
+        }
+    }
+    if !changed {
+        return RefetchOutcome::Unchanged;
+    }
+    match ira_db::store_scraper_metadata(db, db_id, &meta) {
+        Ok(()) => {
+            eprintln!("Steam refetch: filled gaps for game {db_id}");
+            RefetchOutcome::Filled
+        }
+        Err(e) => RefetchOutcome::Failed(e),
+    }
+}
+
+/// Start the refetch over every source at once: Steam first (fast),
+/// then the paced ScreenScraper pass. One strip job covers both, so
+/// "everything" really is one click.
+pub fn start_full_refetch(state: &SharedState) -> bool {
+    let (busy, has_creds) = {
+        let s = state.borrow();
+        (s.ss_job_busy.get(), !s.cfg.screenscraper_id.is_empty())
+    };
+    if busy || !has_creds {
+        return false;
+    }
+    let ss_queue = super::mass_match_ss::refetch_queue(state);
+    let steam_queue = steam_refetch_queue(state);
+    if ss_queue.is_empty() && steam_queue.is_empty() {
+        return false;
+    }
+    let Some(job) = super::fetch_images::begin_strip_job(
+        state,
+        &crate::tr!("Fetching metadata…"),
+        &crate::tr!("Fetching missing metadata…"),
+    ) else {
+        return false;
+    };
+    state.borrow().ss_job_busy.set(true);
+
+    let (steam, creds, db) = {
+        let s = state.borrow();
+        (
+            s.steam.clone(),
+            ira_api::ScraperCreds::from_account(
+                s.cfg.screenscraper_id.clone(),
+                s.cfg.screenscraper_password.clone(),
+            ),
+            s.db.clone(),
+        )
+    };
+    let cancel = job.cancel_flag();
+    let jobs: Vec<(Source, i64)> = steam_queue
+        .into_iter()
+        .map(|db_id| (Source::Steam, db_id))
+        .chain(ss_queue.into_iter().map(|db_id| (Source::Ss, db_id)))
+        .collect();
+    let rx = spawn_full_refetch_worker(jobs, steam, creds, db, Some(cancel));
+    let state = state.clone();
+    poll_refetch(
+        state,
+        job,
+        rx,
+        crate::tr!("{} games updated"),
+        crate::tr!("Metadata fetched"),
+        |state| state.borrow().ss_job_busy.set(false),
+    );
+    true
+}
+
+/// Which source a combined-queue item comes from — it decides the pace:
+/// Steam answers are cheap, ScreenScraper ones ride the quota.
+#[derive(Clone, Copy)]
+enum Source {
+    Steam,
+    Ss,
+}
+
+fn spawn_full_refetch_worker(
+    jobs: Vec<(Source, i64)>,
+    steam: std::sync::Arc<ira_api::SteamDataClient>,
+    creds: ira_api::ScraperCreds,
+    db: ira_db::DbConn,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+) -> std::sync::mpsc::Receiver<RefetchProgress> {
+    use std::sync::atomic::Ordering;
+
+    let total = jobs.len();
+    let (tx, rx) = std::sync::mpsc::channel::<RefetchProgress>();
+    std::thread::spawn(move || {
+        for (index, (source, db_id)) in jobs.into_iter().enumerate() {
+            if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
+                break;
+            }
+            if index > 0 {
+                let pace = match source {
+                    Source::Steam => 250,
+                    Source::Ss => 1000,
+                };
+                std::thread::sleep(std::time::Duration::from_millis(pace));
+            }
+            let current = ira_db::find_by_db_id(&db, db_id)
+                .ok()
+                .flatten()
+                .map(|entry| entry.title)
+                .unwrap_or_default();
+            let outcome = match source {
+                Source::Steam => steam_refetch_one(&steam, &db, db_id),
+                Source::Ss => super::mass_match_ss::refetch_one(&steam, &creds, &db, db_id),
+            };
+            let _ = tx.send(RefetchProgress {
+                done: index + 1,
+                total,
+                db_id,
+                current,
+                outcome,
+            });
+        }
+    });
+    rx
+}
+
+/// Drive a refetch job's channel on the UI loop: strip progress per
+/// report, a section refresh on every filled game, and the finish
+/// summary when the worker disconnects. `on_finish` releases whatever
+/// gate the caller held.
+fn poll_refetch(
+    state: SharedState,
+    job: super::fetch_images::StripJob,
+    rx: std::sync::mpsc::Receiver<RefetchProgress>,
+    short_done: String,
+    status_done: String,
+    on_finish: impl Fn(&SharedState) + 'static,
+) {
+    let rx = RefCell::new(rx);
+    let filled = Cell::new(0usize);
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        loop {
+            match rx.borrow_mut().try_recv() {
+                Ok(progress) => {
+                    if matches!(progress.outcome, RefetchOutcome::Filled) {
+                        filled.set(filled.get() + 1);
+                        // Only repaints when the refilled game's settings
+                        // window is the one open right now.
+                        super::edit_game_scraper::refresh_scraper_section(
+                            &state,
+                            progress.db_id,
+                        );
+                    }
+                    job.progress(&state, progress.done, progress.total, &progress.current);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    return glib::ControlFlow::Continue;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    on_finish(&state);
+                    job.finish(
+                        &state,
+                        &short_done.replacen("{}", &filled.get().to_string(), 1),
+                        &status_done,
+                    );
+                    return glib::ControlFlow::Break;
+                }
+            }
+        }
+    });
+}

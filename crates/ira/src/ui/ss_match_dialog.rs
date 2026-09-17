@@ -243,7 +243,55 @@ pub(super) fn show_unmatched(
     platform_id: &str,
     dialog: &adw::Dialog,
 ) {
-    ss_box.append(&status_label(&crate::tr!("SS: not matched"), CSS_DIM_LABEL));
+    replace_row_actions(ss_box, |ab| {
+        unmatched_actions(
+            ab,
+            &crate::tr!("SS: not matched"),
+            state,
+            db_id,
+            game_name,
+            platform_id,
+            dialog,
+        );
+    });
+}
+
+/// The pass is still running in the background (the dialog was reopened
+/// mid-job): an in-flight note instead of "not matched", same manual
+/// search button.
+pub(super) fn show_background_match(
+    ss_box: &gtk4::Box,
+    state: &SharedState,
+    db_id: i64,
+    game_name: &str,
+    platform_id: &str,
+    dialog: &adw::Dialog,
+) {
+    replace_row_actions(ss_box, |ab| {
+        unmatched_actions(
+            ab,
+            &crate::tr!("Matching in background…"),
+            state,
+            db_id,
+            game_name,
+            platform_id,
+            dialog,
+        );
+    });
+}
+
+/// The dim status label plus the manual search button shared by both
+/// end states of a mass matcher row's ScreenScraper box.
+fn unmatched_actions(
+    ab: &gtk4::Box,
+    label: &str,
+    state: &SharedState,
+    db_id: i64,
+    game_name: &str,
+    platform_id: &str,
+    dialog: &adw::Dialog,
+) {
+    ab.append(&status_label(label, CSS_DIM_LABEL));
     let btn = gtk4::Button::with_label(&crate::tr!("Search SS…"));
     btn.add_css_class(CSS_SUGGESTED_ACTION);
     btn.set_valign(gtk4::Align::Center);
@@ -251,7 +299,7 @@ pub(super) fn show_unmatched(
     let gn = game_name.to_string();
     let pid = platform_id.to_string();
     let dlg = dialog.clone();
-    let inner = ss_box.clone();
+    let inner = ab.clone();
     btn.connect_clicked(move |_| {
         let inner = inner.clone();
         show_ss_search_dialog(
@@ -263,7 +311,7 @@ pub(super) fn show_unmatched(
             Some(Rc::new(move || show_matched(&inner))),
         );
     });
-    ss_box.append(&btn);
+    ab.append(&btn);
 }
 
 pub(super) fn show_matched(ss_box: &gtk4::Box) {

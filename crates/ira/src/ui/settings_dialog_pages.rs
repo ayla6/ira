@@ -83,13 +83,13 @@ pub(super) fn build_settings_pages(
     let (screenscraper_page, screenscraper_id_row, screenscraper_password_row) =
         super::settings_pages::build_screenscraper_settings_page(cfg);
 
-    // One-click maintenance: re-run the SGDB asset ensure for every matched
-    // game so missing art (squares included) is fetched again, even for
-    // games whose enrichment had been skipped as already complete.
+    // One-click maintenance: mass refetches of what matching skips —
+    // missing art, and holes in matched games' stored metadata. Both
+    // jobs report on the sidebar strip and outlive their dialogs.
     let fetch_group = adw::PreferencesGroup::new();
-    fetch_group.set_title(&crate::tr!("Game images"));
+    fetch_group.set_title(&crate::tr!("Fetch missing"));
     let fetch_row = adw::ActionRow::new();
-    fetch_row.set_title(&crate::tr!("Fetch missing images"));
+    fetch_row.set_title(&crate::tr!("Missing images"));
     fetch_row.set_subtitle(&crate::tr!(
         "Re-downloads any missing SGDB art for matched games, even ones skipped before"
     ));
@@ -101,6 +101,45 @@ pub(super) fn build_settings_pages(
     });
     fetch_row.add_suffix(&fetch_btn);
     fetch_group.add(&fetch_row);
+    let all_row = adw::ActionRow::new();
+    all_row.set_title(&crate::tr!("Missing metadata"));
+    all_row.set_subtitle(&crate::tr!(
+        "One pass over both sources: Steam fills PC games, ScreenScraper refetches matched entries"
+    ));
+    let all_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
+    all_btn.set_valign(gtk4::Align::Center);
+    let all_state = state.clone();
+    all_btn.connect_clicked(move |_| {
+        super::fetch_metadata::start_full_refetch(&all_state);
+    });
+    all_row.add_suffix(&all_btn);
+    fetch_group.add(&all_row);
+    let meta_row = adw::ActionRow::new();
+    meta_row.set_title(&crate::tr!("Missing Steam data"));
+    meta_row.set_subtitle(&crate::tr!(
+        "Fills PC games' release dates, studios, synopses and age boards from Steam"
+    ));
+    let meta_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
+    meta_btn.set_valign(gtk4::Align::Center);
+    let meta_state = state.clone();
+    meta_btn.connect_clicked(move |_| {
+        super::fetch_metadata::start_steam_refetch(&meta_state);
+    });
+    meta_row.add_suffix(&meta_btn);
+    fetch_group.add(&meta_row);
+    let ss_row = adw::ActionRow::new();
+    ss_row.set_title(&crate::tr!("Missing ScreenScraper data"));
+    ss_row.set_subtitle(&crate::tr!(
+        "Refetches matched games' entries by id and fills any gaps"
+    ));
+    let ss_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
+    ss_btn.set_valign(gtk4::Align::Center);
+    let ss_state = state.clone();
+    ss_btn.connect_clicked(move |_| {
+        super::fetch_metadata::start_metadata_refetch(&ss_state);
+    });
+    ss_row.add_suffix(&ss_btn);
+    fetch_group.add(&ss_row);
     general_page.append(&fetch_group);
     let (overlay_page, overlay_widgets) = build_overlay_settings_page(cfg);
     let registry = state.borrow().controller_registry.clone();

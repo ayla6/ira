@@ -102,6 +102,13 @@ pub(crate) fn target_env_for(
         if let Some(ignored_device) = ignored_device_for_target(vendor, product, backend) {
             envs.push((
                 "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
+                ignored_device.clone(),
+            ));
+            // The gamecontroller hint only stops the pad from becoming a
+            // gamepad; the blacklist removes it from SDL's joystick layer
+            // entirely, so games poking raw joysticks never see it either.
+            envs.push((
+                "SDL_JOYSTICK_BLACKLIST_DEVICES".to_string(),
                 ignored_device,
             ));
         }
@@ -308,11 +315,36 @@ mod tests {
     #[test]
     fn test_target_env_keeps_the_motion_node_off_joystick_lists() {
         // The uinput backends' native motion rides an accelerometer-class
-        // evdev node; the game's SDL must classify it as a sensor, not as a
-        // second controller with gyro-shaped axes.
+        // evdev node; the game's SDL must classify it as a sensor, not as
+        // a second controller with gyro-shaped axes.
         let envs = target_env_for(VirtualGamepadBackend::XInput, Some(0x2dc8), Some(0x3106), false);
         assert!(envs.contains(&(
             "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
+            "0".to_string()
+        )));
+        // The physical pad is hidden from both SDL layers: off the gamepad
+        // list and off the joystick list entirely.
+        assert!(envs.contains(&(
+            "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
+            "0x2dc8/0x3106".to_string()
+        )));
+        assert!(envs.contains(&(
+            "SDL_JOYSTICK_BLACKLIST_DEVICES".to_string(),
+            "0x2dc8/0x3106".to_string()
+        )));
+    }
+
+    #[test]
+    fn test_target_env_hides_hyphenated_identity_from_the_joystick_layer() {
+        // An 8BitDo speaking the virtual pad's wire protocol is virtualized
+        // as XInput; nothing may leak it into the game's SDL.
+        let envs = target_env_for(VirtualGamepadBackend::XInput, Some(0x2dc8), Some(0x6012), false);
+        assert!(envs.contains(&(
+            "SDL_JOYSTICK_BLACKLIST_DEVICES".to_string(),
+            "0x2dc8/0x6012".to_string()
+        )));
+        assert!(envs.contains(&(
+            "SDL_JOYSTICK_HIDAPI".to_string(),
             "0".to_string()
         )));
     }

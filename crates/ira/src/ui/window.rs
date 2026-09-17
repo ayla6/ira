@@ -111,6 +111,8 @@ pub fn build_ui(
         playtime_links: HashMap::new(),
         big_picture: None,
         fetch_progress: RefCell::new(None),
+        ss_job_busy: Cell::new(false),
+        strip_job_busy: Cell::new(false),
     }));
 
     {

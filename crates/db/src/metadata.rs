@@ -339,7 +339,10 @@ pub fn merge_missing_scraper_metadata(
         meta.ss_id = fresh.ss_id.clone();
         changed = true;
     }
-    if meta.release_date.is_empty() && !fresh.release_date.is_empty() {
+    // The epoch string an old Steam-diff bug wrote counts as no date,
+    // so a refetch replaces it instead of keeping the poison.
+    let date_missing = meta.release_date.is_empty() || meta.release_date == "1970-01-01";
+    if date_missing && !fresh.release_date.is_empty() {
         meta.release_date = fresh.release_date.clone();
         meta.release_timestamp = fresh.release_timestamp;
         meta.release_dates = fresh.release_dates.clone();
@@ -598,6 +601,63 @@ pub fn scraper_companies_search(
         .collect::<Result<Vec<_>, _>>()
         .map_err(err)?;
     Ok(rows)
+}
+
+/// Genres whose name contains the filter, for the picker's search.
+pub fn search_genres(conn: &DbConn, filter: &str) -> Result<Vec<ira_models::ScraperEntity>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(
+            "SELECT id, name FROM scraper_genres
+             WHERE name LIKE '%' || ?1 || '%' COLLATE NOCASE
+             ORDER BY name LIMIT 60",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![filter.trim()], |row| {
+            Ok(ira_models::ScraperEntity {
+                id: row.get::<_, i64>(0)?.to_string(),
+                name: row.get(1)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
+}
+
+/// The genre entity for a hand-typed name: a cached ScreenScraper genre
+/// when one's tokens match, else a freshly allocated local genre under a
+/// negative id. `None` only for names with no identifying tokens.
+pub fn local_genre_entity(conn: &DbConn, name: &str) -> Option<ira_models::ScraperEntity> {
+    let tokens = ira_models::company_tokens(name);
+    if tokens.is_empty() {
+        return None;
+    }
+    if let Ok(found) = search_genres(conn, name) {
+        if let Some(entity) = found.iter().find(|e| ira_models::company_tokens(&e.name) == tokens)
+        {
+            return Some(entity.clone());
+        }
+    }
+    let c = crate::lock_db(conn).ok()?;
+    let min: i64 = c
+        .query_row(
+            "SELECT COALESCE(MIN(id), 0) FROM scraper_genres WHERE id < 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let id = min - 1;
+    let name = name.trim().to_string();
+    let _ = c.execute(
+        "INSERT INTO scraper_genres (id, name) VALUES (?1, ?2)",
+        rusqlite::params![id, name],
+    );
+    Some(ira_models::ScraperEntity {
+        id: id.to_string(),
+        name,
+    })
 }
 
 /// The genre name a ScreenScraper id refers to, per the lookup table.
@@ -927,8 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scraper_release_timestamp_parses_both_shapes() {
-        let full = scraper_release_timestamp("1993-12-18");
+    fn test_scraper_release_timestamp_parses_both_shapes() {        let full = scraper_release_timestamp("1993-12-18");
         assert_eq!(
             chrono::DateTime::from_timestamp(full, 0)
                 .unwrap()
@@ -971,6 +1030,51 @@ mod tests {
         assert_eq!(salvato.id, "54774");
         // A filler-only name agrees with nothing.
         assert!(steam_company_entity(&conn, "LLC").is_none());
+    }
+
+    #[test]
+    fn test_merge_replaces_the_epoch_date_but_never_a_real_one() {
+        let (conn, _tmp) = setup_db();
+        let game_id = add_game(
+            &conn,
+            GameKind::Steam,
+            TrophySource::Gse,
+            "",
+            "",
+            "",
+            "Poisoned Game",
+        )
+        .unwrap();
+        // The old diff bug stored the epoch string while the timestamp
+        // column kept its real value; the merge must treat the string
+        // as a hole, not as data.
+        let poisoned = ira_models::ScraperMetadata {
+            ss_id: "1".into(),
+            release_date: "1970-01-01".into(),
+            ..Default::default()
+        };
+        store_scraper_metadata(&conn, game_id, &poisoned).unwrap();
+        let fresh = ira_models::ScraperMetadata {
+            ss_id: "1".into(),
+            release_date: "2015-09-15".into(),
+            release_timestamp: 1_442_275_200,
+            ..Default::default()
+        };
+        assert!(merge_missing_scraper_metadata(&conn, game_id, &fresh).unwrap());
+        let metadata = scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        assert_eq!(metadata.release_date, "2015-09-15");
+        assert_eq!(metadata.release_timestamp, 1_442_275_200);
+
+        // A real stored date is never overwritten by the merge.
+        let newer = ira_models::ScraperMetadata {
+            ss_id: "1".into(),
+            release_date: "2020-05-01".into(),
+            release_timestamp: 1_588_291_200,
+            ..Default::default()
+        };
+        assert!(!merge_missing_scraper_metadata(&conn, game_id, &newer).unwrap());
+        let metadata = scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        assert_eq!(metadata.release_date, "2015-09-15");
     }
 
     #[test]

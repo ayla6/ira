@@ -2086,6 +2086,7 @@ dependencies = [
 name = "ira-api"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "ira-models",
  "ira-parser",
  "quick-xml",
@@ -2124,7 +2125,9 @@ dependencies = [
 name = "ira-images"
 version = "0.1.0"
 dependencies = [
+ "gdk-pixbuf",
  "gdk4",
+ "gio",
  "glib",
  "gtk4",
  "ira-models",

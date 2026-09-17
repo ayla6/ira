@@ -26,7 +26,7 @@ type GameGeneralPageResult = (
     Option<adw::EntryRow>,
     Option<gtk4::Button>,
     Option<adw::ComboRow>,
-    gtk4::Box,
+    Option<super::edit_game_scraper::ScraperSlot>,
 );
 
 fn build_ra_section(
@@ -735,17 +735,15 @@ pub(super) fn build_game_general_page(
     add_game_path_if_needed(&identity_group, game);
     let runtime_row = build_runtime_row(&identity_group, game);
     let game_folder_entry = build_game_folder_row(&identity_group, game, win);
+    // The scraped metadata lives inside the Identity group too — it is
+    // the game's own record, not a ScreenScraper-branded sidebar.
+    let scraper_slot =
+        super::edit_game_scraper::build_scraper_section(state, game, win, &identity_group);
     general_page.append(&identity_group);
 
     let pending_version = build_shadps4_version_section(&general_page, game);
     let (pending_ra_core, pending_emulator, ra_container) =
         build_retro_emulator_and_ra(&general_page, state, game, win, pending_copies);
-
-    let scraper_container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    if let Some(group) = super::edit_game_scraper::build_scraper_section(state, game, win) {
-        scraper_container.append(&group);
-    }
-    general_page.append(&scraper_container);
 
     let service_group = adw::PreferencesGroup::new();
     service_group.set_title(&crate::tr!("Service"));
@@ -770,7 +768,7 @@ pub(super) fn build_game_general_page(
         game_folder_entry,
         migrate_btn,
         runtime_row,
-        scraper_container,
+        scraper_slot,
     )
 }
 

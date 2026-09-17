@@ -45,7 +45,7 @@ pub struct SettingsData {
     pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,
     pub sgdb_cache: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>,
     pub ra_container: Option<gtk4::Box>,
-    pub scraper_container: Option<gtk4::Box>,
+    pub(crate) scraper_slot: Option<super::edit_game_scraper::ScraperSlot>,
 }
 
 /// Widgets of the transient "Loading game library" screen, kept so progress
@@ -110,6 +110,14 @@ pub struct AppState {
     pub big_picture: Option<Rc<super::big_picture::BigPictureUi>>,
     /// Sidebar indicator for long-running image fetches (desktop mode).
     pub fetch_progress: RefCell<Option<super::fetch_images::FetchIndicator>>,
+    /// A quota-limited ScreenScraper job (background matching or a
+    /// metadata refetch) is running: other such jobs must not stack onto
+    /// the quota. Lives on the state, not the strip widget, so it
+    /// survives a hide-to-background rebuild.
+    pub ss_job_busy: Cell<bool>,
+    /// The sidebar strip is showing a job: new jobs must not fight it
+    /// for the labels. Same rebuild-survival reasoning as `ss_job_busy`.
+    pub strip_job_busy: Cell<bool>,
 }
 
 impl AppState {

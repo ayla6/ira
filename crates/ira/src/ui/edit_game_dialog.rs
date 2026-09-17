@@ -308,7 +308,7 @@ fn build_dialog_contents(
         game_folder_entry,
         migrate_btn,
         runtime_row,
-        scraper_container,
+        scraper_slot,
     ) = super::game_settings::build_game_general_page(
         &state,
         &game,
@@ -613,7 +613,7 @@ fn build_dialog_contents(
             pending_copies: pending_copies.clone(),
             sgdb_cache: sgdb_cache.clone(),
             ra_container,
-            scraper_container: Some(scraper_container),
+            scraper_slot,
         });
     }
     let state_close_w = Rc::downgrade(&state);

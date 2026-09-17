@@ -26,11 +26,53 @@ struct AchEntry {
 }
 
 /// What the PC garnish takes from the store page: the short
-/// description and every age-rating board that answered.
+/// description, every age-rating board that answered, and the PC
+/// release date normalized to the metadata's ISO form.
 #[derive(Debug, Clone)]
 pub struct StoreExtras {
     pub synopsis: String,
     pub ratings: Vec<(String, String)>,
+    pub release_date: String,
+}
+
+/// Steam's store date strings come in several shapes — "21 Jan, 2018",
+/// "Jan 2018", a bare year, even "Q1 2018" — normalized here to
+/// `YYYY-MM-DD`: the 4-digit year is the anchor, month and day default
+/// to the first when absent. Vague or unparsable answers ("Coming
+/// soon", "TBA") stay empty: no date beats a wrong one. chrono's own
+/// `%Y` parsing is skipped on purpose — it eats "Jan 2018" as year 18,
+/// day 20.
+fn parse_store_release_date(raw: &str) -> String {
+    const MONTHS: [&str; 12] = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    let mut year: Option<i32> = None;
+    let mut month = 1u32;
+    let mut day = 1u32;
+    for token in raw.split(|c: char| !c.is_ascii_alphanumeric()) {
+        if let Ok(value) = token.parse::<u32>() {
+            if token.len() == 4 && (1970..=2100).contains(&(value as i32)) {
+                year = Some(value as i32);
+            } else if (1..=31).contains(&value) {
+                day = value;
+            }
+            continue;
+        }
+        if token.len() >= 3 {
+            if let Some(index) = MONTHS
+                .iter()
+                .position(|m| token[..3].eq_ignore_ascii_case(m))
+            {
+                month = index as u32 + 1;
+            }
+        }
+    }
+    match year {
+        Some(year) => chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .map(|date| date.format("%Y-%m-%d").to_string())
+            .unwrap_or_default(),
+        None => String::new(),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -46,6 +88,14 @@ struct StoreAppShortInfo {
     short_description: String,
     #[serde(default)]
     ratings: Option<std::collections::HashMap<String, StoreBoardRating>>,
+    #[serde(default)]
+    release_date: Option<StoreReleaseDate>,
+}
+
+#[derive(serde::Deserialize)]
+struct StoreReleaseDate {
+    #[serde(default)]
+    date: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -216,15 +266,27 @@ impl SteamDataClient {
                     .iter()
                     .filter(|(_, board)| !board.rating.trim().is_empty())
                     .map(|(board, info)| {
-                        (board.to_uppercase(), info.rating.trim().to_string())
+                        // The stored kind is the canonical board id from
+                        // the ratings table, so Steam's `class_ind` lands
+                        // as CLASSIND beside ScreenScraper's own spelling.
+                        let board = ira_models::ratings::find_board(board)
+                            .map(|known| known.id)
+                            .unwrap_or(board);
+                        (board.to_string(), info.rating.trim().to_string())
                     })
                     .collect()
             })
             .unwrap_or_default();
         ratings.sort();
+        let release_date = data
+            .release_date
+            .as_ref()
+            .map(|release| parse_store_release_date(&release.date))
+            .unwrap_or_default();
         Some(StoreExtras {
             synopsis: synopsis.to_string(),
             ratings,
+            release_date,
         })
     }
 
@@ -710,6 +772,21 @@ fn header_image_base(header_image: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::types::SteamCmdConfig;
+
+    #[test]
+    fn test_parse_store_release_date_handles_the_steam_shapes() {
+        assert_eq!(parse_store_release_date("21 Jan, 2018"), "2018-01-21");
+        assert_eq!(parse_store_release_date("21 Jan 2018"), "2018-01-21");
+        assert_eq!(parse_store_release_date("Jan 21, 2018"), "2018-01-21");
+        assert_eq!(parse_store_release_date("Jan 2018"), "2018-01-01");
+        assert_eq!(parse_store_release_date("Q1 2018"), "2018-01-01");
+        assert_eq!(parse_store_release_date(" 2018 "), "2018-01-01");
+        // Vague and unparsable answers stay empty — no date beats a
+        // wrong one.
+        assert_eq!(parse_store_release_date("Coming soon"), "");
+        assert_eq!(parse_store_release_date("TBA"), "");
+        assert_eq!(parse_store_release_date(""), "");
+    }
 
     #[test]
     fn test_sorted_launches_orders_by_numeric_key() {

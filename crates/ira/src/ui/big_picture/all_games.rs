@@ -792,45 +792,26 @@ impl AllSoftwareUi {
             self.groups_grid.reload(state);
         }
         let was_empty = self.games.borrow().is_empty();
-        let (show_hidden, sort_mode, sort_descending) = {
+        // Same filter+sort core as the desktop sidebar; the selected
+        // group maps onto the shared GroupSelection, with None = all.
+        let games = {
             let s = state.borrow();
-            (
+            let search = super::super::search::SearchQuery::parse(&s.search_query);
+            let group = self
+                .groups_view
+                .get()
+                .map(ira_models::GroupSelection::Collection)
+                .unwrap_or(ira_models::GroupSelection::AllGames);
+            super::super::filter::filter_and_sort(
+                &s.games,
                 s.cfg.show_hidden_games,
+                &search,
+                &group,
+                &s.group_members,
                 s.cfg.sort_mode,
                 s.cfg.sort_descending,
             )
         };
-        // The group members cache is kept in state (loaded on start,
-        // refreshed on every group change) — no DB query per refresh.
-        let members: Option<std::collections::HashSet<i64>> =
-            self.groups_view.get().map(|group_id| {
-                state
-                    .borrow()
-                    .group_members
-                    .get(&group_id)
-                    .cloned()
-                    .unwrap_or_default()
-            });
-        let mut games: Vec<Game> = state
-            .borrow()
-            .games
-            .iter()
-            .filter(|g| !g.hidden || show_hidden)
-            .filter(|g| {
-                members
-                    .as_ref()
-                    .is_none_or(|ids| ids.contains(&g.db_id))
-            })
-            .cloned()
-            .collect();
-        games.sort_by(|a, b| {
-            let ord = sort_mode.compare(a, b).then_with(|| a.db_id.cmp(&b.db_id));
-            if sort_descending {
-                ord.reverse()
-            } else {
-                ord
-            }
-        });
 
         let unchanged = {
             let current = self.games.borrow();

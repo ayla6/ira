@@ -67,11 +67,15 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
 /// and a name that is only a bare title id falls through to the other.
 fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
     let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten()?;
+    // PS3/PS4 games carry a native product code here, not a console.
+    let console = ira_models::scraper_console_id(entry.kind, &entry.platform_id);
     // PC titles come from Steam or the user — search from them; dump
-    // stems there are executable names at best.
+    // stems there are executable names at best. Product-code platforms'
+    // titles come from the console's own metadata, so they lead too —
+    // their stems are directory names at best.
     let trusted = entry.title_trusted
         || entry.kind.is_pc()
-        || ira_models::title_from_trusted_source(&entry.platform_id);
+        || ira_models::title_from_trusted_source(&console);
     let stem = clean_rom_name(
         &std::path::Path::new(&entry.rom_path)
             .file_stem()
@@ -171,13 +175,17 @@ pub fn show_ss_search_dialog(
             return;
         }
     }
+    // Say which console the search is scoped to.
+    let console = ira_models::find_console(platform_id)
+        .map(|def| def.display_name.to_string())
+        .unwrap_or_else(|| platform_id.to_string());
     let SearchDialogWidgets {
         dialog,
         entry,
         search_btn,
         list,
     } = build_search_dialog(
-        &crate::tr!("Match to ScreenScraper"),
+        &crate::tr!("Match to ScreenScraper · {}").replacen("{}", &console, 1),
         500,
         400,
         500,
@@ -205,6 +213,10 @@ pub fn show_ss_search_dialog(
                 ),
             )
         };
+        // The request runs off-thread; say so instead of leaving the
+        // previous results (or an empty list) looking frozen.
+        clear_children(&list);
+        list.append(&status_row(&crate::tr!("Searching ScreenScraper…")));
         let (tx, rx) = mpsc::channel::<Result<Vec<ScrapedGame>, String>>();
         let platform_id_c = platform_id.clone();
         std::thread::spawn(move || {

@@ -74,6 +74,18 @@ pub fn title_from_trusted_source(platform_id: &str) -> bool {
     matches!(platform_id, "ps3" | "ps4" | "psvita" | "switch" | "wiiu")
 }
 
+/// The console a game's ScreenScraper lookups run under. PS3 and PS4
+/// games store their native product code as the platform id — NPUB30698,
+/// CUSA12112 — which names a release, not a console; their kind is what
+/// carries the console. Every other game's platform_id already is one.
+pub fn scraper_console_id(kind: crate::GameKind, platform_id: &str) -> String {
+    match kind {
+        crate::GameKind::Ps4 => "ps4".to_string(),
+        crate::GameKind::Ps3 => "ps3".to_string(),
+        _ => platform_id.to_string(),
+    }
+}
+
 /// The corporate words a store appends to a studio's name — Steam says
 /// "Naughty Dog, LLC" where ScreenScraper writes "Naughty Dog", "Sega
 /// Games" where it writes "Sega" — dropped when companies compare.

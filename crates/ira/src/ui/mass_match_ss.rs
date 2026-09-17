@@ -171,13 +171,14 @@ pub(super) fn attach_ss_actions(
 ) -> gtk4::Box {
     let ss_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     ss_box.set_valign(gtk4::Align::Center);
+    let console = ira_models::scraper_console_id(game.kind, &game.platform_id);
     if missed {
         show_unmatched(
             &ss_box,
             state,
             game.db_id,
             &game.name,
-            &game.platform_id,
+            &console,
             dialog,
         );
     } else {
@@ -385,7 +386,8 @@ fn resolve(
     item: &BatchItem,
 ) -> Option<SsOutcome> {
     let mut entry = ira_db::find_by_db_id(db, item.db_id).ok().flatten()?;
-    let platform_id = entry.platform_id.clone();
+    // PS3/PS4 games carry a native product code here, not a console.
+    let platform_id = ira_models::scraper_console_id(entry.kind, &entry.platform_id);
     // PC games search ScreenScraper's own Windows/Linux systems and fall
     // back to a cross-platform lookup diffed against their Steam data.
     if entry.kind.is_pc() {
@@ -1173,7 +1175,7 @@ fn apply_hit(
         .games
         .iter()
         .find(|g| g.db_id == hit.db_id)
-        .map(|g| g.platform_id.clone())
+        .map(|g| ira_models::scraper_console_id(g.kind, &g.platform_id))
         .unwrap_or_default();
     match hit.matched {
         Some(SsOutcome::Hit(game)) => {

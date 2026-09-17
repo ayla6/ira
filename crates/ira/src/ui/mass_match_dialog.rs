@@ -76,11 +76,12 @@ fn needs_ss_match(g: &Game) -> bool {
     if g.manual_unmatch || !g.screenscraper_id.is_empty() {
         return false;
     }
+    let console = ira_models::scraper_console_id(g.kind, &g.platform_id);
     match g.kind {
         GameKind::Wine | GameKind::Linux | GameKind::Steam => true,
         _ => {
             (g.kind == GameKind::Retro || g.kind.is_console_emulator())
-                && ira_models::screenscraper_system_id(&g.platform_id).is_some()
+                && ira_models::screenscraper_system_id(&console).is_some()
         }
     }
 }
@@ -466,5 +467,17 @@ mod tests {
         let mut g = game(ira_models::GameKind::Wine);
         g.manual_unmatch = true;
         assert!(!needs_ss_match(&g));
+    }
+
+    #[test]
+    fn test_needs_ss_match_resolves_product_code_platforms() {
+        // PS3/PS4 games carry a native product code as the platform id;
+        // the kind is what names the console.
+        let mut g = game(ira_models::GameKind::Ps4);
+        g.platform_id = "CUSA12112".to_string();
+        assert!(needs_ss_match(&g));
+        let mut g = game(ira_models::GameKind::Ps3);
+        g.platform_id = "NPUB30698".to_string();
+        assert!(needs_ss_match(&g));
     }
 }

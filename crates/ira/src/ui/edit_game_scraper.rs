@@ -57,9 +57,11 @@ pub(super) fn build_scraper_section(
 ) -> Option<ScraperSlot> {
     let metadata = stored_metadata(state, game.db_id);
     // Every game the SS pass can touch gets the rows: consoles on mapped
-    // platforms, and PC games whose diff search fills them too.
-    let eligible = game.kind.is_pc()
-        || ira_models::screenscraper_system_id(&game.platform_id).is_some();
+    // platforms, and PC games whose diff search fills them too. PS3/PS4
+    // games carry a product code here, not a console.
+    let console = ira_models::scraper_console_id(game.kind, &game.platform_id);
+    let eligible =
+        game.kind.is_pc() || ira_models::screenscraper_system_id(&console).is_some();
     if metadata.is_none() && !eligible {
         return None;
     }
@@ -1068,7 +1070,7 @@ fn search_row(state: &SharedState, game: &Game, win: &adw::Window) -> adw::Actio
     {
         let state = state.clone();
         let name = game.name.clone();
-        let platform_id = game.platform_id.clone();
+        let platform_id = ira_models::scraper_console_id(game.kind, &game.platform_id);
         let db_id = game.db_id;
         let win = win.clone();
         btn.connect_clicked(move |_| {

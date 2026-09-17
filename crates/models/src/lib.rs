@@ -41,7 +41,8 @@ pub use session::PlaySession;
 pub use group_order::GroupOrder;
 pub use screenscraper::{
     company_tokens, screenscraper_hashes_content, screenscraper_matches_by_serial,
-    screenscraper_pc_system_id, screenscraper_system_id, title_from_trusted_source,
+    scraper_console_id, screenscraper_pc_system_id, screenscraper_system_id,
+    title_from_trusted_source,
     ScraperClassification, ScraperEntity, ScraperMetadata,
 };
 pub use sort_mode::SortMode;

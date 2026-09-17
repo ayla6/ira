@@ -65,12 +65,13 @@ pub fn parse_tropusr_bytes(data: &[u8]) -> Result<HashMap<u32, (bool, i64)>, Str
         return Err("TROPUSR.DAT too short for header".into());
     }
 
-    let magic = read_u32_be(data, 0).unwrap();
+    let magic = read_u32_be(data, 0).ok_or_else(|| "TROPUSR: truncated header".to_string())?;
     if magic != TROPUSR_MAGIC {
         return Err(format!("bad TROPUSR magic: 0x{:08X}", magic));
     }
 
-    let tables_count = read_u32_be(data, 8).unwrap() as usize;
+    let tables_count = read_u32_be(data, 8)
+        .ok_or_else(|| "TROPUSR: truncated header".to_string())? as usize;
 
     let mut result = HashMap::new();
 
@@ -81,9 +82,9 @@ pub fn parse_tropusr_bytes(data: &[u8]) -> Result<HashMap<u32, (bool, i64)>, Str
             break;
         }
 
-        let table_type = read_u32_be(data, th_off).unwrap();
-        let entries_count = read_u32_be(data, th_off + 12).unwrap() as usize;
-        let entries_offset = read_u64_be(data, th_off + 16).unwrap() as usize;
+        let table_type = read_u32_be(data, th_off).unwrap_or(0);
+        let entries_count = read_u32_be(data, th_off + 12).unwrap_or(0) as usize;
+        let entries_offset = read_u64_be(data, th_off + 16).unwrap_or(0) as usize;
 
         if table_type != 6 {
             continue;

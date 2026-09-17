@@ -12,6 +12,10 @@ use crate::emu_dirs;
 /// Several Switch emulators can be installed side by side, each with its
 /// own NAND, so every detected install contributes its portable cache;
 /// the shared XDG caches follow.
+/// The switch-emulator forks this codebase recognizes, oldest last:
+/// Eden reads their directories too, so every install contributes.
+const YUZU_FAMILY_INSTALLS: &[&str] = &["eden", "suyu", "citron", "sudachi", "yuzu"];
+
 pub fn game_list_cache_dirs_for(executable: &str) -> Vec<PathBuf> {
     game_list_cache_dirs_in(executable, &crate::switch_detect::detected_launch_commands())
 }
@@ -49,12 +53,11 @@ pub(crate) fn game_list_cache_dirs_in(executable: &str, detected: &[String]) -> 
     // their caches hold the same per-title files, newest fork first.
     // AppImage managers that override XDG_CACHE_HOME scatter installs
     // under ~/.cache/AppImage-Cache/<name>.
-    let names = ["eden", "suyu", "citron", "sudachi", "yuzu"];
     let cache_home = emu_dirs::cache_home();
-    for name in names {
+    for name in YUZU_FAMILY_INSTALLS {
         push_root(cache_home.join(name), &mut roots);
     }
-    for name in names {
+    for name in YUZU_FAMILY_INSTALLS {
         push_root(cache_home.join("AppImage-Cache").join(name), &mut roots);
     }
     roots
@@ -97,7 +100,7 @@ pub(crate) fn nand_registered_dirs_in(executable: &str, detected: &[String]) -> 
             push_root(app.join("data/eden/nand/System/Contents"), &mut roots);
         }
     }
-    for name in ["eden", "suyu", "citron", "sudachi", "yuzu"] {
+    for name in YUZU_FAMILY_INSTALLS {
         push_root(
             emu_dirs::data_home().join(name).join("nand/System/Contents"),
             &mut roots,
@@ -251,7 +254,7 @@ fn qt_config_paths(executable: &str) -> Vec<PathBuf> {
         }
     }
     // The forks this codebase recognizes; Eden reads their directories too.
-    for name in ["eden", "suyu", "citron", "sudachi", "yuzu"] {
+    for name in YUZU_FAMILY_INSTALLS {
         push(
             crate::emu_dirs::config_home().join(name).join("qt-config.ini"),
             &mut out,

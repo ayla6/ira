@@ -201,7 +201,7 @@ mod tests {
 fn test_logo_scaled_dims_wide_logo_at_half_percent() {
     // 1920×620 hero → region 1868×588; 1024×300 logo at 50% → box 934×294,
     // width binds, logo is half the region wide.
-    let (lw, lh) = logo_scaled_dims(1920.0, 620.0, 1024.0, 300.0, 50);
+    let (lw, lh) = logo_scaled_dims(REF_HERO_W, REF_HERO_H, 1024.0, 300.0, 50);
     assert!((lw - 934.0).abs() < 1.0);
     assert!((lh - 273.6).abs() < 0.1);
 }
@@ -210,7 +210,7 @@ fn test_logo_scaled_dims_wide_logo_at_half_percent() {
 fn test_logo_margins_scale_with_hero_size() {
     // At the reference size the margins are Steam's 26/16; a quarter-size
     // hero gets quarter margins, keeping the inset proportional.
-    let (mx, my) = logo_margins(1920.0, 620.0);
+    let (mx, my) = logo_margins(REF_HERO_W, REF_HERO_H);
     assert!((mx - 26.0).abs() < 0.001);
     assert!((my - 16.0).abs() < 0.001);
     let (mx, my) = logo_margins(480.0, 155.0);
@@ -222,7 +222,7 @@ fn test_logo_margins_scale_with_hero_size() {
 fn test_logo_scaled_dims_tall_logo_bounded_by_height() {
     // Square logo on a wide hero → height binds, logo is half the region
     // height (588 / 2 = 294).
-    let (lw, lh) = logo_scaled_dims(1920.0, 620.0, 300.0, 300.0, 50);
+    let (lw, lh) = logo_scaled_dims(REF_HERO_W, REF_HERO_H, 300.0, 300.0, 50);
     assert!((lw - 294.0).abs() < 1.0);
     assert!((lh - 294.0).abs() < 1.0);
 }
@@ -231,7 +231,7 @@ fn test_logo_scaled_dims_tall_logo_bounded_by_height() {
 fn test_logo_scaled_dims_full_percent_fills_region_exactly() {
     // 100% must fill the inset region, never the raw hero — this is the
     // overflow regression: the logo must not eat into the margins.
-    let (lw, lh) = logo_scaled_dims(1920.0, 620.0, 4000.0, 1200.0, 100);
+    let (lw, lh) = logo_scaled_dims(REF_HERO_W, REF_HERO_H, 4000.0, 1200.0, 100);
     assert!(lw <= 1920.0 - 2.0 * 26.0 + 0.001);
     assert!(lh <= 620.0 - 2.0 * 16.0 + 0.001);
 }
@@ -241,7 +241,7 @@ fn test_logo_scaled_dims_stays_inside_region_at_min_percent() {
     // Extreme aspect at 5%: both axes stay inside the percentage box.
     let region_w = 1920.0 - 2.0 * 26.0;
     let region_h = 620.0 - 2.0 * 16.0;
-    let (lw, lh) = logo_scaled_dims(1920.0, 620.0, 2000.0, 40.0, 5);
+    let (lw, lh) = logo_scaled_dims(REF_HERO_W, REF_HERO_H, 2000.0, 40.0, 5);
     assert!(lw <= region_w * 0.05 + 0.001);
     assert!(lh <= region_h * 0.05 + 0.001);
 }

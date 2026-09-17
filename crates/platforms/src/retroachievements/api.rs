@@ -273,17 +273,13 @@ impl RaClient {
         let suffix = if locked { "_lock" } else { "" };
         let url = format!("{}/{}{}.png", RA_BADGE_URL, badge_name, suffix);
         let tmp = dest.with_extension("png");
-        match self.http.get(&url).send() {
-            Ok(resp) if resp.status().is_success() => match resp.bytes() {
-                Ok(bytes) => {
-                    if std::fs::write(&tmp, &bytes).is_ok() {
-                        ira_parser::convert_to_lossless_webp(&tmp);
-                        return dest.to_string_lossy().into_owned();
-                    }
+        match self.fetch_ra_bytes(&url) {
+            Ok(bytes) => {
+                if std::fs::write(&tmp, &bytes).is_ok() {
+                    ira_parser::convert_to_lossless_webp(&tmp);
+                    return dest.to_string_lossy().into_owned();
                 }
-                Err(e) => eprintln!("RA badge download read error: {}", e),
-            },
-            Ok(resp) => eprintln!("RA badge HTTP {}", resp.status()),
+            }
             Err(e) => eprintln!("RA badge download error: {}", e),
         }
         String::new()

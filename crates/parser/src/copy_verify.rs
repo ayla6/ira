@@ -34,14 +34,30 @@ pub fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
     count
 }
 
-/// Copy a file and verify the destination matches the source by size.
+/// Copy a file and verify the destination byte-for-byte (a rolling
+/// digest over both files — a same-length corrupted copy used to pass).
 /// Returns true if the copy is verified safe.
 fn safe_copy_and_verify(src: &Path, dst: &Path) -> bool {
+    use std::io::Read;
+    use std::hash::{Hash, Hasher};
     if std::fs::copy(src, dst).is_err() {
         return false;
     }
-    match (std::fs::metadata(src), std::fs::metadata(dst)) {
-        (Ok(s), Ok(d)) if s.len() == d.len() => true,
+    let digest = |path: &Path| -> Option<u64> {
+        let mut file = std::fs::File::open(path).ok()?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = file.read(&mut buf).ok()?;
+            if n == 0 {
+                break;
+            }
+            buf[..n].hash(&mut hasher);
+        }
+        Some(hasher.finish())
+    };
+    match (digest(src), digest(dst)) {
+        (Some(a), Some(b)) if a == b => true,
         _ => {
             let _ = std::fs::remove_file(dst);
             false

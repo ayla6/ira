@@ -12,10 +12,24 @@ pub struct TrophyDef {
 }
 
 /// Parse TROP.XML to get trophy definitions (name, detail, type, hidden).
+/// Decode the five XML built-in entities. The scanners here are
+/// hand-rolled and don't decode, so an escaped name would show up raw
+/// ("Killer &amp; Survivor"). `&amp;` decodes last.
+fn decode_xml_entities(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
 pub fn parse_trop_xml(path: &Path) -> Vec<TrophyDef> {
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            eprintln!("trophy definitions unreadable ({}): {e}", path.display());
+            return Vec::new();
+        }
     };
 
     let mut trophies = Vec::new();
@@ -55,8 +69,8 @@ pub fn parse_trop_xml(path: &Path) -> Vec<TrophyDef> {
                 if tag_name == "trophy" && in_trophy {
                     trophies.push(TrophyDef {
                         id: current_id.clone(),
-                        name: current_name.clone(),
-                        detail: current_detail.clone(),
+                        name: decode_xml_entities(&current_name),
+                        detail: decode_xml_entities(&current_detail),
                         ttype: current_ttype,
                         hidden: current_hidden,
                     });
@@ -109,10 +123,14 @@ pub fn parse_trop_xml(path: &Path) -> Vec<TrophyDef> {
 /// Parse user trophy XML to get unlock states.
 /// Returns map of trophy_id → (earned, timestamp)
 pub fn parse_user_trophies(path: &Path) -> HashMap<String, (bool, i64)> {
+
     let mut result = HashMap::new();
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
-        Err(_) => return result,
+        Err(e) => {
+            eprintln!("trophy unlock states unreadable ({}): {e}", path.display());
+            return result;
+        }
     };
 
     let mut chars = data.chars().peekable();

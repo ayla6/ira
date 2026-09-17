@@ -250,8 +250,8 @@ impl SteamDataClient {
     /// plus whatever else it holds.
     pub fn fetch_store_extras(&self, app_id: &str) -> Option<StoreExtras> {
         let url = format!("https://store.steampowered.com/api/appdetails?appids={app_id}&l=english");
-        let resp = self.http.get(&url).send().ok()?;
-        let raw: std::collections::HashMap<String, StoreAppDetailsAnswer> = resp.json().ok()?;
+        let raw: std::collections::HashMap<String, StoreAppDetailsAnswer> =
+            self.http_get_json(&url)?;
         let entry = raw.get(app_id)?;
         if !entry.success {
             return None;

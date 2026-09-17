@@ -6,13 +6,16 @@
 
 /// Strip the dump tags a ROM name carries — every `(...)` and `[...]`
 /// group, including the bracketed switch/3DS title ids — and the
-/// underscores scene names use for spaces, so a title search sees a
-/// title. Punctuation stays: the source's search needs it, and the
-/// acceptance comparison is what ignores it. Console-fed titles bring
-/// their own noise, which never survives into a search: the trademark
-/// glyphs Nintendo's metadata loves ("Bayonetta™") and the
-/// filesystem-safe colon switch titles use instead of a real one
-/// ("Catherine꞉ Full Body").
+/// underscores and dots, so a title search sees a title. Dots go
+/// because ScreenScraper's search stumbles on them: their database
+/// writes "Plants vs Zombies" without one, and the dot in "Plants vs.
+/// Zombies" kills the hit even though the game is theirs. Other
+/// punctuation stays: the source's search needs it, and the acceptance
+/// comparison is what ignores it. Console-fed titles bring their own
+/// noise, which never survives into a search: the trademark glyphs
+/// Nintendo's metadata loves ("Bayonetta™") and the filesystem-safe
+/// colon switch titles use instead of a real one ("Catherine꞉ Full
+/// Body").
 pub(crate) fn clean_rom_name(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut depth = 0usize;
@@ -26,7 +29,7 @@ pub(crate) fn clean_rom_name(name: &str) -> String {
             _ => {}
         }
     }
-    let cleaned: String = out.replace('_', " ");
+    let cleaned: String = out.replace(['_', '.'], " ");
     cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -249,6 +252,14 @@ mod tests {
         // Unbalanced opening brackets still keep the text.
         assert_eq!(clean_rom_name("Half Life (Source"), "Half Life");
         assert_eq!(clean_rom_name("   "), "");
+    }
+
+    #[test]
+    fn test_clean_rom_name_dots_are_spaces() {
+        // ScreenScraper's database drops dots ("Plants vs Zombies"),
+        // and its search stumbles on the title's own dot.
+        assert_eq!(clean_rom_name("Plants vs. Zombies"), "Plants vs Zombies");
+        assert_eq!(clean_rom_name("Super Mario Galaxy"), "Super Mario Galaxy");
     }
 
     #[test]

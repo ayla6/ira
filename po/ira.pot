@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-16 21:26-0300\n"
+"POT-Creation-Date: 2026-09-16 21:44-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1645,40 +1645,40 @@ msgstr ""
 msgid "Cancelled"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:36
+#: crates/ira/src/ui/fetch_metadata.rs:37
 msgid "Fetching ScreenScraper data…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:37
-#: crates/ira/src/ui/fetch_metadata.rs:269
+#: crates/ira/src/ui/fetch_metadata.rs:38
+#: crates/ira/src/ui/fetch_metadata.rs:304
 msgid "Fetching missing metadata…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:61
-#: crates/ira/src/ui/fetch_metadata.rs:94
-#: crates/ira/src/ui/fetch_metadata.rs:298
+#: crates/ira/src/ui/fetch_metadata.rs:62
+#: crates/ira/src/ui/fetch_metadata.rs:98
+#: crates/ira/src/ui/fetch_metadata.rs:333
 #, rust-format
 msgid "{} games updated"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:62
-#: crates/ira/src/ui/fetch_metadata.rs:299
+#: crates/ira/src/ui/fetch_metadata.rs:63
+#: crates/ira/src/ui/fetch_metadata.rs:334
 msgid "Metadata fetched"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:78
+#: crates/ira/src/ui/fetch_metadata.rs:82
 msgid "Fetching Steam data…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:79
+#: crates/ira/src/ui/fetch_metadata.rs:83
 msgid "Fetching missing Steam data…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:95
+#: crates/ira/src/ui/fetch_metadata.rs:99
 msgid "Steam data fetched"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:268
+#: crates/ira/src/ui/fetch_metadata.rs:303
 msgid "Fetching metadata…"
 msgstr ""
 
@@ -4995,8 +4995,7 @@ msgid "Missing Steam data"
 msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_pages.rs:120
-msgid ""
-"Fills PC games' release dates, studios, synopses and age boards from Steam"
+msgid "Fills games' release dates, studios, synopses and age boards from Steam"
 msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_pages.rs:131

@@ -117,7 +117,7 @@ pub(super) fn build_settings_pages(
     let meta_row = adw::ActionRow::new();
     meta_row.set_title(&crate::tr!("Missing Steam data"));
     meta_row.set_subtitle(&crate::tr!(
-        "Fills PC games' release dates, studios, synopses and age boards from Steam"
+        "Fills games' release dates, studios, synopses and age boards from Steam"
     ));
     let meta_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
     meta_btn.set_valign(gtk4::Align::Center);

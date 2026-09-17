@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Background and border from the official 2025 ClassInd set
+     (classind-10); the L glyph is the file's own. -->
+<svg version="1.1" id="svg1" width="497.89999" height="497.93631"
+     viewBox="0 0 497.89999 497.9363"
+     xmlns="http://www.w3.org/2000/svg">
+  <path
+     d="m 36.449219,8.9003906 c -14.814274,0 -27.5488284,9.5166084 -27.5488284,23.6093754 V 463.42187 c 0,13.30044 14.1850484,25.61524 27.5488284,25.61524 H 464.44922 c 15.47871,0 24.56767,-14.16238 24.55078,-28.61524 L 488.5,32.515625 C 488.48644,20.910294 477.62629,8.9003893 466.44922,8.9003906 Z"
+     style="baseline-shift:baseline;clip-rule:evenodd;display:inline;overflow:visible;vector-effect:none;fill:#00a651;fill-rule:evenodd;image-rendering:optimizeQuality;shape-rendering:geometricPrecision;text-rendering:geometricPrecision;enable-background:accumulate;stop-color:#000000;stop-opacity:1"
+     id="path7" />
+  <path
+     d="M 36.449219,0 C 17.652374,0 0,13.044067 0,32.509766 V 463.42187 c 0,18.30471 18.132102,34.51368 36.449219,34.51368 H 464.44922 c 19.46649,0 33.47517,-16.98974 33.45117,-37.52539 l -0.5,-427.906254 C 497.38079,15.726727 483.46381,-2.0520114e-6 466.44922,0 Z m 0,8.9003906 H 466.44922 C 477.62629,8.9003893 488.48644,20.910294 488.5,32.515625 L 489,460.42187 c 0.0169,14.45181 -9.07146,28.61524 -24.55078,28.61524 H 36.449219 c -13.363673,0 -27.5488284,-12.3147 -27.5488284,-25.61524 V 32.509766 c 0,-14.092767 12.7345544,-23.6093754 27.5488284,-23.6093754 z"
+     style="baseline-shift:baseline;clip-rule:evenodd;display:inline;overflow:visible;vector-effect:none;fill:#ffffff;fill-rule:evenodd;image-rendering:optimizeQuality;shape-rendering:geometricPrecision;text-rendering:geometricPrecision;enable-background:accumulate;stop-color:#000000;stop-opacity:1"
+     id="path11" />
+  <g transform="translate(0.0,0.3821) scale(1.018196)">
+  <path
+     id="path15"
+     style="font-weight:bold;font-size:192px;line-height:0;font-family:'Roboto Condensed';-inkscape-font-specification:'Roboto Condensed, Bold';letter-spacing:3.47px;fill:#ffffff;fill-rule:evenodd;stroke-width:1.59511"
+     d="m 183.35722,135.78622 v 215.137 h 30.7231 13.62106 77.94284 V 315.16556 H 227.70138 V 135.78622 Z" />
+  </g>
+</svg>

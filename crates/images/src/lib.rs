@@ -1,6 +1,7 @@
 mod async_load;
 mod cache;
 mod pixbuf;
+mod ratings;
 mod scaled;
 mod texture;
 
@@ -10,6 +11,7 @@ pub use async_load::{
 };
 pub use cache::{clear_texture_cache, invalidate_texture, trim_image_caches};
 pub use pixbuf::{pixbuf_for, pixbuf_for_async};
+pub use ratings::rating_texture;
 pub use scaled::ScaledPaintable;
 pub use texture::{
     cached_texture, new_image_from_file, set_image, set_picture_contain, set_picture_natural,

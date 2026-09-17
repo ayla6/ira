@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Background geometry from the official 2025 ClassInd set
+     (classind-10); the glyphs are the file's own. -->
+<svg version="1.1" id="svg1" width="497.89999" height="497.93631"
+     viewBox="0 0 497.89999 497.9363"
+     xmlns="http://www.w3.org/2000/svg">
+  <path
+     d="m 36.449219,8.9003906 c -14.814274,0 -27.5488284,9.5166084 -27.5488284,23.6093754 V 463.42187 c 0,13.30044 14.1850484,25.61524 27.5488284,25.61524 H 464.44922 c 15.47871,0 24.56767,-14.16238 24.55078,-28.61524 L 488.5,32.515625 C 488.48644,20.910294 477.62629,8.9003893 466.44922,8.9003906 Z"
+     style="baseline-shift:baseline;clip-rule:evenodd;display:inline;overflow:visible;vector-effect:none;fill:#fdc115;fill-rule:evenodd;image-rendering:optimizeQuality;shape-rendering:geometricPrecision;text-rendering:geometricPrecision;enable-background:accumulate;stop-color:#000000;stop-opacity:1"
+     id="path7" />
+  <path
+     d="M 36.449219,0 C 17.652374,0 0,13.044067 0,32.509766 V 463.42187 c 0,18.30471 18.132102,34.51368 36.449219,34.51368 H 464.44922 c 19.46649,0 33.47517,-16.98974 33.45117,-37.52539 l -0.5,-427.906254 C 497.38079,15.726727 483.46381,-2.0520114e-6 466.44922,0 Z m 0,8.9003906 H 466.44922 C 477.62629,8.9003893 488.48644,20.910294 488.5,32.515625 L 489,460.42187 c 0.0169,14.45181 -9.07146,28.61524 -24.55078,28.61524 H 36.449219 c -13.363673,0 -27.5488284,-12.3147 -27.5488284,-25.61524 V 32.509766 c 0,-14.092767 12.7345544,-23.6093754 27.5488284,-23.6093754 z"
+     style="baseline-shift:baseline;clip-rule:evenodd;display:inline;overflow:visible;vector-effect:none;fill:#ffffff;fill-rule:evenodd;image-rendering:optimizeQuality;shape-rendering:geometricPrecision;text-rendering:geometricPrecision;enable-background:accumulate;stop-color:#000000;stop-opacity:1"
+     id="path11" />
+  <path
+     style="font-weight:bold;font-size:192px;line-height:0;font-family:'Roboto Condensed';-inkscape-font-specification:'Roboto Condensed, Bold';letter-spacing:3.47px;fill:#ffffff;fill-rule:evenodd;stroke-width:1.57455"
+     d="m 453.61602,322.09852 v 34.28519 H 326.56175 v -29.2822 l 58.34426,-73.72054 q 8.44068,-11.47745 13.1793,-20.30625 4.73862,-8.82881 6.81177,-15.7447 2.07313,-7.06305 2.07313,-13.39036 0,-9.41739 -2.22121,-16.18615 -2.22124,-6.91589 -6.66369,-10.59456 -4.29437,-3.82582 -10.66189,-3.82582 -7.70028,0 -12.73505,4.7087 -5.03478,4.70869 -7.55219,12.94891 -2.3693,8.09308 -2.3693,18.39335 h -41.61102 q 0,-19.12908 7.84834,-35.16808 7.99642,-16.18614 22.36037,-25.60353 14.51203,-9.56454 34.79925,-9.56454 19.6949,0 33.17034,7.35733 13.47547,7.35734 20.28724,21.04199 6.95984,13.5375 6.95984,32.51944 0,10.59456 -2.81355,20.74769 -2.81356,10.00598 -7.99643,20.01196 -5.18287,9.85883 -12.88313,20.1591 -7.55217,10.30028 -16.88133,21.33628 l -28.13558,39.87679 z"
+     id="path3" />
+  <path
+     style="font-weight:bold;font-size:192px;line-height:0;font-family:'Roboto Condensed';-inkscape-font-specification:'Roboto Condensed, Bold';letter-spacing:3.47px;fill:#ffffff;fill-rule:evenodd;stroke-width:1.57299"
+     d="M 296.2914,141.88226 V 356.42735 H 254.73499 V 192.46726 l -41.11276,15.73429 v -34.40957 l 78.08466,-31.90972 z"
+     id="path1" />
+  <path
+     id="path7"
+     style="font-weight:bold;font-size:192px;line-height:0;font-family:'Roboto Condensed';-inkscape-font-specification:'Roboto Condensed, Bold';letter-spacing:3.47px;fill:#ffffff;fill-rule:evenodd;stroke-width:1.57056"
+     d="M 111.19557,142.11874 44.226673,356.58051 h 45.479745 l 11.555622,-44.18815 h 59.23873 l 11.6294,44.18815 h 45.77435 L 150.34691,142.11874 h -10.74457 -18.10387 z m 19.59137,57.37136 20.29375,77.10928 h -40.4584 z" />
+</svg>

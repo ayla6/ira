@@ -14,6 +14,7 @@ mod group;
 mod kind;
 pub mod launch_config;
 mod message;
+pub mod ratings;
 pub mod session;
 mod group_order;
 mod screenscraper;

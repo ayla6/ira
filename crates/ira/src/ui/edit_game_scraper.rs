@@ -21,14 +21,18 @@ use crate::Game;
 use ira_api::ScraperCreds;
 use ira_models::{ScraperClassification, ScraperEntity, ScraperMetadata};
 
-/// Handle on the metadata rows living inside the Identity group: a
-/// refresh removes exactly these rows and rebuilds them from the
-/// database, leaving the group's own title/sort/path rows alone.
+/// Handle on the metadata rows living inside the Identity group, plus
+/// the staged draft they edit against. Editors mutate the draft and
+/// repaint the rows — nothing touches the database until the game
+/// settings' Save runs [`ScraperSlot::apply`], so half-finished edits
+/// never masquerade as saved state.
 #[derive(Clone)]
 pub(crate) struct ScraperSlot {
     group: adw::PreferencesGroup,
     rows: Rc<RefCell<Vec<gtk4::Widget>>>,
     match_row: Rc<RefCell<Option<adw::ActionRow>>>,
+    pub(super) draft: Rc<RefCell<ScraperMetadata>>,
+    pub(super) link: Rc<RefCell<String>>,
 }
 
 impl ScraperSlot {
@@ -69,13 +73,18 @@ pub(super) fn build_scraper_section(
         group: group.clone(),
         rows: Rc::new(RefCell::new(Vec::new())),
         match_row: Rc::new(RefCell::new(None)),
+        draft: Rc::new(RefCell::new(metadata.clone().unwrap_or_default())),
+        link: Rc::new(RefCell::new(
+            game.steam_link_id.clone(),
+        )),
     };
     rebuild_rows(state, game, win, &slot);
     Some(slot)
 }
 
-/// Rebuild the rows in place after an edit or a fresh match. `true` when
-/// the open settings window actually shows this game's rows.
+/// Rebuild the rows in place after an external change (a fresh match, a
+/// refetch, an unmatch): the database wins and the draft resyncs to it.
+/// `true` when the open settings window actually shows this game's rows.
 pub(super) fn refresh_scraper_section(state: &SharedState, db_id: i64) -> bool {
     let sd = match state.borrow().settings_data.clone() {
         Some(d) => d,
@@ -96,8 +105,34 @@ pub(super) fn refresh_scraper_section(state: &SharedState, db_id: i64) -> bool {
     else {
         return false;
     };
+    // External change: the database is the truth, staged edits give way.
+    *slot.draft.borrow_mut() = stored_metadata(state, db_id).unwrap_or_default();
+    *slot.link.borrow_mut() = game.steam_link_id.clone();
     rebuild_rows(state, &game, &sd.window, &slot);
     true
+}
+
+/// Flush the staged draft to the database at Save time. `true` when
+/// something was written.
+pub(super) fn apply_scraper_draft(state: &SharedState, db_id: i64) -> bool {
+    let Some(slot) = state
+        .borrow()
+        .settings_data
+        .as_ref()
+        .filter(|sd| sd.db_id == db_id)
+        .and_then(|sd| sd.scraper_slot.clone())
+    else {
+        return false;
+    };
+    let draft = slot.draft.borrow().clone();
+    let link = slot.link.borrow().clone();
+    let stored = ira_db::store_scraper_metadata(&state.borrow().db, db_id, &draft)
+        .map_err(|e| eprintln!("Failed to store the edited metadata: {e}"))
+        .is_ok();
+    if ira_db::set_steam_link_id(&state.borrow().db, db_id, &link).is_err() {
+        eprintln!("Failed to store the Steam link");
+    }
+    stored
 }
 
 fn stored_metadata(state: &SharedState, db_id: i64) -> Option<ScraperMetadata> {
@@ -106,7 +141,7 @@ fn stored_metadata(state: &SharedState, db_id: i64) -> Option<ScraperMetadata> {
         .flatten()
 }
 
-/// Remove the slot's previous rows, then rebuild them from the database:
+/// Remove the slot's previous rows, then rebuild them from the draft:
 /// the entity fields, the editable facts, the synopsis, and the match
 /// row last.
 fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &ScraperSlot) {
@@ -116,14 +151,14 @@ fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &Scra
     slot.rows.borrow_mut().clear();
     slot.match_row.borrow_mut().take();
 
-    let metadata = stored_metadata(state, game.db_id).unwrap_or_default();
+    let metadata = slot.draft.borrow().clone();
 
     for field in entity_fields() {
-        let row = field_row(state, game, win, &field, &metadata);
+        let row = field_row(state, game, win, slot, &field, &metadata);
         slot.add(row.upcast());
     }
     fact_rows(state, game, win, &metadata, slot);
-    synopsis_row(state, game, win, &metadata.synopses, slot);
+    synopsis_row(win, slot, &metadata.synopses);
     let match_row = search_row(state, game, win);
     slot.add(match_row.clone().upcast());
     *slot.match_row.borrow_mut() = Some(match_row);
@@ -197,6 +232,7 @@ fn field_row(
     state: &SharedState,
     game: &Game,
     win: &adw::Window,
+    slot: &ScraperSlot,
     field: &EntityField,
     metadata: &ScraperMetadata,
 ) -> adw::ActionRow {
@@ -221,12 +257,14 @@ fn field_row(
         let state = state.clone();
         let game = game.clone();
         let win = win.clone();
+        let slot = slot.clone();
+        let slot_for_dialog = slot.clone();
         let label = field.label.clone();
         row.add_suffix(&edit_button(move |_| {
             let Some(field) = entity_fields().into_iter().find(|f| f.label == label) else {
                 return;
             };
-            show_entity_edit_dialog(&state, &game, &win, field);
+            show_entity_edit_dialog(&state, &game, &win, &slot_for_dialog, field);
         }));
     }
     row
@@ -253,30 +291,21 @@ fn fact_rows(
     metadata: &ScraperMetadata,
     slot: &ScraperSlot,
 ) {
-    let db_id = game.db_id;
-    release_date_row(state, game, &metadata.release_date, slot);
+    release_date_row(&metadata.release_date, slot);
     text_row(
         slot,
-        state,
         &crate::tr!("Players"),
         &metadata.players,
         "",
-        move |state, text| {
-            edit_field(state, db_id, |m| m.players = text.to_string());
-        },
+        move |text, m| m.players = text.to_string(),
     );
     classifications_row(state, game, win, &metadata.classifications, slot);
-    rating_row(state, slot, db_id, metadata.rating.max(0.0));
+    rating_row(slot, metadata.rating.max(0.0));
 }
 
 /// The stored release date as the row's subtitle, a calendar button
 /// opening the picker — dates are picked, not typed.
-fn release_date_row(
-    state: &SharedState,
-    game: &Game,
-    release_date: &str,
-    slot: &ScraperSlot,
-) {
+fn release_date_row(release_date: &str, slot: &ScraperSlot) {
     let row = adw::ActionRow::new();
     row.set_title(&crate::tr!("Released"));
     if release_date.is_empty() {
@@ -333,8 +362,7 @@ fn release_date_row(
     pick.set_popover(Some(&popover));
 
     {
-        let state = state.clone();
-        let game = game.clone();
+        let slot = slot.clone();
         let calendar = calendar.clone();
         let popover = popover.clone();
         apply.connect_clicked(move |_| {
@@ -346,25 +374,22 @@ fn release_date_row(
             else {
                 return;
             };
-            edit_field(&state, game.db_id, |m| {
+            edit_field(&slot, |m| {
                 m.release_date = iso.clone();
                 m.release_timestamp = ira_db::scraper_release_timestamp(&iso);
             });
             popover.popdown();
-            refresh_scraper_section(&state, game.db_id);
         });
     }
     {
-        let state = state.clone();
-        let game = game.clone();
+        let slot = slot.clone();
         let popover = popover.clone();
         clear.connect_clicked(move |_| {
             popover.popdown();
-            edit_field(&state, game.db_id, |m| {
+            edit_field(&slot, |m| {
                 m.release_date = String::new();
                 m.release_timestamp = 0;
             });
-            refresh_scraper_section(&state, game.db_id);
         });
     }
     row.add_suffix(&pick);
@@ -431,8 +456,9 @@ fn classifications_row(
         let state = state.clone();
         let game = game.clone();
         let win = win.clone();
+        let slot = slot.clone();
         outer.append(&edit_button(move |_| {
-            show_classifications_edit_dialog(&state, &game, &win);
+            show_classifications_edit_dialog(&state, &game, &win, &slot);
         }));
     }
 
@@ -480,11 +506,10 @@ fn snap_half_step(value: f64) -> f64 {
 /// or the check button) persists through `store`.
 fn text_row(
     slot: &ScraperSlot,
-    state: &SharedState,
     label: &str,
     value: &str,
     hint: &str,
-    store: impl Fn(&SharedState, &str) + 'static,
+    store: impl Fn(&str, &mut ScraperMetadata) + 'static,
 ) -> adw::EntryRow {
     let row = adw::EntryRow::new();
     row.set_title(label);
@@ -494,16 +519,13 @@ fn text_row(
         // tooltip.
         row.set_tooltip_text(Some(hint));
     }
-    let weak = row.downgrade();
-    let state = state.clone();
-    row.connect_apply(move |_| {
-        let Some(row) = weak.upgrade() else {
-            return;
-        };
+    let row_for_add = row.clone();
+    let draft = std::rc::Rc::clone(&slot.draft);
+    row.connect_apply(move |row| {
         let text = row.text().trim().to_string();
-        store(&state, &text);
+        mutate_draft(&draft, |m| store(&text, m));
     });
-    slot.add(row.clone().upcast());
+    slot.add(row_for_add.upcast());
     row
 }
 
@@ -512,12 +534,12 @@ fn text_row(
 /// Typed values snap to half points; the adjustment clamps the range.
 /// The adjustment is seeded before the handler connects, so rebuilding
 /// the rows never writes back what it just read.
-fn rating_row(state: &SharedState, slot: &ScraperSlot, db_id: i64, stored: f64) -> adw::SpinRow {
+fn rating_row(slot: &ScraperSlot, stored: f64) -> adw::SpinRow {
     let adjustment = gtk4::Adjustment::new(stored / 2.0, 0.0, 10.0, 0.5, 1.0, 0.0);
     let row = adw::SpinRow::new(Some(&adjustment), 0.5, 1);
     row.set_title(&crate::tr!("Rating"));
     let weak_adjustment = adjustment.downgrade();
-    let state = state.clone();
+    let slot_for_closure = slot.clone();
     adjustment.connect_value_changed(move |_| {
         let Some(adjustment) = weak_adjustment.upgrade() else {
             return;
@@ -528,7 +550,7 @@ fn rating_row(state: &SharedState, slot: &ScraperSlot, db_id: i64, stored: f64) 
         if (adjustment.value() - snapped).abs() > f64::EPSILON {
             adjustment.set_value(snapped);
         }
-        edit_field(&state, db_id, |m| m.rating = snapped * 2.0);
+        edit_field(&slot_for_closure, |m| m.rating = snapped * 2.0);
     });
     slot.add(row.clone().upcast());
     row
@@ -544,6 +566,7 @@ fn show_entity_edit_dialog(
     state: &SharedState,
     game: &Game,
     win: &adw::Window,
+    slot: &ScraperSlot,
     field: EntityField,
 ) {
     let dialog = adw::Dialog::new();
@@ -596,7 +619,7 @@ fn show_entity_edit_dialog(
     stack.add_named(&search_toolbar, Some("search"));
     dialog.set_child(Some(&stack));
 
-    fill_entity_list(&root_list, state, game, field.clone());
+    fill_entity_list(&root_list, state, game, slot, field.clone());
 
     {
         let state = state.clone();
@@ -606,8 +629,9 @@ fn show_entity_edit_dialog(
         let results_list = results_list.clone();
         let entry = entry.clone();
         let stack = stack.clone();
+        let slot = slot.clone();
         add_btn.connect_clicked(move |_| {
-            populate_search_results(&results_list, &state, &game, &field, "", &root_list);
+            populate_search_results(&results_list, &state, &game, &slot, &field, "", &root_list);
             stack.set_transition_type(gtk4::StackTransitionType::SlideRight);
             stack.set_visible_child(&search_toolbar);
             let entry = entry.clone();
@@ -621,11 +645,13 @@ fn show_entity_edit_dialog(
         let game = game.clone();
         let field = field.clone();
         let results_list = results_list.clone();
+        let slot = slot.clone();
         entry.connect_search_changed(move |entry| {
             populate_search_results(
                 &results_list,
                 &state,
                 &game,
+                &slot,
                 &field,
                 &entry.text(),
                 &root_list,
@@ -649,7 +675,12 @@ fn show_entity_edit_dialog(
 /// remove buttons (their marks as prefixes), and the add page picks a
 /// board and then one of its known values from two combo rows. Adding
 /// keeps the page up so several ratings can go in.
-fn show_classifications_edit_dialog(state: &SharedState, game: &Game, win: &adw::Window) {
+fn show_classifications_edit_dialog(
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    slot: &ScraperSlot,
+) {
     let dialog = adw::Dialog::new();
     dialog.set_title(&crate::tr!("Age ratings"));
     dialog.set_content_width(460);
@@ -725,7 +756,7 @@ fn show_classifications_edit_dialog(state: &SharedState, game: &Game, win: &adw:
     stack.add_named(&add_toolbar, Some("add"));
     dialog.set_child(Some(&stack));
 
-    fill_classification_list(&list, state, game);
+    fill_classification_list(&list, state, game, slot);
 
     {
         let stack = stack.clone();
@@ -750,6 +781,7 @@ fn show_classifications_edit_dialog(state: &SharedState, game: &Game, win: &adw:
         let state = state.clone();
         let game = game.clone();
         let list = list.clone();
+        let slot = slot.clone();
         let board_combo = board_combo.clone();
         let value_combo = value_combo.clone();
         confirm.connect_clicked(move |_| {
@@ -758,11 +790,10 @@ fn show_classifications_edit_dialog(state: &SharedState, game: &Game, win: &adw:
             let Some(value) = board.values.get(value_index) else {
                 return;
             };
-            edit_field(&state, game.db_id, |metadata| {
+            edit_field(&slot, |metadata| {
                 upsert_classification(metadata, board.id, value);
             });
-            refresh_scraper_section(&state, game.db_id);
-            fill_classification_list(&list, &state, &game);
+            fill_classification_list(&list, &state, &game, &slot);
         });
     }
 
@@ -780,12 +811,9 @@ fn fill_value_combo(value_combo: &adw::ComboRow, board: &ira_models::ratings::Ra
 
 /// (Re)fill the editor's list page: every stored rating with a remove
 /// button. Edits persist at once and refresh the Identity page's rows.
-fn fill_classification_list(list: &gtk4::ListBox, state: &SharedState, game: &Game) {
+fn fill_classification_list(list: &gtk4::ListBox, state: &SharedState, game: &Game, slot: &ScraperSlot) {
     clear_children(list);
-    let metadata = ira_db::scraper_metadata_for_game(&state.borrow().db, game.db_id)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let metadata = slot.draft.borrow().clone();
     if metadata.classifications.is_empty() {
         list.append(&status_row(&crate::tr!("No age ratings stored")));
         return;
@@ -817,15 +845,15 @@ fn fill_classification_list(list: &gtk4::ListBox, state: &SharedState, game: &Ga
             let state = state.clone();
             let game = game.clone();
             let list = list.clone();
+            let slot = slot.clone();
             let kind = classification.kind.clone();
             remove.connect_clicked(move |_| {
-                edit_field(&state, game.db_id, |metadata| {
+                edit_field(&slot, |metadata| {
                     metadata
                         .classifications
                         .retain(|c| !c.kind.eq_ignore_ascii_case(&kind));
                 });
-                refresh_scraper_section(&state, game.db_id);
-                fill_classification_list(&list, &state, &game);
+                    fill_classification_list(&list, &state, &game, &slot);
             });
         }
         row.add_suffix(&remove);
@@ -839,13 +867,11 @@ fn fill_entity_list(
     list: &gtk4::ListBox,
     state: &SharedState,
     game: &Game,
+    slot: &ScraperSlot,
     field: EntityField,
 ) {
     clear_children(list);
-    let metadata = ira_db::scraper_metadata_for_game(&state.borrow().db, game.db_id)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let metadata = slot.draft.borrow().clone();
     for entity in (field.get)(&metadata) {
         let row = adw::ActionRow::new();
         row.set_use_markup(false);
@@ -858,14 +884,14 @@ fn fill_entity_list(
             let game = game.clone();
             let entity = entity.clone();
             let list = list.clone();
+            let slot = slot.clone();
             let field = field.clone();
             remove.connect_clicked(move |_| {
                 let field = field.clone();
-                edit_field(&state, game.db_id, |metadata| {
+                edit_field(&slot, |metadata| {
                     (field.remove)(metadata, &entity);
                 });
-                refresh_scraper_section(&state, game.db_id);
-                fill_entity_list(&list, &state, &game, field);
+                fill_entity_list(&list, &state, &game, &slot, field);
             });
         }
         row.add_suffix(&remove);
@@ -881,6 +907,7 @@ fn populate_search_results(
     list: &gtk4::ListBox,
     state: &SharedState,
     game: &Game,
+    slot: &ScraperSlot,
     field: &EntityField,
     term: &str,
     root_list: &gtk4::ListBox,
@@ -890,18 +917,18 @@ fn populate_search_results(
     let store = {
         let state = state.clone();
         let game = game.clone();
+        let slot = slot.clone();
         let field = field.clone();
         let root_list = root_list.clone();
         Rc::new(move |entity: ScraperEntity| {
-            edit_field(&state, game.db_id, |metadata| {
+            edit_field(&slot, |metadata| {
                 let entities = (field.get)(metadata);
                 // The same company twice is noise, not data.
                 if !entities.iter().any(|e| e.id == entity.id) {
                     (field.push)(metadata, entity.clone());
                 }
             });
-            refresh_scraper_section(&state, game.db_id);
-            fill_entity_list(&root_list, &state, &game, field.clone());
+            fill_entity_list(&root_list, &state, &game, &slot, field.clone());
         })
     };
     let mint_and_store = {
@@ -1181,11 +1208,9 @@ fn run_refetch_missing(
 /// display. Clicking toggles between the four-line summary and the full
 /// text; the pen opens the text editor.
 fn synopsis_row(
-    state: &SharedState,
-    game: &Game,
     win: &adw::Window,
-    synopses: &[(String, String)],
     slot: &ScraperSlot,
+    synopses: &[(String, String)],
 ) {
     let Some((lang, text)) = synopses
         .iter()
@@ -1212,11 +1237,10 @@ fn synopsis_row(
         }
     });
     {
-        let state = state.clone();
-        let game = game.clone();
         let win = win.clone();
+        let slot = slot.clone();
         row.add_suffix(&edit_button(move |_| {
-            show_synopsis_edit_dialog(&state, &game, &win, lang.clone(), text.clone());
+            show_synopsis_edit_dialog(&win, &slot, lang.clone(), text.clone());
         }));
     }
     slot.add(row.upcast());
@@ -1226,9 +1250,8 @@ fn synopsis_row(
 /// Applying it emptied removes the entry; the language's siblings stay
 /// untouched.
 fn show_synopsis_edit_dialog(
-    state: &SharedState,
-    game: &Game,
     win: &adw::Window,
+    slot: &ScraperSlot,
     lang: String,
     text: String,
 ) {
@@ -1269,8 +1292,7 @@ fn show_synopsis_edit_dialog(
     dialog.set_child(Some(&toolbar));
 
     {
-        let state = state.clone();
-        let game = game.clone();
+        let slot = slot.clone();
         let dialog = dialog.clone();
         let view = view.clone();
         apply.connect_clicked(move |_| {
@@ -1278,7 +1300,7 @@ fn show_synopsis_edit_dialog(
             let (start, end) = buffer.bounds();
             let text = buffer.text(&start, &end, false).trim().to_string();
             dialog.close();
-            edit_field(&state, game.db_id, |m| {
+            edit_field(&slot, |m| {
                 if text.is_empty() {
                     m.synopses.retain(|(l, _)| *l != lang);
                 } else {
@@ -1288,32 +1310,23 @@ fn show_synopsis_edit_dialog(
                     }
                 }
             });
-            refresh_scraper_section(&state, game.db_id);
         });
     }
 
     dialog.present(Some(win));
 }
 
-/// Read the stored metadata — an empty record when none exists yet, so
-/// unmatched games can be filled by hand — mutate one field, write it
-/// back. A store failure leaves the dialog as-is; the error is on
-/// stderr.
-fn edit_field(state: &SharedState, db_id: i64, mutate: impl FnOnce(&mut ScraperMetadata)) {
-    let mut metadata = match ira_db::scraper_metadata_for_game(&state.borrow().db, db_id) {
-        Ok(Some(metadata)) => metadata,
-        Ok(None) => ScraperMetadata::default(),
-        Err(e) => {
-            eprintln!("Failed to read ScreenScraper metadata: {e}");
-            return;
-        }
-    };
-    mutate(&mut metadata);
-    if let Err(e) = ira_db::store_scraper_metadata(&state.borrow().db, db_id, &metadata) {
-        eprintln!("Failed to store ScreenScraper metadata: {e}");
-    }
+/// Stage a metadata change on the draft — the Save button is what
+/// writes the database. A store failure surfaces at Save, not here.
+/// Stage a mutation directly on a draft; display is refreshed by the
+/// caller.
+fn mutate_draft(draft: &RefCell<ScraperMetadata>, mutate: impl FnOnce(&mut ScraperMetadata)) {
+    mutate(&mut draft.borrow_mut());
 }
 
+fn edit_field(slot: &ScraperSlot, mutate: impl FnOnce(&mut ScraperMetadata)) {
+    mutate(&mut slot.draft.borrow_mut());
+}
 #[cfg(test)]
 mod tests {
     use super::{snap_half_step, upsert_classification};

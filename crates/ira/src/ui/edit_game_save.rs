@@ -812,6 +812,10 @@ fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
 }
 
 pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
+    // The staged metadata draft flushes with everything else, so one
+    // Save click lands the whole settings page atomically.
+    super::edit_game_scraper::apply_scraper_draft(&params.state, params.db_id);
+
     // Trimmed like save_title_and_sort: the in-memory copy must match
     // what lands in the database.
     let title = params.title_entry.text().trim().to_string();

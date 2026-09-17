@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-17 03:24-0300\n"
+"POT-Creation-Date: 2026-09-17 13:32-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -122,7 +122,7 @@ msgid "Global unlock rates"
 msgstr ""
 
 #: crates/ira/src/ui/achievement_rows.rs:156
-#: crates/ira/src/ui/edit_game_scraper.rs:283
+#: crates/ira/src/ui/edit_game_scraper.rs:312
 msgid "Unknown"
 msgstr ""
 
@@ -376,7 +376,7 @@ msgid "Searching SteamGridDB…"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:330
-#: crates/ira/src/ui/edit_game_scraper.rs:158
+#: crates/ira/src/ui/edit_game_scraper.rs:193
 #: crates/ira/src/ui/ra_match_dialog.rs:148
 #: crates/ira/src/ui/sgdb_match_dialog.rs:242
 #: crates/ira/src/ui/ss_match_dialog.rs:178
@@ -658,8 +658,8 @@ msgid "Rename"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/all_games.rs:759
-#: crates/ira/src/ui/edit_game_scraper.rs:577
-#: crates/ira/src/ui/edit_game_scraper.rs:683
+#: crates/ira/src/ui/edit_game_scraper.rs:600
+#: crates/ira/src/ui/edit_game_scraper.rs:714
 msgid "Back"
 msgstr ""
 
@@ -1284,10 +1284,10 @@ msgid "Hours, like 2:30 or 12.5"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_playtime.rs:94
-#: crates/ira/src/ui/edit_game_scraper.rs:562
-#: crates/ira/src/ui/edit_game_scraper.rs:666
-#: crates/ira/src/ui/edit_game_scraper.rs:716
-#: crates/ira/src/ui/edit_game_scraper.rs:951
+#: crates/ira/src/ui/edit_game_scraper.rs:585
+#: crates/ira/src/ui/edit_game_scraper.rs:697
+#: crates/ira/src/ui/edit_game_scraper.rs:747
+#: crates/ira/src/ui/edit_game_scraper.rs:978
 msgid "Add"
 msgstr ""
 
@@ -1334,35 +1334,35 @@ msgstr ""
 msgid "Choose the entries whose time counts together"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:156
+#: crates/ira/src/ui/edit_game_scraper.rs:191
 msgid "Companies appear here as games get matched"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:166
+#: crates/ira/src/ui/edit_game_scraper.rs:201
 msgid "Developers"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:167
+#: crates/ira/src/ui/edit_game_scraper.rs:202
 msgid "Developer"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:174
+#: crates/ira/src/ui/edit_game_scraper.rs:209
 msgid "Publishers"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:175
+#: crates/ira/src/ui/edit_game_scraper.rs:210
 msgid "Publisher"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:182
+#: crates/ira/src/ui/edit_game_scraper.rs:217
 msgid "Genres"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:183
+#: crates/ira/src/ui/edit_game_scraper.rs:218
 msgid "Genre"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:215
+#: crates/ira/src/ui/edit_game_scraper.rs:251
 #: crates/ira/src/ui/input_output_picker.rs:141
 #: crates/ira/src/ui/input_profile_action_sets.rs:217
 #: crates/ira/src/ui/input_profile_input_rows.rs:413
@@ -1374,121 +1374,121 @@ msgstr ""
 msgid "None"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:240
+#: crates/ira/src/ui/edit_game_scraper.rs:278
 msgid "Edit"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:261
+#: crates/ira/src/ui/edit_game_scraper.rs:297
 msgid "Players"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:281
+#: crates/ira/src/ui/edit_game_scraper.rs:310
 msgid "Released"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:295
+#: crates/ira/src/ui/edit_game_scraper.rs:324
 msgid "Pick a date"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:315
+#: crates/ira/src/ui/edit_game_scraper.rs:344
 msgid "Clear"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:319
-#: crates/ira/src/ui/edit_game_scraper.rs:1246
+#: crates/ira/src/ui/edit_game_scraper.rs:348
+#: crates/ira/src/ui/edit_game_scraper.rs:1269
 #: crates/ira/src/ui/input_profile_editor.rs:141
 msgid "Apply"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:393
+#: crates/ira/src/ui/edit_game_scraper.rs:418
 msgid "Age rating"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:395
-#: crates/ira/src/ui/edit_game_scraper.rs:654
-#: crates/ira/src/ui/edit_game_scraper.rs:661
+#: crates/ira/src/ui/edit_game_scraper.rs:420
+#: crates/ira/src/ui/edit_game_scraper.rs:685
+#: crates/ira/src/ui/edit_game_scraper.rs:692
 msgid "Age ratings"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:518
-#: crates/ira/src/ui/edit_game_scraper.rs:703
+#: crates/ira/src/ui/edit_game_scraper.rs:540
+#: crates/ira/src/ui/edit_game_scraper.rs:734
 msgid "Rating"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:572
-#: crates/ira/src/ui/edit_game_scraper.rs:1067
+#: crates/ira/src/ui/edit_game_scraper.rs:595
+#: crates/ira/src/ui/edit_game_scraper.rs:1094
 #: crates/ira/src/ui/steam_search_dialog.rs:61
 #: crates/ira/src/ui/steam_search.rs:34
 msgid "Search"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:586
+#: crates/ira/src/ui/edit_game_scraper.rs:609
 msgid "Search…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:678
+#: crates/ira/src/ui/edit_game_scraper.rs:709
 msgid "Add a rating"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:695
+#: crates/ira/src/ui/edit_game_scraper.rs:726
 msgid "Board"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:790
+#: crates/ira/src/ui/edit_game_scraper.rs:818
 msgid "No age ratings stored"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:950
+#: crates/ira/src/ui/edit_game_scraper.rs:977
 #, rust-format
 msgid "Add \"{}\""
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:978
+#: crates/ira/src/ui/edit_game_scraper.rs:1005
 msgid "Matched"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:979
+#: crates/ira/src/ui/edit_game_scraper.rs:1006
 #: crates/ira/src/ui/settings_dialog_pages.rs:90
 msgid "Fetch missing"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:999
+#: crates/ira/src/ui/edit_game_scraper.rs:1026
 msgid "Filled the missing pieces"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:1002
+#: crates/ira/src/ui/edit_game_scraper.rs:1029
 msgid "Everything was already stored"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:1005
+#: crates/ira/src/ui/edit_game_scraper.rs:1032
 #, rust-format
 msgid "Fetch failed: {}"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:1015
+#: crates/ira/src/ui/edit_game_scraper.rs:1042
 #: crates/ira/src/ui/game_settings.rs:60
 msgid "Unmatch"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:1045
+#: crates/ira/src/ui/edit_game_scraper.rs:1072
 msgid "Not matched yet"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:1048
+#: crates/ira/src/ui/edit_game_scraper.rs:1075
 msgid "Auto match"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:1066
+#: crates/ira/src/ui/edit_game_scraper.rs:1093
 msgid "Search ScreenScraper…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:1155
+#: crates/ira/src/ui/edit_game_scraper.rs:1182
 msgid "Another metadata job is running"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_scraper.rs:1201
-#: crates/ira/src/ui/edit_game_scraper.rs:1236
-#: crates/ira/src/ui/edit_game_scraper.rs:1242
+#: crates/ira/src/ui/edit_game_scraper.rs:1226
+#: crates/ira/src/ui/edit_game_scraper.rs:1259
+#: crates/ira/src/ui/edit_game_scraper.rs:1265
 msgid "Synopsis"
 msgstr ""
 

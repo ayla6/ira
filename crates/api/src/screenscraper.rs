@@ -290,8 +290,10 @@ struct SsJeu {
     classifications: Option<SsClassifications>,
     #[serde(default)]
     medias: Option<SsMedias>,
-    #[serde(default, rename = "systemname")]
-    system_name: Option<String>,
+    /// The console the entry belongs to:
+    /// `<systeme id="138">PC Windows</systeme>`.
+    #[serde(default, rename = "systeme")]
+    system: Option<SsEntity>,
 }
 
 /// A referenced entity: `<developpeur id="2911">Chunsoft</developpeur>`.
@@ -560,7 +562,11 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
         screenshot,
         box2d,
         title_screen,
-        system_name: jeu.system_name.as_deref().unwrap_or_default().to_string(),
+        system_name: jeu
+            .system
+            .as_ref()
+            .map(|s| s.name.trim().to_string())
+            .unwrap_or_default(),
     }
 }
 
@@ -939,6 +945,7 @@ mod tests {
             <genre id="2621" langue="fr">Jeu de r&#244;le</genre>
           </genres>
           <joueurs>1-4</joueurs>
+          <systeme id="18">Super Nintendo</systeme>
           <note>18</note>
           <classifications>
             <classification type="CERO" id="277">CERO:A</classification>
@@ -980,6 +987,8 @@ mod tests {
         assert!(game.names.iter().any(|(r, n)| r == "us" && n == "Dragon Quest I & II"));
         assert!(game.names.iter().any(|(r, n)| r == "jp" && n.contains("ドラゴンクエスト")));
         assert_eq!(game.release_date, "1993-12-18");
+        // The console the entry belongs to, named as the source spells it.
+        assert_eq!(game.system_name, "Super Nintendo");
         // Every region's date lands in the list.
         assert_eq!(
             game.release_dates,

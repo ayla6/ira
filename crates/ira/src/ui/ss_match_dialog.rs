@@ -199,7 +199,8 @@ fn populate_results(
         });
         // The row's background opens the entry's page on the site.
         let uri = ira_api::screenscraper::game_page_url(&game.ss_id);
-        row.connect_activate(move |row| {
+        row.set_activatable(true);
+        row.connect_activated(move |row| {
             super::helpers::open_uri(row.upcast_ref(), &uri);
         });
         list.append(&row);
@@ -247,7 +248,7 @@ pub fn show_ss_search_dialog(
     );
     // Clicking a result's background opens its page on the site — the
     // way to check what a candidate actually is before matching it.
-    list.set_activate_on_single_click(true);
+    // (Rows activate themselves; no list wiring needed.)
 
     let state_c = state.clone();
     let platform_id = platform_id.to_string();

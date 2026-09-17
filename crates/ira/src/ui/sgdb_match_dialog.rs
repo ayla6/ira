@@ -36,7 +36,6 @@ fn manual_sgdb_search_button(
     let parent_dialog = parent_dialog.clone();
     let game_name = game_name.to_string();
     let btn = gtk4::Button::with_label(&crate::tr!("Search SGDB"));
-    btn.add_css_class(CSS_PILL);
     btn.connect_clicked(move |_| {
         let cb: MatchCallback = Rc::new({
             let action_box = action_box.clone();

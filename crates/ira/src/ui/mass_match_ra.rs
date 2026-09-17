@@ -58,7 +58,6 @@ fn show_unmatched(
     dialog: &gtk4::Widget,
 ) {
     let btn = gtk4::Button::with_label(&crate::tr!("Search RA"));
-    btn.add_css_class(CSS_PILL);
     btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     let gn = game_name.to_string();

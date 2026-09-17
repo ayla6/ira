@@ -341,7 +341,6 @@ fn unmatched_actions(
         ab.append(&status_label(label, CSS_DIM_LABEL));
     }
     let btn = gtk4::Button::with_label(&crate::tr!("Search SS"));
-    btn.add_css_class(CSS_PILL);
     btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     let gn = game_name.to_string();

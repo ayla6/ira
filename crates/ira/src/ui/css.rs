@@ -95,7 +95,6 @@ pub const CSS_SIDEBAR_ROW_TITLE: &str = "sidebar-row-title";
 pub const CSS_SIDEBAR_SEPARATOR_ROW: &str = "sidebar-separator-row";
 pub const CSS_SUCCESS_LABEL: &str = "success-label";
 pub const CSS_SUGGESTED_ACTION: &str = "suggested-action";
-pub const CSS_PILL: &str = "pill";
 pub const CSS_TITLE_1: &str = "title-1";
 pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
 pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";

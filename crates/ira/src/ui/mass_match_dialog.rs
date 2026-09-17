@@ -283,6 +283,7 @@ fn start_steam_batch_matching(
     title_map: Vec<(String, String, String)>,
     rows: &[RowActions],
     dialog: &gtk4::Widget,
+    vis: RowVis,
 ) {
     let queue: Vec<BatchItem> = needs_matching
         .iter()
@@ -331,6 +332,7 @@ fn start_steam_batch_matching(
             let steam = steam;
             let rows = rows.to_vec();
             let parent_dialog = dialog.clone();
+            let vis = vis;
             move |hit| {
                 if let Some(row) = rows.get(hit.row_idx) {
                     handle_steam_search_result(
@@ -342,6 +344,9 @@ fn start_steam_batch_matching(
                         hit.matched,
                         &parent_dialog,
                     );
+                    // The pass spoke its final word for this row —
+                    // without this the hide toggle can never retire it.
+                    vis.pass_done(hit.row_idx);
                 }
             }
         },
@@ -353,6 +358,7 @@ fn start_sgdb_batch_matching(
     needs_matching: &[Game],
     rows: &[RowActions],
     dialog: &gtk4::Widget,
+    vis: RowVis,
 ) {
     let queue: Vec<BatchItem> = needs_matching
         .iter()
@@ -385,6 +391,7 @@ fn start_sgdb_batch_matching(
             let state = state.clone();
             let rows = rows.to_vec();
             let parent_dialog = dialog.clone();
+            let vis = vis;
             move |hit| {
                 if let Some(row) = rows.get(hit.row_idx) {
                     handle_unified_sgdb_result(
@@ -395,6 +402,7 @@ fn start_sgdb_batch_matching(
                         hit.matched,
                         &parent_dialog,
                     );
+                    vis.pass_done(hit.row_idx);
                 }
             }
         },
@@ -579,8 +587,15 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     dialog.set_content(Some(&toolbar));
     dialog.present();
 
-    start_steam_batch_matching(state, &needs_matching, title_map, &rows, dialog.upcast_ref());
-    start_sgdb_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref());
+    start_steam_batch_matching(
+        state,
+        &needs_matching,
+        title_map,
+        &rows,
+        dialog.upcast_ref(),
+        vis.clone(),
+    );
+    start_sgdb_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref(), vis.clone());
     start_ra_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref(), vis.clone());
     start_ss_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref(), vis.clone());
     start_steam_title_matching(state, &needs_matching, &rows, vis);

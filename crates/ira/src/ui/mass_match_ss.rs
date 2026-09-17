@@ -33,8 +33,10 @@ use ira_models::screenscraper_system_id;
 
 /// The per-game outcome of the pass. The distinction decides the
 /// tombstone: only `Miss` records one — `Failed` leaves the game untombed
-/// so the next opening asks again.
-enum SsOutcome {
+/// so the next opening asks again. PC matching shares it: a miss there
+/// used to come back as nothing at all, leaving the row "searching"
+/// forever and re-asking on every opening.
+pub(super) enum SsOutcome {
     Hit(Box<ScrapedGame>),
     Miss,
     Failed(String),
@@ -352,7 +354,9 @@ pub(super) fn start_ss_batch_matching(
                 );
             } else {
                 // Quota spent: the queued rows never get an answer, so
-                // they go straight to the manual search button.
+                // they go straight to the manual search button — and
+                // count as done for the hide toggle, since nothing will
+                // ask for them again today.
                 for item in &queue {
                     let Some(ss_box) = rows.get(item.row_idx).and_then(|r| r.ss.clone()) else {
                         continue;
@@ -367,6 +371,7 @@ pub(super) fn start_ss_batch_matching(
                     show_unmatched(
                         &ss_box, &state, item.db_id, &item.name, &platform_id, &dialog,
                     );
+                    vis.pass_done(item.row_idx);
                 }
                 eprintln!("ScreenScraper batch: quota exhausted, standing down for today");
             }
@@ -397,8 +402,7 @@ fn resolve(
             display: &item.name,
             db_id: item.db_id,
         };
-        let matched = run_pc_matching(steam, creds, db, &target);
-        return matched.map(Box::new).map(SsOutcome::Hit);
+        return Some(run_pc_matching(steam, creds, db, &target));
     }
     screenscraper_system_id(&platform_id)?;
     // ROM paths are stored relative to the console's folder in the ROM
@@ -652,8 +656,10 @@ pub(super) fn run_pc_matching(
     creds: &ScraperCreds,
     db: &ira_db::DbConn,
     target: &PcMatchTarget,
-) -> Option<ScrapedGame> {
-    let system = ira_models::screenscraper_pc_system_id(target.kind)?;
+) -> SsOutcome {
+    let Some(system) = ira_models::screenscraper_pc_system_id(target.kind) else {
+        return SsOutcome::Failed("no pc system".to_string());
+    };
     // PC titles come from Steam or the user, never from dump tags: the
     // title leads and the executable stem is last resort.
     let full = [clean_rom_name(target.title), clean_rom_name(target.display)]
@@ -663,7 +669,7 @@ pub(super) fn run_pc_matching(
     let term = search_term(&full);
     if term.is_empty() {
         eprintln!("SS batch: [pc] no usable search term");
-        return None;
+        return SsOutcome::Failed("no usable search term".to_string());
     }
     let normalized = normalized_for_match(&full);
     let verbose = verbose_logging();
@@ -683,32 +689,33 @@ pub(super) fn run_pc_matching(
             None
         }
     };
-    let finish = |game: ScrapedGame| -> Option<ScrapedGame> {
+    // Every confirmed pick is stored, bare or not: the entry is usually
+    // the game's console version, and recording it is what makes the
+    // match stick instead of re-asking on every opening.
+    let finish = |game: ScrapedGame| -> SsOutcome {
         let extras = extras_for(&game);
-        finish_pc_pick(db, game, steam_info.as_ref(), extras.as_ref())
+        SsOutcome::Hit(Box::new(finish_pc_pick(
+            db,
+            game,
+            steam_info.as_ref(),
+            extras.as_ref(),
+        )))
     };
 
     // The game's own system first — a hit there is simply the game.
     match steam.screenscraper_search_in(creds, &term, Some(system)) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [pc] search failed: {e}");
-            return None;
+            return SsOutcome::Failed(e);
         }
         Ok(candidates) => {
             if let Some(game) = pick_candidate(&candidates, &normalized, &[]) {
-                if let Some(game) = finish(game.clone()) {
-                    if verbose {
-                        eprintln!(
-                            "SS batch: '{term}' [pc] matched ss id {} '{}'",
-                            game.ss_id, game.name
-                        );
-                    }
-                    return Some(game);
-                }
                 if verbose {
-                    eprintln!("SS batch: '{term}' [pc] pc-system pick was bare, skipping");
+                    eprintln!("SS batch: '{term}' [pc] matched ss id {} '{}'", game.ss_id, game.name);
                 }
-            } else if verbose {
+                return finish(game.clone());
+            }
+            if verbose {
                 eprintln!("SS batch: '{term}' [pc] nothing on the pc system");
             }
         }
@@ -718,47 +725,33 @@ pub(super) fn run_pc_matching(
     let candidates = match steam.screenscraper_search_in(creds, &term, None) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [pc] wide search failed: {e}");
-            return None;
+            return SsOutcome::Failed(e);
         }
         Ok(candidates) => candidates,
     };
 
     if let Some(info) = steam_info.as_ref() {
-        if let Some(game) = verified_pick(&candidates, &normalized, Some(info)) {
-            let mut game = game;
+        if let Some(mut game) = verified_pick(&candidates, &normalized, Some(info)) {
             let steam_date = steam_release_date(info.release_timestamp);
             if !steam_date.is_empty() {
                 game.release_date = steam_date;
             }
-            if let Some(game) = finish(game) {
-                if verbose {
-                    eprintln!(
-                        "SS batch: '{term}' [pc] Steam-diffed to ss id {} '{}'",
-                        game.ss_id, game.name
-                    );
-                }
-                return Some(game);
-            }
             if verbose {
-                eprintln!("SS batch: '{term}' [pc] Steam-diffed pick was bare, skipping");
+                eprintln!(
+                    "SS batch: '{term}' [pc] Steam-diffed to ss id {} '{}'",
+                    game.ss_id, game.name
+                );
             }
+            return finish(game);
         }
     } else {
         // No Steam data to diff with: ScreenScraper's ranked pick over
         // every system is the answer.
         if let Some(game) = pick_candidate(&candidates, &normalized, &[]) {
-            if let Some(game) = finish(game.clone()) {
-                if verbose {
-                    eprintln!(
-                        "SS batch: '{term}' [pc] matched ss id {} '{}'",
-                        game.ss_id, game.name
-                    );
-                }
-                return Some(game);
-            }
             if verbose {
-                eprintln!("SS batch: '{term}' [pc] pick was bare, skipping");
+                eprintln!("SS batch: '{term}' [pc] matched ss id {} '{}'", game.ss_id, game.name);
             }
+            return finish(game.clone());
         }
     }
 
@@ -770,36 +763,28 @@ pub(super) fn run_pc_matching(
         match steam.screenscraper_search_in(creds, &full, None) {
             Err(e) => {
                 eprintln!("SS batch: '{full}' [pc] wide search failed: {e}");
-                return None;
+                return SsOutcome::Failed(e);
             }
             Ok(widened) => {
                 if let Some(info) = steam_info.as_ref() {
-                    if let Some(game) = verified_pick(&widened, &normalized, Some(info)) {
-                        let mut game = game;
+                    if let Some(mut game) = verified_pick(&widened, &normalized, Some(info)) {
                         let steam_date = steam_release_date(info.release_timestamp);
                         if !steam_date.is_empty() {
                             game.release_date = steam_date;
                         }
-                        if let Some(game) = finish(game) {
-                            if verbose {
-                                eprintln!(
-                                    "SS batch: '{full}' [pc] Steam-diffed to ss id {} '{}'",
-                                    game.ss_id, game.name
-                                );
-                            }
-                            return Some(game);
-                        }
-                    }
-                } else if let Some(game) = pick_candidate(&widened, &normalized, &[]) {
-                    if let Some(game) = finish(game.clone()) {
                         if verbose {
                             eprintln!(
-                                "SS batch: '{full}' [pc] matched ss id {} '{}'",
+                                "SS batch: '{full}' [pc] Steam-diffed to ss id {} '{}'",
                                 game.ss_id, game.name
                             );
                         }
-                        return Some(game);
+                        return finish(game);
                     }
+                } else if let Some(game) = pick_candidate(&widened, &normalized, &[]) {
+                    if verbose {
+                        eprintln!("SS batch: '{full}' [pc] matched ss id {} '{}'", game.ss_id, game.name);
+                    }
+                    return finish(game.clone());
                 }
             }
         }
@@ -813,22 +798,21 @@ pub(super) fn run_pc_matching(
     if let Some(app_id) = app_id {
         super::enrichment::garnish_pc_ss_metadata(db, steam, target.db_id, app_id);
     }
-    None
+    SsOutcome::Miss
 }
 
-/// Store a PC pick only when it is worth storing: company-less entries
-/// get their developers and publishers from our cache when the Steam
-/// names are known there — with the proper ScreenScraper ids — a missing
-/// synopsis comes from the Steam store page, and a pick that is still
-/// bare afterwards (no date, no companies, no synopsis, nothing) is
-/// skipped entirely: a match to an empty entry buys a name we already
-/// had.
+/// Store a PC pick. Company-less entries get their developers and
+/// publishers from our cache when the Steam names are known there —
+/// with the proper ScreenScraper ids — and a missing synopsis comes
+/// from the Steam store page. The pick is recorded even when it stays
+/// bare afterwards: it is the game's console version most times, and
+/// the stored id is what keeps the matcher from asking again.
 fn finish_pc_pick(
     db: &ira_db::DbConn,
     mut game: ScrapedGame,
     info: Option<&SteamCmdInfo>,
     extras: Option<&ira_api::steam::StoreExtras>,
-) -> Option<ScrapedGame> {
+) -> ScrapedGame {
     if game.developers.is_empty() && game.publishers.is_empty() {
         if let Some(info) = info {
             super::enrichment::fill_steam_companies(
@@ -864,15 +848,7 @@ fn finish_pc_pick(
             }
         }
     }
-    let bare = release_date_is_broken(&game.release_date)
-        && game.developers.is_empty()
-        && game.publishers.is_empty()
-        && game.genres.is_empty()
-        && game.synopses.is_empty()
-        && game.players.is_empty()
-        && game.classifications.is_empty()
-        && game.rating < 0.0;
-    (!bare).then_some(game)
+    game
 }
 
 /// Whether a candidate carries company data at all.
@@ -1561,8 +1537,7 @@ mod tests {
             ratings: vec![],
             release_date: String::new(),
         };
-        let finished =
-            super::finish_pc_pick(&conn, game.clone(), Some(&info), Some(&extras)).unwrap();
+        let finished = super::finish_pc_pick(&conn, game.clone(), Some(&info), Some(&extras));
         assert_eq!(
             finished
                 .developers
@@ -1588,20 +1563,20 @@ mod tests {
             release_date: "2020-01-01".into(),
             ..Default::default()
         };
-        let finished = super::finish_pc_pick(&conn, game, Some(&unknown), None).unwrap();
+        let finished = super::finish_pc_pick(&conn, game, Some(&unknown), None);
         assert_eq!(finished.developers.len(), 1);
         assert!(finished.developers[0].id.parse::<i64>().unwrap() < 0);
         assert_eq!(finished.developers[0].name, "Whoever");
-        // A pick that stays bare after everything is skipped — no Steam
-        // info means no companies, and the parser's no-rating sentinel
-        // is -1.
+        // A bare pick is still recorded: it is the game's console
+        // version most times, and the stored id keeps the matcher from
+        // asking again. The parser's no-rating sentinel is -1.
         let bare = ScrapedGame {
             ss_id: "70001".into(),
             name: "Some Bare Entry".into(),
             rating: -1.0,
             ..Default::default()
         };
-        assert!(super::finish_pc_pick(&conn, bare, None, None).is_none());
+        assert_eq!(super::finish_pc_pick(&conn, bare, None, None).ss_id, "70001");
     }
 
     #[test]
@@ -1620,7 +1595,7 @@ mod tests {
             name: "Undated".into(),
             ..Default::default()
         };
-        let finished = super::finish_pc_pick(&conn, undated, None, Some(&extras)).unwrap();
+        let finished = super::finish_pc_pick(&conn, undated, None, Some(&extras));
         assert_eq!(finished.release_date, "2015-09-15");
         // The epoch string the old diff bug wrote counts as no date and
         // is replaced the same way.
@@ -1630,7 +1605,7 @@ mod tests {
             release_date: "1970-01-01".into(),
             ..Default::default()
         };
-        let finished = super::finish_pc_pick(&conn, poisoned, None, Some(&extras)).unwrap();
+        let finished = super::finish_pc_pick(&conn, poisoned, None, Some(&extras));
         assert_eq!(finished.release_date, "2015-09-15");
         // A real date is never overwritten.
         let dated = ScrapedGame {
@@ -1639,7 +1614,7 @@ mod tests {
             release_date: "2001-06-21".into(),
             ..Default::default()
         };
-        let finished = super::finish_pc_pick(&conn, dated, None, Some(&extras)).unwrap();
+        let finished = super::finish_pc_pick(&conn, dated, None, Some(&extras));
         assert_eq!(finished.release_date, "2001-06-21");
     }
 

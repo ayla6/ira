@@ -163,7 +163,6 @@ pub(super) fn handle_steam_search_result(
         });
 
         let id_btn = gtk4::Button::with_label(&crate::tr!("Enter ID"));
-        id_btn.add_css_class(CSS_PILL);
         let sc = state.clone();
         let name = game_name.to_string();
         let cb = on_match.clone();
@@ -182,7 +181,6 @@ pub(super) fn handle_steam_search_result(
         action_box.append(&id_btn);
 
         let steam_btn = gtk4::Button::with_label(&crate::tr!("Search Steam"));
-        steam_btn.add_css_class(CSS_PILL);
         let sc2 = state.clone();
         let name2 = game_name.to_string();
         let steam2 = steam.clone();
@@ -204,7 +202,6 @@ pub(super) fn handle_steam_search_result(
         action_box.append(&steam_btn);
 
         let sgdb_btn = gtk4::Button::with_label(&crate::tr!("Search SGDB"));
-        sgdb_btn.add_css_class(CSS_PILL);
         let sc3 = state.clone();
         let name3 = game_name.to_string();
         let steam3 = steam.clone();

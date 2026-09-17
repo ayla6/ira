@@ -1153,7 +1153,10 @@ fn run_auto_match(
             display: &display,
             db_id,
         };
-        let matched = super::mass_match_ss::run_pc_matching(&steam, &creds, &db, &target);
+        let matched = match super::mass_match_ss::run_pc_matching(&steam, &creds, &db, &target) {
+            super::mass_match_ss::SsOutcome::Hit(game) => Some(*game),
+            _ => None,
+        };
         let _ = tx.send(matched);
     });
     let state = state.clone();

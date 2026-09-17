@@ -195,7 +195,7 @@ pub(super) fn build_general_page(
     }
     sgdb_id_entry.add_suffix(&sgdb_search_btn);
     ids_group.add(&sgdb_id_entry);
-    page.append(&ids_group);    page.append(&ids_group);
+    page.append(&ids_group);
 
     let detect_btn = super::helpers::make_browse_button(
         Some(win),
@@ -347,6 +347,7 @@ fn show_sgdb_id_search_popup(
         }
     };
 
+    do_search();
     let do_search = Rc::new(do_search);
     entry.connect_activate({
         let ds = do_search.clone();

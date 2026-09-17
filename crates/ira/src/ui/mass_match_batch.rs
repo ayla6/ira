@@ -66,7 +66,20 @@ pub(super) fn run_batch<T: Send + 'static>(
             if index > 0 && pace_ms > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(pace_ms));
             }
-            let matched = worker(item);
+            // A panicking worker must not skip the sentinel below — the
+            // pass's completion bookkeeping depends on it.
+            let matched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                worker(item)
+            }))
+            .unwrap_or_else(|panic| {
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "worker panicked".to_string());
+                eprintln!("batch worker panicked on '{}': {message}", item.name);
+                None
+            });
             let _ = tx.try_send(BatchHit {
                 row_idx: item.row_idx,
                 db_id: item.db_id,

@@ -182,14 +182,25 @@ fn populate_results(
         let sc = state.clone();
         let dc = dialog.clone();
         let on_match_c = on_match.clone();
-        let subtitle = if game.release_date.is_empty() {
-            format!("SS ID: {}", game.ss_id)
-        } else {
-            format!("SS ID: {} · {}", game.ss_id, game.release_date)
-        };
+        // The console matters most on the wide PC search, where the
+        // candidates come from every system at once.
+        let mut subtitle = crate::tr!("SS ID: {}").replacen("{}", &game.ss_id, 1);
+        if !game.system_name.is_empty() {
+            subtitle.push_str(" · ");
+            subtitle.push_str(&game.system_name);
+        }
+        if !game.release_date.is_empty() {
+            subtitle.push_str(" · ");
+            subtitle.push_str(&game.release_date);
+        }
         let row = match_result_row(&game.name, &subtitle, {
             let game = game.clone();
             move || apply_ss_match(&sc, db_id, game.clone(), &on_match_c, &dc)
+        });
+        // The row's background opens the entry's page on the site.
+        let uri = ira_api::screenscraper::game_page_url(&game.ss_id);
+        row.connect_activate(move |row| {
+            super::helpers::open_uri(row.upcast_ref(), &uri);
         });
         list.append(&row);
     }
@@ -214,9 +225,13 @@ pub fn show_ss_search_dialog(
         }
     }
     // Say which console the search is scoped to.
-    let console = ira_models::find_console(platform_id)
-        .map(|def| def.display_name.to_string())
-        .unwrap_or_else(|| platform_id.to_string());
+    let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten();
+    let console = match &entry {
+        Some(entry) if entry.kind.is_pc() => crate::tr!("PC"),
+        _ => ira_models::find_console(platform_id)
+            .map(|def| def.display_name.to_string())
+            .unwrap_or_else(|| platform_id.to_string()),
+    };
     let SearchDialogWidgets {
         dialog,
         entry,
@@ -230,6 +245,9 @@ pub fn show_ss_search_dialog(
         &rom_stem(state, db_id).unwrap_or_else(|| game_name.to_string()),
         Some(&crate::tr!("Game name…")),
     );
+    // Clicking a result's background opens its page on the site — the
+    // way to check what a candidate actually is before matching it.
+    list.set_activate_on_single_click(true);
 
     let state_c = state.clone();
     let platform_id = platform_id.to_string();

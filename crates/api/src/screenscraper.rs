@@ -46,6 +46,9 @@ pub struct ScrapedGame {
     /// Region-picked title screen URL — the fallback for consoles whose
     /// cover art runs ugly, 3DS above all.
     pub title_screen: Option<String>,
+    /// The console the entry belongs to, as ScreenScraper names it
+    /// ("Nintendo 64"). Empty when the answer carries no system.
+    pub system_name: String,
 }
 
 impl ScrapedGame {
@@ -287,6 +290,8 @@ struct SsJeu {
     classifications: Option<SsClassifications>,
     #[serde(default)]
     medias: Option<SsMedias>,
+    #[serde(default, rename = "systemname")]
+    system_name: Option<String>,
 }
 
 /// A referenced entity: `<developpeur id="2911">Chunsoft</developpeur>`.
@@ -378,6 +383,12 @@ fn is_rom_miss(body: &str) -> bool {
 /// ES-DE's cleanups: HTML entities ScreenScraper leaves in the text, the
 /// "ZZZ(notgame)" placeholder results, and duplicate game ids that one
 /// multi-system query produces.
+/// The game's page on the ScreenScraper site — what "open in browser"
+/// affordances point at.
+pub fn game_page_url(ss_id: &str) -> String {
+    format!("https://www.screenscraper.fr/gameinfos.php?gameid={ss_id}")
+}
+
 pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
     // Plain French text answers, not XML. A rom miss is an empty result;
     // anything else — rejected credentials above all — is a real error
@@ -549,6 +560,7 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
         screenshot,
         box2d,
         title_screen,
+        system_name: jeu.system_name.as_deref().unwrap_or_default().to_string(),
     }
 }
 

@@ -1157,6 +1157,10 @@ fn apply_hit(
         Some(SsOutcome::Hit(game)) => {
             persist_ss_match(state, hit.db_id, &game);
             matched.set(matched.get() + 1);
+            // The settings window's scraper draft must learn the new
+            // match before its next Save, or it would write the stale
+            // empty id back over the fresh one.
+            super::edit_game_scraper::refresh_scraper_section(state, hit.db_id);
             if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {
                 show_matched(&ss_box);
             }

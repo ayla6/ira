@@ -1003,6 +1003,20 @@ fn search_row(state: &SharedState, game: &Game, win: &adw::Window) -> adw::Actio
         // rematch ambiguity: one exact fetch by id, merged over what's
         // stored. Unmatch stays for genuinely wrong matches.
         row.set_title(&crate::tr!("Matched"));
+        row.set_subtitle(
+            &crate::tr!("SS ID: {}").replacen("{}", &game.screenscraper_id, 1),
+        );
+        // The entry's page on the site — what got matched, one click away.
+        let open = gtk4::LinkButton::new(&ira_api::screenscraper::game_page_url(
+            &game.screenscraper_id,
+        ));
+        open.set_child(Some(&gtk4::Image::from_icon_name(
+            "adw-external-link-symbolic",
+        )));
+        open.add_css_class(CSS_FLAT);
+        open.set_tooltip_text(Some(&crate::tr!("Open the ScreenScraper page")));
+        open.set_valign(gtk4::Align::Center);
+        row.add_suffix(&open);
         let fetch = gtk4::Button::with_label(&crate::tr!("Fetch missing"));
         fetch.add_css_class(CSS_FLAT);
         fetch.set_valign(gtk4::Align::Center);

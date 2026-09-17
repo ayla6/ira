@@ -624,6 +624,13 @@ impl SearchStatus {
     }
 }
 
+/// Open `uri` in the system browser. The widget only anchors the launch
+/// to a window; a missing one just means no window association.
+pub(crate) fn open_uri(anchor: &gtk4::Widget, uri: &str) {
+    let win = anchor.root().and_then(|r| r.downcast::<gtk4::Window>().ok());
+    gtk4::UriLauncher::new(uri).launch(win.as_ref(), gtk4::gio::Cancellable::NONE, |_| ());
+}
+
 /// Wrap `child` in an `adw::Clamp` so wide dialogs don't stretch it.
 /// Margins are `(top, bottom, start, end)`.
 pub(crate) fn clamped(

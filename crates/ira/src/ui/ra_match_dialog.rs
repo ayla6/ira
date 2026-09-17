@@ -85,6 +85,7 @@ pub(super) fn persist_ra_match(
             ra_web_api_key,
             cfg,
             game: None,
+            progress: None,
         });
     }
     let sc_refresh = sc.clone();

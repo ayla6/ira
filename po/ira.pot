@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-17 13:32-0300\n"
+"POT-Creation-Date: 2026-09-17 14:22-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -170,7 +170,7 @@ msgstr ""
 #: crates/ira/src/ui/add_game_dialog.rs:201
 #: crates/ira/src/ui/add_game_method.rs:13
 #: crates/ira/src/ui/add_game.rs:23
-#: crates/ira/src/ui/auto_add_dialog.rs:828
+#: crates/ira/src/ui/auto_add_dialog.rs:829
 msgid "Add game"
 msgstr ""
 
@@ -223,11 +223,11 @@ msgstr ""
 msgid "Cancel"
 msgstr ""
 
-#: crates/ira/src/ui/add_game_dialog.rs:481
+#: crates/ira/src/ui/add_game_dialog.rs:482
 msgid "Variable name (e.g. FOO)"
 msgstr ""
 
-#: crates/ira/src/ui/add_game_dialog.rs:487
+#: crates/ira/src/ui/add_game_dialog.rs:488
 msgid "Value"
 msgstr ""
 
@@ -251,23 +251,23 @@ msgid "Game info"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:32
-#: crates/ira/src/ui/auto_add_dialog.rs:752
+#: crates/ira/src/ui/auto_add_dialog.rs:753
 msgid "Name"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:35
-#: crates/ira/src/ui/auto_add_dialog.rs:789
+#: crates/ira/src/ui/auto_add_dialog.rs:790
 msgid "Native Linux"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:35
-#: crates/ira/src/ui/auto_add_dialog.rs:789
+#: crates/ira/src/ui/auto_add_dialog.rs:790
 #: crates/ira/src/ui/game_settings.rs:229
 msgid "Wine (Windows)"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:39
-#: crates/ira/src/ui/auto_add_dialog.rs:787
+#: crates/ira/src/ui/auto_add_dialog.rs:788
 msgid "Kind"
 msgstr ""
 
@@ -279,14 +279,14 @@ msgstr ""
 #: crates/ira/src/ui/add_game_general.rs:50
 #: crates/ira/src/ui/add_game_general.rs:159
 #: crates/ira/src/ui/add_game_general.rs:202
-#: crates/ira/src/ui/auto_add_dialog.rs:255
+#: crates/ira/src/ui/auto_add_dialog.rs:256
 msgid "Select game folder"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:69
 #: crates/ira/src/ui/add_game_general.rs:76
-#: crates/ira/src/ui/auto_add_dialog.rs:798
-#: crates/ira/src/ui/auto_add_dialog.rs:805
+#: crates/ira/src/ui/auto_add_dialog.rs:799
+#: crates/ira/src/ui/auto_add_dialog.rs:806
 #: crates/ira/src/ui/edit_game_launch.rs:50
 #: crates/ira/src/ui/edit_game_launch.rs:60
 #: crates/ira/src/ui/edit_game_variants.rs:285
@@ -295,7 +295,7 @@ msgid "Executable"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:73
-#: crates/ira/src/ui/auto_add_dialog.rs:802
+#: crates/ira/src/ui/auto_add_dialog.rs:803
 #: crates/ira/src/ui/edit_game_launch.rs:58
 #: crates/ira/src/ui/edit_game_variants.rs:289
 #: crates/ira/src/ui/game_header.rs:285
@@ -327,7 +327,7 @@ msgid "Service IDs"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:130
-#: crates/ira/src/ui/auto_add_dialog.rs:757
+#: crates/ira/src/ui/auto_add_dialog.rs:758
 #: crates/ira/src/ui/game_settings.rs:512
 #: crates/ira/src/ui/game_settings.rs:584
 #: crates/ira/src/ui/game_settings.rs:619
@@ -335,7 +335,7 @@ msgid "Steam app ID"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:133
-#: crates/ira/src/ui/auto_add_dialog.rs:761
+#: crates/ira/src/ui/auto_add_dialog.rs:762
 #: crates/ira/src/ui/game_settings.rs:545
 #: crates/ira/src/ui/game_settings.rs:623
 #: crates/ira/src/ui/steam_search.rs:19
@@ -343,7 +343,7 @@ msgid "Search Steam store"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:148
-#: crates/ira/src/ui/auto_add_dialog.rs:776
+#: crates/ira/src/ui/auto_add_dialog.rs:777
 #: crates/ira/src/ui/big_picture/keyboard.rs:617
 #: crates/ira/src/ui/input_profile_options.rs:101
 msgid "Select"
@@ -364,7 +364,7 @@ msgid "Search SteamGridDB"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:303
-#: crates/ira/src/ui/ra_match_dialog.rs:206
+#: crates/ira/src/ui/ra_match_dialog.rs:207
 #: crates/ira/src/ui/sgdb_match_dialog.rs:219
 #: crates/ira/src/ui/ss_match_dialog.rs:231
 #: crates/ira/src/ui/steam_search.rs:30
@@ -377,7 +377,7 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:330
 #: crates/ira/src/ui/edit_game_scraper.rs:193
-#: crates/ira/src/ui/ra_match_dialog.rs:148
+#: crates/ira/src/ui/ra_match_dialog.rs:149
 #: crates/ira/src/ui/sgdb_match_dialog.rs:242
 #: crates/ira/src/ui/ss_match_dialog.rs:178
 #: crates/ira/src/ui/steam_search_dialog.rs:290
@@ -394,9 +394,9 @@ msgid "Manual add"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_method.rs:47
-#: crates/ira/src/ui/auto_add_dialog.rs:196
-#: crates/ira/src/ui/auto_add_dialog.rs:233
-#: crates/ira/src/ui/auto_add_dialog.rs:1737
+#: crates/ira/src/ui/auto_add_dialog.rs:197
+#: crates/ira/src/ui/auto_add_dialog.rs:234
+#: crates/ira/src/ui/auto_add_dialog.rs:1786
 msgid "Auto add game"
 msgstr ""
 
@@ -419,61 +419,61 @@ msgstr ""
 msgid "e.g. 1687950"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:235
+#: crates/ira/src/ui/auto_add_dialog.rs:236
 msgid ""
 "Pick the game's install folder. Ira will identify it, download assets and "
 "set everything up."
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:240
+#: crates/ira/src/ui/auto_add_dialog.rs:241
 msgid "Pick game folder…"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:316
+#: crates/ira/src/ui/auto_add_dialog.rs:317
 msgid "Move to games folder?"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:318
+#: crates/ira/src/ui/auto_add_dialog.rs:319
 msgid "Pick where to move it, or keep it where it is."
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:330
+#: crates/ira/src/ui/auto_add_dialog.rs:331
 msgid "Keep where it is"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:373
+#: crates/ira/src/ui/auto_add_dialog.rs:374
 #: crates/ira/src/ui/folder_list.rs:61
 #, rust-format
 msgid "{} free"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:405
-#: crates/ira/src/ui/auto_add_dialog.rs:441
+#: crates/ira/src/ui/auto_add_dialog.rs:406
+#: crates/ira/src/ui/auto_add_dialog.rs:442
 #: crates/ira/src/ui/installer_add_dialog.rs:892
 msgid "Identifying game…"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:557
+#: crates/ira/src/ui/auto_add_dialog.rs:558
 msgid "Moving folder…"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:621
+#: crates/ira/src/ui/auto_add_dialog.rs:622
 msgid "This folder is already in your library. Pick another one."
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:656
+#: crates/ira/src/ui/auto_add_dialog.rs:657
 msgid "Couldn't identify this game."
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:662
+#: crates/ira/src/ui/auto_add_dialog.rs:663
 msgid "Search Steam for the game, or set it up manually."
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:668
+#: crates/ira/src/ui/auto_add_dialog.rs:669
 msgid "Search Steam…"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:681
+#: crates/ira/src/ui/auto_add_dialog.rs:682
 #: crates/ira/src/ui/image_manager.rs:199
 #: crates/ira/src/ui/image_manager.rs:229
 #: crates/ira/src/ui/image_manager.rs:253
@@ -484,82 +484,100 @@ msgstr ""
 msgid "Steam"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:698
+#: crates/ira/src/ui/auto_add_dialog.rs:699
 msgid "Set up manually"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:749
+#: crates/ira/src/ui/auto_add_dialog.rs:750
 msgid "Confirm game"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:907
+#: crates/ira/src/ui/auto_add_dialog.rs:908
 msgid "Adding game and downloading assets…"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1380
+#: crates/ira/src/ui/auto_add_dialog.rs:922
+#, rust-format
+msgid "Adding {}…"
+msgstr ""
+
+#: crates/ira/src/ui/auto_add_dialog.rs:929
+msgid "Downloading assets…"
+msgstr ""
+
+#: crates/ira/src/ui/auto_add_dialog.rs:939
+#, rust-format
+msgid "{} added"
+msgstr ""
+
+#: crates/ira/src/ui/auto_add_dialog.rs:940
+msgid "Assets downloaded"
+msgstr ""
+
+#: crates/ira/src/ui/auto_add_dialog.rs:1429
 msgid "Install Nemirtingas Galaxy emulator?"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1381
+#: crates/ira/src/ui/auto_add_dialog.rs:1430
 msgid ""
 "GOG Galaxy DLLs were found in this game. Install the Nemirtingas Galaxy "
 "Emulator to enable achievements? (Steam DLLs, if any, will be left "
 "untouched.)"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1384
+#: crates/ira/src/ui/auto_add_dialog.rs:1433
 msgid "Install Goldberg emulator?"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1385
+#: crates/ira/src/ui/auto_add_dialog.rs:1434
 msgid ""
 "Steam API DLLs were found in this game. Install the Goldberg Steam Emulator "
 "to enable achievements?"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1416
+#: crates/ira/src/ui/auto_add_dialog.rs:1465
 #: crates/ira/src/ui/edit_game_pages.rs:358
 #: crates/ira/src/ui/settings_pages.rs:804
 msgid "Emulator version"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1417
+#: crates/ira/src/ui/auto_add_dialog.rs:1466
 msgid "Version directory to install"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1428
+#: crates/ira/src/ui/auto_add_dialog.rs:1477
 #: crates/ira/src/ui/edit_game_pages.rs:372
 msgid "No emulator versions available"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1429
+#: crates/ira/src/ui/auto_add_dialog.rs:1478
 #: crates/ira/src/ui/edit_game_pages.rs:373
 msgid "Place version directories in api_emulators/"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1435
+#: crates/ira/src/ui/auto_add_dialog.rs:1484
 msgid "Don't ask me again"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1441
+#: crates/ira/src/ui/auto_add_dialog.rs:1490
 #: crates/ira/src/ui/big_picture/game_menu.rs:283
 msgid "No"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1442
+#: crates/ira/src/ui/auto_add_dialog.rs:1491
 #: crates/ira/src/ui/big_picture/game_menu.rs:280
 msgid "Yes"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1521
+#: crates/ira/src/ui/auto_add_dialog.rs:1570
 msgid "Installing Nemirtingas Galaxy emulator…"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1522
+#: crates/ira/src/ui/auto_add_dialog.rs:1571
 msgid "Installing Goldberg emulator…"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1598
+#: crates/ira/src/ui/auto_add_dialog.rs:1647
 #, rust-format
 msgid ""
 "Steamworks redistributables were found:\n"
@@ -568,28 +586,28 @@ msgid ""
 "Install the selected ones now via Wine?"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1609
+#: crates/ira/src/ui/auto_add_dialog.rs:1658
 msgid "Install redistributables?"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1610
+#: crates/ira/src/ui/auto_add_dialog.rs:1659
 #: crates/ira/src/ui/installer_add_dialog.rs:661
 msgid "Skip"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1611
+#: crates/ira/src/ui/auto_add_dialog.rs:1660
 msgid "Install"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1643
+#: crates/ira/src/ui/auto_add_dialog.rs:1692
 msgid "Installing redistributables via Wine…"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1749
+#: crates/ira/src/ui/auto_add_dialog.rs:1798
 msgid "Auto-add failed"
 msgstr ""
 
-#: crates/ira/src/ui/auto_add_dialog.rs:1750
+#: crates/ira/src/ui/auto_add_dialog.rs:1799
 #: crates/ira/src/ui/big_picture/all_games.rs:755
 #: crates/ira/src/ui/big_picture/keyboard.rs:405
 #: crates/ira/src/ui/mass_match_dialog.rs:495
@@ -1630,6 +1648,18 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_variants.rs:429
 msgid "Add variant"
+msgstr ""
+
+#: crates/ira/src/ui/enrichment.rs:119
+msgid "Fetching achievements…"
+msgstr ""
+
+#: crates/ira/src/ui/enrichment.rs:160
+msgid "Downloading images…"
+msgstr ""
+
+#: crates/ira/src/ui/enrichment.rs:182
+msgid "Fetching store metadata…"
 msgstr ""
 
 #: crates/ira/src/ui/fetch_images.rs:87
@@ -4598,18 +4628,18 @@ msgstr ""
 msgid "Matching finished"
 msgstr ""
 
-#: crates/ira/src/ui/matching.rs:214
+#: crates/ira/src/ui/matching.rs:215
 msgid "Mark as already unlocked?"
 msgstr ""
 
-#: crates/ira/src/ui/matching.rs:216
+#: crates/ira/src/ui/matching.rs:217
 #, rust-format
 msgid ""
 "This will mark “{}” as earned without a real unlock time. Use this only if "
 "you already unlocked it previously (e.g. before using this tool)."
 msgstr ""
 
-#: crates/ira/src/ui/matching.rs:219
+#: crates/ira/src/ui/matching.rs:220
 msgid "Mark as unlocked"
 msgstr ""
 
@@ -4781,24 +4811,24 @@ msgstr ""
 msgid "Launch via umu-run (required for Proton versions)"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:153
+#: crates/ira/src/ui/ra_match_dialog.rs:154
 msgid "Exact hash match"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:155
+#: crates/ira/src/ui/ra_match_dialog.rs:156
 msgid "No achievements yet"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:157
+#: crates/ira/src/ui/ra_match_dialog.rs:158
 #, rust-format
 msgid "{} achievements"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:201
+#: crates/ira/src/ui/ra_match_dialog.rs:202
 msgid "Match to RetroAchievements"
 msgstr ""
 
-#: crates/ira/src/ui/ra_match_dialog.rs:237
+#: crates/ira/src/ui/ra_match_dialog.rs:238
 msgid "RetroAchievements credentials not configured"
 msgstr ""
 

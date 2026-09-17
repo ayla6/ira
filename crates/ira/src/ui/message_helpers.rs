@@ -330,6 +330,7 @@ fn start_background_enrichment(state: &SharedState) {
                                                 ra_web_api_key: ra_web_api_key.clone(),
                                                 cfg: cfg.clone(),
                                                 game: Some(game.clone()),
+                                                progress: None,
                                             },
                                         );
                                     }));
@@ -719,6 +720,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
                 ra_web_api_key,
                 cfg,
                 game: None,
+                progress: None,
             });
         } else if game.kind == ira_models::GameKind::Retro
             && game.trophy_source == ira_models::TrophySource::Ra

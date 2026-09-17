@@ -12,6 +12,12 @@ use std::sync::Mutex;
 
 static RA_ENRICH_LOCK: Mutex<()> = Mutex::new(());
 
+/// Phase reporter for [`EnrichGameParams::progress`]: how many phases are
+/// done, how many the job has in total, and what it is doing now. Called
+/// on the enriching thread as each phase begins; labels arrive already
+/// translated.
+pub type EnrichProgress = std::sync::Arc<dyn Fn(usize, usize, &str) + Send + Sync>;
+
 pub struct EnrichGameParams {
     pub app_id: String,
     pub trophy_source: ira_models::TrophySource,
@@ -28,12 +34,27 @@ pub struct EnrichGameParams {
     /// If provided, use this game instead of calling load_game (skips achievement loading).
     /// Pass Some for background enrichment, None for on-demand loading.
     pub game: Option<Game>,
+    /// Optional sidebar-strip reporter for jobs that outlive the dialog
+    /// that started them, e.g. the auto-add wizard's asset download.
+    pub progress: Option<EnrichProgress>,
 }
 
 pub fn enrich_game_async(params: EnrichGameParams) {
     std::thread::spawn(move || {
         enrich_game_blocking(params);
     });
+}
+
+/// Drives a strip's phase labels for one enrichment: achievements,
+/// images, store metadata — reported as each begins.
+struct Phases(Option<EnrichProgress>, usize);
+
+impl Phases {
+    fn enter(&self, done: usize, label: &str) {
+        if let Some(report) = &self.0 {
+            report(done, self.1, label);
+        }
+    }
 }
 
 pub fn enrich_game_blocking(params: EnrichGameParams) {
@@ -51,7 +72,9 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
         ra_web_api_key,
         cfg,
         game,
+        progress,
     } = params;
+    let phases = Phases(progress, 3);
     let _s = tracing::info_span!("enrich_game", app_id = %app_id, db_id = db_id).entered();
 
     let mut game = if trophy_source == ira_models::TrophySource::Ra {
@@ -93,6 +116,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
             let meta_path =
                 ira_parser::achievements_dir(&save_dir, &app_id).join("achievements.json");
             if !meta_path.exists() {
+                phases.enter(0, &crate::tr!("Fetching achievements…"));
                 if let Err(e) = steam.generate_steam_settings(&app_id) {
                     eprintln!("Could not generate achievements for {}: {}", app_id, e);
                     if let Some(parent) = meta_path.parent() {
@@ -133,6 +157,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
     };
 
     if trophy_source.has_steam_enrichment() {
+        phases.enter(1, &crate::tr!("Downloading images…"));
         enrich_steam_assets(&mut game, &steam, &save_dir, &app_id);
 
         if let Err(e) = ira_db::store_game_metadata(
@@ -154,6 +179,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
     // the company cache's ids can fill the metadata record.
     if game.kind.is_pc() {
         if let Ok(app_id) = game.platform_id.parse::<u32>() {
+            phases.enter(2, &crate::tr!("Fetching store metadata…"));
             garnish_pc_ss_metadata(&db, &steam, game.db_id, app_id);
         }
     }
@@ -502,5 +528,37 @@ pub(super) fn garnish_pc_ss_metadata(
     }
     if let Err(e) = ira_db::store_scraper_metadata(db, db_id, &meta) {
         eprintln!("Could not store PC metadata garnish for {db_id}: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EnrichProgress, Phases};
+
+    #[test]
+    fn test_phases_reports_done_total_and_label() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let reporter: EnrichProgress = {
+            let calls = calls.clone();
+            std::sync::Arc::new(move |done, total, label| {
+                calls.lock().unwrap().push((done, total, label.to_string()));
+            })
+        };
+        let phases = Phases(Some(reporter), 3);
+        phases.enter(0, "achievements");
+        phases.enter(2, "metadata");
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![
+                (0, 3, "achievements".to_string()),
+                (2, 3, "metadata".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_phases_without_reporter_is_silent() {
+        let phases = Phases(None, 3);
+        phases.enter(0, "achievements");
     }
 }

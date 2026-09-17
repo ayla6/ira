@@ -70,6 +70,7 @@ pub fn match_game_to_steam(
                         ra_web_api_key,
                         cfg,
                         game: None,
+                        progress: None,
                     });
                 }
                 Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),

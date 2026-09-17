@@ -450,6 +450,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
                                     ra_web_api_key: ra_web_api_key_c,
                                     cfg: cfg_c,
                                     game: None,
+                                    progress: None,
                                 },
                             );
                         }

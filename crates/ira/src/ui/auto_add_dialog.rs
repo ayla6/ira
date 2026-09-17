@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc;
 
 use adw::prelude::*;
@@ -908,6 +909,40 @@ pub(super) fn start_add(
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));
+
+    // The download's phase reports land on the sidebar strip instead of
+    // the wizard's status line, so they stay visible if the wizard is
+    // closed mid-add. The strip is claimed on the first report — an add
+    // that fails before enriching never flashes it — and, when another
+    // job holds it, the reports are dropped.
+    let (progress_tx, progress_rx) =
+        super::helpers::ui_channel::<(usize, usize, String)>();
+    let strip_name = name.clone();
+    let strip_state = wizard.borrow().state.clone();
+    glib::spawn_future_local(async move {
+        let short = crate::tr!("Adding {}…").replacen("{}", &strip_name, 1);
+        let mut job = None;
+        while let Ok((done, total, label)) = progress_rx.recv().await {
+            if job.is_none() {
+                job = super::fetch_images::begin_strip_job(
+                    &strip_state,
+                    &short,
+                    &crate::tr!("Downloading assets…"),
+                );
+            }
+            if let Some(job) = &job {
+                job.progress(&strip_state, done, total, &label);
+            }
+        }
+        if let Some(job) = job {
+            job.finish(
+                &strip_state,
+                &crate::tr!("{} added").replacen("{}", &strip_name, 1),
+                &crate::tr!("Assets downloaded"),
+            );
+        }
+    });
+
     spawn_add_thread(
         tx,
         AddParams {
@@ -923,6 +958,9 @@ pub(super) fn start_add(
             skip_emu_prompt,
             language_preferences,
             cfg,
+            progress: Arc::new(move |done, total, label| {
+                let _ = progress_tx.try_send((done, total, label.to_string()));
+            }),
         },
     );
 
@@ -957,6 +995,8 @@ pub(super) struct AddParams {
     pub skip_emu_prompt: bool,
     pub language_preferences: Vec<String>,
     pub cfg: ira_config::Config,
+    /// Feeds the sidebar strip the download's phase reports.
+    pub progress: crate::ui::enrichment::EnrichProgress,
 }
 
 struct AddGameSetup {
@@ -991,6 +1031,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             skip_emu_prompt,
             language_preferences,
             cfg,
+            progress,
         } = params;
         let setup = build_add_game_setup(&game, &profiles, profile_id);
         let db_id = match add_game_record(AddGameRecordParams {
@@ -1027,7 +1068,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
 
         let save_dir_for_lang = save_dir.clone();
         let db_for_cache = db.clone();
-        enrich_added_game(db, steam, sender, save_dir, cfg, &game_obj, name);
+        enrich_added_game(db, steam, sender, save_dir, cfg, &game_obj, progress);
         apply_language_preference(
             &game,
             &game_obj,
@@ -1177,14 +1218,15 @@ fn enrich_added_game(
     save_dir: String,
     cfg: ira_config::Config,
     game: &Game,
-    title: String,
+    progress: crate::ui::enrichment::EnrichProgress,
 ) {
     crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
         app_id: game.app_id.clone(),
         trophy_source: game.trophy_source,
         platform_id: game.platform_id.clone(),
         db_id: game.db_id,
-        title,
+        // load_and_publish_game already set this exact name on the game.
+        title: game.name.clone(),
         steam,
         sender,
         save_dir,
@@ -1193,6 +1235,7 @@ fn enrich_added_game(
         ra_username: String::new(),
         ra_web_api_key: String::new(),
         cfg,
+        progress: Some(progress),
     });
 }
 

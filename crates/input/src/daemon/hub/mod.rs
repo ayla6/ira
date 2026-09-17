@@ -4,6 +4,7 @@
 //! that game's rumble back onto the physical pad. Unfocused sessions stay
 //! subscribed but receive nothing: frozen, not closed.
 
+mod holds;
 mod pad;
 
 use std::collections::HashMap;
@@ -91,10 +92,6 @@ pub(crate) struct Subscribe {
     pub(crate) live_always: bool,
     pub(crate) calibration: Option<PathBuf>,
     pub(crate) device: Option<PathBuf>,
-    /// The session exposes a native controller twin: while it is routed,
-    /// the physical pad's hidraw is held exclusively so SDL-style stacks
-    /// cannot claim the hardware over the twin.
-    pub(crate) native_twin: bool,
     pub(crate) reply: Sender<PadSnapshot>,
 }
 
@@ -120,7 +117,6 @@ struct RouteEntry {
     live_always: bool,
     always_claims_focus: bool,
     focus_seq: u64,
-    native_twin: bool,
     passthrough: bool,
 }
 
@@ -189,6 +185,12 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
             let _ = controller_events.send((false, String::new(), String::new()));
             pad.drop_pad();
         }
+        // While any session claims the pad, the physical controller's
+        // companion evdev nodes (IMU sensors, vendor keyboards) are held
+        // exclusively: no other process may read raw hardware input past
+        // the remap. Re-evaluated every pass so reconnects — which create
+        // fresh nodes — are re-held, and a node our own sensor attaches to
+        // is released back to it.
         let any_claiming = routes.values().any(|route| !route.passthrough);
         if subscribed && any_claiming
             && pad
@@ -209,13 +211,7 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
             // desktop instead of holding it dead in the void.
             pad.ungrab();
         }
-        // A native-twin route holds the physical pad's hidraw exclusively:
-        // SDL's hidapi stacks would otherwise claim the hardware and hide
-        // the twin (the identities are identical by design). Re-evaluated
-        // every pass so reconnects — which create fresh hidraw nodes — are
-        // re-grabbed, and so the hold drops with the last twin route.
-        let any_native_twin = routes.values().any(|route| route.native_twin);
-        pad.set_hidraw_grab(subscribed && any_native_twin);
+        pad.set_sibling_holds(subscribed && any_claiming);
         if pad.gamepad.is_none() && pad.reconnect_at.elapsed() >= RECONNECT_INTERVAL {
             pad.reconnect_at = Instant::now();
             if let Some((name, path, vendor, product)) = pad.try_open(subscribed) {
@@ -378,7 +374,6 @@ fn drain_commands(
                         live_always: subscribe.live_always,
                         always_claims_focus: false,
                         focus_seq: 0,
-                        native_twin: subscribe.native_twin,
                         passthrough: false,
                     },
                 );
@@ -543,7 +538,6 @@ mod tests {
             live_always,
             always_claims_focus: false,
             focus_seq,
-            native_twin: false,
             passthrough: false,
         }
     }

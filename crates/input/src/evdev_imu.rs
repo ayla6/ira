@@ -128,6 +128,9 @@ pub fn sensor_node_names(dir: &Path) -> Vec<String> {
 /// One live kernel IMU node, polled for motion samples.
 pub struct EvdevImu {
     device: Device,
+    /// The `/dev/input/eventN` node being read, so the hub's companion
+    /// holds never grab the node the sensor itself needs.
+    path: PathBuf,
     /// Counts per g for the accelerometer axes.
     accel_resolution: f32,
     /// Counts per degree per second for the gyroscope axes.
@@ -163,9 +166,15 @@ impl EvdevImu {
             accel_resolution: resolution(AbsoluteAxisCode::ABS_X)?,
             gyro_resolution: resolution(AbsoluteAxisCode::ABS_RX)?,
             device,
+            path,
             accel_raw: [0; 3],
             gyro_raw: [0; 3],
         })
+    }
+
+    /// The node this sensor reads.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Drains pending axis updates into one sample. Multiple kernel sensor

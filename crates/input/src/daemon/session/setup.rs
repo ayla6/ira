@@ -205,7 +205,6 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         live_always: !arguments.pause_unfocused,
         calibration: arguments.calibration.clone(),
         device: arguments.device.clone(),
-        native_twin: mapper.profile().wants_native_controller(),
         reply: reply_tx,
     }));
     let snapshot = reply_rx

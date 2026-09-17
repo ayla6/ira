@@ -12,6 +12,7 @@ use super::super::session::{
     apply_controller_layout, open_sensor, probe_sensor, reconnect_gamepad, resolved_layout_for,
     GyroSource,
 };
+use super::holds::SiblingHolds;
 use super::{broadcast_motion, RouteEntry};
 
 /// Reconnect cadence for a pad that vanished, matching the old per-session
@@ -29,9 +30,9 @@ pub(super) struct PhysicalPad {
     pub(super) gamepad: Option<PhysicalGamepad>,
     pub(super) switch_hidraw: Option<SwitchHidrawPad>,
     pub(super) sensor: Option<GyroSource>,
-    /// Exclusive hold on the pad's hidraw while a native-twin route wants
-    /// the hardware hidden from SDL-style stacks.
-    pub(super) hidraw_grab: Option<crate::hidraw_grab::PadHidrawGrab>,
+    /// Exclusive holds on the pad's companion evdev nodes while a session
+    /// claims the pad, so no other process reads raw hardware input.
+    pub(super) holds: SiblingHolds,
     pub(super) rumble: Option<PhysicalRumble>,
     pub(super) calibration: Option<PathBuf>,
     pub(super) device_hint: Option<PathBuf>,
@@ -47,7 +48,7 @@ impl PhysicalPad {
             gamepad: None,
             switch_hidraw: None,
             sensor: None,
-            hidraw_grab: None,
+            holds: SiblingHolds::default(),
             rumble: None,
             calibration: None,
             device_hint: None,
@@ -60,29 +61,18 @@ impl PhysicalPad {
         }
     }
 
-    /// Re-evaluates the exclusive hidraw hold that keeps SDL-style stacks
-    /// from claiming the physical pad over a native twin. Re-applied every
-    /// hub pass: reconnects create fresh hidraw nodes, and a stale hold
-    /// (its device went away) must be replaced by one on the new node.
-    pub(super) fn set_hidraw_grab(&mut self, hold: bool) {
-        if hold && self.hidraw_grab.is_none() {
-            if let Some(gamepad) = self.gamepad.as_ref() {
-                let path = gamepad.info().path.clone();
-                match crate::hidraw_grab::grab_pad_hidraw(&path) {
-                    Some(grab) => {
-                        eprintln!(
-                            "hub: holding {} exclusively; the native twin is the pad SDL sees",
-                            grab.path().display()
-                        );
-                        self.hidraw_grab = Some(grab);
-                    }
-                    None => self.hidraw_grab = None,
-                }
-            }
-        } else if !hold && self.hidraw_grab.is_some() {
-            self.hidraw_grab = None; // dropping the file releases the grab
-            eprintln!("hub: hidraw hold released; the physical pad is public again");
-        }
+    /// Re-evaluates the exclusive holds that keep every companion node of
+    /// the physical pad (IMU sensors, vendor keyboards) silent for other
+    /// processes while a remapping session owns the pad. Re-applied on
+    /// input changes: reconnects create fresh nodes, and a node our own
+    /// sensor attaches to must be released back to it.
+    pub(super) fn set_sibling_holds(&mut self, hold: bool) {
+        let primary = self
+            .gamepad
+            .as_ref()
+            .map(|gamepad| gamepad.info().path.clone());
+        let imu = self.sensor.as_ref().and_then(GyroSource::node_path);
+        self.holds.set(hold, primary.as_deref(), imu);
     }
 
     pub(super) fn motion_alive(&self) -> bool {
@@ -200,9 +190,9 @@ impl PhysicalPad {
         self.gamepad = None;
         self.switch_hidraw = None;
         self.sensor = None;
-        // The held hidraw node died with the pad connection; the next open
-        // creates a fresh one and the hub re-grabs it.
-        self.hidraw_grab = None;
+        // The held nodes died with the pad connection; the next open
+        // creates fresh ones and the hub re-holds them.
+        self.holds.release();
         if let Some(rumble) = self.rumble.as_mut() {
             rumble.stop();
         }

@@ -172,6 +172,15 @@ impl GyroSource {
             Self::Sdl(sdl) => sdl.read(fallback_timestamp_us),
         }
     }
+
+    /// The evdev node this source reads, so the hub's companion holds
+    /// never grab a node the sensor itself needs.
+    pub(crate) fn node_path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::Kernel(imu) => Some(imu.path()),
+            Self::Sdl(_) => None,
+        }
+    }
 }
 
 /// Seed the mapper with the connected controller's calibrated stick

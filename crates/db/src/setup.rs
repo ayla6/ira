@@ -16,8 +16,25 @@ pub fn update_field(
     column: &str,
     value: &dyn rusqlite::types::ToSql,
 ) -> Result<(), String> {
+    // The column name cannot be a bound parameter, so anything outside
+    // this set is refused instead of formatted into the SQL.
+    const UPDATABLE_COLUMNS: &[&str] = &[
+        "hidden",
+        "vanished",
+        "playtime",
+        "last_played",
+        "shadps4_version",
+        "ra_core",
+        "emulator_override",
+        "rom_path",
+        "screenscraper_id",
+        "title_trusted",
+    ];
+    if !UPDATABLE_COLUMNS.contains(&column) {
+        return Err(format!("update_field: unknown column {column}"));
+    }
     let c = crate::lock_db(conn)?;
-    let sql = format!("UPDATE games SET {} = ?1 WHERE id = ?2", column);
+    let sql = format!("UPDATE games SET {column} = ?1 WHERE id = ?2");
     c.execute(&sql, rusqlite::params![value, id]).map_err(err)?;
     Ok(())
 }

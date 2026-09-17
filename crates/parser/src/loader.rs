@@ -81,11 +81,15 @@ pub fn set_achievement_earned(
 ) -> Result<(), String> {
     let status_path =
         super::paths::unlock_status_path(save_dir, trophy_source, app_id, platform_id);
-    let mut status_map: HashMap<String, AchievementStatus> = HashMap::new();
-    if let Ok(data) = std::fs::read(&status_path) {
-        let _ = serde_json::from_slice::<HashMap<String, AchievementStatus>>(&data)
-            .map(|m| status_map = m);
-    }
+    // A failed read or a corrupt file must refuse the write — otherwise
+    // the map starts empty and the write below erases every recorded
+    // unlock the moment one new achievement is recorded.
+    let mut status_map: HashMap<String, AchievementStatus> = match std::fs::read(&status_path) {
+        Ok(data) => serde_json::from_slice(&data)
+            .map_err(|e| format!("corrupt unlock status {}: {e}", status_path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashMap::new(),
+        Err(e) => return Err(format!("read {}: {e}", status_path.display())),
+    };
     status_map.insert(
         ach_name.to_string(),
         AchievementStatus {

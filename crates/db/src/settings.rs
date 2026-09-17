@@ -74,12 +74,22 @@ pub fn set_title_trusted(conn: &DbConn, id: i64, trusted: bool) -> Result<(), St
 }
 
 pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    let current: String = c
-        .query_row("SELECT hashes FROM games WHERE id = ?1", params![id], |row| row.get(0))
-        .unwrap_or_default();
+    let mut c = crate::lock_db(conn)?;
+    // One immediate transaction around the read-modify-write: the SS
+    // batch and the RA pass store different keys from separate pooled
+    // connections, and without it each writer erases the other's key.
+    let tx = c
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(err)?;
+    let current: Option<String> = tx
+        .query_row(
+            "SELECT hashes FROM games WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(err)?;
     let mut hashes: ira_models::RomHashes =
-        serde_json::from_str(&current).unwrap_or_default();
+        serde_json::from_str(&current.unwrap_or_default()).unwrap_or_default();
     match key {
         "md5" => hashes.md5 = value.to_string(),
         "ra_md5" => hashes.ra_md5 = value.to_string(),
@@ -87,7 +97,7 @@ pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<()
         other => return Err(format!("unknown hash key {other}")),
     }
     let json = serde_json::to_string(&hashes).map_err(err)?;
-    c.execute("UPDATE games SET hashes = ?1 WHERE id = ?2", params![json, id])
+    tx.execute("UPDATE games SET hashes = ?1 WHERE id = ?2", params![json, id])
         .map_err(err)?;
-    Ok(())
+    tx.commit().map_err(err)
 }

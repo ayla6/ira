@@ -78,23 +78,21 @@ pub fn delete_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<(), Strin
 }
 
 /// Delete a single session, returning the removed row so the caller can
-/// subtract its duration from the game's playtime.
+/// subtract its duration from the game's playtime. One atomic
+/// DELETE..RETURNING: a session that races another delete is removed
+/// exactly once, never subtracted twice.
 pub fn delete_session(conn: &DbConn, session_id: i64) -> Result<Option<PlaySession>, String> {
-    let session = crate::query_optional(
-        conn,
-        &format!("SELECT {SESSION_COLUMNS} FROM play_sessions WHERE id = ?1"),
-        params![session_id],
-        play_session_from_row,
-    )?;
-    if session.is_some() {
-        let c = crate::lock_db(conn)?;
-        c.execute(
-            "DELETE FROM play_sessions WHERE id = ?1",
-            params![session_id],
-        )
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(&format!(
+            "DELETE FROM play_sessions WHERE id = ?1 RETURNING {SESSION_COLUMNS}"
+        ))
         .map_err(err)?;
+    let mut rows = stmt.query(params![session_id]).map_err(err)?;
+    match rows.next().map_err(err)? {
+        Some(row) => Ok(Some(play_session_from_row(row).map_err(err)?)),
+        None => Ok(None),
     }
-    Ok(session)
 }
 
 #[cfg(test)]

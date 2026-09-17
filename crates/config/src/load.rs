@@ -68,7 +68,22 @@ pub fn load_config() -> Config {
             .or_else(|| parse_config_file(&backup_path())),
         // No config yet (fresh install); the backup is not consulted so a
         // deleted config stays deleted.
-        Err(_) => None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        // Unreadable is not the same as absent: move the file aside so
+        // the first save can't overwrite it with defaults, and fall back
+        // to the backup copy.
+        Err(e) => {
+            eprintln!("Failed to read config: {e}; trying the backup copy");
+            let recovery = path.with_extension("json.unreadable");
+            match std::fs::rename(&path, &recovery) {
+                Ok(()) => eprintln!(
+                    "Moved the unreadable config to {}; fix and restore it to recover your settings",
+                    recovery.display()
+                ),
+                Err(e) => eprintln!("Could not move the unreadable config aside: {e}"),
+            }
+            parse_config_file(&backup_path())
+        }
     }
     .unwrap_or_default();
     let (steam_key, sgdb_key, ra_web_api_key, screenscraper_password) = std::thread::scope(|s| {

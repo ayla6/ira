@@ -480,19 +480,42 @@ pub(super) fn build_api_emulator_page(
         gen_btn.add_css_class(CSS_FLAT);
         gen_btn.set_valign(gtk4::Align::Center);
         let exe_c = emu_exe.to_string();
-        gen_btn.connect_clicked(move |_| {
+        gen_btn.connect_clicked(move |btn| {
             let game_dir = std::path::Path::new(&exe_c).parent();
-            if let Some(dir) = game_dir {
-                let settings_dir = dir.join("steam_settings");
-                let gen_path = settings_dir.join("generate_interfaces");
-                if gen_path.is_file() {
-                    let _ = std::process::Command::new(&gen_path)
-                        .current_dir(&settings_dir)
-                        .status();
-                } else {
-                    eprintln!("generate_interfaces not found in steam_settings folder");
-                }
+            let Some(dir) = game_dir else {
+                return;
+            };
+            let settings_dir = dir.join("steam_settings");
+            let gen_path = settings_dir.join("generate_interfaces");
+            if !gen_path.is_file() {
+                eprintln!("generate_interfaces not found in steam_settings folder");
+                return;
             }
+            // The tool can churn for a while; run it off the UI thread
+            // with the button down so nothing freezes and it can't be
+            // double-run.
+            btn.set_sensitive(false);
+            let btn = btn.clone();
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            let rx = std::cell::RefCell::new(rx);
+            std::thread::spawn(move || {
+                if let Err(e) = std::process::Command::new(&gen_path)
+                    .current_dir(&settings_dir)
+                    .status()
+                {
+                    eprintln!("generate_interfaces failed: {e}");
+                }
+                let _ = tx.send(());
+            });
+            glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+                match rx.borrow_mut().try_recv() {
+                    Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        btn.set_sensitive(true);
+                        glib::ControlFlow::Break
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+                }
+            });
         });
         let gen_row = adw::ActionRow::new();
         gen_row.set_title(&crate::tr!("Generate steam_interfaces.txt"));

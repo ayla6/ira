@@ -622,6 +622,19 @@ fn stop_native_process_group(pid: i32) {
     });
 }
 
+/// Poll until every pid is gone or the deadline elapses. Replaces the
+/// blind sleeps in the shutdown sequence so a clean exit doesn't pay
+/// the full grace period.
+fn wait_all_gone(pids: &[i32], deadline: Duration) {
+    let start = std::time::Instant::now();
+    while start.elapsed() < deadline {
+        if pids.iter().all(|p| unsafe { libc::kill(*p, 0) } != 0) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 pub fn stop_game(
     pid: i32,
     wine_exe: Option<&str>,
@@ -674,8 +687,11 @@ pub fn stop_game(
             }
         }
 
-        // Step 4: Wait for wineserver cleanup.
-        std::thread::sleep(Duration::from_secs(3));
+        // Step 4: Wait for wineserver cleanup — bounded by the same
+        // three seconds, but over as soon as everyone is actually gone.
+        let mut watched = vec![pid];
+        watched.extend(&descendants);
+        wait_all_gone(&watched, Duration::from_secs(3));
 
         // Step 5: SIGTERM any remaining stragglers, identifying wine bg
         // processes via is_wine_bg() for diagnostics.
@@ -695,8 +711,8 @@ pub fn stop_game(
             }
         }
 
-        // Step 6: Wait 2s for stragglers to exit.
-        std::thread::sleep(Duration::from_secs(2));
+        // Step 6: Wait up to 2s for stragglers to exit.
+        wait_all_gone(&descendants, Duration::from_secs(2));
 
         // Step 7: Final fallback — SIGKILL the entire process group,
         // then SIGKILL any remaining stragglers that escaped the group.

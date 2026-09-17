@@ -498,27 +498,33 @@ pub fn open_folder(path: &str) {
 }
 
 pub fn open_file_location(file_path: &str) {
-    let path = std::path::Path::new(file_path);
-    let dir = path.parent().map(|p| p.to_string_lossy().to_string());
+    // dbus-send's round-trip has no timeout — a slow or broken session
+    // bus must not hang the right-click handler, so the whole dance
+    // (including the folder fallback) runs on a thread.
     let uri = format!("file://{}", file_path);
-    let dbus_result = std::process::Command::new("dbus-send")
-        .args([
-            "--session",
-            "--print-reply",
-            "--dest=org.freedesktop.FileManager1",
-            "/org/freedesktop/FileManager1",
-            "org.freedesktop.FileManager1.ShowItems",
-            &format!("array:string:{}", uri),
-            "string:",
-        ])
-        .output();
-    match dbus_result {
-        Ok(o) if o.status.success() => return,
-        _ => {}
-    }
-    if let Some(dir) = dir {
-        open_folder(&dir);
-    }
+    let dir = std::path::Path::new(file_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string());
+    std::thread::spawn(move || {
+        let dbus_result = std::process::Command::new("dbus-send")
+            .args([
+                "--session",
+                "--print-reply",
+                "--dest=org.freedesktop.FileManager1",
+                "/org/freedesktop/FileManager1",
+                "org.freedesktop.FileManager1.ShowItems",
+                &format!("array:string:{}", uri),
+                "string:",
+            ])
+            .output();
+        match dbus_result {
+            Ok(o) if o.status.success() => return,
+            _ => {}
+        }
+        if let Some(dir) = dir {
+            let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+        }
+    });
 }
 
 pub fn confirm_dialog(

@@ -233,11 +233,13 @@ fn setup_gamepad(
             let value_cc = value_c.clone();
             let reset_cc = reset_c.clone();
             let default_cc = default_c.clone();
+            let tick = std::cell::Cell::new(0u64);
             let id = glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
                 if !*capturing_cc.borrow() {
                     return glib::ControlFlow::Break;
                 }
-                if let Some(name) = poll_gamepad_buttons() {
+                tick.set(tick.get() + 1);
+                if let Some(name) = poll_gamepad_buttons(tick.get()) {
                     let mut p = pressed_cc.borrow_mut();
                     if !p.contains(&name) {
                         p.push(name);
@@ -310,47 +312,74 @@ struct InputEvent {
     value: i32,
 }
 
-fn poll_gamepad_buttons() -> Option<String> {
-    let entries = std::fs::read_dir("/dev/input").ok()?;
-    let mut found: Option<String> = None;
+thread_local! {
+    /// Event-device fds kept open between capture ticks — reopening
+    /// every /dev/input device 20 times a second was the whole cost of
+    /// gamepad capture. Devices that fail reads (unplugged) are dropped;
+    /// the directory is rescanned once a second so a late-plugged pad is
+    /// still found. Held-open evdev fds are what every gamepad daemon
+    /// does; they close when the app does.
+    static EVENT_FDS: std::cell::RefCell<Vec<(std::ffi::CString, i32)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
 
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if !name_str.starts_with("event") {
-            continue;
-        }
-        let path = std::ffi::CString::new(entry.path().to_string_lossy().as_bytes()).ok()?;
-        let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
-        if fd < 0 {
-            continue;
-        }
-
-        let mut buf = [0u8; 24 * 16]; // up to 16 events
-        let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut _, buf.len()) };
-        unsafe {
-            libc::close(fd);
-        }
-
-        if n <= 0 {
-            continue;
-        }
-
-        let count = (n as usize) / 24;
-        for i in 0..count {
-            let ptr = buf.as_ptr() as *const InputEvent;
-            let event = unsafe { &*ptr.add(i) };
-            if event.type_ == 0x01 && event.value == 1 {
-                if let Some(name) = button_code_to_name(event.code) {
-                    found = Some(name.to_string());
-                    break;
+fn poll_gamepad_buttons(tick: u64) -> Option<String> {
+    // One directory rescan per second of ticks picks up new devices.
+    if tick.is_multiple_of(20) {
+        if let Ok(entries) = std::fs::read_dir("/dev/input") {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                if !name.to_string_lossy().starts_with("event") {
+                    continue;
+                }
+                if let Ok(path) =
+                    std::ffi::CString::new(entry.path().to_string_lossy().as_bytes())
+                {
+                    EVENT_FDS.with(|cache| {
+                        let mut fds = cache.borrow_mut();
+                        if !fds.iter().any(|(known, _)| *known == path) {
+                            let fd = unsafe {
+                                libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK)
+                            };
+                            if fd >= 0 {
+                                fds.push((path, fd));
+                            }
+                        }
+                    });
                 }
             }
         }
-        if found.is_some() {
-            break;
-        }
     }
+
+    let mut found: Option<String> = None;
+    EVENT_FDS.with(|cache| {
+        cache.borrow_mut().retain_mut(|(_, fd)| {
+            if found.is_some() {
+                return true;
+            }
+            let mut buf = [0u8; 24 * 16]; // up to 16 events
+            let n = unsafe { libc::read(*fd, buf.as_mut_ptr() as *mut _, buf.len()) };
+            if n <= 0 {
+                // -1 is both "no data" (EAGAIN — normal, keep) and
+                // "device went away" (drop it).
+                let keep =
+                    unsafe { *libc::__errno_location() } == libc::EAGAIN;
+                return keep;
+            }
+            let count = (n as usize) / 24;
+            for i in 0..count {
+                let ptr = buf.as_ptr() as *const InputEvent;
+                let event = unsafe { &*ptr.add(i) };
+                if event.type_ == 0x01 && event.value == 1 {
+                    if let Some(name) = button_code_to_name(event.code) {
+                        found = Some(name.to_string());
+                        break;
+                    }
+                }
+            }
+            true
+        });
+    });
     found
 }
 

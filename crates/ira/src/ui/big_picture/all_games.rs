@@ -800,13 +800,16 @@ impl AllSoftwareUi {
                 s.cfg.sort_descending,
             )
         };
+        // The group members cache is kept in state (loaded on start,
+        // refreshed on every group change) — no DB query per refresh.
         let members: Option<std::collections::HashSet<i64>> =
             self.groups_view.get().map(|group_id| {
-                let db = state.borrow().db.clone();
-                ira_db::get_game_ids_in_group(&db, group_id)
+                state
+                    .borrow()
+                    .group_members
+                    .get(&group_id)
+                    .cloned()
                     .unwrap_or_default()
-                    .into_iter()
-                    .collect()
             });
         let mut games: Vec<Game> = state
             .borrow()

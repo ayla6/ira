@@ -507,17 +507,19 @@ fn add_steam_link_row(
     win: &adw::Window,
     game: &Game,
 ) {
+    let db_id = game.db_id;
     let row = adw::EntryRow::new();
-    row.set_title(&crate::tr!("Steam app ID (linked)"));
+    row.set_title(&crate::tr!("Steam app ID"));
     row.set_text(&game.steam_link_id);
     row.set_tooltip_text(Some(&crate::tr!(
         "Links this game to a Steam entry for metadata only"
     )));
-    {
-        let state = state.clone();
-        let db_id = game.db_id;
-        row.connect_apply(move |row| {
-            let link = row.text().trim().to_string();
+
+    let apply_link: Rc<dyn Fn(&str)> = {
+        let row = row.clone();
+        let state = std::rc::Rc::clone(state);
+        Rc::new(move |link: &str| {
+            let link = link.trim().to_string();
             if !link.is_empty() && link.parse::<u32>().is_err() {
                 row.add_css_class(CSS_ERROR);
                 return;
@@ -530,10 +532,43 @@ fn add_steam_link_row(
             if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
                 g.steam_link_id = link;
             }
-            row.remove_css_class(CSS_ERROR);
+        })
+    };
+    {
+        let apply_link = apply_link.clone();
+        row.connect_apply(move |row| apply_link(&row.text()));
+    }
+
+    // The store search that fills the link without leaving the page.
+    let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
+    search_btn.set_valign(gtk4::Align::Center);
+    search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
+    search_btn.add_css_class(CSS_FLAT);
+    {
+        let row = row.clone();
+        let win = win.clone();
+        let game_name = game.name.clone();
+        let apply_link = apply_link.clone();
+        let state = std::rc::Rc::clone(state);
+        search_btn.connect_clicked(move |_| {
+            let row = row.clone();
+            let win = win.clone();
+            let game_name = game_name.clone();
+            let apply_link = apply_link.clone();
+            let state = std::rc::Rc::clone(&state);
+            super::steam_search::show_steam_id_search_popup(
+                &state,
+                &game_name,
+                &win,
+                &row,
+                &crate::tr!("Link"),
+                Rc::new(move |app_id: &str, _name: &str| {
+                    apply_link(app_id);
+                }),
+            );
         });
     }
-    let _ = win;
+    row.add_suffix(&search_btn);
     parent.add(&row);
 }
 

@@ -180,8 +180,22 @@ pub(super) fn build_general_page(
     let sgdb_id_entry = adw::EntryRow::new();
     sgdb_id_entry.set_title(&crate::tr!("SteamGridDB ID"));
     sgdb_id_entry.set_input_purpose(gtk4::InputPurpose::Number);
+    let sgdb_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
+    sgdb_search_btn.set_valign(gtk4::Align::Center);
+    sgdb_search_btn.set_tooltip_text(Some(&crate::tr!("Search SteamGridDB")));
+    sgdb_search_btn.add_css_class(CSS_FLAT);
+    {
+        let sc = state.clone();
+        let win_c = win.clone();
+        let row_c = sgdb_id_entry.clone();
+        let name_entry_c = name_entry.clone();
+        sgdb_search_btn.connect_clicked(move |_| {
+            show_sgdb_id_search_popup(&sc, &name_entry_c.text(), &win_c, &row_c);
+        });
+    }
+    sgdb_id_entry.add_suffix(&sgdb_search_btn);
     ids_group.add(&sgdb_id_entry);
-    page.append(&ids_group);
+    page.append(&ids_group);    page.append(&ids_group);
 
     let detect_btn = super::helpers::make_browse_button(
         Some(win),
@@ -261,4 +275,87 @@ pub(super) fn build_general_page(
         gog_id_entry,
         sgdb_id_entry,
     )
+}
+
+/// SGDB entry search for the manual-add page: picks an SGDB id into the
+/// field before the game exists in the database.
+fn show_sgdb_id_search_popup(
+    state: &SharedState,
+    game_name: &str,
+    parent: &adw::Dialog,
+    sgdb_row: &adw::EntryRow,
+) {
+    use super::helpers::{clear_children, poll_channel, status_row};
+    use super::steam_search_dialog::{build_search_dialog, match_result_row, SearchDialogWidgets};
+    use std::sync::mpsc;
+
+    let SearchDialogWidgets {
+        dialog,
+        entry,
+        search_btn,
+        list,
+    } = build_search_dialog(
+        &crate::tr!("Search SteamGridDB"),
+        500,
+        400,
+        500,
+        game_name,
+        Some(&crate::tr!("Game name…")),
+    );
+
+    let do_search = {
+        let state = state.clone();
+        let entry = entry.clone();
+        let list = list.clone();
+        let sgdb_row = sgdb_row.downgrade();
+        let dialog = dialog.downgrade();
+        move || {
+            let term = entry.text().trim().to_string();
+            if term.is_empty() {
+                return;
+            }
+            let steam = state.borrow().steam.clone();
+            let (tx, rx) = mpsc::channel::<Vec<(String, String)>>();
+            std::thread::spawn(move || {
+                let _ = tx.send(steam.search_sgdb(&term));
+            });
+            clear_children(&list);
+            list.append(&status_row(&crate::tr!("Searching SteamGridDB…")));
+            let list = list.clone();
+            let sgdb_row = sgdb_row.clone();
+            let dialog = dialog.clone();
+            poll_channel(rx, move |results| {
+                clear_children(&list);
+                if results.is_empty() {
+                    list.append(&status_row(&crate::tr!("No results found")));
+                    return;
+                }
+                for (id, name) in results {
+                    let sgdb_row = sgdb_row.clone();
+                    let dialog = dialog.clone();
+                    let row = match_result_row(&name, &format!("SGDB {id}"), move || {
+                        if let Some(row) = sgdb_row.upgrade() {
+                            row.set_text(&id);
+                        }
+                        if let Some(dialog) = dialog.upgrade() {
+                            dialog.close();
+                        }
+                    });
+                    list.append(&row);
+                }
+            });
+        }
+    };
+
+    let do_search = Rc::new(do_search);
+    entry.connect_activate({
+        let ds = do_search.clone();
+        move |_| ds()
+    });
+    search_btn.connect_clicked({
+        let ds = do_search.clone();
+        move |_| ds()
+    });
+
+    dialog.present(Some(parent));
 }

@@ -21,9 +21,47 @@ use ira_api::ScraperCreds;
 /// local entity cache future pickers search first.
 pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &ScrapedGame) {
     let timestamp = ira_db::scraper_release_timestamp(&picked.release_date);
-    if let Err(e) =
-        ira_db::store_scraper_metadata(&state.borrow().db, db_id, &picked.metadata(timestamp))
-    {
+    // Where the SS entry has data it wins; where it has none, whatever
+    // was stored before (Steam garnish, hand edits) survives. The old
+    // full store let an empty SS entry wipe age ratings and studios.
+    let existing = ira_db::scraper_metadata_for_game(&state.borrow().db, db_id)
+        .ok()
+        .flatten();
+    let fresh = picked.metadata(timestamp);
+    let merged = match existing {
+        Some(current) => {
+            let mut m = current;
+            if !fresh.release_date.is_empty() {
+                m.release_date = fresh.release_date.clone();
+                m.release_timestamp = fresh.release_timestamp;
+                m.release_dates = fresh.release_dates.clone();
+            }
+            if !fresh.players.is_empty() {
+                m.players = fresh.players.clone();
+            }
+            if fresh.rating > 0.0 {
+                m.rating = fresh.rating;
+            }
+            if !fresh.synopses.is_empty() {
+                m.synopses = fresh.synopses.clone();
+            }
+            if !fresh.developers.is_empty() {
+                m.developers = fresh.developers.clone();
+            }
+            if !fresh.publishers.is_empty() {
+                m.publishers = fresh.publishers.clone();
+            }
+            if !fresh.genres.is_empty() {
+                m.genres = fresh.genres.clone();
+            }
+            if !fresh.classifications.is_empty() {
+                m.classifications = fresh.classifications.clone();
+            }
+            m
+        }
+        None => fresh.clone(),
+    };
+    if let Err(e) = ira_db::store_scraper_metadata(&state.borrow().db, db_id, &merged) {
         eprintln!("Failed to store ScreenScraper metadata: {e}");
         return;
     }
@@ -237,6 +275,8 @@ pub fn show_ss_search_dialog(
         let ds = do_search.clone();
         move |_| ds()
     });
+    // The prefill is already the best query — run it on open.
+    do_search();
     search_btn.connect_clicked({
         let ds = do_search.clone();
         move |_| ds()

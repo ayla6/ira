@@ -108,7 +108,7 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
                 ira_parser::entry_data_dir(&save_dir, e),
                 Some(sgdb_game_from_entry(e, &sgdb_id)),
             ),
-            None => (ira_parser::sgdb_data_dir(&save_dir, &sgdb_id), None),
+            None => (ira_parser::local_data_dir(&save_dir, db_id), None),
         };
         let switch_exe = cfg.console("switch").executable.clone();
         let (icon, hero, grid, logo, header, square) = match &game {
@@ -175,7 +175,7 @@ pub(crate) fn fetch_and_report_sgdb_assets(
 ) {
     let dir = match game_for_dir {
         Some(g) => ira_parser::game_data_dir(save_dir, g),
-        None => ira_parser::sgdb_data_dir(save_dir, &sgdb_id),
+        None => ira_parser::local_data_dir(save_dir, db_id),
     };
     let (icon, hero, grid, logo, header, square) = match game_for_dir {
         Some(g) => {

@@ -451,7 +451,7 @@ fn start_background_enrichment(state: &SharedState) {
                 } else if trophy_source.has_steam_enrichment() {
                     ira_parser::data_dir(&save_dir, &app_id)
                 } else {
-                    ira_parser::sgdb_data_dir(&save_dir, &sgdb_id)
+                    ira_parser::local_data_dir(&save_dir, db_id)
                 };
                 // Console games keep their square native: SGDB must never
                 // write that slot, and an empty path preserves whatever the

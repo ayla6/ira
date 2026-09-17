@@ -30,13 +30,6 @@ pub fn switch_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
     Path::new(save_dir).join("data").join("switch").join(db_id.to_string())
 }
 
-pub fn sgdb_data_dir(save_dir: &str, sgdb_id: &str) -> PathBuf {
-    Path::new(save_dir)
-        .join("data")
-        .join("steamgriddb")
-        .join(sgdb_id)
-}
-
 pub fn retro_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
     Path::new(save_dir)
         .join("data")
@@ -52,7 +45,6 @@ fn data_dir_for(
     kind: ira_models::GameKind,
     id: &str,
     db_id: i64,
-    sgdb_id: &str,
     enriched: bool,
 ) -> PathBuf {
     match kind {
@@ -64,13 +56,26 @@ fn data_dir_for(
         ira_models::GameKind::WiiU => wiiu_data_dir(save_dir, id),
         ira_models::GameKind::ThreeDS => three_ds_data_dir(save_dir, id),
         _ if enriched => data_dir(save_dir, id),
-        _ if !sgdb_id.is_empty() => sgdb_data_dir(save_dir, sgdb_id),
-        _ => data_dir(save_dir, id),
+        _ if !id.is_empty() => data_dir(save_dir, id),
+        // No store id at all (manually added PC games): key the
+        // directory on the unique row id — an empty id used to mean one
+        // shared directory for every such game, with each new game
+        // inheriting the previous one's images.
+        _ => local_data_dir(save_dir, db_id),
     }
 }
 
-/// Returns the data directory for a game based on its kind, trophy source,
-/// and SGDB ID. Centralizes the branching logic that was duplicated across
+/// The per-game data directory for games with no id of their own,
+/// keyed on Ira's row id.
+pub fn local_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
+    Path::new(save_dir)
+        .join("data")
+        .join("ira")
+        .join(db_id.to_string())
+}
+
+/// Returns the data directory for a game based on its kind and trophy
+/// source. Centralizes the branching logic that was duplicated across
 /// game_loader, edit_game_dialog, image_manager, and context_menu.
 pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
     data_dir_for(
@@ -78,7 +83,6 @@ pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
         game.kind,
         &game.app_id,
         game.db_id,
-        &game.sgdb_id,
         game.trophy_source.has_steam_enrichment(),
     )
 }
@@ -95,7 +99,6 @@ pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf 
         entry.kind,
         id,
         entry.id,
-        entry.sgdb_id.as_deref().unwrap_or(""),
         entry.trophy_source.has_steam_enrichment(),
     )
 }

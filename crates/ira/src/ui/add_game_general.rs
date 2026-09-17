@@ -21,6 +21,7 @@ pub(super) fn build_general_page(
     adw::ComboRow,
     adw::EntryRow,
     adw::EntryRow,
+    adw::EntryRow,
 ) {
     let page = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
@@ -43,12 +44,19 @@ pub(super) fn build_general_page(
     let folder_entry = adw::EntryRow::new();
     folder_entry.set_title(&crate::tr!("Game folder"));
 
+    let games_root = state.borrow().cfg.default_game_folder.clone();
     let folder_browse = super::helpers::make_browse_button(
         Some(win),
         &crate::tr!("Select game folder"),
         true,
         None,
-        super::helpers::entry_path_closure(&folder_entry),
+        {
+            let entry = folder_entry.clone();
+            let games_root = games_root.clone();
+            move || super::helpers::entry_path_closure(&entry)().or_else(|| {
+                (!games_root.is_empty()).then_some(games_root.clone())
+            })
+        },
         {
             let entry = folder_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -68,7 +76,19 @@ pub(super) fn build_general_page(
             &crate::tr!("Executable"),
             &["application/x-executable", "application/x-msdos-program"],
         )),
-        super::helpers::entry_path_closure(&exe_entry),
+        {
+            let entry = exe_entry.clone();
+            let folder = folder_entry.clone();
+            let games_root = games_root.clone();
+            move || {
+                super::helpers::entry_path_closure(&entry)().or_else(|| {
+                    let folder = folder.text().trim().to_string();
+                    (!folder.is_empty()).then_some(folder).or_else(|| {
+                        (!games_root.is_empty()).then_some(games_root.clone())
+                    })
+                })
+            }
+        },
         {
             let entry = exe_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -157,6 +177,10 @@ pub(super) fn build_general_page(
     );
     gog_id_entry.add_suffix(&gog_browse_btn);
     ids_group.add(&gog_id_entry);
+    let sgdb_id_entry = adw::EntryRow::new();
+    sgdb_id_entry.set_title(&crate::tr!("SteamGridDB ID"));
+    sgdb_id_entry.set_input_purpose(gtk4::InputPurpose::Number);
+    ids_group.add(&sgdb_id_entry);
     page.append(&ids_group);
 
     let detect_btn = super::helpers::make_browse_button(
@@ -235,5 +259,6 @@ pub(super) fn build_general_page(
         profile_row,
         steam_id_entry,
         gog_id_entry,
+        sgdb_id_entry,
     )
 }

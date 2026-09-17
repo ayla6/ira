@@ -47,6 +47,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
         profile_row,
         steam_id_entry,
         gog_id_entry,
+        sgdb_id_entry,
     ) = build_general_page(&win, &profiles, state);
     sidebar.append(&super::settings_pages::settings_sidebar_row(
         "emblem-system-symbolic",
@@ -133,6 +134,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
             profile_row: &profile_row,
             steam_id_entry: &steam_id_entry,
             gog_id_entry: &gog_id_entry,
+            sgdb_id_entry: &sgdb_id_entry,
             env_vars_box: &env_vars_box,
             ld_preload_entry: &ld_preload_entry,
             ld_library_entry: &ld_library_entry,
@@ -216,6 +218,7 @@ struct AddGameWidgets<'a> {
     profile_row: &'a adw::ComboRow,
     steam_id_entry: &'a adw::EntryRow,
     gog_id_entry: &'a adw::EntryRow,
+    sgdb_id_entry: &'a adw::EntryRow,
     env_vars_box: &'a gtk4::ListBox,
     ld_preload_entry: &'a adw::EntryRow,
     ld_library_entry: &'a adw::EntryRow,
@@ -241,6 +244,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         profile_row,
         steam_id_entry,
         gog_id_entry,
+        sgdb_id_entry,
         env_vars_box,
         ld_preload_entry,
         ld_library_entry,
@@ -265,6 +269,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
     let profile_row = profile_row.clone();
     let steam_id_entry = steam_id_entry.clone();
     let gog_id_entry = gog_id_entry.clone();
+    let sgdb_id_entry = sgdb_id_entry.clone();
     let env_vars_box = env_vars_box.clone();
     let ld_preload_entry = ld_preload_entry.clone();
     let ld_library_entry = ld_library_entry.clone();
@@ -302,6 +307,11 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         };
         let steam_app_id = steam_id_entry.text().to_string();
         let gog_product_id = gog_id_entry.text().to_string();
+        let sgdb_id = sgdb_id_entry.text().trim().to_string();
+        if !sgdb_id.is_empty() && !sgdb_id.chars().all(|c| c.is_ascii_digit()) {
+            sgdb_id_entry.add_css_class(CSS_ERROR);
+            return;
+        }
 
         let trophy_source = if !steam_app_id.is_empty() {
             ira_models::TrophySource::Gse
@@ -352,6 +362,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         let sender_c = sender.clone();
         let name_c = name;
         let app_id_c = platform_id.clone();
+        let sgdb_id_c = sgdb_id.clone();
         let game_folder_c = game_folder;
         let kind_c = kind;
         let ts_c = trophy_source;
@@ -377,6 +388,11 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
                 save_dir: &save_dir_c,
             }) {
                 Ok(game_id) => {
+                    if !sgdb_id_c.is_empty() {
+                        if let Err(e) = ira_db::set_sgdb_id(&db_c, game_id, &sgdb_id_c) {
+                            eprintln!("Failed to store the SGDB id: {}", e);
+                        }
+                    }
                     let entry = ira_db::find_by_db_id(&db_c, game_id).ok().flatten();
                     if let Some(entry) = entry {
                         if let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir_c) {

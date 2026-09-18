@@ -61,7 +61,7 @@ pub fn start_metadata_refetch(state: &SharedState) -> bool {
         state,
         job,
         rx,
-        crate::tr!("{} games updated"),
+        crate::tr!("{} of {} games updated"),
         crate::tr!("Metadata fetched"),
         |state| state.borrow().ss_job_busy.set(false),
     );
@@ -97,7 +97,7 @@ pub fn start_steam_refetch(state: &SharedState) -> bool {
         state,
         job,
         rx,
-        crate::tr!("{} games updated"),
+        crate::tr!("{} of {} games updated"),
         crate::tr!("Steam data fetched"),
         |_| {},
     );
@@ -238,6 +238,12 @@ pub(crate) fn steam_refetch_one(
     let info = steam.fetch_steamcmd_info(&app_id);
     let extras = steam.fetch_store_extras(&app_id);
     if info.is_none() && extras.is_none() {
+        // Most often a stored id Steam does not know — auto-identification
+        // picked it from a store search, and the wrong app answers nothing.
+        eprintln!(
+            "Steam refetch: '{}': steam answered nothing for app {app_id}",
+            entry.title
+        );
         return RefetchOutcome::Failed("steam answered nothing".to_string());
     }
     let mut meta = ira_db::scraper_metadata_for_game(db, db_id)
@@ -352,7 +358,7 @@ pub fn start_full_refetch(state: &SharedState) -> bool {
         state,
         job,
         rx,
-        crate::tr!("{} games updated"),
+        crate::tr!("{} of {} games updated"),
         crate::tr!("Metadata fetched"),
         |state| state.borrow().ss_job_busy.set(false),
     );
@@ -427,17 +433,28 @@ fn poll_refetch(
     // disconnect (done, cancelled, or failed) is the finish signal.
     glib::spawn_future_local(async move {
         let mut filled = 0usize;
+        let mut processed = 0usize;
         loop {
             match rx.recv().await {
                 Ok(progress) => {
-                    if matches!(progress.outcome, RefetchOutcome::Filled) {
-                        filled += 1;
-                        // Only repaints when the refilled game's settings
-                        // window is the one open right now.
-                        super::edit_game_scraper::refresh_scraper_section(
-                            &state,
-                            progress.db_id,
-                        );
+                    processed += 1;
+                    match &progress.outcome {
+                        RefetchOutcome::Filled => {
+                            filled += 1;
+                            // Only repaints when the refilled game's settings
+                            // window is the one open right now.
+                            super::edit_game_scraper::refresh_scraper_section(
+                                &state,
+                                progress.db_id,
+                            );
+                        }
+                        // A failed game explains itself in the terminal —
+                        // the summary alone would read as a misreport
+                        // ("why did my Steam games not update?").
+                        RefetchOutcome::Failed(e) => {
+                            eprintln!("Refetch: '{}': {e}", progress.current);
+                        }
+                        RefetchOutcome::Unchanged => {}
                     }
                     job.progress(&state, progress.done, progress.total, &progress.current);
                 }
@@ -445,7 +462,9 @@ fn poll_refetch(
                     on_finish(&state);
                     job.finish(
                         &state,
-                        &short_done.replacen("{}", &filled.to_string(), 1),
+                        &short_done
+                            .replacen("{}", &filled.to_string(), 1)
+                            .replacen("{}", &processed.to_string(), 1),
                         &status_done,
                     );
                     return;

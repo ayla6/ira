@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-18 17:57-0300\n"
+"POT-Creation-Date: 2026-09-18 18:09-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -376,8 +376,8 @@ msgid "Searching SteamGridDB…"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:330
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:547
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:609
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:550
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:612
 #: crates/ira/src/ui/edit_game_scraper.rs:411
 #: crates/ira/src/ui/ra_match_dialog.rs:149
 #: crates/ira/src/ui/sgdb_match_dialog.rs:252
@@ -777,8 +777,8 @@ msgid "Remove \"{}\"?"
 msgstr ""
 
 #: crates/ira/src/ui/context_menu_actions.rs:111
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:399
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:933
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:402
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:992
 msgid "Remove"
 msgstr ""
 
@@ -1043,7 +1043,7 @@ msgid "Unused"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:156
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:980
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:1039
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:41
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:91
 #: crates/ira/src/ui/settings_pages.rs:1296
@@ -1078,7 +1078,7 @@ msgid "Add alias…"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:235
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:322
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:325
 msgid "Merge into…"
 msgstr ""
 
@@ -1086,19 +1086,19 @@ msgstr ""
 msgid "Combine this entry with another one"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:319
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:322
 #: crates/ira/src/ui/edit_game_scraper.rs:1029
 #: crates/ira/src/ui/steam_search_dialog.rs:61
 #: crates/ira/src/ui/steam_search.rs:34
 msgid "Search"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:321
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:324
 #, rust-format
 msgid "Manage {}"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:375
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:378
 #: crates/ira/src/ui/edit_game_scraper.rs:490
 #: crates/ira/src/ui/input_output_picker.rs:141
 #: crates/ira/src/ui/input_profile_action_sets.rs:217
@@ -1111,33 +1111,74 @@ msgstr ""
 msgid "None"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:392
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:395
 msgid "Manage"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:523
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:526
 #: crates/ira/src/ui/settings_pages.rs:1333
 #, rust-format
 msgid "Add \"{}\""
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:545
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:548
 msgid "Nothing in the cache yet — it fills as games get matched"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:618
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:621
 msgid "Merge"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:865
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:658
+msgid "Fetching genres…"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:659
+msgid "Fetching the genre table…"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:660
+msgid "Genre table fetched"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:663
+msgid "Fetching families…"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:664
+msgid "Fetching the family table…"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:665
+msgid "Family table fetched"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:730
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:754
+msgid "Fetch failed"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:731
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:755
+#: crates/ira/src/ui/edit_game_scraper.rs:976
+#, rust-format
+msgid "Fetch failed: {}"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:743
+#, rust-format
+msgid "{} entries cached"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:924
 msgid "Saved"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:921
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:980
 msgid "No aliases"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:978
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:1037
 msgid "Added"
 msgstr ""
 
@@ -1581,11 +1622,6 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:973
 msgid "Everything was already stored"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_scraper.rs:976
-#, rust-format
-msgid "Fetch failed: {}"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:985

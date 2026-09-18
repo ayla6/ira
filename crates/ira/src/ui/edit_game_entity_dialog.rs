@@ -286,9 +286,12 @@ pub(super) fn show_entity_dialog(
     let state = Rc::new(state.clone());
     let selected: Rc<RefCell<Option<i64>>> = Default::default();
     let edits: Rc<RefCell<EntityEdits>> = Default::default();
-    // The genre and family caches fill one-time from the source's whole
-    // table — companies have no listing endpoint and stay harvest-only.
-    let warmed: Rc<Cell<bool>> = Default::default();
+    // The genre and family caches fill from the source's whole table on
+    // first need — companies have no listing endpoint and stay
+    // harvest-only. The fetch rides the sidebar strip and its marker
+    // lives in the database; a refetch later is a matter of clearing
+    // the marker.
+    let warming: Rc<Cell<bool>> = Default::default();
     // Shared: navigate records the current page here and every handler
     // reads the same copy — a plain Cell clone would fork the state.
     let page: Rc<Cell<Page>> = Rc::new(Cell::new(Page::Root));
@@ -625,17 +628,19 @@ pub(super) fn show_entity_dialog(
         }
     };
 
-    // Warm the cache from the source's whole table when it is thin:
-    // the pickers search the local cache, and a library new to matching
-    // would otherwise present three rows where the source has hundreds.
-    // One fetch per dialog session at most.
+    // Fetch the source's whole table when this kind's cache was never
+    // fetched: the pickers search the local cache, and a library new
+    // to matching would otherwise present three rows where the source
+    // has hundreds. The fetched-at marker makes "never" explicit and
+    // gives a future refetch its hook; the run reports on the sidebar
+    // strip like every other job.
     let maybe_warm: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
-        let warmed = warmed.clone();
+        let warming = warming.clone();
         let refresh_manage = refresh_manage.clone();
         let manage_search = manage_search.clone();
         move || {
-            if kind == ira_db::KIND_COMPANY || warmed.get() {
+            if kind == ira_db::KIND_COMPANY || warming.get() {
                 return;
             }
             let (steam, cfg, db) = {
@@ -645,18 +650,39 @@ pub(super) fn show_entity_dialog(
             if !cfg.screenscraper_enabled {
                 return;
             }
-            let count = ira_db::list_entities(&db, kind, "").unwrap_or_default().len();
-            if count >= 100 {
-                warmed.set(true);
+            if matches!(ira_db::entity_fetched_at(&db, kind), Ok(Some(_))) {
                 return;
             }
-            warmed.set(true);
+            let (short_label, status_label, done_status) = match kind {
+                ira_db::KIND_GENRE => (
+                    crate::tr!("Fetching genres…"),
+                    crate::tr!("Fetching the genre table…"),
+                    crate::tr!("Genre table fetched"),
+                ),
+                _ => (
+                    crate::tr!("Fetching families…"),
+                    crate::tr!("Fetching the family table…"),
+                    crate::tr!("Family table fetched"),
+                ),
+            };
+            let Some(job) =
+                super::fetch_images::begin_strip_job(&state, &short_label, &status_label)
+            else {
+                return;
+            };
+            warming.set(true);
             let creds = ira_api::ScraperCreds::from_account(
                 cfg.screenscraper_id.clone(),
                 cfg.screenscraper_password.clone(),
             );
-            let (tx, rx) = std::sync::mpsc::channel::<Vec<(i64, String)>>();
+            let cancel = job.cancel_flag();
+            let (tx, rx) =
+                std::sync::mpsc::channel::<Result<Vec<(i64, String)>, String>>();
             std::thread::spawn(move || {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = tx.send(Ok(Vec::new()));
+                    return;
+                }
                 let fetched = match kind {
                     ira_db::KIND_GENRE => steam
                         .genres_list(&creds)
@@ -669,8 +695,7 @@ pub(super) fn show_entity_dialog(
                                         .map(|id| (id, row.name.clone()))
                                 })
                                 .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default(),
+                        }),
                     _ => steam
                         .familles_list(&creds)
                         .map(|rows| {
@@ -679,24 +704,58 @@ pub(super) fn show_entity_dialog(
                                     id.parse::<i64>().ok().map(|id| (id, name.clone()))
                                 })
                                 .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default(),
+                        }),
                 };
                 let _ = tx.send(fetched);
             });
-            let state = state.clone();
             let refresh_manage = refresh_manage.clone();
             let manage_search = manage_search.clone();
-            super::helpers::poll_channel(rx, move |entries| {
-                if entries.is_empty() {
-                    return;
+            let warming = warming.clone();
+            let state = state.clone();
+            let job = job.clone();
+            super::helpers::poll_channel(rx, move |fetched| {
+                warming.set(false);
+                match fetched {
+                    // A cancelled fetch frees the strip silently (the
+                    // cancel click already froze its labels) and leaves
+                    // the marker absent, so the next manage entry
+                    // retries.
+                    Ok(entries) if entries.is_empty() => {}
+                    Ok(entries) => {
+                        let db = state.borrow().db.clone();
+                        if let Err(e) = ira_db::warm_entity_cache(&db, kind, &entries) {
+                            eprintln!("Failed to warm the entity cache: {e}");
+                            job.finish(
+                                &state,
+                                &crate::tr!("Fetch failed"),
+                                &crate::tr!("Fetch failed: {}").replacen("{}", &e, 1),
+                            );
+                            return;
+                        }
+                        if let Err(e) =
+                            ira_db::set_entity_fetched(&db, kind, chrono::Utc::now().timestamp())
+                        {
+                            eprintln!("Failed to mark the fetch: {e}");
+                        }
+                        refresh_manage(&manage_search.text());
+                        job.finish(
+                            &state,
+                            &crate::tr!("{} entries cached").replacen(
+                                "{}",
+                                &entries.len().to_string(),
+                                1,
+                            ),
+                            &done_status,
+                        );
+                    }
+                    Err(e) => {
+                        job.finish(
+                            &state,
+                            &crate::tr!("Fetch failed"),
+                            &crate::tr!("Fetch failed: {}").replacen("{}", &e, 1),
+                        );
+                    }
                 }
-                let db = state.borrow().db.clone();
-                if let Err(e) = ira_db::warm_entity_cache(&db, kind, &entries) {
-                    eprintln!("Failed to warm the entity cache: {e}");
-                    return;
-                }
-                refresh_manage(&manage_search.text());
             });
         }
     });

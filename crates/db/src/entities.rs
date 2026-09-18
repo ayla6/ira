@@ -218,6 +218,28 @@ pub fn warm_entity_cache(
     Ok(())
 }
 
+/// When a kind's cache last fetched the source's whole table, if
+/// ever. Absent means "never" — the cue to fetch it all.
+pub fn entity_fetched_at(conn: &DbConn, kind: &str) -> Result<Option<i64>, String> {
+    crate::query_optional_scalar(
+        conn,
+        "SELECT fetched_at FROM scraper_fetch_log WHERE kind = ?1",
+        params![kind],
+    )
+}
+
+/// Record a completed whole-table fetch.
+pub fn set_entity_fetched(conn: &DbConn, kind: &str, at: i64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "INSERT INTO scraper_fetch_log (kind, fetched_at) VALUES (?1, ?2)
+         ON CONFLICT(kind) DO UPDATE SET fetched_at = excluded.fetched_at",
+        params![kind, at],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
 /// A user rename: the new spelling lands and latches the row, so the
 /// store's freshen-from-source pass stops overwriting it.
 pub fn rename_entity(conn: &DbConn, kind: &str, id: i64, name: &str) -> Result<(), String> {

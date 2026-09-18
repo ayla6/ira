@@ -6,12 +6,13 @@ use std::sync::mpsc;
 
 use adw::prelude::*;
 
+use ira_api::ScraperCreds;
 use ira_models::{GameKind, GameLaunchConfig, GameVariant, TrophySource, WineConfig, WineProfile};
 
 use super::add_game_db::{add_game_to_db, AddGameToDbParams};
 use super::css::*;
-use super::edit_game_dialog::show_edit_game_dialog;
 use super::helpers::clear_children;
+use super::ss_match_dialog::persist_ss_match;
 use super::state::SharedState;
 use super::steam_search_dialog::{
     show_search_results_dialog, SearchResultsDialogParams, SearchSource,
@@ -47,6 +48,12 @@ pub(super) enum WizardEvent {
     NeedSteamSearch {
         folder: PathBuf,
         name: String,
+    },
+    /// The add's ScreenScraper pass landed a match; persist it on the main
+    /// loop — `persist_ss_match` touches the shared game list.
+    SsMatched {
+        db_id: i64,
+        game: Box<ira_api::screenscraper::ScrapedGame>,
     },
 }
 
@@ -632,7 +639,10 @@ pub(super) fn handle_identify_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEven
             show_steam_search_page(wizard, folder, name)
         }
         // Add-phase events are handled by handle_add_event.
-        WizardEvent::Added(_) | WizardEvent::EmulatorPrompt { .. } | WizardEvent::InstallDone => {}
+        WizardEvent::Added(_)
+        | WizardEvent::EmulatorPrompt { .. }
+        | WizardEvent::InstallDone
+        | WizardEvent::SsMatched { .. } => {}
     }
 }
 
@@ -905,14 +915,26 @@ pub(super) fn start_add(
             s.cfg.clone(),
         )
     };
-    set_status(&wizard, &crate::tr!("Adding game and downloading assets…"));
+    // No window for the download: the wizard goes away here and the game
+    // simply appears in the sidebar, the strip carrying the progress.
+    // Decision prompts (emulator install, redists) still come back over
+    // the main window.
+    wizard.borrow().win.close();
+
+    // Skipped too when a matching job owns the quota gate — one search
+    // is not worth colliding with a batch pass.
+    let ss_auto_match = {
+        let w = wizard.borrow();
+        let s = w.state.borrow();
+        cfg.screenscraper_enabled && !s.ss_job_busy.get()
+    };
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let rx = Rc::new(RefCell::new(rx));
 
     // The download's phase reports land on the sidebar strip instead of
-    // the wizard's status line, so they stay visible if the wizard is
-    // closed mid-add. The strip is claimed on the first report — an add
+    // a wizard status line, so they stay visible now that the wizard is
+    // closed. The strip is claimed on the first report — an add
     // that fails before enriching never flashes it — and, when another
     // job holds it, the reports are dropped.
     let (progress_tx, progress_rx) =
@@ -958,6 +980,7 @@ pub(super) fn start_add(
             skip_emu_prompt,
             language_preferences,
             cfg,
+            ss_auto_match,
             progress: Arc::new(move |done, total, label| {
                 let _ = progress_tx.try_send((done, total, label.to_string()));
             }),
@@ -968,7 +991,10 @@ pub(super) fn start_add(
     glib::source::idle_add_local_full(glib::Priority::LOW, move || {
         match rx.borrow_mut().try_recv() {
             Ok(ev) => {
-                let terminal = !matches!(ev, WizardEvent::Status(_));
+                // The ScreenScraper match precedes the terminal event and
+                // changes nothing about the wizard's fate.
+                let terminal =
+                    !matches!(ev, WizardEvent::Status(_) | WizardEvent::SsMatched { .. });
                 handle_add_event(&wizard_c, ev);
                 if terminal {
                     glib::ControlFlow::Break
@@ -995,6 +1021,9 @@ pub(super) struct AddParams {
     pub skip_emu_prompt: bool,
     pub language_preferences: Vec<String>,
     pub cfg: ira_config::Config,
+    /// Run the one-shot ScreenScraper match after enriching (the config
+    /// enables the source and no batch pass owns the quota gate).
+    pub ss_auto_match: bool,
     /// Feeds the sidebar strip the download's phase reports.
     pub progress: crate::ui::enrichment::EnrichProgress,
 }
@@ -1031,6 +1060,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             skip_emu_prompt,
             language_preferences,
             cfg,
+            ss_auto_match,
             progress,
         } = params;
         let setup = build_add_game_setup(&game, &profiles, profile_id);
@@ -1068,7 +1098,15 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
 
         let save_dir_for_lang = save_dir.clone();
         let db_for_cache = db.clone();
-        enrich_added_game(db, steam, sender, save_dir, cfg, &game_obj, progress);
+        enrich_added_game(
+            db.clone(),
+            steam.clone(),
+            sender,
+            save_dir.clone(),
+            cfg.clone(),
+            &game_obj,
+            progress,
+        );
         apply_language_preference(
             &game,
             &game_obj,
@@ -1076,6 +1114,10 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             &app_id,
             &language_preferences,
         );
+
+        if ss_auto_match {
+            auto_match_screenscraper(&steam, &db_for_cache, &cfg, &game_obj, &name, db_id, &tx);
+        }
 
         if skip_emu_prompt {
             let _ = tx.send(WizardEvent::Added(db_id));
@@ -1239,6 +1281,39 @@ fn enrich_added_game(
     });
 }
 
+/// The add's own ScreenScraper pass: one ranked search for the fresh
+/// game, the hit sent back for persisting on the main loop. A miss is
+/// silent — the game's Identity page keeps the manual search.
+fn auto_match_screenscraper(
+    steam: &std::sync::Arc<ira_api::SteamDataClient>,
+    db: &ira_db::DbConn,
+    cfg: &ira_config::Config,
+    game: &Game,
+    display: &str,
+    db_id: i64,
+    tx: &mpsc::Sender<WizardEvent>,
+) {
+    let creds = ScraperCreds::from_account(
+        cfg.screenscraper_id.clone(),
+        cfg.screenscraper_password.clone(),
+    );
+    let target = super::mass_match_ss::PcMatchTarget {
+        kind: game.kind,
+        platform_id: &game.platform_id,
+        title: &game.name,
+        display,
+        db_id,
+    };
+    if let super::mass_match_ss::SsOutcome::Hit(picked) =
+        super::mass_match_ss::run_pc_matching(steam, &creds, db, &target)
+    {
+        let _ = tx.send(WizardEvent::SsMatched {
+            db_id,
+            game: picked,
+        });
+    }
+}
+
 fn apply_language_preference(
     identified: &IdentifiedGame,
     game: &Game,
@@ -1354,6 +1429,9 @@ fn emulator_needed(game_folder: &str) -> Option<EmuKind> {
 
 pub(super) fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
     match ev {
+        WizardEvent::SsMatched { db_id, game } => {
+            persist_ss_match(&wizard.borrow().state, db_id, &game);
+        }
         WizardEvent::Added(db_id) => finalize(wizard, db_id),
         WizardEvent::EmulatorPrompt {
             db_id,
@@ -1364,10 +1442,7 @@ pub(super) fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
             prompt_install_emulator(wizard, db_id, game_folder, app_id, emu_kind);
         }
         WizardEvent::InstallDone => {}
-        WizardEvent::Failed(e) => {
-            show_error(wizard, &e);
-            show_pick_page(wizard);
-        }
+        WizardEvent::Failed(e) => show_add_error(wizard, &e),
         WizardEvent::Status(msg) => set_status(wizard, &msg),
         _ => {}
     }
@@ -1408,7 +1483,7 @@ fn prompt_install_emulator(
         None => {}
     }
 
-    let (win, default_version, versions) = {
+    let (main_win, default_version, versions) = {
         let w = wizard.borrow();
         let state = w.state.borrow();
         let default_version = state.cfg.default_api_emu_version.clone();
@@ -1416,7 +1491,7 @@ fn prompt_install_emulator(
             EmuKind::Nge => ira_platforms::api_emulators::list_gog_versions(&state.save_dir),
             EmuKind::Gse => ira_platforms::api_emulators::list_gse_versions(&state.save_dir),
         };
-        (w.win.clone(), default_version, versions)
+        (state.window.clone(), default_version, versions)
     };
     let (title, body) = match emu_kind {
         EmuKind::Nge => (
@@ -1489,7 +1564,7 @@ fn prompt_install_emulator(
     outer.append(&btn_row);
 
     dialog.set_child(Some(&outer));
-    dialog.present(Some(win.as_widget()));
+    dialog.present(Some(&main_win));
 
     let resolved = Rc::new(Cell::new(false));
     let wizard_c = wizard.clone();
@@ -1560,11 +1635,6 @@ fn start_install(
     emu_kind: EmuKind,
 ) {
     let save_dir = wizard.borrow().state.borrow().save_dir.clone();
-    let status = match emu_kind {
-        EmuKind::Nge => crate::tr!("Installing Nemirtingas Galaxy emulator…"),
-        EmuKind::Gse => crate::tr!("Installing Goldberg emulator…"),
-    };
-    set_status(&wizard, &status);
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let tx_c = tx;
@@ -1621,11 +1691,11 @@ pub(super) fn finalize(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
             let local = ira_platforms::steam::detect_redists_in_game_folder(folder);
             if !local.is_empty() {
                 prompt_redists(wizard, db_id, local);
-                return;
             }
         }
     }
-    close_and_open_edit(wizard, db_id);
+    // Nothing opens at the end: the game is in the sidebar and the strip
+    // announced the add. The settings screen stays a manual visit.
 }
 
 pub(super) fn prompt_redists(
@@ -1633,10 +1703,7 @@ pub(super) fn prompt_redists(
     db_id: i64,
     packages: Vec<ira_platforms::steam::RedistPackage>,
 ) {
-    let (win, state) = {
-        let w = wizard.borrow();
-        (w.win.clone(), w.state.clone())
-    };
+    let win = wizard.borrow().state.borrow().window.clone();
     let body = crate::tr!(
         "Steamworks redistributables were found:\n{}\n\nInstall the selected ones now via Wine?"
     )
@@ -1658,15 +1725,14 @@ pub(super) fn prompt_redists(
 
     let wizard_c = wizard.clone();
     alert.choose(
-        Some(win.as_widget()),
+        Some(&win),
         None::<&gtk4::gio::Cancellable>,
         move |response| {
             if response == "install" {
                 start_redist_install(wizard_c.clone(), db_id, packages);
-            } else {
-                close_and_open_edit(&wizard_c, db_id);
             }
-            let _ = state;
+            // Skipping installs nothing and announces nothing — the
+            // strip's "added" already ran.
         },
     );
 }
@@ -1681,10 +1747,6 @@ pub(super) fn start_redist_install(
         let s = w.state.borrow();
         (s.db.clone(), s.save_dir.clone(), w.last_folder.clone())
     };
-    set_status(
-        &wizard,
-        &crate::tr!("Installing redistributables via Wine…"),
-    );
 
     // Copy _CommonRedist into the game folder so redists persist across
     // prefix changes. Installer paths are remapped to the local copy.
@@ -1694,7 +1756,6 @@ pub(super) fn start_redist_install(
     };
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
-    let rx = Rc::new(RefCell::new(rx));
     std::thread::spawn(move || {
         let wine_config = ira_db::get_game_config(&db, db_id)
             .ok()
@@ -1734,26 +1795,13 @@ pub(super) fn start_redist_install(
         let _ = tx.send(WizardEvent::InstallDone);
     });
 
-    let wizard_c = wizard;
-    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-        match rx.borrow_mut().try_recv() {
-            Ok(_) => {
-                close_and_open_edit(&wizard_c, db_id);
-                glib::ControlFlow::Break
-            }
-            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
-        }
+    // The installers run with no window over them; when they finish the
+    // add is simply over — the strip said "added" long since.
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || match rx.try_recv() {
+        Ok(_) => glib::ControlFlow::Break,
+        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
     });
-}
-
-pub(super) fn close_and_open_edit(wizard: &Rc<RefCell<Wizard>>, db_id: i64) {
-    let (state, win) = {
-        let w = wizard.borrow();
-        (w.state.clone(), w.win.clone())
-    };
-    win.close();
-    show_edit_game_dialog(&state, db_id);
 }
 
 pub(super) fn resolve_wine_config(profiles: &[WineProfile], profile_id: Option<i64>) -> WineConfig {
@@ -1794,6 +1842,17 @@ pub(super) fn show_error(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
     alert.set_default_response(Some("ok"));
     alert.set_close_response("ok");
     alert.present(Some(win.as_widget()));
+}
+
+/// Add-phase failures surface on the main window: the wizard closed
+/// itself when the add began, so it can no longer host alerts.
+fn show_add_error(wizard: &Rc<RefCell<Wizard>>, msg: &str) {
+    let win = wizard.borrow().state.borrow().window.clone();
+    let alert = adw::AlertDialog::new(Some(&crate::tr!("Auto-add failed")), Some(msg));
+    alert.add_response("ok", &crate::tr!("OK"));
+    alert.set_default_response(Some("ok"));
+    alert.set_close_response("ok");
+    alert.present(Some(&win));
 }
 
 fn move_dir(src: &Path, dst: &Path) -> Result<(), String> {

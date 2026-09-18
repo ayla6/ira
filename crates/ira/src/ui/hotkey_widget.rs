@@ -168,7 +168,7 @@ fn setup_keyboard(
         } else {
             *capturing_c.borrow_mut() = true;
             btn_c.set_label("…");
-            btn_c.set_tooltip_text(Some(&crate::tr!("Press key — Esc to cancel")));
+            btn_c.set_tooltip_text(Some(&crate::tr!("Press a key. Esc cancels")));
             reset_c.set_visible(false);
         }
     });

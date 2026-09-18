@@ -303,7 +303,7 @@ pub(super) fn build_api_emulator_page(
             };
             let alert = adw::AlertDialog::new(
                 Some(&crate::tr!("Uninstall API emulator?")),
-                Some(&crate::tr!("This will restore the original Steam/GOG DLLs. The change will be applied when you save.")),
+                Some(&crate::tr!("Restores the original Steam/GOG DLLs on Save")),
             );
             alert.add_response("cancel", &crate::tr!("Cancel"));
             alert.add_response("uninstall", &crate::tr!("Uninstall"));

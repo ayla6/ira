@@ -179,8 +179,12 @@ pub fn settings_window_layout_sized(
         stack,
     } = dialog_widgets();
     header.set_title_widget(Some(&gtk4::Label::new(Some(title))));
+    // The root overlay hosts toasts for every settings page (and for
+    // the job refusals the fetch buttons report).
+    let toast_overlay = adw::ToastOverlay::new();
+    toast_overlay.set_child(Some(&outer));
     // AdwWindow only accepts set_content; gtk_window_set_child aborts.
-    win.set_content(Some(&outer));
+    win.set_content(Some(&toast_overlay));
 
     SettingsWindowLayout {
         window: win,
@@ -188,6 +192,29 @@ pub fn settings_window_layout_sized(
         stack,
         content_area,
         sidebar_area,
+    }
+}
+
+/// Show a short notice on a settings window: the window's root is a
+/// toast overlay, so the message lands wherever the user is in the
+/// settings. No-op when the window has no overlay (or is gone).
+pub fn show_settings_toast(win: &adw::Window, message: &str) {
+    let toast = adw::Toast::new(message);
+    if let Some(overlay) = win
+        .content()
+        .and_then(|content| content.downcast::<adw::ToastOverlay>().ok())
+    {
+        overlay.add_toast(toast);
+    }
+}
+
+/// The same notice, addressed from any widget of the window.
+pub fn toast_on_root(widget: &impl IsA<gtk4::Widget>, message: &str) {
+    if let Some(win) = widget
+        .root()
+        .and_then(|root| root.downcast::<adw::Window>().ok())
+    {
+        show_settings_toast(&win, message);
     }
 }
 

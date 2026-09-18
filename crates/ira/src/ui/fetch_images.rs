@@ -49,13 +49,14 @@ pub struct FetchIndicator {
 }
 
 /// Start fetching missing images for every matched game, revealing the
-/// indicator. A no-op while a fetch is already running.
-pub fn start_missing_images_fetch(state: &SharedState) {
+/// indicator. `Err` carries the reason it refused: a job already
+/// running, or no game in the library it could fetch anything for.
+pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
     let Some(indicator) = state.borrow().fetch_progress.borrow().clone() else {
-        return;
+        return Err(crate::tr!("Nothing to fetch right now").to_string());
     };
     if indicator.running.get() {
-        return;
+        return Err(crate::tr!("A job is already running").to_string());
     }
     let games: Vec<Game> = {
         let s = state.borrow();
@@ -75,7 +76,7 @@ pub fn start_missing_images_fetch(state: &SharedState) {
             .collect()
     };
     if games.is_empty() {
-        return;
+        return Err(crate::tr!("No games to fetch images for").to_string());
     }
     let total = games.len();
     indicator.cancel.store(false, Ordering::Relaxed);
@@ -167,6 +168,7 @@ pub fn start_missing_images_fetch(state: &SharedState) {
     });
 
     drain_updates(&indicator, rx);
+    Ok(())
 }
 
 /// The popover's details line, at Nautilus's one-size-down markup:

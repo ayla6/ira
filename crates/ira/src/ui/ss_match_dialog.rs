@@ -8,7 +8,7 @@ use std::sync::mpsc;
 
 use super::css::*;
 use super::helpers::{clear_children, poll_channel, replace_row_actions, status_row};
-use super::rom_name::{clean_rom_name, looks_like_title_id};
+use super::rom_name::{clean_rom_name, pick_search_name};
 use super::steam_search_dialog::{
     build_search_dialog, match_result_row, status_label, SearchDialogWidgets,
 };
@@ -85,29 +85,27 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
 /// and a name that is only a bare title id falls through to the other.
 fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
     let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten()?;
-    // PS3/PS4 games carry a native product code here, not a console.
+    // PS3/PS4 games carry a product code here, not a console.
     let console = ira_models::scraper_console_id(entry.kind, &entry.platform_id);
-    // PC titles come from Steam or the user — search from them; dump
-    // stems there are executable names at best. Product-code platforms'
-    // titles come from the console's own metadata, so they lead too —
-    // their stems are directory names at best.
-    let trusted = entry.title_trusted
-        || entry.kind.is_pc()
-        || ira_models::title_from_trusted_source(&console);
+    // PC titles come from Steam or the user; switch and the other
+    // consoles whose internal titles are authoritative search from the
+    // title first. Every other console searches from the ROM file name.
+    // pick_search_name filters bare title ids out of every candidate,
+    // so a dump named nothing but its id can never become the term.
     let stem = clean_rom_name(
         &std::path::Path::new(&entry.rom_path)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default(),
     );
-    let title = clean_rom_name(&entry.title);
-    let (first, second) = if trusted {
-        (Some(title), Some(stem))
-    } else {
-        (Some(stem), Some(title))
-    };
-    let usable = |s: &String| !s.is_empty() && !looks_like_title_id(s);
-    first.filter(|s| usable(s)).or_else(|| second.filter(|s| usable(s)))
+    let trusted =
+        entry.title_trusted || entry.kind.is_pc() || ira_models::title_from_trusted_source(&console);
+    pick_search_name(
+        trusted,
+        &stem,
+        &clean_rom_name(&entry.title),
+        &entry.title,
+    )
 }
 
 /// Whether the row's current title is already authoritative: edited by the

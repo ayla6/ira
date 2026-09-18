@@ -15,7 +15,7 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     };
 
     let window = adw::Dialog::new();
-    window.set_title(&crate::tr!("{} — Log").replacen("{}", &game_name, 1));
+    window.set_title(&crate::tr!("{}: Log").replacen("{}", &game_name, 1));
     window.set_content_width(700);
     window.set_content_height(500);
 
@@ -26,7 +26,7 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     search_entry.set_width_chars(28);
     header.pack_start(&search_entry);
 
-    let title_label = gtk4::Label::new(Some(&crate::tr!("{} — Log").replacen("{}", &game_name, 1)));
+    let title_label = gtk4::Label::new(Some(&crate::tr!("{}: Log").replacen("{}", &game_name, 1)));
     title_label.add_css_class("heading");
     header.set_title_widget(Some(&title_label));
 

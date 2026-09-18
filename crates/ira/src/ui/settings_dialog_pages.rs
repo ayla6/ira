@@ -101,8 +101,10 @@ pub(super) fn build_settings_pages(
     let fetch_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
     fetch_btn.set_valign(gtk4::Align::Center);
     let fetch_state = state.clone();
-    fetch_btn.connect_clicked(move |_| {
-        super::fetch_images::start_missing_images_fetch(&fetch_state);
+    fetch_btn.connect_clicked(move |btn| {
+        if let Err(message) = super::fetch_images::start_missing_images_fetch(&fetch_state) {
+            super::helpers::toast_on_root(btn, &message);
+        }
     });
     fetch_row.add_suffix(&fetch_btn);
     fetch_group.add(&fetch_row);
@@ -114,28 +116,32 @@ pub(super) fn build_settings_pages(
     let all_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
     all_btn.set_valign(gtk4::Align::Center);
     let all_state = state.clone();
-    all_btn.connect_clicked(move |_| {
-        super::fetch_metadata::start_full_refetch(&all_state, false);
+    all_btn.connect_clicked(move |btn| {
+        if !super::fetch_metadata::start_full_refetch(&all_state, false) {
+            super::helpers::toast_on_root(btn, &crate::tr!("Nothing to fetch right now").to_string());
+        }
     });
     all_row.add_suffix(&all_btn);
     fetch_group.add(&all_row);
     let genres_row = adw::ActionRow::new();
     genres_row.set_title(&crate::tr!("Genre table"));
     genres_row.set_subtitle(&crate::tr!(
-        "Fetches ScreenScraper's whole genre list for the pickers — also the refetch"
+        "Fetches ScreenScraper's whole genre list. Run it again to refresh"
     ));
     let genres_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
     genres_btn.set_valign(gtk4::Align::Center);
     let genres_state = state.clone();
-    genres_btn.connect_clicked(move |_| {
-        super::fetch_metadata::start_genre_warm(&genres_state);
+    genres_btn.connect_clicked(move |btn| {
+        if !super::fetch_metadata::start_genre_warm(&genres_state) {
+            super::helpers::toast_on_root(btn, &crate::tr!("A job is already running").to_string());
+        }
     });
     genres_row.add_suffix(&genres_btn);
     fetch_group.add(&genres_row);
     let force_row = adw::ActionRow::new();
     force_row.set_title(&crate::tr!("Everything, even complete games"));
     force_row.set_subtitle(&crate::tr!(
-        "Re-reads every matched game's entry and every linked Steam page, filling anything that appeared — new fields, series, corrections"
+        "Re-reads every matched game and every linked Steam page, picking up anything new"
     ));
     let force_btn = gtk4::Button::with_label(&crate::tr!("Force refetch"));
     force_btn.set_valign(gtk4::Align::Center);
@@ -153,8 +159,10 @@ pub(super) fn build_settings_pages(
     let meta_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
     meta_btn.set_valign(gtk4::Align::Center);
     let meta_state = state.clone();
-    meta_btn.connect_clicked(move |_| {
-        super::fetch_metadata::start_steam_refetch(&meta_state, false);
+    meta_btn.connect_clicked(move |btn| {
+        if !super::fetch_metadata::start_steam_refetch(&meta_state, false) {
+            super::helpers::toast_on_root(btn, &crate::tr!("Nothing to fetch right now").to_string());
+        }
     });
     meta_row.add_suffix(&meta_btn);
     fetch_group.add(&meta_row);
@@ -166,8 +174,10 @@ pub(super) fn build_settings_pages(
     let ss_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
     ss_btn.set_valign(gtk4::Align::Center);
     let ss_state = state.clone();
-    ss_btn.connect_clicked(move |_| {
-        super::fetch_metadata::start_metadata_refetch(&ss_state, false);
+    ss_btn.connect_clicked(move |btn| {
+        if !super::fetch_metadata::start_metadata_refetch(&ss_state, false) {
+            super::helpers::toast_on_root(btn, &crate::tr!("Nothing to fetch right now").to_string());
+        }
     });
     ss_row.add_suffix(&ss_btn);
     fetch_group.add(&ss_row);

@@ -209,7 +209,7 @@ pub(super) fn show_entity_dialog(
     let name_entry = adw::EntryRow::new();
     name_entry.set_title(&crate::tr!("Rename"));
     name_entry.set_tooltip_text(Some(&crate::tr!(
-        "A renamed entry keeps its name when the source answers with the old spelling"
+        "Your rename wins over the source's spelling"
     )));
     name_group.add(&name_entry);
     entity_content.append(&name_group);
@@ -217,7 +217,7 @@ pub(super) fn show_entity_dialog(
     let alias_group = adw::PreferencesGroup::new();
     alias_group.set_title(&crate::tr!("Aliases"));
     alias_group.set_description(Some(&crate::tr!(
-        "Incoming names on this list store as the entity above"
+        "Matching answers that use these names will use this entry"
     )));
     let alias_list = gtk4::ListBox::new();
     alias_list.set_selection_mode(gtk4::SelectionMode::None);
@@ -545,7 +545,7 @@ pub(super) fn show_entity_dialog(
             let rows = ira_db::list_entities(&db, kind, filter).unwrap_or_default();
             if rows.is_empty() {
                 let note = if filter.is_empty() {
-                    crate::tr!("Nothing in the cache yet — it fills as games get matched")
+                    crate::tr!("The cache fills as games get matched")
                 } else {
                     crate::tr!("No results found")
                 };

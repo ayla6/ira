@@ -19,7 +19,7 @@ use super::state::SharedState;
 /// Start refetching missing metadata for every matched game with holes in
 /// its record, revealing the sidebar strip. `false` when a ScreenScraper
 /// job or a strip job is already running, or nothing has gaps.
-pub fn start_metadata_refetch(state: &SharedState) -> bool {
+pub fn start_metadata_refetch(state: &SharedState, force: bool) -> bool {
     let (busy, allowed) = {
         let s = state.borrow();
         (
@@ -30,7 +30,7 @@ pub fn start_metadata_refetch(state: &SharedState) -> bool {
     if busy || !allowed {
         return false;
     }
-    let queue = super::mass_match_ss::refetch_queue(state);
+    let queue = super::mass_match_ss::refetch_queue(state, force);
     if queue.is_empty() {
         return false;
     }
@@ -73,8 +73,8 @@ pub fn start_metadata_refetch(state: &SharedState) -> bool {
 /// earlier. The match is metadata only — nothing Steam-ish lands on the
 /// game. No ScreenScraper quota involved — the strip's one-job rule is
 /// the only gate.
-pub fn start_steam_refetch(state: &SharedState) -> bool {
-    let queue = steam_refetch_queue(state);
+pub fn start_steam_refetch(state: &SharedState, force: bool) -> bool {
+    let queue = steam_refetch_queue(state, force);
     if queue.is_empty() {
         return false;
     }
@@ -110,8 +110,10 @@ pub fn start_steam_refetch(state: &SharedState) -> bool {
 /// search whose exact-hit policy almost never lands — the strip would
 /// cycle the whole library naming games nothing ever happens to.
 /// Includes games with no record at all, and the epoch dates an old
-/// diff bug wrote.
-fn steam_refetch_queue(state: &SharedState) -> Vec<i64> {
+/// diff bug wrote. A forced pass drops the gap filter — every readable
+/// game is re-read, which is how stored records pick up fields that
+/// only the store page provides.
+fn steam_refetch_queue(state: &SharedState, force: bool) -> Vec<i64> {
     let s = state.borrow();
     s.games
         .iter()
@@ -119,10 +121,15 @@ fn steam_refetch_queue(state: &SharedState) -> Vec<i64> {
             !g.steam_link_id.is_empty()
                 || (g.kind.is_pc() && g.platform_id.parse::<u32>().is_ok())
         })
-        .filter(|g| match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
-            Ok(None) => true,
-            Ok(Some(meta)) => steam_gaps(&meta),
-            Err(_) => false,
+        .filter(|g| {
+            if force {
+                return true;
+            }
+            match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
+                Ok(None) => true,
+                Ok(Some(meta)) => steam_gaps(&meta),
+                Err(_) => false,
+            }
         })
         .map(|g| g.db_id)
         .collect()
@@ -281,7 +288,7 @@ pub(crate) fn steam_refetch_one(
 /// Start the refetch over every source at once: Steam first (fast),
 /// then the paced ScreenScraper pass. One strip job covers both, so
 /// "everything" really is one click.
-pub fn start_full_refetch(state: &SharedState) -> bool {
+pub fn start_full_refetch(state: &SharedState, force: bool) -> bool {
     let (busy, allowed) = {
         let s = state.borrow();
         (
@@ -292,8 +299,8 @@ pub fn start_full_refetch(state: &SharedState) -> bool {
     if busy || !allowed {
         return false;
     }
-    let ss_queue = super::mass_match_ss::refetch_queue(state);
-    let steam_queue = steam_refetch_queue(state);
+    let ss_queue = super::mass_match_ss::refetch_queue(state, force);
+    let steam_queue = steam_refetch_queue(state, force);
     if ss_queue.is_empty() && steam_queue.is_empty() {
         return false;
     }

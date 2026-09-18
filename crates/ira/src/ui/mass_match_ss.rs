@@ -57,15 +57,20 @@ fn metadata_has_gaps(meta: &ira_models::ScraperMetadata) -> bool {
 /// Matched games whose stored record has holes, in list order: the
 /// refetch passes' queue. A matched game with no record at all is all
 /// holes.
-pub(crate) fn refetch_queue(state: &SharedState) -> Vec<i64> {
+pub(crate) fn refetch_queue(state: &SharedState, force: bool) -> Vec<i64> {
     let s = state.borrow();
     s.games
         .iter()
         .filter(|g| !g.screenscraper_id.is_empty())
-        .filter(|g| match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
-            Ok(None) => true,
-            Ok(Some(meta)) => metadata_has_gaps(&meta),
-            Err(_) => false,
+        .filter(|g| {
+            if force {
+                return true;
+            }
+            match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
+                Ok(None) => true,
+                Ok(Some(meta)) => metadata_has_gaps(&meta),
+                Err(_) => false,
+            }
         })
         .map(|g| g.db_id)
         .collect()

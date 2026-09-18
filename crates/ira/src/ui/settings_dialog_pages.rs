@@ -115,10 +115,23 @@ pub(super) fn build_settings_pages(
     all_btn.set_valign(gtk4::Align::Center);
     let all_state = state.clone();
     all_btn.connect_clicked(move |_| {
-        super::fetch_metadata::start_full_refetch(&all_state);
+        super::fetch_metadata::start_full_refetch(&all_state, false);
     });
     all_row.add_suffix(&all_btn);
     fetch_group.add(&all_row);
+    let force_row = adw::ActionRow::new();
+    force_row.set_title(&crate::tr!("Everything, even complete games"));
+    force_row.set_subtitle(&crate::tr!(
+        "Re-reads every matched game's entry and every linked Steam page, filling anything that appeared — new fields, series, corrections"
+    ));
+    let force_btn = gtk4::Button::with_label(&crate::tr!("Force refetch"));
+    force_btn.set_valign(gtk4::Align::Center);
+    let force_state = state.clone();
+    force_btn.connect_clicked(move |_| {
+        super::fetch_metadata::start_full_refetch(&force_state, true);
+    });
+    force_row.add_suffix(&force_btn);
+    fetch_group.add(&force_row);
     let meta_row = adw::ActionRow::new();
     meta_row.set_title(&crate::tr!("Missing Steam data"));
     meta_row.set_subtitle(&crate::tr!(
@@ -128,7 +141,7 @@ pub(super) fn build_settings_pages(
     meta_btn.set_valign(gtk4::Align::Center);
     let meta_state = state.clone();
     meta_btn.connect_clicked(move |_| {
-        super::fetch_metadata::start_steam_refetch(&meta_state);
+        super::fetch_metadata::start_steam_refetch(&meta_state, false);
     });
     meta_row.add_suffix(&meta_btn);
     fetch_group.add(&meta_row);
@@ -141,7 +154,7 @@ pub(super) fn build_settings_pages(
     ss_btn.set_valign(gtk4::Align::Center);
     let ss_state = state.clone();
     ss_btn.connect_clicked(move |_| {
-        super::fetch_metadata::start_metadata_refetch(&ss_state);
+        super::fetch_metadata::start_metadata_refetch(&ss_state, false);
     });
     ss_row.add_suffix(&ss_btn);
     fetch_group.add(&ss_row);

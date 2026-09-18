@@ -537,7 +537,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     {
         let state = state.clone();
         refetch_btn.connect_clicked(move |_| {
-            super::fetch_metadata::start_full_refetch(&state);
+            super::fetch_metadata::start_full_refetch(&state, false);
         });
     }
     header.pack_end(&refetch_btn);

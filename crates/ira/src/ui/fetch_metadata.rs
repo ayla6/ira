@@ -1,18 +1,18 @@
 //! Mass metadata refetch on the sidebar strip, one source per job. The
 //! ScreenScraper pass gives matched games whose stored record has holes
-//! one exact fetch by their own id; the Steam pass gives PC games whose
-//! stored metadata misses something Steam can give — release date,
-//! studios, synopsis, age boards — a re-read of their SteamCMD entry and
-//! store page. Both merge only what's missing, both report through the
-//! same bottom-of-sidebar strip the image fetcher uses — so they keep
-//! running, and stay visible, with dialogs or the whole window closed —
-//! and the strip takes one job at a time. The ScreenScraper pass
-//! additionally owns the quota gate, so it and the matching pass never
-//! stack their requests.
+//! one exact fetch by their own id; the Steam pass gives games with a
+//! store app id — PC games by their platform id, console games by a
+//! link stored earlier — whose stored metadata misses something Steam
+//! can give (release date, studios, synopsis, age boards) a re-read of
+//! their SteamCMD entry and store page. Both merge only what's missing,
+//! both report through the same bottom-of-sidebar strip the image
+//! fetcher uses — so they keep running, and stay visible, with dialogs
+//! or the whole window closed — and the strip takes one job at a time.
+//! The ScreenScraper pass additionally owns the quota gate, so it and
+//! the matching pass never stack their requests.
 
 use std::sync::Arc;
 
-use super::mass_match_dialog::normalize_title;
 use super::mass_match_ss::{RefetchOutcome, RefetchProgress};
 use super::state::SharedState;
 
@@ -68,12 +68,11 @@ pub fn start_metadata_refetch(state: &SharedState) -> bool {
     true
 }
 
-/// Start the Steam-only refetch for every game whose stored metadata
-/// misses something Steam can give: PC games by their platform's app
-/// id, consoles by an exact title search over the store. The match is
-/// metadata only — nothing Steam-ish lands on the game. No
-/// ScreenScraper quota involved —
-/// the strip's one-job rule is the only gate.
+/// Start the Steam-only refetch for every game with a store app id —
+/// PC games by their platform's app id, console games by a link stored
+/// earlier. The match is metadata only — nothing Steam-ish lands on the
+/// game. No ScreenScraper quota involved — the strip's one-job rule is
+/// the only gate.
 pub fn start_steam_refetch(state: &SharedState) -> bool {
     let queue = steam_refetch_queue(state);
     if queue.is_empty() {
@@ -104,27 +103,21 @@ pub fn start_steam_refetch(state: &SharedState) -> bool {
     true
 }
 
-/// Games whose stored metadata misses something Steam can give: games
-/// with a store app id on their platform are refetched by it; everyone
-/// else — consoles, and manually added PC games that never had one — is
-/// found by an exact title search over the store. Includes games with
-/// no record at all, and the epoch dates an old diff bug wrote.
+/// Games whose stored metadata misses something Steam can give, and
+/// which the pass can actually read: a stored Steam link (a console
+/// game linked to the store before) or a PC game whose platform id is
+/// the store app id. Everything else would only get a hopeful title
+/// search whose exact-hit policy almost never lands — the strip would
+/// cycle the whole library naming games nothing ever happens to.
+/// Includes games with no record at all, and the epoch dates an old
+/// diff bug wrote.
 fn steam_refetch_queue(state: &SharedState) -> Vec<i64> {
     let s = state.borrow();
     s.games
         .iter()
         .filter(|g| {
-            let by_app_id = g.kind.is_pc() && g.platform_id.parse::<u32>().is_ok();
-            if by_app_id {
-                return true;
-            }
-            // Title-searched games respect manual unmatch, and the
-            // title must be one.
-            !g.manual_unmatch
-                && (g.kind.is_pc()
-                    || g.kind.is_console_emulator()
-                    || g.kind == ira_models::GameKind::Retro)
-                && !g.name.trim().is_empty()
+            !g.steam_link_id.is_empty()
+                || (g.kind.is_pc() && g.platform_id.parse::<u32>().is_ok())
         })
         .filter(|g| match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
             Ok(None) => true,
@@ -144,23 +137,10 @@ fn steam_gaps(meta: &ira_models::ScraperMetadata) -> bool {
         || meta.classifications.is_empty()
 }
 
-/// The store's app id for a title, when one of the answers IS the
-/// title — normalized on both sides, nothing looser. A near miss is a
-/// different game more often than not ("Catherine" is not "Catherine
-/// Classic"… except when it is — exactness is the policy).
-fn exact_title_hit(results: &[(String, String)], title: &str) -> Option<u32> {
-    let norm = normalize_title(title);
-    results
-        .iter()
-        .find(|(_, name)| normalize_title(name) == norm)
-        .and_then(|(id, _)| id.parse().ok())
-}
-
-/// One sequential worker over the Steam refetch queue: the store title
-/// search finds a console game's app id (PC games already carry it),
-/// then the SteamCMD entry and the store page get re-read, merged
-/// fill-only-gaps over what's stored. A short pace keeps steamcmd.net
-/// happy; the worker stands down between items when `cancel` says so.
+/// One sequential worker over the Steam refetch queue: the SteamCMD
+/// entry and the store page get re-read, merged fill-only-gaps over
+/// what's stored. A short pace keeps steamcmd.net happy; the worker
+/// stands down between items when `cancel` says so.
 fn spawn_steam_refetch_worker(
     queue: Vec<i64>,
     steam: std::sync::Arc<ira_api::SteamDataClient>,
@@ -197,12 +177,12 @@ fn spawn_steam_refetch_worker(
     rx
 }
 
-/// One game's Steam re-read, merged over what's stored. Games with a
-/// store app id on their platform go straight to it; everyone else is
-/// found by an exact title search over the store. SteamCMD's timestamp
-/// wins for the release date, the store page's parsed date fills in
-/// when it has none — and an epoch date an old bug wrote counts as
-/// missing, so refetches repair it.
+/// One game's Steam re-read, merged over what's stored. The app id is
+/// the stored Steam link, or the platform id for a PC game whose
+/// platform is the store. SteamCMD's timestamp wins for the release
+/// date, the store page's parsed date fills in when it has none — and
+/// an epoch date an old bug wrote counts as missing, so refetches
+/// repair it.
 pub(crate) fn steam_refetch_one(
     steam: &ira_api::SteamDataClient,
     db: &ira_db::DbConn,
@@ -212,8 +192,7 @@ pub(crate) fn steam_refetch_one(
         return RefetchOutcome::Failed("game not found".to_string());
     };
     // The match is metadata only — no app id, no Steam enrichment ever
-    // lands on the game. A console game matched before reuses its
-    // stored link instead of searching again.
+    // lands on the game.
     let app_id = if !entry.steam_link_id.is_empty() {
         Some(entry.steam_link_id.clone())
     } else {
@@ -222,24 +201,16 @@ pub(crate) fn steam_refetch_one(
             .parse::<u32>()
             .ok()
             .map(|id| id.to_string())
-            .or_else(|| {
-                exact_title_hit(&steam.search_steam_store(&entry.title), &entry.title)
-                    .map(|id| id.to_string())
-            })
     };
     let Some(app_id) = app_id else {
         return RefetchOutcome::Unchanged;
     };
-    // A title-search hit is remembered, so the settings screen can show
-    // and edit the link and later passes skip the search.
-    if entry.steam_link_id.is_empty() && entry.platform_id.parse::<u32>().is_err() {
-        let _ = ira_db::set_steam_link_id(db, db_id, &app_id);
-    }
     let info = steam.fetch_steamcmd_info(&app_id);
     let extras = steam.fetch_store_extras(&app_id);
     if info.is_none() && extras.is_none() {
-        // Most often a stored id Steam does not know — auto-identification
-        // picked it from a store search, and the wrong app answers nothing.
+        // Most often a stored id Steam does not know — a link typed or
+        // picked by hand, or a platform id that is not a store app id
+        // after all.
         eprintln!(
             "Steam refetch: '{}': steam answered nothing for app {app_id}",
             entry.title
@@ -472,30 +443,4 @@ fn poll_refetch(
             }
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::exact_title_hit;
-
-    #[test]
-    fn test_exact_title_hit_folds_spelling_and_rejects_near_misses() {
-        let results = vec![
-            ("620".to_string(), "Portal 2".to_string()),
-            ("123".to_string(), "Catherine Classic".to_string()),
-            ("456".to_string(), "Persona 4: Dancing All Night".to_string()),
-        ];
-        // Punctuation and case fold on both sides.
-        assert_eq!(exact_title_hit(&results, "portal 2"), Some(620));
-        assert_eq!(
-            exact_title_hit(&results, "Persona 4 Dancing All Night"),
-            Some(456)
-        );
-        // A near miss is a different game more often than not.
-        assert_eq!(exact_title_hit(&results, "Catherine"), None);
-        assert_eq!(exact_title_hit(&results, "Portal"), None);
-        // Store ids that are not numbers never match.
-        let odd = vec![("app_1".to_string(), "Portal 2".to_string())];
-        assert_eq!(exact_title_hit(&odd, "Portal 2"), None);
-    }
 }

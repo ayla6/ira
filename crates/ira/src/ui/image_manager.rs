@@ -25,8 +25,6 @@ pub fn build_image_manager_content_with_drafts(
     content.set_margin_top(16);
     content.set_margin_bottom(16);
 
-    let is_steam = game.trophy_source.has_steam_enrichment();
-
     for &at in AssetType::all() {
         let (thumb_w, thumb_h) = match at {
             AssetType::Icon => (48, 48),
@@ -57,7 +55,11 @@ pub fn build_image_manager_content_with_drafts(
         btn_box.set_halign(gtk4::Align::Center);
         btn_box.set_margin_top(24);
 
-        if game.sgdb_id.is_empty() && !is_steam {
+        // The matcher shows for every unmatched game — a Steam-enriched
+        // game's art comes from the store, but SGDB often has the grid or
+        // logo the store never shipped, and matching is how the manual
+        // per-asset pickers and the missing-images pass find it.
+        if game.sgdb_id.is_empty() {
             let match_btn = gtk4::Button::with_label(&crate::tr!("Match to SteamGridDB…"));
             match_btn.add_css_class(CSS_SUGGESTED_ACTION);
             let sc = state.clone();

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-18 16:16-0300\n"
+"POT-Creation-Date: 2026-09-18 17:18-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -200,6 +200,7 @@ msgstr ""
 #: crates/ira/src/ui/context_menu_actions.rs:110
 #: crates/ira/src/ui/context_menu_actions.rs:433
 #: crates/ira/src/ui/edit_game_controller.rs:445
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:257
 #: crates/ira/src/ui/edit_game_pages.rs:308
 #: crates/ira/src/ui/edit_game_playtime.rs:280
 #: crates/ira/src/ui/edit_game_variants.rs:137
@@ -252,7 +253,7 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:32
 #: crates/ira/src/ui/auto_add_dialog.rs:785
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:207
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:208
 msgid "Name"
 msgstr ""
 
@@ -375,8 +376,8 @@ msgid "Searching SteamGridDB…"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:330
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:529
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:591
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:547
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:609
 #: crates/ira/src/ui/edit_game_scraper.rs:411
 #: crates/ira/src/ui/ra_match_dialog.rs:149
 #: crates/ira/src/ui/sgdb_match_dialog.rs:252
@@ -659,14 +660,14 @@ msgid "Delete Group"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/all_games.rs:754
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:209
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:210
 #: crates/ira/src/ui/group_dialog.rs:71
 #: crates/ira/src/ui/sidebar.rs:402
 msgid "Rename"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/all_games.rs:759
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:151
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:152
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:58
 msgid "Back"
 msgstr ""
@@ -776,8 +777,8 @@ msgid "Remove \"{}\"?"
 msgstr ""
 
 #: crates/ira/src/ui/context_menu_actions.rs:111
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:381
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:830
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:399
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:856
 msgid "Remove"
 msgstr ""
 
@@ -1024,7 +1025,7 @@ msgid "Already centralized"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_dialog.rs:496
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:241
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:259
 #: crates/ira/src/ui/input_profile_editor.rs:140
 #: crates/ira/src/ui/input_profile_editor_save.rs:131
 #: crates/ira/src/ui/profile_dialog.rs:452
@@ -1041,68 +1042,64 @@ msgstr ""
 msgid "Unused"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:155
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:877
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:156
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:230
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:903
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:41
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:91
 #: crates/ira/src/ui/edit_game_playtime.rs:94
 msgid "Add"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:159
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:160
 msgid "Rename entries, teach aliases, merge duplicates"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:181
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:194
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:257
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:182
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:195
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:274
 msgid "Search…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:211
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:212
 msgid ""
 "A renamed entry keeps its name when the source answers with the old spelling"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:217
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:218
 msgid "Aliases"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:219
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:220
 msgid "Incoming names on this list store as the entity above"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:224
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:228
 msgid "Add alias…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:231
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:304
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:240
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:322
 msgid "Merge into…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:232
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:241
 msgid "Combine this entry with another one"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:239
-#: crates/ira/src/ui/input_profile_editor_save.rs:130
-msgid "Discard"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:301
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:319
 #: crates/ira/src/ui/edit_game_scraper.rs:1029
 #: crates/ira/src/ui/steam_search_dialog.rs:61
 #: crates/ira/src/ui/steam_search.rs:34
 msgid "Search"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:303
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:321
 #, rust-format
 msgid "Manage {}"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:357
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:375
 #: crates/ira/src/ui/edit_game_scraper.rs:490
 #: crates/ira/src/ui/input_output_picker.rs:141
 #: crates/ira/src/ui/input_profile_action_sets.rs:217
@@ -1115,28 +1112,32 @@ msgstr ""
 msgid "None"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:374
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:392
 msgid "Manage"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:505
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:523
 #, rust-format
 msgid "Add \"{}\""
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:527
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:545
 msgid "Nothing in the cache yet — it fills as games get matched"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:600
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:618
 msgid "Merge"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:818
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:790
+msgid "Saved"
+msgstr ""
+
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:844
 msgid "No aliases"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:875
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:901
 msgid "Added"
 msgstr ""
 
@@ -3060,6 +3061,10 @@ msgstr ""
 
 #: crates/ira/src/ui/input_profile_editor_save.rs:127
 msgid "Save this layout before closing?"
+msgstr ""
+
+#: crates/ira/src/ui/input_profile_editor_save.rs:130
+msgid "Discard"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_general_page.rs:14

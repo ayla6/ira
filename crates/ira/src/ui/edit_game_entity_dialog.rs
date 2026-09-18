@@ -141,6 +141,7 @@ pub(super) fn show_entity_dialog(
     dialog.set_title(&field.label);
     dialog.set_content_width(520);
     dialog.set_content_height(520);
+    let toast_overlay = adw::ToastOverlay::new();
 
     // ——— One header bar for every view: back at the start, then the
     // root page's add and manage buttons; the title follows the
@@ -218,34 +219,50 @@ pub(super) fn show_entity_dialog(
     alias_group.set_description(Some(&crate::tr!(
         "Incoming names on this list store as the entity above"
     )));
-    let alias_list = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    let alias_list = gtk4::ListBox::new();
+    alias_list.set_selection_mode(gtk4::SelectionMode::None);
+    alias_list.add_css_class(CSS_BOXED_LIST);
     alias_group.add(&alias_list);
-    let alias_entry = adw::EntryRow::new();
-    alias_entry.set_title(&crate::tr!("Add alias…"));
-    alias_entry.set_show_apply_button(true);
-    alias_group.add(&alias_entry);
+    let alias_add_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    let alias_entry = gtk4::Entry::new();
+    alias_entry.set_placeholder_text(Some(&crate::tr!("Add alias…")));
+    alias_entry.set_hexpand(true);
+    let alias_add_btn = gtk4::Button::with_label(&crate::tr!("Add"));
+    alias_add_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    alias_add_row.append(&alias_entry);
+    alias_add_row.append(&alias_add_btn);
+    alias_group.add(&alias_add_row);
     entity_content.append(&alias_group);
 
     let merge_group = adw::PreferencesGroup::new();
     let merge_row = adw::ActionRow::new();
+    merge_row.set_activatable(true);
     merge_row.set_title(&crate::tr!("Merge into…"));
     merge_row.set_subtitle(&crate::tr!("Combine this entry with another one"));
     merge_row.add_suffix(&gtk4::Image::from_icon_name("go-next-symbolic"));
     merge_group.add(&merge_row);
     entity_content.append(&merge_group);
 
-    let button_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    button_row.set_halign(gtk4::Align::End);
-    let discard_btn = gtk4::Button::with_label(&crate::tr!("Discard"));
-    discard_btn.add_css_class(CSS_FLAT);
-    let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
-    save_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    button_row.append(&discard_btn);
-    button_row.append(&save_btn);
-    entity_content.append(&button_row);
     let entity_scrolled = gtk4::ScrolledWindow::new();
     entity_scrolled.set_vexpand(true);
     entity_scrolled.set_child(Some(&entity_content));
+    // The action row pins to the page's bottom — it does not scroll
+    // away with the groups above it.
+    let button_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    button_row.set_halign(gtk4::Align::End);
+    button_row.set_margin_top(6);
+    button_row.set_margin_bottom(12);
+    button_row.set_margin_start(12);
+    button_row.set_margin_end(12);
+    let cancel_btn = gtk4::Button::with_label(&crate::tr!("Cancel"));
+    cancel_btn.add_css_class(CSS_FLAT);
+    let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
+    save_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    button_row.append(&cancel_btn);
+    button_row.append(&save_btn);
+    let entity_page = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    entity_page.append(&entity_scrolled);
+    entity_page.append(&button_row);
 
     // ——— Merge page: pick the entity to merge into. ———
     let merge_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -264,11 +281,12 @@ pub(super) fn show_entity_dialog(
     stack.set_vhomogeneous(false);
     stack.add_named(&root_scrolled, Some(Page::Root.name()));
     stack.add_named(&search_box, Some(Page::Search.name()));
-    stack.add_named(&manage_scrolled, Some(Page::Manage.name()));
-    stack.add_named(&entity_scrolled, Some(Page::Entity.name()));
+    stack.add_named(&manage_box, Some(Page::Manage.name()));
+    stack.add_named(&entity_page, Some(Page::Entity.name()));
     stack.add_named(&merge_box, Some(Page::Merge.name()));
     toolbar.set_content(Some(&stack));
-    dialog.set_child(Some(&toolbar));
+    toast_overlay.set_child(Some(&toolbar));
+    dialog.set_child(Some(&toast_overlay));
 
     let state = Rc::new(state.clone());
     let selected: Rc<RefCell<Option<i64>>> = Default::default();
@@ -676,12 +694,12 @@ pub(super) fn show_entity_dialog(
         });
     }
     {
-        // An alias typed on apply joins the staged list; Save is what
-        // teaches it to the database. A spelling already staged is
-        // ignored.
+        // An alias joins the staged list from the button or the enter
+        // key; Save is what teaches it to the database. A spelling
+        // already staged is ignored.
         let edits = edits.clone();
         let alias_list = alias_list.clone();
-        alias_entry.connect_apply(move |entry| {
+        let stage_alias: Rc<dyn Fn(&gtk4::Entry)> = Rc::new(move |entry: &gtk4::Entry| {
             let text = entry.text().trim().to_string();
             if text.is_empty() {
                 return;
@@ -703,6 +721,12 @@ pub(super) fn show_entity_dialog(
             entry.set_text("");
             repaint_alias_list(&alias_list, &edits);
         });
+        alias_add_btn.connect_clicked({
+            let stage_alias = stage_alias.clone();
+            let alias_entry = alias_entry.clone();
+            move |_| stage_alias(&alias_entry)
+        });
+        alias_entry.connect_activate(move |entry| stage_alias(entry));
     }
     {
         // Save commits the staged name (when it changed) and the alias
@@ -716,6 +740,7 @@ pub(super) fn show_entity_dialog(
         let refresh_manage = refresh_manage.clone();
         let manage_search = manage_search.clone();
         let title = title.clone();
+        let toast_overlay = toast_overlay.clone();
         save_btn.connect_clicked(move |_| {
             let Some(id) = *selected.borrow() else {
                 return;
@@ -762,6 +787,7 @@ pub(super) fn show_entity_dialog(
             repaint_alias_list(&alias_list, &edits);
             *edits.borrow_mut() = reloaded;
             refresh_manage(&manage_search.text());
+            toast_overlay.add_toast(adw::Toast::new(&crate::tr!("Saved")));
         });
     }
     {
@@ -772,7 +798,7 @@ pub(super) fn show_entity_dialog(
         let name_entry = name_entry.clone();
         let alias_list = alias_list.clone();
         let title = title.clone();
-        discard_btn.connect_clicked(move |_| {
+        cancel_btn.connect_clicked(move |_| {
             let Some(id) = *selected.borrow() else {
                 return;
             };
@@ -811,7 +837,7 @@ pub(super) fn show_entity_dialog(
 
 /// Repaint the staged alias rows — each with its remove button, which
 /// edits the staging area only.
-fn repaint_alias_list(alias_list: &gtk4::Box, edits: &Rc<RefCell<EntityEdits>>) {
+fn repaint_alias_list(alias_list: &gtk4::ListBox, edits: &Rc<RefCell<EntityEdits>>) {
     clear_children(alias_list);
     let drafts = edits.borrow().aliases.clone();
     if drafts.is_empty() {

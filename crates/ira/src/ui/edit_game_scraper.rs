@@ -13,8 +13,7 @@ use std::rc::Rc;
 use super::css::*;
 use super::helpers::status_row;
 use super::helpers::{clear_children, poll_channel};
-use super::mass_match_ss::{RefetchOutcome, spawn_refetch_worker};
-use super::steam_search_dialog::match_result_row;
+use super::mass_match_ss::{spawn_refetch_worker, RefetchOutcome};
 use super::ss_match_dialog::{persist_ss_match, show_ss_search_dialog};
 use super::state::SharedState;
 use crate::Game;
@@ -158,11 +157,22 @@ fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &Scra
         slot.add(row.upcast());
     }
     fact_rows(state, game, win, &metadata, slot);
-    synopsis_row(win, slot, &metadata.synopses);
+    synopsis_row(state, game, win, slot, &metadata.synopses);
     let match_row = search_row(state, game, win, slot);
     slot.add(match_row.clone().upcast());
     *slot.match_row.borrow_mut() = Some(match_row);
-}/// Which kind of entity a metadata field collects — decides the search
+}
+
+/// Repaint the Identity page's rows from the draft after a staged edit.
+/// The pickers and editors only mutate the draft — without this the
+/// group's field rows keep their old subtitles until the dialog reopens.
+/// Never call from inside a fact row's own handler (the players entry,
+/// the rating spin): those rows show their edit already, and a rebuild
+/// would pull the widget out from under the user.
+fn refresh_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &ScraperSlot) {
+    rebuild_rows(state, game, win, slot);
+}
+/// Which kind of entity a metadata field collects — decides the search
 /// source and the custom-entry factory.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EntityKind {
@@ -291,7 +301,7 @@ fn fact_rows(
     metadata: &ScraperMetadata,
     slot: &ScraperSlot,
 ) {
-    release_date_row(&metadata.release_date, slot);
+    release_date_row(state, game, win, &metadata.release_date, slot);
     text_row(
         slot,
         &crate::tr!("Players"),
@@ -305,7 +315,13 @@ fn fact_rows(
 
 /// The stored release date as the row's subtitle, a calendar button
 /// opening the picker — dates are picked, not typed.
-fn release_date_row(release_date: &str, slot: &ScraperSlot) {
+fn release_date_row(
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    release_date: &str,
+    slot: &ScraperSlot,
+) {
     let row = adw::ActionRow::new();
     row.set_title(&crate::tr!("Released"));
     if release_date.is_empty() {
@@ -365,6 +381,7 @@ fn release_date_row(release_date: &str, slot: &ScraperSlot) {
         let slot = slot.clone();
         let calendar = calendar.clone();
         let popover = popover.clone();
+        let (state, game, win) = (state.clone(), game.clone(), win.clone());
         apply.connect_clicked(move |_| {
             let Some(iso) = calendar
                 .date()
@@ -379,17 +396,20 @@ fn release_date_row(release_date: &str, slot: &ScraperSlot) {
                 m.release_timestamp = ira_db::scraper_release_timestamp(&iso);
             });
             popover.popdown();
+            refresh_rows(&state, &game, &win, &slot);
         });
     }
     {
         let slot = slot.clone();
         let popover = popover.clone();
+        let (state, game, win) = (state.clone(), game.clone(), win.clone());
         clear.connect_clicked(move |_| {
             popover.popdown();
             edit_field(&slot, |m| {
                 m.release_date = String::new();
                 m.release_timestamp = 0;
             });
+            refresh_rows(&state, &game, &win, &slot);
         });
     }
     row.add_suffix(&pick);
@@ -619,19 +639,22 @@ fn show_entity_edit_dialog(
     stack.add_named(&search_toolbar, Some("search"));
     dialog.set_child(Some(&stack));
 
-    fill_entity_list(&root_list, state, game, slot, field.clone());
+    fill_entity_list(&root_list, state, game, win, slot, field.clone());
 
     {
-        let state = state.clone();
-        let game = game.clone();
-        let field = field.clone();
+        let picker = EntityPicker {
+            state: state.clone(),
+            game: game.clone(),
+            win: win.clone(),
+            slot: slot.clone(),
+            field: field.clone(),
+        };
         let root_list = root_list.clone();
         let results_list = results_list.clone();
         let entry = entry.clone();
         let stack = stack.clone();
-        let slot = slot.clone();
         add_btn.connect_clicked(move |_| {
-            populate_search_results(&results_list, &state, &game, &slot, &field, "", &root_list);
+            populate_search_results(&results_list, &picker, "", &root_list);
             stack.set_transition_type(gtk4::StackTransitionType::SlideRight);
             stack.set_visible_child(&search_toolbar);
             let entry = entry.clone();
@@ -641,21 +664,17 @@ fn show_entity_edit_dialog(
         });
     }
     {
-        let state = state.clone();
-        let game = game.clone();
-        let field = field.clone();
+        let picker = EntityPicker {
+            state: state.clone(),
+            game: game.clone(),
+            win: win.clone(),
+            slot: slot.clone(),
+            field: field.clone(),
+        };
+        let root_list = root_list.clone();
         let results_list = results_list.clone();
-        let slot = slot.clone();
         entry.connect_search_changed(move |entry| {
-            populate_search_results(
-                &results_list,
-                &state,
-                &game,
-                &slot,
-                &field,
-                &entry.text(),
-                &root_list,
-            );
+            populate_search_results(&results_list, &picker, &entry.text(), &root_list);
         });
     }
     {
@@ -756,7 +775,7 @@ fn show_classifications_edit_dialog(
     stack.add_named(&add_toolbar, Some("add"));
     dialog.set_child(Some(&stack));
 
-    fill_classification_list(&list, state, game, slot);
+    fill_classification_list(&list, state, game, win, slot);
 
     {
         let stack = stack.clone();
@@ -780,6 +799,7 @@ fn show_classifications_edit_dialog(
     {
         let state = state.clone();
         let game = game.clone();
+        let win = win.clone();
         let list = list.clone();
         let slot = slot.clone();
         let board_combo = board_combo.clone();
@@ -793,7 +813,8 @@ fn show_classifications_edit_dialog(
             edit_field(&slot, |metadata| {
                 upsert_classification(metadata, board.id, value);
             });
-            fill_classification_list(&list, &state, &game, &slot);
+            fill_classification_list(&list, &state, &game, &win, &slot);
+            refresh_rows(&state, &game, &win, &slot);
         });
     }
 
@@ -804,14 +825,24 @@ fn show_classifications_edit_dialog(
 /// The rating picker's second row: the chosen board's known values.
 fn fill_value_combo(value_combo: &adw::ComboRow, board: &ira_models::ratings::RatingBoard) {
     value_combo.set_model(Some(&super::helpers::string_list_from(
-        &board.values.iter().map(|v| v.to_string()).collect::<Vec<_>>(),
+        &board
+            .values
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>(),
     )));
     value_combo.set_selected(0);
 }
 
 /// (Re)fill the editor's list page: every stored rating with a remove
 /// button. Edits persist at once and refresh the Identity page's rows.
-fn fill_classification_list(list: &gtk4::ListBox, state: &SharedState, game: &Game, slot: &ScraperSlot) {
+fn fill_classification_list(
+    list: &gtk4::ListBox,
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    slot: &ScraperSlot,
+) {
     clear_children(list);
     let metadata = slot.draft.borrow().clone();
     if metadata.classifications.is_empty() {
@@ -823,13 +854,8 @@ fn fill_classification_list(list: &gtk4::ListBox, state: &SharedState, game: &Ga
         row.set_use_markup(false);
         // "STEAM_GERMANY 12" is really "USK 12" — display the board's
         // name and the canonical value spelling, raw text otherwise.
-        let name = ira_models::ratings::display(
-            &classification.kind,
-            &classification.value,
-        )
-        .unwrap_or_else(|| {
-            format!("{} {}", classification.kind, classification.value)
-        });
+        let name = ira_models::ratings::display(&classification.kind, &classification.value)
+            .unwrap_or_else(|| format!("{} {}", classification.kind, classification.value));
         row.set_title(&name);
         if let Some(texture) =
             ira_images::rating_texture(&classification.kind, &classification.value, 24)
@@ -844,6 +870,7 @@ fn fill_classification_list(list: &gtk4::ListBox, state: &SharedState, game: &Ga
         {
             let state = state.clone();
             let game = game.clone();
+            let win = win.clone();
             let list = list.clone();
             let slot = slot.clone();
             let kind = classification.kind.clone();
@@ -853,7 +880,8 @@ fn fill_classification_list(list: &gtk4::ListBox, state: &SharedState, game: &Ga
                         .classifications
                         .retain(|c| !c.kind.eq_ignore_ascii_case(&kind));
                 });
-                    fill_classification_list(&list, &state, &game, &slot);
+                fill_classification_list(&list, &state, &game, &win, &slot);
+                refresh_rows(&state, &game, &win, &slot);
             });
         }
         row.add_suffix(&remove);
@@ -867,6 +895,7 @@ fn fill_entity_list(
     list: &gtk4::ListBox,
     state: &SharedState,
     game: &Game,
+    win: &adw::Window,
     slot: &ScraperSlot,
     field: EntityField,
 ) {
@@ -882,6 +911,7 @@ fn fill_entity_list(
         {
             let state = state.clone();
             let game = game.clone();
+            let win = win.clone();
             let entity = entity.clone();
             let list = list.clone();
             let slot = slot.clone();
@@ -891,12 +921,25 @@ fn fill_entity_list(
                 edit_field(&slot, |metadata| {
                     (field.remove)(metadata, &entity);
                 });
-                fill_entity_list(&list, &state, &game, &slot, field);
+                fill_entity_list(&list, &state, &game, &win, &slot, field);
+                refresh_rows(&state, &game, &win, &slot);
             });
         }
         row.add_suffix(&remove);
         list.append(&row);
     }
+}
+
+/// The context the entity picker's search page fills against: the game
+/// being edited, its window (the refresh needs it), the slot's draft and
+/// the field being picked — one bundle instead of an argument list.
+#[derive(Clone)]
+struct EntityPicker {
+    state: SharedState,
+    game: Game,
+    win: adw::Window,
+    slot: ScraperSlot,
+    field: EntityField,
 }
 
 /// (Re)fill the search page for a term: the cache matches, then the
@@ -905,18 +948,23 @@ fn fill_entity_list(
 /// credits can be added in a row.
 fn populate_search_results(
     list: &gtk4::ListBox,
-    state: &SharedState,
-    game: &Game,
-    slot: &ScraperSlot,
-    field: &EntityField,
+    picker: &EntityPicker,
     term: &str,
     root_list: &gtk4::ListBox,
 ) {
+    let EntityPicker {
+        state,
+        game,
+        win,
+        slot,
+        field,
+    } = picker;
     clear_children(list);
     let term = term.trim();
     let store = {
         let state = state.clone();
         let game = game.clone();
+        let win = win.clone();
         let slot = slot.clone();
         let field = field.clone();
         let root_list = root_list.clone();
@@ -928,25 +976,8 @@ fn populate_search_results(
                     (field.push)(metadata, entity.clone());
                 }
             });
-            fill_entity_list(&root_list, &state, &game, &slot, field.clone());
-        })
-    };
-    let mint_and_store = {
-        let state = state.clone();
-        let field = field.clone();
-        let store = store.clone();
-        Rc::new(move |term: &str| {
-            // Minting happens only on click, never while typing — the
-            // db must not fill up with every prefix the user tried.
-            let entity = match field.kind {
-                EntityKind::Developer | EntityKind::Publisher => {
-                    ira_db::steam_company_entity(&state.borrow().db, term)
-                }
-                EntityKind::Genre => ira_db::local_genre_entity(&state.borrow().db, term),
-            };
-            if let Some(entity) = entity {
-                store(entity);
-            }
+            fill_entity_list(&root_list, &state, &game, &win, &slot, field.clone());
+            refresh_rows(&state, &game, &win, &slot);
         })
     };
 
@@ -960,37 +991,100 @@ fn populate_search_results(
         list.append(&status_row(&field.empty_text()));
         return;
     }
+    let draft_holds = |entity: &ScraperEntity| {
+        (field.get)(&slot.draft.borrow())
+            .iter()
+            .any(|held| held.id == entity.id)
+    };
     for entity in &rows {
         let store = store.clone();
         let row_entity = entity.clone();
-        list.append(&search_result_row(
-            entity,
-            Rc::new(move || store(row_entity.clone())),
+        list.append(&pick_row(
+            &entity.name,
+            &format!("id {}", entity.id),
+            draft_holds(entity),
+            move || store(row_entity.clone()),
         ));
     }
     // The term itself as a custom entry — a local company or genre when
     // the sources have no row for it, the cache's own when they do.
     // Nothing is minted here: allocation happens on click.
     if !term.is_empty() {
-        let row = adw::ActionRow::new();
-        row.set_use_markup(false);
-        row.set_title(&crate::tr!("Add \"{}\"").replacen("{}", term, 1));
-        let add = gtk4::Button::with_label(&crate::tr!("Add"));
-        add.add_css_class(CSS_SUGGESTED_ACTION);
-        add.set_valign(gtk4::Align::Center);
-        {
-            let mint_and_store = mint_and_store.clone();
-            let term = term.to_string();
-            add.connect_clicked(move |_| mint_and_store(&term));
-        }
-        row.add_suffix(&add);
-        list.append(&row);
+        let mint_and_store = {
+            let state = state.clone();
+            let field = field.clone();
+            let store = store.clone();
+            Rc::new(move |term: String| {
+                // Minting happens only on click, never while typing — the
+                // db must not fill up with every prefix the user tried.
+                let entity = match field.kind {
+                    EntityKind::Developer | EntityKind::Publisher => {
+                        ira_db::steam_company_entity(&state.borrow().db, &term)
+                    }
+                    EntityKind::Genre => ira_db::local_genre_entity(&state.borrow().db, &term),
+                };
+                if let Some(entity) = entity {
+                    store(entity);
+                }
+            })
+        };
+        let already = (field.get)(&slot.draft.borrow())
+            .iter()
+            .any(|held| held.name == term);
+        let term_c = term.to_string();
+        list.append(&pick_row(
+            &crate::tr!("Add \"{}\"").replacen("{}", term, 1),
+            "",
+            already,
+            move || mint_and_store(term_c.clone()),
+        ));
     }
 }
 
-/// One search answer row: picking it stores the entity.
-fn search_result_row(entity: &ScraperEntity, on_store: Rc<dyn Fn()>) -> adw::ActionRow {
-    match_result_row(&entity.name, &format!("id {}", entity.id), move || on_store())
+/// One picker answer row: the add button flips to a dead "Added" once
+/// the pick lands — and starts that way when the draft already holds
+/// the entity — so a second click can neither duplicate nor confuse.
+fn pick_row(
+    title: &str,
+    subtitle: &str,
+    already_added: bool,
+    on_pick: impl Fn() + 'static,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_use_markup(false);
+    row.set_title(&super::helpers::esc(title));
+    row.set_subtitle(&super::helpers::esc(subtitle));
+    let pick = gtk4::Button::new();
+    let added = std::cell::Cell::new(already_added);
+    mark_added(&pick, already_added);
+    pick.set_valign(gtk4::Align::Center);
+    pick.connect_clicked(move |pick| {
+        if added.get() {
+            return;
+        }
+        on_pick();
+        added.set(true);
+        mark_added(pick, true);
+    });
+    row.add_suffix(&pick);
+    row
+}
+
+/// The button's two states: a suggested "Add", then a flat, insensitive
+/// "Added" — impossible to click twice.
+fn mark_added(button: &gtk4::Button, added: bool) {
+    button.set_label(&if added {
+        crate::tr!("Added")
+    } else {
+        crate::tr!("Add")
+    });
+    button.set_sensitive(!added);
+    button.remove_css_class(CSS_SUGGESTED_ACTION);
+    if added {
+        button.add_css_class(CSS_FLAT);
+    } else {
+        button.add_css_class(CSS_SUGGESTED_ACTION);
+    }
 }
 
 fn search_row(
@@ -1029,7 +1123,12 @@ fn search_row(
         {
             let state = state.clone();
             let game = game.clone();
+            let slot = slot.clone();
             fetch.connect_clicked(move |btn| {
+                if !state.borrow().cfg.screenscraper_enabled {
+                    slot.set_match_status(&crate::tr!("ScreenScraper is disabled in Settings"));
+                    return;
+                }
                 btn.set_sensitive(false);
                 let state = state.clone();
                 let game = game.clone();
@@ -1098,7 +1197,12 @@ fn search_row(
         {
             let state = state.clone();
             let game = game.clone();
+            let slot = slot.clone();
             btn.connect_clicked(move |btn| {
+                if !state.borrow().cfg.screenscraper_enabled {
+                    slot.set_match_status(&crate::tr!("ScreenScraper is disabled in Settings"));
+                    return;
+                }
                 btn.set_sensitive(false);
                 let state = state.clone();
                 let game = game.clone();
@@ -1231,6 +1335,8 @@ fn run_refetch_missing(
 /// display. Clicking toggles between the four-line summary and the full
 /// text; the pen opens the text editor.
 fn synopsis_row(
+    state: &SharedState,
+    game: &Game,
     win: &adw::Window,
     slot: &ScraperSlot,
     synopses: &[(String, String)],
@@ -1260,10 +1366,9 @@ fn synopsis_row(
         }
     });
     {
-        let win = win.clone();
-        let slot = slot.clone();
+        let (state, game, win, slot) = (state.clone(), game.clone(), win.clone(), slot.clone());
         row.add_suffix(&edit_button(move |_| {
-            show_synopsis_edit_dialog(&win, &slot, lang.clone(), text.clone());
+            show_synopsis_edit_dialog(&state, &game, &win, &slot, lang.clone(), text.clone());
         }));
     }
     slot.add(row.upcast());
@@ -1273,6 +1378,8 @@ fn synopsis_row(
 /// Applying it emptied removes the entry; the language's siblings stay
 /// untouched.
 fn show_synopsis_edit_dialog(
+    state: &SharedState,
+    game: &Game,
     win: &adw::Window,
     slot: &ScraperSlot,
     lang: String,
@@ -1318,6 +1425,7 @@ fn show_synopsis_edit_dialog(
         let slot = slot.clone();
         let dialog = dialog.clone();
         let view = view.clone();
+        let (state, game, win) = (state.clone(), game.clone(), win.clone());
         apply.connect_clicked(move |_| {
             let buffer = view.buffer();
             let (start, end) = buffer.bounds();
@@ -1333,6 +1441,7 @@ fn show_synopsis_edit_dialog(
                     }
                 }
             });
+            refresh_rows(&state, &game, &win, &slot);
         });
     }
 

@@ -1,37 +1,60 @@
 //! The Identity page's metadata rows: what a match stored, editable in
 //! place — companies and genres through the cached pickers, the small
-//! facts as entry and spin rows. Edits persist immediately, like the RA
-//! section's do — a pick reads the stored metadata back, mutates one
-//! field, and writes it, so the lookup tables and the games row never
-//! disagree. Unmatched games get the same editors, so metadata can be
-//! filled by hand before any match exists.
+//! facts as entry and spin rows. Editors stage onto a draft; nothing
+//! here touches the database until the game settings' Save runs
+//! [`apply_scraper_draft`] — and a ScreenScraper pick, refetch or
+//! unmatch stages the same way, so half-finished work never masquerades
+//! as saved state. The match row itself lives in the Service group: it
+//! wires the game to a service, it is not part of the game's record.
 
 use adw::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::css::*;
-use super::helpers::status_row;
-use super::helpers::{clear_children, poll_channel};
-use super::mass_match_ss::{spawn_refetch_worker, RefetchOutcome};
-use super::ss_match_dialog::{persist_ss_match, show_ss_search_dialog};
+use super::edit_game_metadata_editors::{
+    show_classifications_edit_dialog, show_entity_edit_dialog, show_synopsis_edit_dialog,
+};
+use super::helpers::poll_channel;
+use super::mass_match_ss::{run_pc_matching, PcMatchTarget, RefetchOutcome, SsOutcome};
+use super::ss_match_dialog::{entry_title_trusted, show_ss_search_dialog, SsMatchSink};
 use super::state::SharedState;
 use crate::Game;
+use ira_api::screenscraper::ScrapedGame;
 use ira_api::ScraperCreds;
 use ira_models::{ScraperClassification, ScraperEntity, ScraperMetadata};
+
+/// A staged service change waiting for Save. The picked answer is kept
+/// whole (boxed — the enum sits in the slot, not on the heap) so an
+/// external refresh of the rows can fold it in again.
+#[derive(Clone)]
+pub(super) enum SsPending {
+    None,
+    Match(Box<ScrapedGame>),
+    Unmatch,
+}
 
 /// Handle on the metadata rows living inside the Identity group, plus
 /// the staged draft they edit against. Editors mutate the draft and
 /// repaint the rows — nothing touches the database until the game
-/// settings' Save runs [`ScraperSlot::apply`], so half-finished edits
+/// settings' Save runs [`apply_scraper_draft`], so half-finished edits
 /// never masquerade as saved state.
 #[derive(Clone)]
 pub(crate) struct ScraperSlot {
+    /// The Identity group: every metadata row lands here.
     group: adw::PreferencesGroup,
+    /// The Service group: where the match row hangs — matching is a
+    /// service wiring, not part of the game's own record.
+    match_parent: adw::PreferencesGroup,
     rows: Rc<RefCell<Vec<gtk4::Widget>>>,
     match_row: Rc<RefCell<Option<adw::ActionRow>>>,
     pub(super) draft: Rc<RefCell<ScraperMetadata>>,
     pub(super) link: Rc<RefCell<String>>,
+    pub(super) pending: Rc<RefCell<SsPending>>,
+    /// The draft as it stood before a match was staged this session —
+    /// what the revert buttons put back: the Steam garnish, the hand
+    /// edits, whatever was there before the answer folded in.
+    pub(super) pre_match: Rc<RefCell<Option<ScraperMetadata>>>,
 }
 
 impl ScraperSlot {
@@ -57,6 +80,7 @@ pub(super) fn build_scraper_section(
     game: &Game,
     win: &adw::Window,
     group: &adw::PreferencesGroup,
+    match_parent: &adw::PreferencesGroup,
 ) -> Option<ScraperSlot> {
     let metadata = stored_metadata(state, game.db_id);
     // Every game the SS pass can touch gets the rows: consoles on mapped
@@ -70,19 +94,24 @@ pub(super) fn build_scraper_section(
     }
     let slot = ScraperSlot {
         group: group.clone(),
+        match_parent: match_parent.clone(),
         rows: Rc::new(RefCell::new(Vec::new())),
         match_row: Rc::new(RefCell::new(None)),
         draft: Rc::new(RefCell::new(metadata.clone().unwrap_or_default())),
         link: Rc::new(RefCell::new(
             game.steam_link_id.clone(),
         )),
+        pending: Rc::new(RefCell::new(SsPending::None)),
+        pre_match: Rc::new(RefCell::new(None)),
     };
     rebuild_rows(state, game, win, &slot);
     Some(slot)
 }
 
-/// Rebuild the rows in place after an external change (a fresh match, a
-/// refetch, an unmatch): the database wins and the draft resyncs to it.
+/// Rebuild the rows in place after an external change (a batch match or
+/// a refetch job wrote the database): the database wins and the draft
+/// resyncs to it — except a match staged here this session, which folds
+/// into the resynced record again so the user's unsaved pick survives.
 /// `true` when the open settings window actually shows this game's rows.
 pub(super) fn refresh_scraper_section(state: &SharedState, db_id: i64) -> bool {
     let sd = match state.borrow().settings_data.clone() {
@@ -95,32 +124,24 @@ pub(super) fn refresh_scraper_section(state: &SharedState, db_id: i64) -> bool {
     let Some(slot) = sd.scraper_slot.clone() else {
         return false;
     };
-    let Some(game) = state
-        .borrow()
-        .games
-        .iter()
-        .find(|g| g.db_id == db_id)
-        .cloned()
-    else {
+    let Some(game) = state.borrow().find_game(db_id, None) else {
         return false;
     };
-    // External change: the database is the truth, staged edits give way.
+    let pending = slot.pending.borrow().clone();
+    *slot.pre_match.borrow_mut() = None;
     *slot.draft.borrow_mut() = stored_metadata(state, db_id).unwrap_or_default();
     *slot.link.borrow_mut() = game.steam_link_id.clone();
+    if let SsPending::Match(picked) = &pending {
+        fold_match(&mut slot.draft.borrow_mut(), picked);
+    }
     rebuild_rows(state, &game, &sd.window, &slot);
     true
 }
 
-/// Flush the staged draft to the database at Save time. `true` when
-/// something was written.
+/// Flush the staged draft — and any staged match or unmatch — to the
+/// database at Save time. `true` when the metadata write succeeded.
 pub(super) fn apply_scraper_draft(state: &SharedState, db_id: i64) -> bool {
-    let Some(slot) = state
-        .borrow()
-        .settings_data
-        .as_ref()
-        .filter(|sd| sd.db_id == db_id)
-        .and_then(|sd| sd.scraper_slot.clone())
-    else {
+    let Some(slot) = slot_for(state, db_id) else {
         return false;
     };
     let draft = slot.draft.borrow().clone();
@@ -131,7 +152,158 @@ pub(super) fn apply_scraper_draft(state: &SharedState, db_id: i64) -> bool {
     if ira_db::set_steam_link_id(&state.borrow().db, db_id, &link).is_err() {
         eprintln!("Failed to store the Steam link");
     }
+    match slot.pending.borrow().clone() {
+        SsPending::None => {}
+        // The draft carried the picked id into the store above; what is
+        // left is the miss marker and the in-memory copy of the game.
+        SsPending::Match(_) => {
+            if let Err(e) = ira_db::clear_scraper_miss(&state.borrow().db, db_id) {
+                eprintln!("Failed to clear the ScreenScraper miss marker: {e}");
+            }
+            if let Some(g) = state
+                .borrow_mut()
+                .games
+                .iter_mut()
+                .find(|g| g.db_id == db_id)
+            {
+                g.screenscraper_id = draft.ss_id;
+            }
+        }
+        SsPending::Unmatch => {
+            if let Err(e) = ira_db::clear_screenscraper_match(&state.borrow().db, db_id) {
+                eprintln!("Failed to unmatch: {e}");
+            }
+            if let Some(g) = state
+                .borrow_mut()
+                .games
+                .iter_mut()
+                .find(|g| g.db_id == db_id)
+            {
+                g.screenscraper_id.clear();
+            }
+        }
+    }
     stored
+}
+
+/// The open settings window's slot for this game, when it shows one.
+fn slot_for(state: &SharedState, db_id: i64) -> Option<ScraperSlot> {
+    let s = state.borrow();
+    s.settings_data
+        .as_ref()
+        .filter(|sd| sd.db_id == db_id)
+        .and_then(|sd| sd.scraper_slot.clone())
+}
+
+/// Rebuild the open settings window's rows for this game from the draft
+/// — the staged truth — without consulting the database. `false` when
+/// the window is gone, showing another game, or hidden.
+fn repaint_slot(state: &SharedState, db_id: i64) -> bool {
+    let sd = match state.borrow().settings_data.clone() {
+        Some(d) => d,
+        None => return false,
+    };
+    if sd.db_id != db_id || !sd.window.is_visible() {
+        return false;
+    }
+    let Some(slot) = sd.scraper_slot.clone() else {
+        return false;
+    };
+    let Some(game) = state.borrow().find_game(db_id, None) else {
+        return false;
+    };
+    rebuild_rows(state, &game, &sd.window, &slot);
+    true
+}
+
+/// Fold a picked answer into a draft as *the match*: the source's merge
+/// rules (`ScraperMetadata::merge_match`) — scalars won where the answer
+/// has them, companies/genres/age ratings mixed in, never replaced.
+fn fold_match(draft: &mut ScraperMetadata, picked: &ScrapedGame) {
+    let timestamp = ira_db::scraper_release_timestamp(&picked.release_date);
+    draft.merge_match(&picked.metadata(timestamp));
+}
+
+/// Stage a picked ScreenScraper match onto the dialog's draft: the
+/// revert snapshot is taken once, the answer folds into the draft, the
+/// title entry picks up the entry's name when the stored title came
+/// from a dump and the user hasn't retyped it. Nothing is written until
+/// Save.
+fn stage_ss_match(state: &SharedState, db_id: i64, picked: &ScrapedGame, slot: &ScraperSlot) {
+    let mut pre = slot.pre_match.borrow_mut();
+    if pre.is_none() {
+        *pre = Some(slot.draft.borrow().clone());
+    }
+    drop(pre);
+    fold_match(&mut slot.draft.borrow_mut(), picked);
+    *slot.pending.borrow_mut() = SsPending::Match(Box::new(picked.clone()));
+    fill_title_entry(state, db_id, picked);
+    repaint_slot(state, db_id);
+    slot.set_match_status(&crate::tr!("Applies when you save"));
+}
+
+/// Stage an unmatch. The id leaves the draft at once — the rows flip to
+/// "not matched" — while the database keeps it until Save. Unmatching a
+/// match that was only staged this session (the database never saw it)
+/// undoes the staging whole, draft and all.
+fn stage_ss_unmatch(state: &SharedState, db_id: i64, slot: &ScraperSlot) {
+    let db_matched = ira_db::find_by_db_id(&state.borrow().db, db_id)
+        .map(|entry| entry.is_some_and(|e| !e.screenscraper_id.is_empty()))
+        .unwrap_or(false);
+    let status = if db_matched {
+        slot.draft.borrow_mut().ss_id = String::new();
+        *slot.pending.borrow_mut() = SsPending::Unmatch;
+        crate::tr!("Unmatches when you save")
+    } else {
+        if let Some(pre) = slot.pre_match.borrow_mut().take() {
+            *slot.draft.borrow_mut() = pre;
+        }
+        slot.draft.borrow_mut().ss_id = String::new();
+        *slot.pending.borrow_mut() = SsPending::None;
+        String::new()
+    };
+    repaint_slot(state, db_id);
+    slot.set_match_status(&status);
+}
+
+/// Fold a refetched answer into the draft, gaps only — a refetch never
+/// overwrites, staged or not. Reports whether anything was filled.
+fn stage_refetch_fill(state: &SharedState, db_id: i64, picked: &ScrapedGame) -> bool {
+    let Some(slot) = slot_for(state, db_id) else {
+        return false;
+    };
+    let mut draft = slot.draft.borrow_mut();
+    let timestamp = ira_db::scraper_release_timestamp(&picked.release_date);
+    draft.fill_gaps(&picked.metadata(timestamp))
+}
+
+/// The match's name fills the title entry — visible, and still editable,
+/// before Save — but only when the stored title came from a dump (the
+/// same rule a persisted match renames under) and the entry still shows
+/// it untouched.
+fn fill_title_entry(state: &SharedState, db_id: i64, picked: &ScrapedGame) {
+    if picked.name.is_empty() || entry_title_trusted(state, db_id).unwrap_or(true) {
+        return;
+    }
+    let entry = {
+        let s = state.borrow();
+        let Some(sd) = s.settings_data.as_ref().filter(|sd| sd.db_id == db_id) else {
+            return;
+        };
+        let current = s
+            .find_game(db_id, None)
+            .map(|g| g.name.clone())
+            .unwrap_or_default();
+        let entry = sd.title_entry.clone();
+        if entry.text().trim() == current {
+            Some(entry)
+        } else {
+            None
+        }
+    };
+    if let Some(entry) = entry {
+        entry.set_text(&picked.name);
+    }
 }
 
 fn stored_metadata(state: &SharedState, db_id: i64) -> Option<ScraperMetadata> {
@@ -142,13 +314,15 @@ fn stored_metadata(state: &SharedState, db_id: i64) -> Option<ScraperMetadata> {
 
 /// Remove the slot's previous rows, then rebuild them from the draft:
 /// the entity fields, the editable facts, the synopsis, and the match
-/// row last.
+/// row last — in the Service group, not the Identity one.
 fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &ScraperSlot) {
     for widget in slot.rows.borrow().iter() {
         slot.group.remove(widget);
     }
     slot.rows.borrow_mut().clear();
-    slot.match_row.borrow_mut().take();
+    if let Some(old) = slot.match_row.borrow_mut().take() {
+        slot.match_parent.remove(&old);
+    }
 
     let metadata = slot.draft.borrow().clone();
 
@@ -159,7 +333,7 @@ fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &Scra
     fact_rows(state, game, win, &metadata, slot);
     synopsis_row(state, game, win, slot, &metadata.synopses);
     let match_row = search_row(state, game, win, slot);
-    slot.add(match_row.clone().upcast());
+    slot.match_parent.add(&match_row.clone().upcast::<gtk4::Widget>());
     *slot.match_row.borrow_mut() = Some(match_row);
 }
 
@@ -169,33 +343,37 @@ fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &Scra
 /// Never call from inside a fact row's own handler (the players entry,
 /// the rating spin): those rows show their edit already, and a rebuild
 /// would pull the widget out from under the user.
-fn refresh_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &ScraperSlot) {
+pub(super) fn refresh_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &ScraperSlot) {
     rebuild_rows(state, game, win, slot);
 }
 /// Which kind of entity a metadata field collects — decides the search
 /// source and the custom-entry factory.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum EntityKind {
+pub(super) enum EntityKind {
     Developer,
     Publisher,
     Genre,
 }
 
 /// Which metadata field a row edits: its display names (one entry reads
-/// singular), the picker it opens, and the read/add/remove accessors.
+/// singular), the picker it opens, and the read/add/remove/restore
+/// accessors.
 #[derive(Clone)]
-struct EntityField {
-    label: String,
-    singular: String,
-    kind: EntityKind,
-    get: fn(&ScraperMetadata) -> &Vec<ScraperEntity>,
-    remove: fn(&mut ScraperMetadata, &ScraperEntity),
-    push: fn(&mut ScraperMetadata, ScraperEntity),
+pub(super) struct EntityField {
+    pub(super) label: String,
+    pub(super) singular: String,
+    pub(super) kind: EntityKind,
+    pub(super) get: fn(&ScraperMetadata) -> &Vec<ScraperEntity>,
+    pub(super) remove: fn(&mut ScraperMetadata, &ScraperEntity),
+    pub(super) push: fn(&mut ScraperMetadata, ScraperEntity),
+    /// The revert button's restore: the whole list goes back to the
+    /// pre-match snapshot's.
+    pub(super) set: fn(&mut ScraperMetadata, Vec<ScraperEntity>),
 }
 
 impl EntityField {
     /// The picker's empty-state copy per kind.
-    fn empty_text(&self) -> String {
+    pub(super) fn empty_text(&self) -> String {
         match self.kind {
             EntityKind::Developer | EntityKind::Publisher => {
                 crate::tr!("Companies appear here as games get matched")
@@ -214,6 +392,7 @@ fn entity_fields() -> [EntityField; 3] {
             get: |m| &m.developers,
             remove: |m, gone| m.developers.retain(|e| e.id != gone.id),
             push: |m, entity| m.developers.push(entity),
+            set: |m, list| m.developers = list,
         },
         EntityField {
             label: crate::tr!("Publishers"),
@@ -222,6 +401,7 @@ fn entity_fields() -> [EntityField; 3] {
             get: |m| &m.publishers,
             remove: |m, gone| m.publishers.retain(|e| e.id != gone.id),
             push: |m, entity| m.publishers.push(entity),
+            set: |m, list| m.publishers = list,
         },
         EntityField {
             label: crate::tr!("Genres"),
@@ -230,14 +410,24 @@ fn entity_fields() -> [EntityField; 3] {
             get: |m| &m.genres,
             remove: |m, gone| m.genres.retain(|e| e.id != gone.id),
             push: |m, entity| m.genres.push(entity),
+            set: |m, list| m.genres = list,
         },
     ]
 }
 
+/// Whether two entity lists hold different content — the revert button's
+/// changed test for the company and genre rows.
+fn entities_differ(a: &[ScraperEntity], b: &[ScraperEntity]) -> bool {
+    a.len() != b.len()
+        || a.iter()
+            .any(|e| !b.iter().any(|o| o.id == e.id && o.name == e.name))
+}
+
 /// One row per metadata field: the stored names as the subtitle, an Edit
-/// button opening the compact remove/add dialog. Works on empty metadata
-/// too — edits create the record, so an unmatched game can be filled by
-/// hand before any match exists.
+/// button opening the compact remove/add dialog and — when a staged
+/// match changed the field — an undo button putting the pre-match list
+/// back. Works on empty metadata too — edits create the record, so an
+/// unmatched game can be filled by hand before any match exists.
 fn field_row(
     state: &SharedState,
     game: &Game,
@@ -277,6 +467,22 @@ fn field_row(
             show_entity_edit_dialog(&state, &game, &win, &slot_for_dialog, field);
         }));
     }
+    if let Some(revert) = revert_button(
+        state,
+        game,
+        win,
+        slot,
+        {
+            let field = field.clone();
+            move |pre, cur| entities_differ((field.get)(pre), (field.get)(cur))
+        },
+        {
+            let field = field.clone();
+            move |draft, pre| (field.set)(draft, (field.get)(pre).clone())
+        },
+    ) {
+        row.add_suffix(&revert);
+    }
     row
 }
 
@@ -290,10 +496,41 @@ fn edit_button(on_click: impl Fn(&gtk4::Button) + 'static) -> gtk4::Button {
     button
 }
 
+/// The undo button a staged match adds to the rows it changed: one click
+/// puts that field back to the pre-match snapshot — the Steam synopsis,
+/// the hand-picked genres — while the match itself stays staged. `None`
+/// when nothing is staged or the field matches the snapshot already.
+fn revert_button(
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    slot: &ScraperSlot,
+    changed: impl Fn(&ScraperMetadata, &ScraperMetadata) -> bool + 'static,
+    restore: impl Fn(&mut ScraperMetadata, &ScraperMetadata) + 'static,
+) -> Option<gtk4::Button> {
+    let pre = slot.pre_match.borrow().clone()?;
+    if !changed(&slot.draft.borrow(), &pre) {
+        return None;
+    }
+    let button = gtk4::Button::from_icon_name("edit-undo-symbolic");
+    button.add_css_class(CSS_FLAT);
+    button.set_valign(gtk4::Align::Center);
+    button.set_tooltip_text(Some(&crate::tr!("Revert to the value before the match")));
+    let (state, game, win, slot) = (state.clone(), game.clone(), win.clone(), slot.clone());
+    button.connect_clicked(move |_| {
+        let Some(pre) = slot.pre_match.borrow().clone() else {
+            return;
+        };
+        edit_field(&slot, |draft| restore(draft, &pre));
+        refresh_rows(&state, &game, &win, &slot);
+    });
+    Some(button)
+}
+
 /// The editable facts: release date, player count, rating and the age
-/// boards, one row each, persisted the moment an edit applies. No
-/// refresh afterwards — the rows already show what was typed, and a
-/// rebuild would drop focus mid-edit.
+/// boards, one row each, staged onto the draft like every other edit
+/// here. No refresh afterwards — the rows already show what was typed,
+/// and a rebuild would drop focus mid-edit.
 fn fact_rows(
     state: &SharedState,
     game: &Game,
@@ -416,10 +653,11 @@ fn release_date_row(
     slot.add(row.upcast());
 }
 
-/// The Age ratings entry: the title with its Edit… button on one line
-/// and the official marks underneath, in stored order — the marks are
-/// the point, so no subtitle text. Pairs without a bundled mark keep a
-/// small text chip so they don't silently vanish from the summary.
+/// The Age ratings entry: the title with its Edit… (and, after a staged
+/// match, revert) buttons on one line and the official marks underneath,
+/// in stored order — the marks are the point, so no subtitle text. Pairs
+/// without a bundled mark keep a small text chip so they don't silently
+/// vanish from the summary.
 fn classifications_row(
     state: &SharedState,
     game: &Game,
@@ -481,6 +719,16 @@ fn classifications_row(
             show_classifications_edit_dialog(&state, &game, &win, &slot);
         }));
     }
+    if let Some(revert) = revert_button(
+        state,
+        game,
+        win,
+        slot,
+        |pre, cur| pre.classifications_differ(cur),
+        |draft, pre| draft.classifications = pre.classifications.clone(),
+    ) {
+        outer.append(&revert);
+    }
 
     box_row(slot, &outer);
 }
@@ -495,35 +743,13 @@ fn box_row(slot: &ScraperSlot, content: &impl glib::object::IsA<gtk4::Widget>) {
     slot.add(row.upcast());
 }
 
-/// Insert or replace a board: the junction's primary key is
-/// (game, kind), so a second entry for the same board is an update, not
-/// a duplicate. Kind folds to uppercase, the way the sources spell
-/// them; empty halves store nothing.
-fn upsert_classification(metadata: &mut ScraperMetadata, kind: &str, value: &str) {
-    let kind = kind.trim().to_uppercase();
-    let value = value.trim().to_string();
-    if kind.is_empty() || value.is_empty() {
-        return;
-    }
-    match metadata
-        .classifications
-        .iter_mut()
-        .find(|c| c.kind.eq_ignore_ascii_case(&kind))
-    {
-        Some(existing) => existing.value = value,
-        None => metadata
-            .classifications
-            .push(ScraperClassification { kind, value }),
-    }
-}
-
 /// The nearest 0.5 inside 0..=10 — the rating editor's half-point snap.
 fn snap_half_step(value: f64) -> f64 {
     ((value / 0.5).round() * 0.5).clamp(0.0, 10.0)
 }
 
 /// A text fact row: an entry seeded with the stored value; apply (enter
-/// or the check button) persists through `store`.
+/// or the check button) stages through the draft.
 fn text_row(
     slot: &ScraperSlot,
     label: &str,
@@ -576,764 +802,11 @@ fn rating_row(slot: &ScraperSlot, stored: f64) -> adw::SpinRow {
     row
 }
 
-/// The per-field editor: a two-page dialog. The root page lists the
-/// stored entities with remove buttons; the header's add button slides a
-/// search page in from the left — where the add button sits — over the
-/// same window: cached ScreenScraper companies/genres to pick, and a
-/// custom row that mints the name as a local entry for studios and
-/// categories the sources will never list.
-fn show_entity_edit_dialog(
-    state: &SharedState,
-    game: &Game,
-    win: &adw::Window,
-    slot: &ScraperSlot,
-    field: EntityField,
-) {
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&field.label);
-    dialog.set_content_width(460);
-    dialog.set_content_height(440);
-
-    // Root page: the stored entities.
-    let root_toolbar = adw::ToolbarView::new();
-    let root_header = adw::HeaderBar::new();
-    let root_title = gtk4::Label::new(Some(&field.label));
-    root_title.add_css_class("heading");
-    root_header.set_title_widget(Some(&root_title));
-    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.add_css_class(CSS_FLAT);
-    add_btn.set_tooltip_text(Some(&crate::tr!("Add")));
-    root_header.pack_start(&add_btn);
-    root_toolbar.add_top_bar(&root_header);
-    let (root_scrolled, root_list) = super::helpers::clamped_boxed_list(460);
-    root_toolbar.set_content(Some(&root_scrolled));
-
-    // Search page: the cache query plus a custom-add row, with an
-    // explicit back button — a gtk Stack has none of NavigationView's.
-    let search_toolbar = adw::ToolbarView::new();
-    let search_header = adw::HeaderBar::new();
-    let search_title = gtk4::Label::new(Some(&crate::tr!("Search")));
-    search_title.add_css_class("heading");
-    search_header.set_title_widget(Some(&search_title));
-    let back_btn = gtk4::Button::from_icon_name("go-previous-symbolic");
-    back_btn.add_css_class(CSS_FLAT);
-    back_btn.set_tooltip_text(Some(&crate::tr!("Back")));
-    search_header.pack_start(&back_btn);
-    search_toolbar.add_top_bar(&search_header);
-    let search_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    search_box.set_margin_top(12);
-    search_box.set_margin_bottom(12);
-    search_box.set_margin_start(12);
-    search_box.set_margin_end(12);
-    let entry = gtk4::SearchEntry::new();
-    entry.set_placeholder_text(Some(&crate::tr!("Search…")));
-    search_box.append(&entry);
-    let (results_scrolled, results_list) = super::helpers::clamped_boxed_list(460);
-    results_scrolled.set_vexpand(true);
-    search_box.append(&results_scrolled);
-    search_toolbar.set_content(Some(&search_box));
-
-    let stack = gtk4::Stack::new();
-    stack.set_vhomogeneous(false);
-    stack.add_named(&root_toolbar, Some("list"));
-    stack.add_named(&search_toolbar, Some("search"));
-    dialog.set_child(Some(&stack));
-
-    fill_entity_list(&root_list, state, game, win, slot, field.clone());
-
-    {
-        let picker = EntityPicker {
-            state: state.clone(),
-            game: game.clone(),
-            win: win.clone(),
-            slot: slot.clone(),
-            field: field.clone(),
-        };
-        let root_list = root_list.clone();
-        let results_list = results_list.clone();
-        let entry = entry.clone();
-        let stack = stack.clone();
-        add_btn.connect_clicked(move |_| {
-            populate_search_results(&results_list, &picker, "", &root_list);
-            stack.set_transition_type(gtk4::StackTransitionType::SlideRight);
-            stack.set_visible_child(&search_toolbar);
-            let entry = entry.clone();
-            glib::idle_add_local_once(move || {
-                entry.grab_focus();
-            });
-        });
-    }
-    {
-        let picker = EntityPicker {
-            state: state.clone(),
-            game: game.clone(),
-            win: win.clone(),
-            slot: slot.clone(),
-            field: field.clone(),
-        };
-        let root_list = root_list.clone();
-        let results_list = results_list.clone();
-        entry.connect_search_changed(move |entry| {
-            populate_search_results(&results_list, &picker, &entry.text(), &root_list);
-        });
-    }
-    {
-        let stack = stack.clone();
-        back_btn.connect_clicked(move |_| {
-            stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
-            stack.set_visible_child(&root_toolbar);
-        });
-    }
-
-    let parent = win.clone();
-    dialog.present(Some(&parent));
-}
-
-/// The age-rating editor: a two-page dialog like the entity pickers, but
-/// with nothing to search — the root page lists the stored ratings with
-/// remove buttons (their marks as prefixes), and the add page picks a
-/// board and then one of its known values from two combo rows. Adding
-/// keeps the page up so several ratings can go in.
-fn show_classifications_edit_dialog(
-    state: &SharedState,
-    game: &Game,
-    win: &adw::Window,
-    slot: &ScraperSlot,
-) {
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&crate::tr!("Age ratings"));
-    dialog.set_content_width(460);
-    dialog.set_content_height(320);
-
-    // List page: every stored rating with its remove button.
-    let list_toolbar = adw::ToolbarView::new();
-    let list_header = adw::HeaderBar::new();
-    let list_title = gtk4::Label::new(Some(&crate::tr!("Age ratings")));
-    list_title.add_css_class("heading");
-    list_header.set_title_widget(Some(&list_title));
-    let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    add_btn.add_css_class(CSS_FLAT);
-    add_btn.set_tooltip_text(Some(&crate::tr!("Add")));
-    list_header.pack_start(&add_btn);
-    list_toolbar.add_top_bar(&list_header);
-    let (list_scrolled, list) = super::helpers::clamped_boxed_list(460);
-    list_toolbar.set_content(Some(&list_scrolled));
-
-    // Add page: board and rating as two pickers over the hardcoded
-    // value sets. There is no source to search, so no query entry.
-    let boards: Vec<&ira_models::ratings::RatingBoard> =
-        ira_models::ratings::BOARDS.iter().collect();
-    let add_toolbar = adw::ToolbarView::new();
-    let add_header = adw::HeaderBar::new();
-    let add_title = gtk4::Label::new(Some(&crate::tr!("Add a rating")));
-    add_title.add_css_class("heading");
-    add_header.set_title_widget(Some(&add_title));
-    let back_btn = gtk4::Button::from_icon_name("go-previous-symbolic");
-    back_btn.add_css_class(CSS_FLAT);
-    back_btn.set_tooltip_text(Some(&crate::tr!("Back")));
-    add_header.pack_start(&back_btn);
-    add_toolbar.add_top_bar(&add_header);
-    let add_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    add_box.set_margin_top(12);
-    add_box.set_margin_bottom(12);
-    add_box.set_margin_start(12);
-    add_box.set_margin_end(12);
-    let pickers = gtk4::ListBox::new();
-    pickers.set_selection_mode(gtk4::SelectionMode::None);
-    pickers.add_css_class(CSS_BOXED_LIST);
-    let board_combo = adw::ComboRow::new();
-    board_combo.set_title(&crate::tr!("Board"));
-    board_combo.set_model(Some(&super::helpers::string_list_from(
-        &boards
-            .iter()
-            .map(|board| format!("{} · {}", board.name, board.region))
-            .collect::<Vec<_>>(),
-    )));
-    let value_combo = adw::ComboRow::new();
-    value_combo.set_title(&crate::tr!("Rating"));
-    fill_value_combo(&value_combo, boards[0]);
-    {
-        let value_combo = value_combo.clone();
-        let boards = boards.clone();
-        board_combo.connect_selected_notify(move |combo| {
-            let board = boards[combo.selected() as usize];
-            fill_value_combo(&value_combo, board);
-        });
-    }
-    pickers.append(&board_combo);
-    pickers.append(&value_combo);
-    add_box.append(&pickers);
-    let confirm = gtk4::Button::with_label(&crate::tr!("Add"));
-    confirm.add_css_class(CSS_SUGGESTED_ACTION);
-    confirm.set_halign(gtk4::Align::End);
-    add_box.append(&confirm);
-    add_toolbar.set_content(Some(&add_box));
-
-    let stack = gtk4::Stack::new();
-    stack.set_vhomogeneous(false);
-    stack.add_named(&list_toolbar, Some("list"));
-    stack.add_named(&add_toolbar, Some("add"));
-    dialog.set_child(Some(&stack));
-
-    fill_classification_list(&list, state, game, win, slot);
-
-    {
-        let stack = stack.clone();
-        let board_combo = board_combo.clone();
-        add_btn.connect_clicked(move |_| {
-            stack.set_transition_type(gtk4::StackTransitionType::SlideRight);
-            stack.set_visible_child(&add_toolbar);
-            let board_combo = board_combo.clone();
-            glib::idle_add_local_once(move || {
-                board_combo.grab_focus();
-            });
-        });
-    }
-    {
-        let stack = stack.clone();
-        back_btn.connect_clicked(move |_| {
-            stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
-            stack.set_visible_child(&list_toolbar);
-        });
-    }
-    {
-        let state = state.clone();
-        let game = game.clone();
-        let win = win.clone();
-        let list = list.clone();
-        let slot = slot.clone();
-        let board_combo = board_combo.clone();
-        let value_combo = value_combo.clone();
-        confirm.connect_clicked(move |_| {
-            let board = boards[board_combo.selected() as usize];
-            let value_index = value_combo.selected() as usize;
-            let Some(value) = board.values.get(value_index) else {
-                return;
-            };
-            edit_field(&slot, |metadata| {
-                upsert_classification(metadata, board.id, value);
-            });
-            fill_classification_list(&list, &state, &game, &win, &slot);
-            refresh_rows(&state, &game, &win, &slot);
-        });
-    }
-
-    let parent = win.clone();
-    dialog.present(Some(&parent));
-}
-
-/// The rating picker's second row: the chosen board's known values.
-fn fill_value_combo(value_combo: &adw::ComboRow, board: &ira_models::ratings::RatingBoard) {
-    value_combo.set_model(Some(&super::helpers::string_list_from(
-        &board
-            .values
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>(),
-    )));
-    value_combo.set_selected(0);
-}
-
-/// (Re)fill the editor's list page: every stored rating with a remove
-/// button. Edits persist at once and refresh the Identity page's rows.
-fn fill_classification_list(
-    list: &gtk4::ListBox,
-    state: &SharedState,
-    game: &Game,
-    win: &adw::Window,
-    slot: &ScraperSlot,
-) {
-    clear_children(list);
-    let metadata = slot.draft.borrow().clone();
-    if metadata.classifications.is_empty() {
-        list.append(&status_row(&crate::tr!("No age ratings stored")));
-        return;
-    }
-    for classification in &metadata.classifications {
-        let row = adw::ActionRow::new();
-        row.set_use_markup(false);
-        // "STEAM_GERMANY 12" is really "USK 12" — display the board's
-        // name and the canonical value spelling, raw text otherwise.
-        let name = ira_models::ratings::display(&classification.kind, &classification.value)
-            .unwrap_or_else(|| format!("{} {}", classification.kind, classification.value));
-        row.set_title(&name);
-        if let Some(texture) =
-            ira_images::rating_texture(&classification.kind, &classification.value, 24)
-        {
-            let mark = gtk4::Image::from_paintable(Some(&texture));
-            mark.set_pixel_size(24);
-            row.add_prefix(&mark);
-        }
-        let remove = gtk4::Button::from_icon_name("user-trash-symbolic");
-        remove.add_css_class(CSS_FLAT);
-        remove.set_valign(gtk4::Align::Center);
-        {
-            let state = state.clone();
-            let game = game.clone();
-            let win = win.clone();
-            let list = list.clone();
-            let slot = slot.clone();
-            let kind = classification.kind.clone();
-            remove.connect_clicked(move |_| {
-                edit_field(&slot, |metadata| {
-                    metadata
-                        .classifications
-                        .retain(|c| !c.kind.eq_ignore_ascii_case(&kind));
-                });
-                fill_classification_list(&list, &state, &game, &win, &slot);
-                refresh_rows(&state, &game, &win, &slot);
-            });
-        }
-        row.add_suffix(&remove);
-        list.append(&row);
-    }
-}
-
-/// (Re)fill the root page's list: every stored entity with a remove
-/// button. Edits persist at once and refresh the Identity page's rows.
-fn fill_entity_list(
-    list: &gtk4::ListBox,
-    state: &SharedState,
-    game: &Game,
-    win: &adw::Window,
-    slot: &ScraperSlot,
-    field: EntityField,
-) {
-    clear_children(list);
-    let metadata = slot.draft.borrow().clone();
-    for entity in (field.get)(&metadata) {
-        let row = adw::ActionRow::new();
-        row.set_use_markup(false);
-        row.set_title(&entity.name);
-        let remove = gtk4::Button::from_icon_name("user-trash-symbolic");
-        remove.add_css_class(CSS_FLAT);
-        remove.set_valign(gtk4::Align::Center);
-        {
-            let state = state.clone();
-            let game = game.clone();
-            let win = win.clone();
-            let entity = entity.clone();
-            let list = list.clone();
-            let slot = slot.clone();
-            let field = field.clone();
-            remove.connect_clicked(move |_| {
-                let field = field.clone();
-                edit_field(&slot, |metadata| {
-                    (field.remove)(metadata, &entity);
-                });
-                fill_entity_list(&list, &state, &game, &win, &slot, field);
-                refresh_rows(&state, &game, &win, &slot);
-            });
-        }
-        row.add_suffix(&remove);
-        list.append(&row);
-    }
-}
-
-/// The context the entity picker's search page fills against: the game
-/// being edited, its window (the refresh needs it), the slot's draft and
-/// the field being picked — one bundle instead of an argument list.
-#[derive(Clone)]
-struct EntityPicker {
-    state: SharedState,
-    game: Game,
-    win: adw::Window,
-    slot: ScraperSlot,
-    field: EntityField,
-}
-
-/// (Re)fill the search page for a term: the cache matches, then the
-/// custom-add row for the term itself. Picking anything stores it and
-/// refreshes the Identity page; the search page stays up so several
-/// credits can be added in a row.
-fn populate_search_results(
-    list: &gtk4::ListBox,
-    picker: &EntityPicker,
-    term: &str,
-    root_list: &gtk4::ListBox,
-) {
-    let EntityPicker {
-        state,
-        game,
-        win,
-        slot,
-        field,
-    } = picker;
-    clear_children(list);
-    let term = term.trim();
-    let store = {
-        let state = state.clone();
-        let game = game.clone();
-        let win = win.clone();
-        let slot = slot.clone();
-        let field = field.clone();
-        let root_list = root_list.clone();
-        Rc::new(move |entity: ScraperEntity| {
-            edit_field(&slot, |metadata| {
-                let entities = (field.get)(metadata);
-                // The same company twice is noise, not data.
-                if !entities.iter().any(|e| e.id == entity.id) {
-                    (field.push)(metadata, entity.clone());
-                }
-            });
-            fill_entity_list(&root_list, &state, &game, &win, &slot, field.clone());
-            refresh_rows(&state, &game, &win, &slot);
-        })
-    };
-
-    let rows = match field.kind {
-        EntityKind::Developer | EntityKind::Publisher => {
-            ira_db::scraper_companies_search(&state.borrow().db, term).unwrap_or_default()
-        }
-        EntityKind::Genre => ira_db::search_genres(&state.borrow().db, term).unwrap_or_default(),
-    };
-    if rows.is_empty() && term.is_empty() {
-        list.append(&status_row(&field.empty_text()));
-        return;
-    }
-    let draft_holds = |entity: &ScraperEntity| {
-        (field.get)(&slot.draft.borrow())
-            .iter()
-            .any(|held| held.id == entity.id)
-    };
-    for entity in &rows {
-        let store = store.clone();
-        let row_entity = entity.clone();
-        list.append(&pick_row(
-            &entity.name,
-            &format!("id {}", entity.id),
-            draft_holds(entity),
-            move || store(row_entity.clone()),
-        ));
-    }
-    // The term itself as a custom entry — a local company or genre when
-    // the sources have no row for it, the cache's own when they do.
-    // Nothing is minted here: allocation happens on click.
-    if !term.is_empty() {
-        let mint_and_store = {
-            let state = state.clone();
-            let field = field.clone();
-            let store = store.clone();
-            Rc::new(move |term: String| {
-                // Minting happens only on click, never while typing — the
-                // db must not fill up with every prefix the user tried.
-                let entity = match field.kind {
-                    EntityKind::Developer | EntityKind::Publisher => {
-                        ira_db::steam_company_entity(&state.borrow().db, &term)
-                    }
-                    EntityKind::Genre => ira_db::local_genre_entity(&state.borrow().db, &term),
-                };
-                if let Some(entity) = entity {
-                    store(entity);
-                }
-            })
-        };
-        let already = (field.get)(&slot.draft.borrow())
-            .iter()
-            .any(|held| held.name == term);
-        let term_c = term.to_string();
-        list.append(&pick_row(
-            &crate::tr!("Add \"{}\"").replacen("{}", term, 1),
-            "",
-            already,
-            move || mint_and_store(term_c.clone()),
-        ));
-    }
-}
-
-/// One picker answer row: the add button flips to a dead "Added" once
-/// the pick lands — and starts that way when the draft already holds
-/// the entity — so a second click can neither duplicate nor confuse.
-fn pick_row(
-    title: &str,
-    subtitle: &str,
-    already_added: bool,
-    on_pick: impl Fn() + 'static,
-) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
-    row.set_use_markup(false);
-    row.set_title(&super::helpers::esc(title));
-    row.set_subtitle(&super::helpers::esc(subtitle));
-    let pick = gtk4::Button::new();
-    let added = std::cell::Cell::new(already_added);
-    mark_added(&pick, already_added);
-    pick.set_valign(gtk4::Align::Center);
-    pick.connect_clicked(move |pick| {
-        if added.get() {
-            return;
-        }
-        on_pick();
-        added.set(true);
-        mark_added(pick, true);
-    });
-    row.add_suffix(&pick);
-    row
-}
-
-/// The button's two states: a suggested "Add", then a flat, insensitive
-/// "Added" — impossible to click twice.
-fn mark_added(button: &gtk4::Button, added: bool) {
-    button.set_label(&if added {
-        crate::tr!("Added")
-    } else {
-        crate::tr!("Add")
-    });
-    button.set_sensitive(!added);
-    button.remove_css_class(CSS_SUGGESTED_ACTION);
-    if added {
-        button.add_css_class(CSS_FLAT);
-    } else {
-        button.add_css_class(CSS_SUGGESTED_ACTION);
-    }
-}
-
-fn search_row(
-    state: &SharedState,
-    game: &Game,
-    win: &adw::Window,
-    slot: &ScraperSlot,
-) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
-    // Matched means an entry id is on record — a hand-filled record on
-    // an unmatched game still gets the search/auto-match row below.
-    let matched = !game.screenscraper_id.is_empty();
-    if matched {
-        // The entry's id is known, so gaps can be filled without any
-        // rematch ambiguity: one exact fetch by id, merged over what's
-        // stored. Unmatch stays for genuinely wrong matches.
-        row.set_title(&crate::tr!("Matched"));
-        row.set_subtitle(
-            &crate::tr!("SS ID: {}").replacen("{}", &game.screenscraper_id, 1),
-        );
-        // The entry's page on the site — what got matched, one click away.
-        let open = gtk4::Button::from_icon_name("adw-external-link-symbolic");
-        open.add_css_class(CSS_FLAT);
-        open.set_tooltip_text(Some(&crate::tr!("Open the ScreenScraper page")));
-        open.set_valign(gtk4::Align::Center);
-        {
-            let uri = ira_api::screenscraper::game_page_url(&game.screenscraper_id);
-            open.connect_clicked(move |btn| {
-                super::helpers::open_uri(btn.upcast_ref(), &uri);
-            });
-        }
-        row.add_suffix(&open);
-        let fetch = gtk4::Button::with_label(&crate::tr!("Fetch missing"));
-        fetch.add_css_class(CSS_FLAT);
-        fetch.set_valign(gtk4::Align::Center);
-        {
-            let state = state.clone();
-            let game = game.clone();
-            let slot = slot.clone();
-            fetch.connect_clicked(move |btn| {
-                if !state.borrow().cfg.screenscraper_enabled {
-                    slot.set_match_status(&crate::tr!("ScreenScraper is disabled in Settings"));
-                    return;
-                }
-                btn.set_sensitive(false);
-                let state = state.clone();
-                let game = game.clone();
-                run_refetch_missing(&state, &game, move |state, db_id, outcome| {
-                    if refresh_scraper_section(state, db_id) {
-                        let slot = state
-                            .borrow()
-                            .settings_data
-                            .as_ref()
-                            .and_then(|sd| sd.scraper_slot.clone());
-                        if let Some(slot) = slot {
-                            let text = match outcome {
-                                RefetchOutcome::Filled => {
-                                    crate::tr!("Filled the missing pieces")
-                                }
-                                RefetchOutcome::Unchanged => {
-                                    crate::tr!("Everything was already stored")
-                                }
-                                RefetchOutcome::Failed(e) => {
-                                    crate::tr!("Fetch failed: {}").replacen("{}", &e, 1)
-                                }
-                            };
-                            slot.set_match_status(&text);
-                        }
-                    }
-                });
-            });
-        }
-        row.add_suffix(&fetch);
-        let unmatch = gtk4::Button::with_label(&crate::tr!("Unmatch"));
-        unmatch.add_css_class(CSS_DESTRUCTIVE_ACTION);
-        unmatch.set_valign(gtk4::Align::Center);
-        {
-            let state = state.clone();
-            let db_id = game.db_id;
-            unmatch.connect_clicked(move |_| {
-                if let Err(e) = ira_db::clear_screenscraper_match(&state.borrow().db, db_id) {
-                    eprintln!("Failed to unmatch: {e}");
-                    return;
-                }
-                if let Some(g) = state
-                    .borrow_mut()
-                    .games
-                    .iter_mut()
-                    .find(|g| g.db_id == db_id)
-                {
-                    g.screenscraper_id = String::new();
-                }
-                refresh_scraper_section(&state, db_id);
-            });
-        }
-        row.add_suffix(&unmatch);
-        return row;
-    }
-
-    // A Steam-backed PC game can run the whole automated matching —
-    // system search, cross-platform diff, garnish — from here, without
-    // waiting for the next mass-matcher opening.
-    let auto_matchable = game.kind.is_pc() && game.platform_id.parse::<u32>().is_ok();
-    row.set_title(&crate::tr!("Not matched yet"));
-
-    if auto_matchable {
-        let btn = gtk4::Button::with_label(&crate::tr!("Auto match"));
-        btn.add_css_class(CSS_SUGGESTED_ACTION);
-        btn.set_valign(gtk4::Align::Center);
-        {
-            let state = state.clone();
-            let game = game.clone();
-            let slot = slot.clone();
-            btn.connect_clicked(move |btn| {
-                if !state.borrow().cfg.screenscraper_enabled {
-                    slot.set_match_status(&crate::tr!("ScreenScraper is disabled in Settings"));
-                    return;
-                }
-                btn.set_sensitive(false);
-                let state = state.clone();
-                let game = game.clone();
-                run_auto_match(&state, &game, |state, db_id, _matched| {
-                    refresh_scraper_section(state, db_id);
-                });
-            });
-        }
-        row.add_suffix(&btn);
-    }
-
-    row.set_tooltip_text(Some(&crate::tr!("Search ScreenScraper…")));
-    let btn = gtk4::Button::with_label(&crate::tr!("Search"));
-    btn.add_css_class(CSS_SUGGESTED_ACTION);
-    btn.set_valign(gtk4::Align::Center);
-    {
-        let state = state.clone();
-        let name = game.name.clone();
-        let platform_id = ira_models::scraper_console_id(game.kind, &game.platform_id);
-        let db_id = game.db_id;
-        let win = win.clone();
-        btn.connect_clicked(move |_| {
-            let dialog_state = state.clone();
-            let refresh_state = state.clone();
-            let refresh: Rc<dyn Fn()> = Rc::new(move || {
-                refresh_scraper_section(&refresh_state, db_id);
-            });
-            show_ss_search_dialog(
-                &dialog_state,
-                db_id,
-                &name,
-                &platform_id,
-                &win,
-                Some(refresh),
-            );
-        });
-    }
-    row.add_suffix(&btn);
-    row
-}
-
-/// The automated PC matching, off-thread: resolve, then persist and
-/// report on the UI loop. `on_done` runs on the main loop with whether a
-/// match landed.
-fn run_auto_match(
-    state: &SharedState,
-    game: &Game,
-    on_done: impl Fn(&SharedState, i64, bool) + 'static,
-) {
-    let (steam, creds, db) = {
-        let s = state.borrow();
-        (
-            s.steam.clone(),
-            ScraperCreds::from_account(
-                s.cfg.screenscraper_id.clone(),
-                s.cfg.screenscraper_password.clone(),
-            ),
-            s.db.clone(),
-        )
-    };
-    let kind = game.kind;
-    let platform_id = game.platform_id.clone();
-    let title = game.name.clone();
-    let display = game.name.clone();
-    let db_id = game.db_id;
-    let (tx, rx) = std::sync::mpsc::channel::<Option<ira_api::screenscraper::ScrapedGame>>();
-    std::thread::spawn(move || {
-        let target = super::mass_match_ss::PcMatchTarget {
-            kind,
-            platform_id: &platform_id,
-            title: &title,
-            display: &display,
-            db_id,
-        };
-        let matched = match super::mass_match_ss::run_pc_matching(&steam, &creds, &db, &target) {
-            super::mass_match_ss::SsOutcome::Hit(game) => Some(*game),
-            _ => None,
-        };
-        let _ = tx.send(matched);
-    });
-    let state = state.clone();
-    poll_channel(rx, move |matched| {
-        if let Some(game) = matched.as_ref() {
-            persist_ss_match(&state, db_id, game);
-        }
-        on_done(&state, db_id, matched.is_some());
-    });
-}
-
-/// Re-fetch the matched entry by its own id — no search, no ambiguity —
-/// and merge only what's missing into the stored metadata. Takes the
-/// quota gate so a mass job and this never request the same entry twice;
-/// off-thread, `on_done` runs on the main loop with the outcome.
-fn run_refetch_missing(
-    state: &SharedState,
-    game: &Game,
-    on_done: impl Fn(&SharedState, i64, RefetchOutcome) + 'static,
-) {
-    let db_id = game.db_id;
-    if state.borrow().ss_job_busy.get() {
-        on_done(
-            state,
-            db_id,
-            RefetchOutcome::Failed(crate::tr!("Another metadata job is running").to_string()),
-        );
-        return;
-    }
-    state.borrow().ss_job_busy.set(true);
-    let (steam, creds, db) = {
-        let s = state.borrow();
-        (
-            s.steam.clone(),
-            ScraperCreds::from_account(
-                s.cfg.screenscraper_id.clone(),
-                s.cfg.screenscraper_password.clone(),
-            ),
-            s.db.clone(),
-        )
-    };
-    let rx = spawn_refetch_worker(vec![db_id], steam, creds, db, None);
-    let state = state.clone();
-    super::helpers::once_channel(rx, move |progress| {
-        state.borrow().ss_job_busy.set(false);
-        on_done(&state, db_id, progress.outcome);
-    });
-}
-
 /// The synopsis: the English one when the sources sent several — every
 /// language they sent stays stored, this row only edits the one on
 /// display. Clicking toggles between the four-line summary and the full
-/// text; the pen opens the text editor.
+/// text; the pen opens the text editor, and a staged match that brought
+/// its own text adds the revert button beside it.
 fn synopsis_row(
     state: &SharedState,
     game: &Game,
@@ -1371,128 +844,308 @@ fn synopsis_row(
             show_synopsis_edit_dialog(&state, &game, &win, &slot, lang.clone(), text.clone());
         }));
     }
+    if let Some(revert) = revert_button(
+        state,
+        game,
+        win,
+        slot,
+        |pre, cur| pre.synopses_differ(cur),
+        |draft, pre| draft.synopses = pre.synopses.clone(),
+    ) {
+        row.add_suffix(&revert);
+    }
     slot.add(row.upcast());
 }
 
-/// The synopsis editor: the displayed language's text in a text view.
-/// Applying it emptied removes the entry; the language's siblings stay
-/// untouched.
-fn show_synopsis_edit_dialog(
-    state: &SharedState,
-    game: &Game,
-    win: &adw::Window,
-    slot: &ScraperSlot,
-    lang: String,
-    text: String,
-) {
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&crate::tr!("Synopsis"));
-    dialog.set_content_width(460);
-    dialog.set_content_height(340);
-
-    let toolbar = adw::ToolbarView::new();
-    let header = adw::HeaderBar::new();
-    let title = gtk4::Label::new(Some(&crate::tr!("Synopsis")));
-    title.add_css_class("heading");
-    header.set_title_widget(Some(&title));
-    // The apply lives in the header — nothing floating over dead space.
-    let apply = gtk4::Button::with_label(&crate::tr!("Apply"));
-    apply.add_css_class(CSS_SUGGESTED_ACTION);
-    apply.set_valign(gtk4::Align::Center);
-    header.pack_end(&apply);
-    toolbar.add_top_bar(&header);
-
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
-    content.set_margin_top(12);
-    content.set_margin_bottom(12);
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    // The framed, scrolling text view fills the dialog — a real editor
-    // surface instead of a text field stranded in empty space.
-    let scrolled = gtk4::ScrolledWindow::new();
-    scrolled.set_vexpand(true);
-    let view = gtk4::TextView::new();
-    view.set_wrap_mode(gtk4::WrapMode::WordChar);
-    view.buffer().set_text(&text);
-    scrolled.set_child(Some(&view));
-    let frame = gtk4::Frame::new(None);
-    frame.set_child(Some(&scrolled));
-    content.append(&frame);
-    toolbar.set_content(Some(&content));
-    dialog.set_child(Some(&toolbar));
-
-    {
-        let slot = slot.clone();
-        let dialog = dialog.clone();
-        let view = view.clone();
-        let (state, game, win) = (state.clone(), game.clone(), win.clone());
-        apply.connect_clicked(move |_| {
-            let buffer = view.buffer();
-            let (start, end) = buffer.bounds();
-            let text = buffer.text(&start, &end, false).trim().to_string();
-            dialog.close();
-            edit_field(&slot, |m| {
-                if text.is_empty() {
-                    m.synopses.retain(|(l, _)| *l != lang);
-                } else {
-                    match m.synopses.iter_mut().find(|(l, _)| *l == lang) {
-                        Some(entry) => entry.1 = text.clone(),
-                        None => m.synopses.push((lang.clone(), text.clone())),
-                    }
-                }
-            });
-            refresh_rows(&state, &game, &win, &slot);
-        });
-    }
-
-    dialog.present(Some(win));
-}
-
-/// Stage a metadata change on the draft — the Save button is what
-/// writes the database. A store failure surfaces at Save, not here.
 /// Stage a mutation directly on a draft; display is refreshed by the
-/// caller.
+/// caller. A store failure surfaces at Save, not here.
 fn mutate_draft(draft: &RefCell<ScraperMetadata>, mutate: impl FnOnce(&mut ScraperMetadata)) {
     mutate(&mut draft.borrow_mut());
 }
 
-fn edit_field(slot: &ScraperSlot, mutate: impl FnOnce(&mut ScraperMetadata)) {
+/// Stage a metadata change on the slot's draft — the Save button is what
+/// writes the database.
+pub(super) fn edit_field(slot: &ScraperSlot, mutate: impl FnOnce(&mut ScraperMetadata)) {
     mutate(&mut slot.draft.borrow_mut());
 }
+
+fn search_row(
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    slot: &ScraperSlot,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    // Matched means an entry id is on record — in the draft, so a match
+    // staged this session reads as matched before Save too. A
+    // hand-filled record on an unmatched game still gets the
+    // search/auto-match row below.
+    let ss_id = slot.draft.borrow().ss_id.clone();
+    let matched = !ss_id.is_empty();
+    if matched {
+        // The entry's id is known, so gaps can be filled without any
+        // rematch ambiguity: one exact fetch by id, merged over what's
+        // stored. Unmatch stays for genuinely wrong matches.
+        row.set_title(&crate::tr!("Matched"));
+        row.set_subtitle(&crate::tr!("SS ID: {}").replacen("{}", &ss_id, 1));
+        // The entry's page on the site — what got matched, one click away.
+        let open = gtk4::Button::from_icon_name("adw-external-link-symbolic");
+        open.add_css_class(CSS_FLAT);
+        open.set_tooltip_text(Some(&crate::tr!("Open the ScreenScraper page")));
+        open.set_valign(gtk4::Align::Center);
+        {
+            let uri = ira_api::screenscraper::game_page_url(&ss_id);
+            open.connect_clicked(move |btn| {
+                super::helpers::open_uri(btn.upcast_ref(), &uri);
+            });
+        }
+        row.add_suffix(&open);
+        let fetch = gtk4::Button::with_label(&crate::tr!("Fetch missing"));
+        fetch.add_css_class(CSS_FLAT);
+        fetch.set_valign(gtk4::Align::Center);
+        {
+            let state = state.clone();
+            let game = game.clone();
+            let slot = slot.clone();
+            fetch.connect_clicked(move |btn| {
+                if !state.borrow().cfg.screenscraper_enabled {
+                    slot.set_match_status(&crate::tr!("ScreenScraper is disabled in Settings"));
+                    return;
+                }
+                btn.set_sensitive(false);
+                let state = state.clone();
+                let game = game.clone();
+                let db_id = game.db_id;
+                run_refetch_missing(&state, &game, move |state, outcome| {
+                    // Every outcome repaints: a fill shows the merged
+                    // rows, and Unchanged/Failed re-enable the button.
+                    repaint_slot(state, db_id);
+                    let slot = state
+                        .borrow()
+                        .settings_data
+                        .as_ref()
+                        .and_then(|sd| sd.scraper_slot.clone());
+                    if let Some(slot) = slot {
+                        let text = match outcome {
+                            RefetchOutcome::Filled => crate::tr!("Filled the missing pieces"),
+                            RefetchOutcome::Unchanged => {
+                                crate::tr!("Everything was already stored")
+                            }
+                            RefetchOutcome::Failed(e) => {
+                                crate::tr!("Fetch failed: {}").replacen("{}", &e, 1)
+                            }
+                        };
+                        slot.set_match_status(&text);
+                    }
+                });
+            });
+        }
+        row.add_suffix(&fetch);
+        let unmatch = gtk4::Button::with_label(&crate::tr!("Unmatch"));
+        unmatch.add_css_class(CSS_DESTRUCTIVE_ACTION);
+        unmatch.set_valign(gtk4::Align::Center);
+        {
+            let state = state.clone();
+            let db_id = game.db_id;
+            let slot = slot.clone();
+            unmatch.connect_clicked(move |_| {
+                stage_ss_unmatch(&state, db_id, &slot);
+            });
+        }
+        row.add_suffix(&unmatch);
+        return row;
+    }
+
+    // A Steam-backed PC game can run the whole automated matching —
+    // system search, cross-platform diff, garnish — from here, without
+    // waiting for the next mass-matcher opening.
+    let auto_matchable = game.kind.is_pc() && game.platform_id.parse::<u32>().is_ok();
+    row.set_title(&crate::tr!("Not matched yet"));
+
+    if auto_matchable {
+        let btn = gtk4::Button::with_label(&crate::tr!("Auto match"));
+        btn.add_css_class(CSS_SUGGESTED_ACTION);
+        btn.set_valign(gtk4::Align::Center);
+        {
+            let state = state.clone();
+            let game = game.clone();
+            let slot = slot.clone();
+            btn.connect_clicked(move |btn| {
+                if !state.borrow().cfg.screenscraper_enabled {
+                    slot.set_match_status(&crate::tr!("ScreenScraper is disabled in Settings"));
+                    return;
+                }
+                btn.set_sensitive(false);
+                let state = state.clone();
+                let game = game.clone();
+                run_auto_match(&state, &game, &slot);
+            });
+        }
+        row.add_suffix(&btn);
+    }
+
+    row.set_tooltip_text(Some(&crate::tr!("Search ScreenScraper…")));
+    let btn = gtk4::Button::with_label(&crate::tr!("Search"));
+    btn.add_css_class(CSS_SUGGESTED_ACTION);
+    btn.set_valign(gtk4::Align::Center);
+    {
+        let state = state.clone();
+        let name = game.name.clone();
+        let platform_id = ira_models::scraper_console_id(game.kind, &game.platform_id);
+        let db_id = game.db_id;
+        let win = win.clone();
+        let slot = slot.clone();
+        btn.connect_clicked(move |_| {
+            let dialog_state = state.clone();
+            let stage_slot = slot.clone();
+            let sink = SsMatchSink::Stage(Rc::new(
+                move |st: &SharedState, id: i64, picked: &ScrapedGame| {
+                    stage_ss_match(st, id, picked, &stage_slot);
+                },
+            ));
+            show_ss_search_dialog(
+                &dialog_state,
+                db_id,
+                &name,
+                &platform_id,
+                &win,
+                sink,
+                None,
+            );
+        });
+    }
+    row.add_suffix(&btn);
+    row
+}
+
+/// The automated PC matching, off-thread: resolve, then stage the hit on
+/// the dialog's draft and report on the UI loop. A miss repaints too —
+/// the fresh Auto match button is the way to answer it.
+fn run_auto_match(state: &SharedState, game: &Game, slot: &ScraperSlot) {
+    let (steam, creds, db) = {
+        let s = state.borrow();
+        (
+            s.steam.clone(),
+            ScraperCreds::from_account(
+                s.cfg.screenscraper_id.clone(),
+                s.cfg.screenscraper_password.clone(),
+            ),
+            s.db.clone(),
+        )
+    };
+    let kind = game.kind;
+    let platform_id = game.platform_id.clone();
+    let title = game.name.clone();
+    let display = game.name.clone();
+    let db_id = game.db_id;
+    let (tx, rx) = std::sync::mpsc::channel::<Option<ScrapedGame>>();
+    std::thread::spawn(move || {
+        let target = PcMatchTarget {
+            kind,
+            platform_id: &platform_id,
+            title: &title,
+            display: &display,
+            db_id,
+        };
+        let matched = match run_pc_matching(&steam, &creds, &db, &target) {
+            SsOutcome::Hit(game) => Some(*game),
+            _ => None,
+        };
+        let _ = tx.send(matched);
+    });
+    let state = state.clone();
+    let slot = slot.clone();
+    poll_channel(rx, move |matched| {
+        match matched.as_ref() {
+            Some(picked) => stage_ss_match(&state, db_id, picked, &slot),
+            None => {
+                repaint_slot(&state, db_id);
+                slot.set_match_status(&crate::tr!("No ScreenScraper entry found"));
+            }
+        }
+    });
+}
+
+/// Re-fetch the matched entry by its own id — no search, no ambiguity —
+/// and merge only what's missing into the draft; Save is what writes.
+/// Takes the quota gate so a mass job and this never request the same
+/// entry twice; off-thread, `on_done` runs on the main loop.
+fn run_refetch_missing(
+    state: &SharedState,
+    game: &Game,
+    on_done: impl Fn(&SharedState, RefetchOutcome) + 'static,
+) {
+    let db_id = game.db_id;
+    if state.borrow().ss_job_busy.get() {
+        on_done(
+            state,
+            RefetchOutcome::Failed(crate::tr!("Another metadata job is running").to_string()),
+        );
+        return;
+    }
+    // The staged id when a match just landed here, the stored one
+    // otherwise — same value unless Save has not run yet.
+    let ss_id = {
+        let s = state.borrow();
+        let staged = s
+            .settings_data
+            .as_ref()
+            .filter(|sd| sd.db_id == db_id)
+            .and_then(|sd| sd.scraper_slot.clone())
+            .map(|slot| slot.draft.borrow().ss_id.clone())
+            .filter(|id| !id.is_empty());
+        staged.unwrap_or_else(|| game.screenscraper_id.clone())
+    };
+    if ss_id.is_empty() {
+        on_done(
+            state,
+            RefetchOutcome::Failed("no ScreenScraper id".to_string()),
+        );
+        return;
+    }
+    state.borrow().ss_job_busy.set(true);
+    let (steam, creds) = {
+        let s = state.borrow();
+        (
+            s.steam.clone(),
+            ScraperCreds::from_account(
+                s.cfg.screenscraper_id.clone(),
+                s.cfg.screenscraper_password.clone(),
+            ),
+        )
+    };
+    let (tx, rx) = std::sync::mpsc::channel::<Result<ScrapedGame, String>>();
+    std::thread::spawn(move || {
+        let outcome = steam
+            .screenscraper_game(&creds, &ss_id)
+            .and_then(|games| {
+                games
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| "entry not found".to_string())
+            });
+        let _ = tx.send(outcome);
+    });
+    let state = state.clone();
+    poll_channel(rx, move |outcome| {
+        state.borrow().ss_job_busy.set(false);
+        let result = match outcome {
+            Ok(picked) => {
+                if stage_refetch_fill(&state, db_id, &picked) {
+                    RefetchOutcome::Filled
+                } else {
+                    RefetchOutcome::Unchanged
+                }
+            }
+            Err(e) => RefetchOutcome::Failed(e),
+        };
+        on_done(&state, result);
+    });
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{snap_half_step, upsert_classification};
-    use ira_models::ScraperMetadata;
-
-    #[test]
-    fn test_upsert_classification_inserts_then_updates_by_kind() {
-        let mut metadata = ScraperMetadata::default();
-        upsert_classification(&mut metadata, "PEGI", "18");
-        upsert_classification(&mut metadata, "ESRB", "M");
-        assert_eq!(metadata.classifications.len(), 2);
-        // A second entry for the same board replaces the value — the
-        // junction's primary key is (game, kind).
-        upsert_classification(&mut metadata, "pegi", "16");
-        assert_eq!(metadata.classifications.len(), 2);
-        assert_eq!(metadata.classifications[0].kind, "PEGI");
-        assert_eq!(metadata.classifications[0].value, "16");
-    }
-
-    #[test]
-    fn test_upsert_classification_trims_and_needs_both_halves() {
-        let mut metadata = ScraperMetadata::default();
-        upsert_classification(&mut metadata, "  CERO  ", " C ");
-        assert_eq!(
-            metadata.classifications.first().map(|c| (c.kind.as_str(), c.value.as_str())),
-            Some(("CERO", "C"))
-        );
-        // Empty boards and empty values store nothing.
-        upsert_classification(&mut metadata, "", "18");
-        upsert_classification(&mut metadata, "   ", "18");
-        upsert_classification(&mut metadata, "PEGI", "");
-        upsert_classification(&mut metadata, "PEGI", "   ");
-        assert_eq!(metadata.classifications.len(), 1);
-    }
+    use super::snap_half_step;
 
     #[test]
     fn test_snap_half_step_snaps_and_clamps() {

@@ -812,17 +812,24 @@ pub(super) fn build_game_general_page(
     let runtime_row = build_runtime_row(&identity_group, game);
     let game_folder_entry = build_game_folder_row(&identity_group, game, win);
     // The scraped metadata lives inside the Identity group too — it is
-    // the game's own record, not a ScreenScraper-branded sidebar.
-    let scraper_slot =
-        super::edit_game_scraper::build_scraper_section(state, game, win, &identity_group);
+    // the game's own record, not a ScreenScraper-branded sidebar. The
+    // match row, though, is a service wiring: it hangs off the Service
+    // group below, next to the store ids and the Steam link.
+    let service_group = adw::PreferencesGroup::new();
+    service_group.set_title(&crate::tr!("Service"));
+    let scraper_slot = super::edit_game_scraper::build_scraper_section(
+        state,
+        game,
+        win,
+        &identity_group,
+        &service_group,
+    );
     general_page.append(&identity_group);
 
     let pending_version = build_shadps4_version_section(&general_page, game);
     let (pending_ra_core, pending_emulator, ra_container) =
         build_retro_emulator_and_ra(&general_page, state, game, win, pending_copies);
 
-    let service_group = adw::PreferencesGroup::new();
-    service_group.set_title(&crate::tr!("Service"));
     let (has_service_ids, app_id_entry) =
         build_service_ids_section(&service_group, game, state, win);
     let language_row = build_language_section(&service_group, state, game, languages);

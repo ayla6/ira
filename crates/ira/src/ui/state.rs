@@ -42,6 +42,11 @@ pub struct SettingsData {
     pub window: adw::Window,
     pub stack: gtk4::Stack,
     pub db_id: i64,
+    /// The Identity page's title entry: a staged ScreenScraper match may
+    /// fill it with the entry's own name (when the stored title came from
+    /// a dump), so the user sees — and can still edit — the name that
+    /// Save will write.
+    pub title_entry: adw::EntryRow,
     pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,
     pub sgdb_cache: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>,
     pub ra_container: Option<gtk4::Box>,

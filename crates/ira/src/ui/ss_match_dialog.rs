@@ -16,56 +16,31 @@ use super::state::SharedState;
 use ira_api::screenscraper::ScrapedGame;
 use ira_api::ScraperCreds;
 
+/// Where a picked match lands. The game settings' dialog stages the pick
+/// onto its draft — nothing is written until Save, and the closure is the
+/// scraper section's own staging step — while the batch matchers (mass
+/// matcher, auto-add wizard) have no Save button and persist at once.
+pub type StagePick = Rc<dyn Fn(&SharedState, i64, &ScrapedGame)>;
+
+#[derive(Clone)]
+pub enum SsMatchSink {
+    Persist,
+    Stage(StagePick),
+}
+
 /// Store a picked ScreenScraper game on the entry: the metadata write also
 /// refreshes the company/genre lookup tables, so every pick widens the
-/// local entity cache future pickers search first.
+/// local entity cache future pickers search first. The match wins the
+/// scalar fields it has data for; companies, genres and age ratings the
+/// entry already carries are mixed together with the answer, never
+/// replaced by it.
 pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &ScrapedGame) {
     let timestamp = ira_db::scraper_release_timestamp(&picked.release_date);
-    // Where the SS entry has data it wins; where it has none, whatever
-    // was stored before (Steam garnish, hand edits) survives. The old
-    // full store let an empty SS entry wipe age ratings and studios.
-    let existing = ira_db::scraper_metadata_for_game(&state.borrow().db, db_id)
+    let mut merged = ira_db::scraper_metadata_for_game(&state.borrow().db, db_id)
         .ok()
-        .flatten();
-    let fresh = picked.metadata(timestamp);
-    let merged = match existing {
-        Some(current) => {
-            let mut m = current;
-            // The match is the point of the call: the just-picked entry's
-            // id always wins, whatever was stored before. Without this
-            // the store kept the old (often empty) id — the row looked
-            // matched until the game reloaded from the database.
-            m.ss_id = fresh.ss_id.clone();
-            if !fresh.release_date.is_empty() {
-                m.release_date = fresh.release_date.clone();
-                m.release_timestamp = fresh.release_timestamp;
-                m.release_dates = fresh.release_dates.clone();
-            }
-            if !fresh.players.is_empty() {
-                m.players = fresh.players.clone();
-            }
-            if fresh.rating > 0.0 {
-                m.rating = fresh.rating;
-            }
-            if !fresh.synopses.is_empty() {
-                m.synopses = fresh.synopses.clone();
-            }
-            if !fresh.developers.is_empty() {
-                m.developers = fresh.developers.clone();
-            }
-            if !fresh.publishers.is_empty() {
-                m.publishers = fresh.publishers.clone();
-            }
-            if !fresh.genres.is_empty() {
-                m.genres = fresh.genres.clone();
-            }
-            if !fresh.classifications.is_empty() {
-                m.classifications = fresh.classifications.clone();
-            }
-            m
-        }
-        None => fresh.clone(),
-    };
+        .flatten()
+        .unwrap_or_default();
+    merged.merge_match(&picked.metadata(timestamp));
     if let Err(e) = ira_db::store_scraper_metadata(&state.borrow().db, db_id, &merged) {
         eprintln!("Failed to store ScreenScraper metadata: {e}");
         return;
@@ -137,7 +112,7 @@ fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
 
 /// Whether the row's current title is already authoritative: edited by the
 /// user, from an RA match, or from an official console header.
-fn entry_title_trusted(state: &SharedState, db_id: i64) -> Option<bool> {
+pub(super) fn entry_title_trusted(state: &SharedState, db_id: i64) -> Option<bool> {
     Some(
         ira_db::find_by_db_id(&state.borrow().db, db_id)
             .ok()
@@ -153,10 +128,14 @@ fn apply_ss_match(
     state: &SharedState,
     db_id: i64,
     picked: ScrapedGame,
+    sink: &SsMatchSink,
     on_match: &Option<Rc<dyn Fn()>>,
     dialog: &adw::Dialog,
 ) {
-    persist_ss_match(state, db_id, &picked);
+    match sink {
+        SsMatchSink::Persist => persist_ss_match(state, db_id, &picked),
+        SsMatchSink::Stage(stage) => stage(state, db_id, &picked),
+    }
     if let Some(ref cb) = on_match {
         cb();
     }
@@ -168,6 +147,7 @@ fn populate_results(
     state: &SharedState,
     db_id: i64,
     dialog: &adw::Dialog,
+    sink: &SsMatchSink,
     on_match: &Option<Rc<dyn Fn()>>,
     outcome: Result<Vec<ScrapedGame>, String>,
 ) {
@@ -186,6 +166,7 @@ fn populate_results(
     for game in results {
         let sc = state.clone();
         let dc = dialog.clone();
+        let sink_c = sink.clone();
         let on_match_c = on_match.clone();
         // The console matters most on the wide PC search, where the
         // candidates come from every system at once.
@@ -200,7 +181,7 @@ fn populate_results(
         }
         let row = match_result_row(&game.name, &subtitle, {
             let game = game.clone();
-            move || apply_ss_match(&sc, db_id, game.clone(), &on_match_c, &dc)
+            move || apply_ss_match(&sc, db_id, game.clone(), &sink_c, &on_match_c, &dc)
         });
         // The row's background opens the entry's page on the site.
         let uri = ira_api::screenscraper::game_page_url(&game.ss_id);
@@ -214,20 +195,28 @@ fn populate_results(
 
 /// Search ScreenScraper by title and let the user pick the match for
 /// `db_id`. The prefill is a starting point, nothing more — the request
-/// only goes out when the user searches. `on_match` runs after a pick is
-/// stored, so callers can repaint their row.
+/// only goes out when the user searches. `sink` decides whether a pick
+/// persists at once or stages onto the settings dialog's draft; `on_match`
+/// runs after a pick lands, so callers can repaint their row.
 pub fn show_ss_search_dialog(
     state: &SharedState,
     db_id: i64,
     game_name: &str,
     platform_id: &str,
     parent: &impl IsA<gtk4::Widget>,
+    sink: SsMatchSink,
     on_match: Option<Rc<dyn Fn()>>,
 ) {
-    if let Ok(Some(entry)) = ira_db::find_by_db_id(&state.borrow().db, db_id) {
-        if !entry.screenscraper_id.is_empty() {
-            eprintln!("SS search: game {db_id} is already matched");
-            return;
+    // A staged match may sit on an entry the database still calls
+    // matched (an unmatch pending on Save), so only the persist sink —
+    // the batch matchers, whose rows only exist for unmatched games —
+    // needs the guard.
+    if matches!(sink, SsMatchSink::Persist) {
+        if let Ok(Some(entry)) = ira_db::find_by_db_id(&state.borrow().db, db_id) {
+            if !entry.screenscraper_id.is_empty() {
+                eprintln!("SS search: game {db_id} is already matched");
+                return;
+            }
         }
     }
     // The master switch outranks every entry point into the source — a
@@ -308,9 +297,18 @@ pub fn show_ss_search_dialog(
         let list_c = list.clone();
         let state_c2 = state_c.clone();
         let dialog_c2 = dialog_c.clone();
+        let sink_c2 = sink.clone();
         let on_match_c2 = on_match.clone();
         poll_channel(rx, move |outcome| {
-            populate_results(&list_c, &state_c2, db_id, &dialog_c2, &on_match_c2, outcome);
+            populate_results(
+                &list_c,
+                &state_c2,
+                db_id,
+                &dialog_c2,
+                &sink_c2,
+                &on_match_c2,
+                outcome,
+            );
         });
     };
 
@@ -402,6 +400,7 @@ fn unmatched_actions(
             &gn,
             &pid,
             &dlg,
+            SsMatchSink::Persist,
             Some(Rc::new(move || show_matched(&inner))),
         );
     });

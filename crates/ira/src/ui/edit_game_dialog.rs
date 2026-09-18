@@ -610,6 +610,7 @@ fn build_dialog_contents(
             window: win.clone(),
             stack: stack.clone(),
             db_id,
+            title_entry: title_entry.clone(),
             pending_copies: pending_copies.clone(),
             sgdb_cache: sgdb_cache.clone(),
             ra_container,

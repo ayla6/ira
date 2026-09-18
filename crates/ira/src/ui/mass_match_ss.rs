@@ -630,8 +630,9 @@ fn resolve(
                 }
                 None => {
                     eprintln!(
-                        "SS batch: '{term}' [{platform_id}] no acceptable candidate ({} candidate(s) arrived)",
-                        candidates.len()
+                        "SS batch: '{term}' [{platform_id}] no acceptable candidate ({} arrived: {})",
+                        candidates.len(),
+                        candidate_names(&candidates)
                     );
                     Some(SsOutcome::Miss)
                 }
@@ -645,6 +646,17 @@ fn resolve(
 /// log, because they are what a bad matching run is diagnosed with.
 fn verbose_logging() -> bool {
     std::env::var_os("IRA_SS_VERBOSE").is_some()
+}
+
+/// A miss log names what arrived — "1 candidate(s)" says nothing when
+/// the question is why the one answer was no good.
+fn candidate_names(candidates: &[ScrapedGame]) -> String {
+    candidates
+        .iter()
+        .take(3)
+        .map(|game| game.name.as_str())
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 /// Off-thread PC branch. ScreenScraper barely covers desktop platforms,
@@ -806,8 +818,9 @@ pub(super) fn run_pc_matching(
         }
     }
     eprintln!(
-        "SS batch: '{term}' [pc] no acceptable candidate ({} candidate(s) arrived)",
-        candidates.len()
+        "SS batch: '{term}' [pc] no acceptable candidate ({} arrived: {})",
+        candidates.len(),
+        candidate_names(&candidates)
     );
     // No match does not mean no metadata: the store synopsis and the
     // cache's companies are still on offer.
@@ -872,17 +885,21 @@ fn has_companies(game: &ScrapedGame) -> bool {
     !game.developers.is_empty() || !game.publishers.is_empty()
 }
 
-/// Whether any of a candidate's names is the target, letter for letter
-/// after normalization.
-fn exact_title(target: &str, game: &ScrapedGame) -> bool {
+/// Whether any of a candidate's names fits the target by any accepted
+/// match shape — the title evidence for candidates with no companies.
+fn title_fits(target: &str, game: &ScrapedGame) -> bool {
     game.names
         .iter()
-        .any(|(_, name)| match_rank(target, &normalized_for_match(name)) == Some(4))
+        .any(|(_, name)| match_rank(target, &normalized_for_match(name)).is_some())
 }
 
 /// The candidates the Steam diff confirms: companies agree with Steam's,
-/// or the title is exact while the candidate carries no companies to
-/// contradict it. The best-ranked of those wins.
+/// or — when the candidate carries no companies, so nothing can agree or
+/// contradict — the title fits by any match shape. ScreenScraper's
+/// Higurashi chapters are exactly that case: no developer on record and
+/// no exact name (the store's bundle word "Hou" sits mid-title), but
+/// every Steam-title word accounted for. The best-ranked of the winners
+/// takes it, so an exact title still outranks a contained one.
 fn verified_pick(
     set: &[ScrapedGame],
     target: &str,
@@ -893,7 +910,7 @@ fn verified_pick(
         .filter(|game| match info {
             Some(info) => {
                 companies_overlap(info, game)
-                    || (exact_title(target, game) && !has_companies(game))
+                    || (!has_companies(game) && title_fits(target, game))
             }
             None => false,
         })
@@ -1003,11 +1020,15 @@ fn normalized_for_match(name: &str) -> String {
 /// ("Emio – The Smiling Man: Famicom Detective Club" against "Famicom
 /// Detective Club - Emio The Smiling Man"); one being the other plus
 /// decoration in front or behind, subtitle and region chopping tolerated
-/// ("(Japan)", "Advance"); and weakest, a brand the region's name
+/// ("(Japan)", "Advance"); next weakest, a brand the region's name
 /// carries in front of the title ("Simple 2000 Series Vol. 50 : The
-/// Daibijin" is "The Daibijin" with a prefix in front). A number leading
-/// the extension is a sequel, not decoration: "Advance Wars" is not
-/// "Advance Wars 2". `None` is not the game at all.
+/// Daibijin" is "The Daibijin" with a prefix in front); and weakest of
+/// all, one name's every word inside the other's — the store's bundle
+/// word sits mid-title where no prefix or suffix rule can see it
+/// ("Higurashi When They Cry Hou - Ch.3 Tatarigoroshi" against
+/// ScreenScraper's "Higurashi - When They Cry - Ch.3 - Tatarigoroshi").
+/// A number leading the extension is a sequel, not decoration: "Advance
+/// Wars" is not "Advance Wars 2". `None` is not the game at all.
 fn match_rank(target: &str, candidate: &str) -> Option<u8> {
     if target.is_empty() || candidate.is_empty() {
         return None;
@@ -1023,6 +1044,9 @@ fn match_rank(target: &str, candidate: &str) -> Option<u8> {
     }
     if suffix_extension_ok(target, candidate) || suffix_extension_ok(candidate, target) {
         return Some(1);
+    }
+    if containment_ok(target, candidate) || containment_ok(candidate, target) {
+        return Some(0);
     }
     None
 }
@@ -1148,6 +1172,31 @@ fn suffix_extension_ok(short: &str, long: &str) -> bool {
         return false;
     }
     long.as_bytes()[long.len() - short.len() - 1] == b' '
+}
+
+/// The loosest shape: the shorter name's every word appears in the
+/// longer one, position aside. This is for titles that carry an extra
+/// word mid-name — the bundle's "Hou" in "Higurashi When They Cry Hou -
+/// Ch.3 Tatarigoroshi", which ScreenScraper's "Higurashi - When They
+/// Cry - Ch.3 - Tatarigoroshi" matches under no prefix or suffix rule.
+/// The shorter side needs at least two words ("Mario" inside "Super
+/// Mario Bros. Wonder" is a word, not a title), and the words only the
+/// longer name holds must not be bare numbers — the sequel guard again,
+/// and the same check pins the right chapter: a "Ch.3" title can never
+/// be contained in a "Ch.4" name, because the 3 and the 4 are words.
+fn containment_ok(short: &str, long: &str) -> bool {
+    let short_words: Vec<&str> = short.split_whitespace().collect();
+    let long_words: Vec<&str> = long.split_whitespace().collect();
+    if short_words.len() < 2 || short_words.len() >= long_words.len() {
+        return false;
+    }
+    if !short_words.iter().all(|word| long_words.contains(word)) {
+        return false;
+    }
+    !long_words
+        .iter()
+        .filter(|word| !short_words.contains(word))
+        .any(|word| word.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// UI loop: persist a hit's result, and repaint the row's SS box when
@@ -1357,6 +1406,46 @@ mod tests {
     }
 
     #[test]
+    fn test_match_rank_containment_accepts_mid_title_extras() {
+        // The store's bundle word sits mid-title ("Hou"); ScreenScraper
+        // spells the chapters with dashes and dots around them. No
+        // prefix or suffix rule sees past the middle word; containment
+        // does (live jeuRecherche answer for "Ch 3 Tatarigoroshi").
+        assert_eq!(
+            match_rank(
+                &normalized_for_match("Higurashi When They Cry Hou - Ch.3 Tatarigoroshi"),
+                &normalized_for_match("Higurashi - When They Cry - Ch.3 - Tatarigoroshi"),
+            ),
+            Some(0)
+        );
+        // The chapter number is a word on both sides, so a wrong chapter
+        // never contains.
+        assert!(match_rank(
+            &normalized_for_match("Higurashi When They Cry Hou - Ch.3 Tatarigoroshi"),
+            &normalized_for_match("Higurashi - When They Cry - Ch.4 - Tatarigoroshi"),
+        )
+        .is_none());
+        // Sibling titles that differ by a real word are not the game.
+        assert!(match_rank(
+            &normalized_for_match("Super Smash Bros. Melee"),
+            &normalized_for_match("Super Smash Bros. Brawl"),
+        )
+        .is_none());
+        // The sequel guard holds: the bare number extra rejects.
+        assert!(match_rank(
+            &normalized_for_match("Advance Wars"),
+            &normalized_for_match("Advance Wars 2"),
+        )
+        .is_none());
+        // A one-word name inside a longer one is a word, not a title.
+        assert!(match_rank(
+            &normalized_for_match("Mario"),
+            &normalized_for_match("Super Mario Bros. Wonder"),
+        )
+        .is_none());
+    }
+
+    #[test]
     fn test_match_rank_accepts_reordered_words() {
         // ScreenScraper titles lead with their brand where the dump leads
         // with the game (live switch answer for "Emio": "Famicom
@@ -1524,6 +1613,46 @@ mod tests {
         );
         // No Steam info verifies nothing.
         assert!(super::verified_pick(&candidates, &target, None).is_none());
+    }
+
+    #[test]
+    fn test_verified_pick_accepts_companyless_containment_titles() {
+        // The live Higurashi chapter case: Steam names it with the
+        // bundle's "Hou" mid-title, and ScreenScraper's entry carries no
+        // companies and no exact name — the contained title verifies.
+        let info = SteamCmdInfo {
+            developer: "07th Expansion".into(),
+            publisher: "MangaGamer".into(),
+            ..Default::default()
+        };
+        let target =
+            normalized_for_match("Higurashi When They Cry Hou - Ch.3 Tatarigoroshi");
+        let candidates = [scraped(
+            "306342",
+            &[("ss", "Higurashi - When They Cry - Ch.3 - Tatarigoroshi")],
+        )];
+        assert!(super::verified_pick(&candidates, &target, Some(&info)).is_some());
+        // A different chapter stays out: the chapter numbers are words,
+        // and Meakashi is not Tatarigoroshi.
+        let wrong_chapter = scraped(
+            "306346",
+            &[("ss", "Higurashi - When They Cry - Ch.5 - Meakashi")],
+        );
+        assert!(super::verified_pick(
+            std::slice::from_ref(&wrong_chapter),
+            &target,
+            Some(&info)
+        )
+        .is_none());
+        // A company-less candidate whose title fits by nothing at all
+        // does not verify either.
+        let unrelated = scraped("1", &[("us", "Totally Different Thing")]);
+        assert!(super::verified_pick(
+            std::slice::from_ref(&unrelated),
+            &target,
+            Some(&info)
+        )
+        .is_none());
     }
 
     #[test]

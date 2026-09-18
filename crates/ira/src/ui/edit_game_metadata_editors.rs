@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use super::css::*;
 use super::edit_game_scraper::{edit_field, refresh_rows, EntityField, EntityKind, ScraperSlot};
+use super::entity_manager::{managed_kind, show_entity_manager};
 use super::helpers::{clear_children, status_row};
 use super::state::SharedState;
 use crate::Game;
@@ -37,6 +38,21 @@ pub(super) fn show_entity_edit_dialog(
     let root_title = gtk4::Label::new(Some(&field.label));
     root_title.add_css_class("heading");
     root_header.set_title_widget(Some(&root_title));
+    let manage_btn = gtk4::Button::with_label(&crate::tr!("Manage…"));
+    manage_btn.add_css_class(CSS_FLAT);
+    manage_btn.set_tooltip_text(Some(&crate::tr!(
+        "Rename entries, teach aliases, merge duplicates"
+    )));
+    {
+        let state = state.clone();
+        let win = win.clone();
+        let kind = managed_kind(&field);
+        let title = field.label.clone();
+        manage_btn.connect_clicked(move |_| {
+            show_entity_manager(&state, &win, kind, &title);
+        });
+    }
+    root_header.pack_start(&manage_btn);
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.add_css_class(CSS_FLAT);
     add_btn.set_tooltip_text(Some(&crate::tr!("Add")));

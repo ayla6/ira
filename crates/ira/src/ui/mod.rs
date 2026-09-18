@@ -9,6 +9,7 @@ mod css;
 mod disk_space;
 mod folder_list;
 mod enrichment;
+mod entity_manager;
 mod fetch_images;
 mod fetch_metadata;
 mod game_display;

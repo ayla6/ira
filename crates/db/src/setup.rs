@@ -143,7 +143,8 @@ pub fn init_db(db_path: &str) -> DbConn {
             );
             CREATE TABLE IF NOT EXISTS scraper_companies (
                 id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL DEFAULT ''
+                name TEXT NOT NULL DEFAULT '',
+                user_renamed INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS scraper_game_companies (
                 game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
@@ -169,11 +170,20 @@ pub fn init_db(db_path: &str) -> DbConn {
             );
             CREATE TABLE IF NOT EXISTS scraper_genres (
                 id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL DEFAULT ''
+                name TEXT NOT NULL DEFAULT '',
+                user_renamed INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS scraper_families (
                 id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL DEFAULT ''
+                name TEXT NOT NULL DEFAULT '',
+                user_renamed INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS scraper_aliases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                alias TEXT NOT NULL,
+                target_id INTEGER NOT NULL,
+                UNIQUE (kind, alias)
             );
             CREATE TABLE IF NOT EXISTS scraper_game_families (
                 game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,

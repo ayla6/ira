@@ -32,8 +32,9 @@ pub fn store_game_metadata(
     Ok(())
 }
 
-/// Upsert one ScreenScraper entity table: ids are stable, but a name the
-/// source has since corrected should win.
+/// Upsert one ScreenScraper entity table: ids are stable, and a name
+/// the source has since corrected should win — unless the user renamed
+/// the row, which latches it against freshening.
 fn store_entities(
     conn: &rusqlite::Connection,
     table: &str,
@@ -43,7 +44,8 @@ fn store_entities(
         conn.execute(
             &format!(
                 "INSERT INTO {table} (id, name) VALUES (?1, ?2)
-                 ON CONFLICT(id) DO UPDATE SET name = excluded.name"
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name
+                 WHERE user_renamed = 0"
             ),
             params![id, name],
         )
@@ -64,6 +66,13 @@ pub fn store_scraper_metadata(
     game_id: i64,
     metadata: &ira_models::ScraperMetadata,
 ) -> Result<(), String> {
+    // Aliases resolve first: a name the alias table knows stores as its
+    // canonical entity, so one declared alias fixes every future match
+    // and refetch at the only choke point every writer shares.
+    let mut metadata = metadata.clone();
+    super::entities::resolve_metadata_aliases(conn, &mut metadata);
+    let metadata = &metadata;
+
     // One row per company with role flags: a studio credited as both
     // developer and publisher is a single company, not two.
     let mut companies: std::collections::BTreeMap<i64, (String, bool, bool)> = Default::default();
@@ -606,7 +615,7 @@ pub fn search_families(
 }
 
 /// A LIKE search over one of the scraper lookup tables, for the pickers.
-fn entity_search(
+pub(crate) fn entity_search(
     conn: &DbConn,
     table: &str,
     filter: &str,

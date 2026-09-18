@@ -1,4 +1,5 @@
 mod crud;
+mod entities;
 mod discs;
 mod game_config;
 mod groups;
@@ -15,6 +16,7 @@ mod setup;
 mod variants;
 
 pub use crud::*;
+pub use entities::*;
 pub use discs::*;
 pub use game_config::*;
 pub use groups::*;

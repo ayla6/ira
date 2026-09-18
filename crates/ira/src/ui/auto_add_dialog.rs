@@ -115,7 +115,7 @@ fn detect_game_exe(folder: &Path) -> (bool, String) {
                 .map(|e| e.to_lowercase())
                 .unwrap_or_default();
             if ext == "exe" {
-                if is_installer_exe(&lower) {
+                if is_utility_stub(&basename, &lower) {
                     continue;
                 }
                 windows.push((score_candidate(&basename, &lower, depth), name));
@@ -124,6 +124,9 @@ fn detect_game_exe(folder: &Path) -> (bool, String) {
                     continue;
                 }
                 if ext.is_empty() && !is_elf(&path) {
+                    continue;
+                }
+                if is_utility_stub(&basename, &lower) {
                     continue;
                 }
                 native.push((score_candidate(&basename, &lower, depth), name));
@@ -142,7 +145,20 @@ fn detect_game_exe(folder: &Path) -> (bool, String) {
     }
 }
 
-fn is_installer_exe(lower: &str) -> bool {
+fn is_utility_stub(basename: &str, lower_name: &str) -> bool {
+    // A candidate that belongs to the game itself is never a helper,
+    // whatever its name contains: folder "Crash Bandicoot" ships a real
+    // "Crash Bandicoot.exe", and the folder "Uninfected" an
+    // "Uninfected.exe".
+    let stem = lower_name.strip_suffix(".exe").unwrap_or(lower_name);
+    let about_the_game = stem == basename || stem.contains(basename) || basename.contains(stem);
+    !about_the_game && hits_utility_marker(lower_name)
+}
+
+/// Whether a bare file name carries a helper marker — an installer, a
+/// redist, a crash reporter, an uninstaller. No game-name relation
+/// checked; [`is_utility_stub`] adds that.
+fn hits_utility_marker(lower_name: &str) -> bool {
     const MARKERS: &[&str] = &[
         "setup",
         "install",
@@ -156,8 +172,9 @@ fn is_installer_exe(lower: &str) -> bool {
         "redist",
         "dotnet",
         "directx",
+        "crash",
     ];
-    MARKERS.iter().any(|m| lower.contains(m))
+    MARKERS.iter().any(|m| lower_name.contains(m))
 }
 
 fn score_candidate(basename: &str, lower_name: &str, depth: i32) -> i32 {
@@ -537,7 +554,9 @@ fn finish_identify(
 /// Steam launch configs describe the Steam install layout; a GOG Linux
 /// install keeps the real executable directly in the game folder, so Steam's
 /// paths don't apply. Local native evidence (start.sh or an ELF) wins; the
-/// Steam exe is only kept when it actually exists on disk here.
+/// Steam exe is only kept when it actually exists on disk here. One
+/// exception: when the local pick itself still looks like a helper, the
+/// Steam data naming the executable outranks it.
 fn reconcile_steam_exe_with_folder(
     folder: &Path,
     steam_is_windows: bool,
@@ -546,7 +565,10 @@ fn reconcile_steam_exe_with_folder(
 ) -> (bool, String, Vec<String>) {
     let (local_windows, local_exe) = detect_game_exe(folder);
     if !local_windows && !local_exe.is_empty() {
-        return (false, local_exe, Vec::new());
+        let steam_names_it = !steam_exe.is_empty() && folder.join(&steam_exe).is_file();
+        if !steam_names_it || !hits_utility_marker(&local_exe.to_lowercase()) {
+            return (false, local_exe, Vec::new());
+        }
     }
     if steam_exe.is_empty() || !folder.join(&steam_exe).is_file() {
         return (local_windows, local_exe, Vec::new());
@@ -808,6 +830,9 @@ pub(super) fn show_identified_form(
     let exe_entry = adw::EntryRow::new();
     exe_entry.set_title(&crate::tr!("Executable"));
     exe_entry.set_text(&game.exe);
+    // The picker opens inside the game's own folder — hunting exes from
+    // $HOME defeats the point of the shortcut.
+    let browse_start = game.game_folder.clone();
     let exe_browse = super::helpers::make_browse_button(
         Some(win.as_widget()),
         &crate::tr!("Select executable"),
@@ -816,7 +841,7 @@ pub(super) fn show_identified_form(
             &crate::tr!("Executable"),
             &["application/x-executable", "application/x-msdos-program"],
         )),
-        || None,
+        move || Some(browse_start.to_string_lossy().into_owned()),
         {
             let entry = exe_entry.clone();
             move |path| entry.set_text(&path.to_string_lossy())
@@ -1916,6 +1941,91 @@ mod tests {
 
         assert!(is_windows);
         assert_eq!(exe, "HollowKnight.exe");
+    }
+
+    #[test]
+    fn test_is_utility_stub_flags_helpers_but_not_the_game_itself() {
+        // Crash reporters, uninstallers, redists: helpers.
+        assert!(is_utility_stub("mygame", "crashpad_handler.exe"));
+        assert!(is_utility_stub("mygame", "unins000.exe"));
+        assert!(is_utility_stub("mygame", "redist_installer.exe"));
+        // The game's own name keeps the marker words meaningless.
+        assert!(!is_utility_stub("crash bandicoot", "crash bandicoot.exe"));
+        assert!(!is_utility_stub("crash", "crashhandler.exe"));
+        assert!(!is_utility_stub("uninfected", "uninfected.exe"));
+        assert!(!is_utility_stub("mygame", "mygame.exe"));
+    }
+
+    #[test]
+    fn test_detect_game_exe_skips_crash_handlers_for_the_real_exe() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("MyGame");
+        write(&game_dir, "crashpad_handler.exe");
+        write(&game_dir, "launcher.exe");
+
+        let (is_windows, exe) = detect_game_exe(&game_dir);
+
+        assert!(is_windows);
+        assert_eq!(exe, "launcher.exe");
+    }
+
+    #[test]
+    fn test_detect_game_exe_skips_native_crash_handlers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("MyGame");
+        write(&game_dir, "crashpad_handler");
+        write(&game_dir, "launcher");
+
+        let (is_windows, exe) = detect_game_exe(&game_dir);
+
+        assert!(!is_windows);
+        assert_eq!(exe, "launcher");
+    }
+
+    #[test]
+    fn test_reconcile_leaves_the_exe_empty_when_only_helpers_were_found() {
+        // Only a crash handler on disk, and Steam's path doesn't exist
+        // here either: nothing plausible to launch beats launching a
+        // helper.
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("MyGame");
+        write(&game_dir, "crashpad_handler");
+
+        let (is_windows, exe, variants) = reconcile_steam_exe_with_folder(
+            &game_dir,
+            true,
+            "bin/Missing.exe".to_string(),
+            Vec::new(),
+        );
+
+        assert!(!is_windows);
+        assert!(exe.is_empty());
+        assert!(variants.is_empty());
+    }
+
+    #[test]
+    fn test_reconcile_prefers_steam_exe_over_a_helper_looking_native_pick() {
+        // The local scan's only native ELF is a crash handler that
+        // matches the game's own name ("Crash"), so it survives the
+        // filter — but Steam says the exe is bin/Real.exe, and that file
+        // exists: the Steam answer outranks the helper.
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("Crash");
+        write(&game_dir, "crashhandler");
+        let real = game_dir.join("bin");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Real.exe"), b"MZ").unwrap();
+
+        let (is_windows, exe, variants) = reconcile_steam_exe_with_folder(
+            &game_dir,
+            true,
+            "bin/Real.exe".to_string(),
+            vec!["Alt.exe".to_string()],
+        );
+
+        assert!(is_windows);
+        assert_eq!(exe, "bin/Real.exe");
+        assert_eq!(variants, vec!["Alt.exe".to_string()]);
     }
 
     #[test]

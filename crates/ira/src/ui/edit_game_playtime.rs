@@ -84,42 +84,19 @@ fn import_row(
     state: &SharedState,
     game: &Game,
     win: &adw::Window,
-) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
+) -> adw::EntryRow {
+    let row = adw::EntryRow::new();
     row.set_title(&crate::tr!("Add playtime"));
-    let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some(&crate::tr!("Hours, like 2:30 or 12.5")));
-    entry.set_width_chars(12);
-    entry.set_valign(gtk4::Align::Center);
-    let add = gtk4::Button::with_label(&crate::tr!("Add"));
-    add.set_valign(gtk4::Align::Center);
-    let sync = {
-        let entry = entry.clone();
-        let add = add.clone();
-        move || add.set_sensitive(parse_playtime_input(&entry.text()).is_some())
-    };
-    entry.connect_changed({
-        let sync = sync.clone();
-        move |_| sync()
-    });
-    sync();
+    row.set_show_apply_button(true);
+    // No subtitle on an entry row — the format hint rides on a tooltip.
+    row.set_tooltip_text(Some(&crate::tr!("Hours, like 2:30 or 12.5")));
     let page_weak = page.downgrade();
     let state = state.clone();
     let win_weak = win.downgrade();
     let db_id = game.db_id;
-    let apply = {
-        let entry = entry.clone();
-        move || {
-            apply_import(&state, db_id, &entry.text(), &page_weak, &win_weak);
-        }
-    };
-    add.connect_clicked({
-        let apply = apply.clone();
-        move |_| apply()
+    row.connect_apply(move |entry| {
+        apply_import(&state, db_id, &entry.text(), &page_weak, &win_weak);
     });
-    entry.connect_activate(move |_| apply());
-    row.add_suffix(&entry);
-    row.add_suffix(&add);
     row
 }
 

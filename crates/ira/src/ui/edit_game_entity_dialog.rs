@@ -223,15 +223,10 @@ pub(super) fn show_entity_dialog(
     alias_list.set_selection_mode(gtk4::SelectionMode::None);
     alias_list.add_css_class(CSS_BOXED_LIST);
     alias_group.add(&alias_list);
-    let alias_add_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    let alias_entry = gtk4::Entry::new();
-    alias_entry.set_placeholder_text(Some(&crate::tr!("Add alias…")));
-    alias_entry.set_hexpand(true);
-    let alias_add_btn = gtk4::Button::with_label(&crate::tr!("Add"));
-    alias_add_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    alias_add_row.append(&alias_entry);
-    alias_add_row.append(&alias_add_btn);
-    alias_group.add(&alias_add_row);
+    let alias_entry = adw::EntryRow::new();
+    alias_entry.set_title(&crate::tr!("Add alias…"));
+    alias_entry.set_show_apply_button(true);
+    alias_group.add(&alias_entry);
     entity_content.append(&alias_group);
 
     let merge_group = adw::PreferencesGroup::new();
@@ -699,7 +694,7 @@ pub(super) fn show_entity_dialog(
         // already staged is ignored.
         let edits = edits.clone();
         let alias_list = alias_list.clone();
-        let stage_alias: Rc<dyn Fn(&gtk4::Entry)> = Rc::new(move |entry: &gtk4::Entry| {
+        alias_entry.connect_apply(move |entry| {
             let text = entry.text().trim().to_string();
             if text.is_empty() {
                 return;
@@ -721,12 +716,6 @@ pub(super) fn show_entity_dialog(
             entry.set_text("");
             repaint_alias_list(&alias_list, &edits);
         });
-        alias_add_btn.connect_clicked({
-            let stage_alias = stage_alias.clone();
-            let alias_entry = alias_entry.clone();
-            move |_| stage_alias(&alias_entry)
-        });
-        alias_entry.connect_activate(move |entry| stage_alias(entry));
     }
     {
         // Save commits the staged name (when it changed) and the alias

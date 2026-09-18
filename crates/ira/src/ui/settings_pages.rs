@@ -1275,11 +1275,7 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
     search_row.set_hexpand(true);
     let filter_entry = adw::EntryRow::new();
     filter_entry.set_title(&crate::tr!("Add user\u{2026}"));
-    let filter_add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
-    filter_add_btn.add_css_class(CSS_FLAT);
-    filter_add_btn.set_valign(gtk4::Align::Center);
-    filter_add_btn.set_tooltip_text(Some(&crate::tr!("Add user to the filter list")));
-    filter_entry.add_suffix(&filter_add_btn);
+    filter_entry.set_show_apply_button(true);
     let filter_user_ids: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(
         cfg.sgdb_filtered_users
             .iter()
@@ -1329,11 +1325,7 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
             entry.set_text("");
         })
     };
-    {
-        let add = add_filtered_action.clone();
-        filter_add_btn.connect_clicked(move |_| add());
-    }
-    filter_entry.connect_activate(move |_| add_filtered_action());
+    filter_entry.connect_apply(move |_| add_filtered_action());
 
     let manage_row = adw::ActionRow::new();
     manage_row.set_title(&crate::tr!("Filtered users"));

@@ -189,6 +189,35 @@ pub fn resolve_metadata_aliases(conn: &DbConn, meta: &mut ira_models::ScraperMet
     resolve(KIND_FAMILY, &mut meta.families);
 }
 
+/// Upsert a fetched batch of the source's own rows into one lookup
+/// cache — the genre and family tables' search index for the pickers.
+/// Honors the rename latch, like every writer.
+pub fn warm_entity_cache(
+    conn: &DbConn,
+    kind: &str,
+    entries: &[(i64, String)],
+) -> Result<(), String> {
+    let spec = spec(kind);
+    let mut c = crate::lock_db(conn)?;
+    let tx = c
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(err)?;
+    for (id, name) in entries {
+        tx.execute(
+            &format!(
+                "INSERT INTO {} (id, name) VALUES (?1, ?2)
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name
+                 WHERE user_renamed = 0",
+                spec.lookup
+            ),
+            params![id, name],
+        )
+        .map_err(err)?;
+    }
+    tx.commit().map_err(err)?;
+    Ok(())
+}
+
 /// A user rename: the new spelling lands and latches the row, so the
 /// store's freshen-from-source pass stops overwriting it.
 pub fn rename_entity(conn: &DbConn, kind: &str, id: i64, name: &str) -> Result<(), String> {

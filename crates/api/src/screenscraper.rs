@@ -108,6 +108,16 @@ pub fn genres_list_url(creds: &ScraperCreds) -> String {
     )
 }
 
+/// The whole family table — same deal as the genre table: the fetched
+/// copy is the search index.
+pub fn familles_list_url(creds: &ScraperCreds) -> String {
+    format!(
+        "{API_URL_BASE}/famillesListe.php?{}&softname={}&output=xml",
+        creds.auth_params(),
+        urlencode(SOFT_NAME)
+    )
+}
+
 /// The account's usage counters, from ssuserInfos.php — ScreenScraper
 /// requires clients to read and manage these.
 #[derive(Debug, Default, Clone)]
@@ -745,6 +755,40 @@ struct SsGenreListRow {
 
 /// Parse the genre table; the English name is preferred with the French
 /// one as fallback, and nameless or idless rows drop out.
+/// One fetched family: the id the source answers with and its name.
+pub fn parse_familles_list(xml: &str) -> Result<Vec<(String, String)>, String> {
+    let root: SsFamillesRoot = quick_xml::de::from_str(xml)
+        .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
+    Ok(root
+        .familles
+        .map(|table| table.famille)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|row| !row.id.is_empty() && !row.nom.is_empty())
+        .map(|row| (row.id, row.nom))
+        .collect())
+}
+
+#[derive(Debug, Deserialize)]
+struct SsFamillesRoot {
+    #[serde(default)]
+    familles: Option<SsFamillesTable>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SsFamillesTable {
+    #[serde(default, rename = "famille")]
+    famille: Vec<SsFamilleRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SsFamilleRow {
+    #[serde(rename = "@id", default)]
+    id: String,
+    #[serde(rename = "@nom", default)]
+    nom: String,
+}
+
 pub fn parse_genres_list(xml: &str) -> Result<Vec<GenreListEntry>, String> {
     let root: SsGenresRoot = quick_xml::de::from_str(xml)
         .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
@@ -796,6 +840,41 @@ impl SteamDataClient {
             return Err("ScreenScraper credentials not configured".to_string());
         }
         self.screenscraper_get(&search_url_scoped(creds, term, system))
+    }
+
+    /// Fetch the whole genre table. The service has no per-name genre
+    /// search, so the fetched copy is the search index.
+    pub fn genres_list(
+        &self,
+        creds: &ScraperCreds,
+    ) -> Result<Vec<GenreListEntry>, String> {
+        if !creds.is_configured() {
+            return Err("ScreenScraper credentials not configured".to_string());
+        }
+        let xml = self
+            .http
+            .get(genres_list_url(creds))
+            .send()
+            .map_err(|e| format!("ScreenScraper request failed: {e}"))?
+            .text()
+            .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
+        parse_genres_list(&xml)
+    }
+
+    /// Fetch the whole family table — the series the source files
+    /// entries under.
+    pub fn familles_list(&self, creds: &ScraperCreds) -> Result<Vec<(String, String)>, String> {
+        if !creds.is_configured() {
+            return Err("ScreenScraper credentials not configured".to_string());
+        }
+        let xml = self
+            .http
+            .get(familles_list_url(creds))
+            .send()
+            .map_err(|e| format!("ScreenScraper request failed: {e}"))?
+            .text()
+            .map_err(|e| format!("ScreenScraper request failed: {e}"))?;
+        parse_familles_list(&xml)
     }
 
     /// Run a ScreenScraper exact ROM lookup (name + optional hash).

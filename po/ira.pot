@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-18 17:18-0300\n"
+"POT-Creation-Date: 2026-09-18 17:57-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -200,9 +200,9 @@ msgstr ""
 #: crates/ira/src/ui/context_menu_actions.rs:110
 #: crates/ira/src/ui/context_menu_actions.rs:433
 #: crates/ira/src/ui/edit_game_controller.rs:445
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:257
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:252
 #: crates/ira/src/ui/edit_game_pages.rs:308
-#: crates/ira/src/ui/edit_game_playtime.rs:280
+#: crates/ira/src/ui/edit_game_playtime.rs:257
 #: crates/ira/src/ui/edit_game_variants.rs:137
 #: crates/ira/src/ui/fetch_images.rs:678
 #: crates/ira/src/ui/group_dialog.rs:20
@@ -778,7 +778,7 @@ msgstr ""
 
 #: crates/ira/src/ui/context_menu_actions.rs:111
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:399
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:856
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:933
 msgid "Remove"
 msgstr ""
 
@@ -1025,7 +1025,7 @@ msgid "Already centralized"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_dialog.rs:496
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:259
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:254
 #: crates/ira/src/ui/input_profile_editor.rs:140
 #: crates/ira/src/ui/input_profile_editor_save.rs:131
 #: crates/ira/src/ui/profile_dialog.rs:452
@@ -1043,11 +1043,10 @@ msgid "Unused"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:156
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:230
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:903
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:980
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:41
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:91
-#: crates/ira/src/ui/edit_game_playtime.rs:94
+#: crates/ira/src/ui/settings_pages.rs:1296
 msgid "Add"
 msgstr ""
 
@@ -1057,7 +1056,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:182
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:195
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:274
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:269
 msgid "Search…"
 msgstr ""
 
@@ -1074,16 +1073,16 @@ msgstr ""
 msgid "Incoming names on this list store as the entity above"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:228
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:227
 msgid "Add alias…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:240
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:235
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:322
 msgid "Merge into…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:241
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:236
 msgid "Combine this entry with another one"
 msgstr ""
 
@@ -1117,6 +1116,7 @@ msgid "Manage"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:523
+#: crates/ira/src/ui/settings_pages.rs:1333
 #, rust-format
 msgid "Add \"{}\""
 msgstr ""
@@ -1129,15 +1129,15 @@ msgstr ""
 msgid "Merge"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:790
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:865
 msgid "Saved"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:844
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:921
 msgid "No aliases"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:901
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:978
 msgid "Added"
 msgstr ""
 
@@ -1434,50 +1434,50 @@ msgstr ""
 msgid "Add playtime"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:91
+#: crates/ira/src/ui/edit_game_playtime.rs:92
 msgid "Hours, like 2:30 or 12.5"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:159
+#: crates/ira/src/ui/edit_game_playtime.rs:136
 msgid "Link with other games"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:161
+#: crates/ira/src/ui/edit_game_playtime.rs:138
 msgid "Link more games"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:163
-#: crates/ira/src/ui/edit_game_playtime.rs:281
+#: crates/ira/src/ui/edit_game_playtime.rs:140
+#: crates/ira/src/ui/edit_game_playtime.rs:258
 #: crates/ira/src/ui/game_settings.rs:564
 msgid "Link"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:199
+#: crates/ira/src/ui/edit_game_playtime.rs:176
 #, rust-format
 msgid "{} on its own"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:205
+#: crates/ira/src/ui/edit_game_playtime.rs:182
 msgid "Remove from link"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:229
+#: crates/ira/src/ui/edit_game_playtime.rs:206
 msgid "Leave link"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:230
+#: crates/ira/src/ui/edit_game_playtime.rs:207
 msgid "Count this entry's time on its own again"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:231
+#: crates/ira/src/ui/edit_game_playtime.rs:208
 msgid "Leave"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:275
+#: crates/ira/src/ui/edit_game_playtime.rs:252
 msgid "Link game playtime"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_playtime.rs:276
+#: crates/ira/src/ui/edit_game_playtime.rs:253
 msgid "Choose the entries whose time counts together"
 msgstr ""
 
@@ -5736,37 +5736,29 @@ msgstr ""
 msgid "Search filtered users…"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1277
-msgid "Add user…"
-msgstr ""
-
-#: crates/ira/src/ui/settings_pages.rs:1281
-msgid "Add user to the filter list"
-msgstr ""
-
-#: crates/ira/src/ui/settings_pages.rs:1339
-#: crates/ira/src/ui/settings_pages.rs:1405
+#: crates/ira/src/ui/settings_pages.rs:1361
+#: crates/ira/src/ui/settings_pages.rs:1425
 msgid "Filtered users"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1341
+#: crates/ira/src/ui/settings_pages.rs:1363
 msgid "Manage the authors whose art is skipped in automatic downloads."
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1347
+#: crates/ira/src/ui/settings_pages.rs:1369
 msgid "Open the filtered users manager"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1462
+#: crates/ira/src/ui/settings_pages.rs:1481
 msgid "Remove from filter list"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1514
+#: crates/ira/src/ui/settings_pages.rs:1533
 #, rust-format
 msgid "{} was unfiltered"
 msgstr ""
 
-#: crates/ira/src/ui/settings_pages.rs:1516
+#: crates/ira/src/ui/settings_pages.rs:1535
 msgid "Undo"
 msgstr ""
 

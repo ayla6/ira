@@ -286,7 +286,12 @@ pub(super) fn show_entity_dialog(
     let state = Rc::new(state.clone());
     let selected: Rc<RefCell<Option<i64>>> = Default::default();
     let edits: Rc<RefCell<EntityEdits>> = Default::default();
-    let page: Cell<Page> = Cell::new(Page::Root);
+    // The genre and family caches fill one-time from the source's whole
+    // table — companies have no listing endpoint and stay harvest-only.
+    let warmed: Rc<Cell<bool>> = Default::default();
+    // Shared: navigate records the current page here and every handler
+    // reads the same copy — a plain Cell clone would fork the state.
+    let page: Rc<Cell<Page>> = Rc::new(Cell::new(Page::Root));
 
     // Navigation: pages deeper in the flow slide in from the right,
     // back slides left; the header's buttons and title follow. The
@@ -340,8 +345,8 @@ pub(super) fn show_entity_dialog(
             let loaded = load_edits(&db, kind, id);
             name_entry.set_text(&loaded.name);
             name_entry.remove_css_class(CSS_ERROR);
-            repaint_alias_list(&alias_list, &edits);
             *edits.borrow_mut() = loaded;
+            repaint_alias_list(&alias_list, &edits);
             selected.replace(Some(id));
             navigate(Page::Entity, name);
         }
@@ -620,6 +625,82 @@ pub(super) fn show_entity_dialog(
         }
     };
 
+    // Warm the cache from the source's whole table when it is thin:
+    // the pickers search the local cache, and a library new to matching
+    // would otherwise present three rows where the source has hundreds.
+    // One fetch per dialog session at most.
+    let maybe_warm: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let warmed = warmed.clone();
+        let refresh_manage = refresh_manage.clone();
+        let manage_search = manage_search.clone();
+        move || {
+            if kind == ira_db::KIND_COMPANY || warmed.get() {
+                return;
+            }
+            let (steam, cfg, db) = {
+                let s = state.borrow();
+                (s.steam.clone(), s.cfg.clone(), s.db.clone())
+            };
+            if !cfg.screenscraper_enabled {
+                return;
+            }
+            let count = ira_db::list_entities(&db, kind, "").unwrap_or_default().len();
+            if count >= 100 {
+                warmed.set(true);
+                return;
+            }
+            warmed.set(true);
+            let creds = ira_api::ScraperCreds::from_account(
+                cfg.screenscraper_id.clone(),
+                cfg.screenscraper_password.clone(),
+            );
+            let (tx, rx) = std::sync::mpsc::channel::<Vec<(i64, String)>>();
+            std::thread::spawn(move || {
+                let fetched = match kind {
+                    ira_db::KIND_GENRE => steam
+                        .genres_list(&creds)
+                        .map(|rows| {
+                            rows.iter()
+                                .filter_map(|row| {
+                                    row.id
+                                        .parse::<i64>()
+                                        .ok()
+                                        .map(|id| (id, row.name.clone()))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                    _ => steam
+                        .familles_list(&creds)
+                        .map(|rows| {
+                            rows.iter()
+                                .filter_map(|(id, name)| {
+                                    id.parse::<i64>().ok().map(|id| (id, name.clone()))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                };
+                let _ = tx.send(fetched);
+            });
+            let state = state.clone();
+            let refresh_manage = refresh_manage.clone();
+            let manage_search = manage_search.clone();
+            super::helpers::poll_channel(rx, move |entries| {
+                if entries.is_empty() {
+                    return;
+                }
+                let db = state.borrow().db.clone();
+                if let Err(e) = ira_db::warm_entity_cache(&db, kind, &entries) {
+                    eprintln!("Failed to warm the entity cache: {e}");
+                    return;
+                }
+                refresh_manage(&manage_search.text());
+            });
+        }
+    });
+
     // ——— Wiring ———
     refresh_root();
     {
@@ -639,9 +720,11 @@ pub(super) fn show_entity_dialog(
     {
         let refresh_manage = refresh_manage.clone();
         let navigate = navigate.clone();
+        let maybe_warm = maybe_warm.clone();
         manage_btn.connect_clicked(move |_| {
             refresh_manage("");
             navigate(Page::Manage, "");
+            maybe_warm();
         });
     }
     {
@@ -653,6 +736,7 @@ pub(super) fn show_entity_dialog(
         let refresh_manage = refresh_manage.clone();
         let selected = selected.clone();
         let navigate = navigate.clone();
+        let maybe_warm = maybe_warm.clone();
         back_btn.connect_clicked(move |_| {
             match page.get() {
                 Page::Search => navigate(Page::Root, ""),
@@ -660,6 +744,7 @@ pub(super) fn show_entity_dialog(
                 Page::Entity => {
                     refresh_manage(&manage_search.text());
                     navigate(Page::Manage, "");
+                    maybe_warm();
                 }
                 Page::Merge => {
                     let name = selected
@@ -730,6 +815,7 @@ pub(super) fn show_entity_dialog(
         let manage_search = manage_search.clone();
         let title = title.clone();
         let toast_overlay = toast_overlay.clone();
+        let navigate = navigate.clone();
         save_btn.connect_clicked(move |_| {
             let Some(id) = *selected.borrow() else {
                 return;
@@ -773,10 +859,12 @@ pub(super) fn show_entity_dialog(
             let reloaded = load_edits(&db, kind, id);
             name_entry.set_text(&reloaded.name);
             title.set_text(&reloaded.name);
-            repaint_alias_list(&alias_list, &edits);
             *edits.borrow_mut() = reloaded;
+            repaint_alias_list(&alias_list, &edits);
             refresh_manage(&manage_search.text());
             toast_overlay.add_toast(adw::Toast::new(&crate::tr!("Saved")));
+            // A committed entity is done: back to the manage list.
+            navigate(Page::Manage, "");
         });
     }
     {
@@ -795,9 +883,9 @@ pub(super) fn show_entity_dialog(
             let reloaded = load_edits(&db, kind, id);
             name_entry.set_text(&reloaded.name);
             title.set_text(&reloaded.name);
+            *edits.borrow_mut() = reloaded;
             name_entry.remove_css_class(CSS_ERROR);
             repaint_alias_list(&alias_list, &edits);
-            *edits.borrow_mut() = reloaded;
         });
     }
     {

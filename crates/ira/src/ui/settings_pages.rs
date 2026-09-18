@@ -1273,9 +1273,6 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
     let search_row = gtk4::SearchEntry::new();
     search_row.set_placeholder_text(Some(&crate::tr!("Search filtered users\u{2026}")));
     search_row.set_hexpand(true);
-    let filter_entry = adw::EntryRow::new();
-    filter_entry.set_title(&crate::tr!("Add user\u{2026}"));
-    filter_entry.set_show_apply_button(true);
     let filter_user_ids: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(
         cfg.sgdb_filtered_users
             .iter()
@@ -1287,30 +1284,64 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
     for user in &seeded {
         add_filtered_user_row(&filter_users_list, &user.name, &user.steam64, &filter_user_ids);
     }
+
+    // Search and add share one entry: the query filters the rows, and a
+    // query matching nobody grows an "Add …" row at the top — click it
+    // and the user joins the list.
+    let add_row = adw::ActionRow::new();
+    // An empty widget name keeps the row out of the user collection and
+    // out of the filter loop — both key off it.
+    add_row.set_widget_name("");
+    add_row.set_visible(false);
+    let add_btn = gtk4::Button::with_label(&crate::tr!("Add"));
+    add_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    add_btn.set_valign(gtk4::Align::Center);
+    add_row.add_suffix(&add_btn);
+    filter_users_list.insert(&add_row, 0);
+    let current_query: Rc<RefCell<String>> = Default::default();
     {
         let list = filter_users_list.clone();
+        let ids = filter_user_ids.clone();
+        let add_row = add_row.clone();
+        let current_query = current_query.clone();
         search_row.connect_search_changed(move |entry| {
-            let query = entry.text().to_lowercase();
+            let query = entry.text().trim().to_string();
+            *current_query.borrow_mut() = query.clone();
+            let query_folded = query.to_lowercase();
             let mut child = list.first_child();
             while let Some(row) = child {
                 child = row.next_sibling();
-                // Only ActionRows are user rows; the add entry row never
-                // takes part in filtering.
+                // The add row is toggled below, never filtered; user
+                // rows are the named ActionRows.
+                if row.widget_name().is_empty() {
+                    continue;
+                }
                 let Some(user_row) = row.downcast_ref::<adw::ActionRow>() else {
                     continue;
                 };
                 user_row.set_visible(
-                    user_row.widget_name().to_lowercase().contains(&query),
+                    user_row.widget_name().to_lowercase().contains(&query_folded),
+                );
+            }
+            let known = !query.is_empty()
+                && filtered_users(&list, &ids)
+                    .iter()
+                    .any(|u| u.name.eq_ignore_ascii_case(&query));
+            add_row.set_visible(!query.is_empty() && !known);
+            if !query.is_empty() {
+                add_row.set_title(
+                    &crate::tr!("Add \"{}\"").replacen("{}", &query, 1),
                 );
             }
         });
     }
-    let add_filtered_action: Rc<dyn Fn()> = {
+    {
         let list = filter_users_list.clone();
-        let entry = filter_entry.clone();
         let ids = filter_user_ids.clone();
-        Rc::new(move || {
-            let name = entry.text().trim().to_string();
+        let current_query = current_query.clone();
+        let search_row = search_row.clone();
+        add_btn.connect_clicked(move |_| {
+            let name = current_query.borrow().clone();
             if name.is_empty() {
                 return;
             }
@@ -1318,14 +1349,13 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
                 .iter()
                 .any(|u| u.name.eq_ignore_ascii_case(&name))
             {
-                entry.set_text("");
+                search_row.set_text("");
                 return;
             }
             add_filtered_user_row(&list, &name, "", &ids);
-            entry.set_text("");
-        })
-    };
-    filter_entry.connect_apply(move |_| add_filtered_action());
+            search_row.set_text("");
+        });
+    }
 
     let manage_row = adw::ActionRow::new();
     manage_row.set_title(&crate::tr!("Filtered users"));
@@ -1341,9 +1371,8 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
     let open_manager: Rc<dyn Fn(&gtk4::Window)> = {
         let list = filter_users_list.clone();
         let search = search_row.clone();
-        let add = filter_entry.clone();
         Rc::new(move |parent: &gtk4::Window| {
-            show_filtered_users_manager(parent.clone(), &list, &search, &add);
+            show_filtered_users_manager(parent.clone(), &list, &search);
         })
     };
     {
@@ -1388,7 +1417,6 @@ fn show_filtered_users_manager(
     parent: gtk4::Window,
     list: &gtk4::ListBox,
     search: &gtk4::SearchEntry,
-    add_entry: &adw::EntryRow,
 ) {
     let win = adw::Window::new();
     win.set_modal(true);
@@ -1404,7 +1432,6 @@ fn show_filtered_users_manager(
     content.set_margin_bottom(12);
     content.append(search);
     content.append(list);
-    content.append(add_entry);
 
     let scroll = gtk4::ScrolledWindow::new();
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);

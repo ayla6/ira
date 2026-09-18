@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use super::css::*;
 use super::edit_game_scraper::{edit_field, refresh_rows, EntityField, EntityKind, ScraperSlot};
-use super::helpers::{clear_children, esc, status_row};
+use super::helpers::{clear_children, status_row};
 use super::state::SharedState;
 use crate::Game;
 use ira_models::{ScraperClassification, ScraperEntity};
@@ -510,9 +510,11 @@ fn pick_row(
     on_pick: impl Fn() + 'static,
 ) -> adw::ActionRow {
     let row = adw::ActionRow::new();
+    // Markup is off, so the text renders literally — no escaping here,
+    // or a custom name with a quote would show as &quot;.
     row.set_use_markup(false);
-    row.set_title(&esc(title));
-    row.set_subtitle(&esc(subtitle));
+    row.set_title(title);
+    row.set_subtitle(subtitle);
     let pick = gtk4::Button::new();
     let added = std::cell::Cell::new(already_added);
     mark_added(&pick, already_added);

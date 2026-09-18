@@ -690,6 +690,7 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
             &g.grid_path,
             &g.header_path,
             &g.logo_path,
+            &g.square_path,
         ]
     }) {
         if !path.is_empty() {
@@ -732,13 +733,19 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
             Err(mpsc::TryRecvError::Disconnected) => return glib::ControlFlow::Break,
         };
         for base_name in &base_names {
-            let webp = cloud_dir_cb.join(format!("{}.webp", base_name));
-            if webp.is_file() {
-                ira_images::invalidate_texture(&webp.to_string_lossy());
-            }
-            let small = cloud_dir_cb.join(format!("{}_small.webp", base_name));
-            if small.is_file() {
-                ira_images::invalidate_texture(&small.to_string_lossy());
+            // Both extensions: the source's own extension survives the
+            // copy for webp/jpg, everything else converts to webp — and
+            // the small variants are copied as .jpg for jpeg sources.
+            for name in [
+                format!("{base_name}.webp"),
+                format!("{base_name}.jpg"),
+                format!("{base_name}_small.webp"),
+                format!("{base_name}_small.jpg"),
+            ] {
+                let path = cloud_dir_cb.join(&name);
+                if path.is_file() {
+                    ira_images::invalidate_texture(&path.to_string_lossy());
+                }
             }
         }
         if let Ok(Some(entry)) = ira_db::find_by_db_id(&db_cb, db_id_cb) {
@@ -777,26 +784,12 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
 }
 
 fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
-    if !params.pending_copies.borrow().is_empty() {
-        if let Ok(Some(entry)) = ira_db::find_by_db_id(db, params.db_id) {
-            if let Ok(reloaded) = crate::game_loader::load_game(&entry, &params.save_dir) {
-                if let Some(g) = params
-                    .state
-                    .borrow_mut()
-                    .games
-                    .iter_mut()
-                    .find(|g| g.db_id == params.db_id)
-                {
-                    g.icon_path = reloaded.icon_path;
-                    g.hero_image_path = reloaded.hero_image_path;
-                    g.grid_path = reloaded.grid_path;
-                    g.header_path = reloaded.header_path;
-                    g.logo_path = reloaded.logo_path;
-                }
-            }
-        }
-    }
-
+    // No image-path reload here: the copy thread is still deleting and
+    // rewriting the `{base}*` / `{base}_small*` files, and a `load_game`
+    // landing mid-surgery captures whatever exists in that instant — an
+    // old `_small` file, or nothing — into the in-memory game. The
+    // completion callback below the copy thread is the one reload, and
+    // it runs only after every file has landed.
     super::sidebar::rebuild_sidebar(&params.state);
     super::grid_view::refresh_grid_store(&params.state);
 

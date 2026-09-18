@@ -856,8 +856,8 @@ impl SteamDataClient {
                 let resp = self.http.get(url).send().map_err(|second| {
                     format!(
                         "ScreenScraper request failed: {} (and the retry: {})",
-                        redact_text(&first.to_string(), url),
-                        redact_text(&second.to_string(), url)
+                        redact_text(&error_with_causes(&first), url),
+                        redact_text(&error_with_causes(&second), url)
                     )
                 })?;
                 let status = resp.status();
@@ -911,6 +911,21 @@ fn redact_url(url: &str) -> String {
 
 fn redact_text(text: &str, url: &str) -> String {
     text.replace(url, &redact_url(url))
+}
+
+/// An error's Display plus its cause chain. reqwest's own text stops at
+/// "error sending request for url (...)" — the cause underneath
+/// ("connection refused", "timed out", a DNS failure) is what tells a
+/// dead service from a dead network, so it rides along.
+fn error_with_causes(err: &(impl std::error::Error + 'static)) -> String {
+    let mut text = err.to_string();
+    let mut cause = std::error::Error::source(err);
+    while let Some(e) = cause {
+        text.push_str(": ");
+        text.push_str(&e.to_string());
+        cause = e.source();
+    }
+    text
 }
 
 /// Collapse the double spaces the entity replacements leave behind.
@@ -1185,6 +1200,20 @@ mod tests {
         );
         // A URL without a query passes through untouched.
         assert_eq!(redact_url("https://x/y.png"), "https://x/y.png");
+    }
+
+    #[test]
+    fn test_error_with_causes_appends_the_whole_chain() {
+        let inner = std::io::Error::new(std::io::ErrorKind::TimedOut, "connection timed out");
+        let outer = std::io::Error::new(std::io::ErrorKind::ConnectionAborted, inner);
+        let text = error_with_causes(&outer);
+        assert!(
+            text.contains("connection timed out"),
+            "the cause must surface: {text}"
+        );
+        // A causeless error is just its own text.
+        let bare = std::io::Error::other("dns failure");
+        assert!(error_with_causes(&bare).contains("dns failure"));
     }
 
     #[test]

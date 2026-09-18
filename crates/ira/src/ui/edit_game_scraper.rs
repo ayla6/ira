@@ -12,8 +12,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::css::*;
+use super::edit_game_entity_dialog::show_entity_dialog;
 use super::edit_game_metadata_editors::{
-    show_classifications_edit_dialog, show_entity_edit_dialog, show_synopsis_edit_dialog,
+    show_classifications_edit_dialog, show_synopsis_edit_dialog,
 };
 use super::helpers::poll_channel;
 use super::mass_match_ss::{run_pc_matching, PcMatchTarget, RefetchOutcome, SsOutcome};
@@ -502,7 +503,7 @@ fn field_row(
             let Some(field) = entity_fields().into_iter().find(|f| f.label == label) else {
                 return;
             };
-            show_entity_edit_dialog(&state, &game, &win, &slot_for_dialog, field);
+            show_entity_dialog(&state, &game, &win, &slot_for_dialog, field);
         }));
     }
     if let Some(revert) = revert_button(

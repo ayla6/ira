@@ -9,7 +9,7 @@ mod css;
 mod disk_space;
 mod folder_list;
 mod enrichment;
-mod entity_manager;
+
 mod fetch_images;
 mod fetch_metadata;
 mod game_display;
@@ -99,6 +99,7 @@ mod auto_add_dialog;
 mod bar_chart;
 mod edit_game_controller;
 mod edit_game_dialog;
+mod edit_game_entity_dialog;
 mod edit_game_launch;
 mod edit_game_metadata_editors;
 mod edit_game_overlay;

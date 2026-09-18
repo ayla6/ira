@@ -338,58 +338,11 @@ pub fn merge_missing_scraper_metadata(
     fresh: &ira_models::ScraperMetadata,
 ) -> Result<bool, String> {
     let mut meta = scraper_metadata_for_game(conn, game_id)?.unwrap_or_default();
-    let mut changed = false;
-    if meta.ss_id.is_empty() && !fresh.ss_id.is_empty() {
-        meta.ss_id = fresh.ss_id.clone();
-        changed = true;
+    if !meta.fill_gaps(fresh) {
+        return Ok(false);
     }
-    // The epoch string an old Steam-diff bug wrote counts as no date,
-    // so a refetch replaces it instead of keeping the poison.
-    let date_missing = meta.release_date.is_empty() || meta.release_date == "1970-01-01";
-    if date_missing && !fresh.release_date.is_empty() {
-        meta.release_date = fresh.release_date.clone();
-        meta.release_timestamp = fresh.release_timestamp;
-        meta.release_dates = fresh.release_dates.clone();
-        changed = true;
-    }
-    if meta.players.is_empty() && !fresh.players.is_empty() {
-        meta.players = fresh.players.clone();
-        changed = true;
-    }
-    if meta.rating <= 0.0 && fresh.rating > 0.0 {
-        meta.rating = fresh.rating;
-        changed = true;
-    }
-    if meta.synopses.is_empty() && !fresh.synopses.is_empty() {
-        meta.synopses = fresh.synopses.clone();
-        changed = true;
-    }
-    for (list, fresh_list) in [
-        (&mut meta.developers, &fresh.developers),
-        (&mut meta.publishers, &fresh.publishers),
-        (&mut meta.genres, &fresh.genres),
-    ] {
-        for entity in fresh_list {
-            if !list.iter().any(|e| e.id == entity.id) {
-                list.push(entity.clone());
-                changed = true;
-            }
-        }
-    }
-    for class in &fresh.classifications {
-        if !meta
-            .classifications
-            .iter()
-            .any(|c| c.kind.eq_ignore_ascii_case(&class.kind))
-        {
-            meta.classifications.push(class.clone());
-            changed = true;
-        }
-    }
-    if changed {
-        store_scraper_metadata(conn, game_id, &meta)?;
-    }
-    Ok(changed)
+    store_scraper_metadata(conn, game_id, &meta)?;
+    Ok(true)
 }
 
 /// Remember that a game's ScreenScraper search came up empty, so the mass

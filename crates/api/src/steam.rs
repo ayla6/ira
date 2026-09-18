@@ -535,7 +535,7 @@ impl SteamDataClient {
         let entry = raw.data.get(app_id)?;
         Some(SteamCmdInfo {
             name: entry.common.name.clone(),
-            release_timestamp: entry.steam_release_date.parse().unwrap_or(0),
+            release_timestamp: entry.common.steam_release_date.parse().unwrap_or(0),
             metacritic_score: entry.common.metacritic_score.parse().unwrap_or(-1),
             review_percentage: entry.common.review_percentage.parse().unwrap_or(-1),
             review_score: entry.common.review_score.parse().unwrap_or(-1),
@@ -786,6 +786,22 @@ mod tests {
         assert_eq!(parse_store_release_date("Coming soon"), "");
         assert_eq!(parse_store_release_date("TBA"), "");
         assert_eq!(parse_store_release_date(""), "");
+    }
+
+    #[test]
+    fn test_parse_steamcmd_app_reads_release_date_from_common() {
+        // steamcmd.net mirrors appinfo's shape: the release date lives
+        // under `common`, never at the app level.
+        let raw: SteamCmdResponse = serde_json::from_value(serde_json::json!({
+            "status": "success",
+            "data": { "220": {
+                "common": { "name": "Half-Life 2", "steam_release_date": "1100592000" }
+            }}
+        }))
+        .unwrap();
+        let info = SteamDataClient::parse_steamcmd_app(&raw, "220").unwrap();
+        assert_eq!(info.name, "Half-Life 2");
+        assert_eq!(info.release_timestamp, 1_100_592_000);
     }
 
     #[test]

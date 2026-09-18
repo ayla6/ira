@@ -274,14 +274,16 @@ pub(crate) struct SteamCmdApp {
     pub config: SteamCmdConfig,
     #[serde(default)]
     pub ufs: SteamCmdUfs,
-    #[serde(default)]
-    pub steam_release_date: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct SteamCmdCommon {
     #[serde(default)]
     pub name: String,
+    /// Unix-seconds string, e.g. "1100592000". Lives under `common` in
+    /// the appinfo shape steamcmd.net mirrors — never at the app level.
+    #[serde(default)]
+    pub steam_release_date: String,
     #[serde(default)]
     pub metacritic_score: String,
     #[serde(default)]

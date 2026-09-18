@@ -677,36 +677,15 @@ pub(super) fn show_entity_dialog(
             );
             let cancel = job.cancel_flag();
             let (tx, rx) =
-                std::sync::mpsc::channel::<Result<Vec<(i64, String)>, String>>();
+                std::sync::mpsc::channel::<Result<usize, String>>();
             std::thread::spawn(move || {
                 if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                    let _ = tx.send(Ok(Vec::new()));
+                    let _ = tx.send(Ok(0));
                     return;
                 }
-                let fetched = match kind {
-                    ira_db::KIND_GENRE => steam
-                        .genres_list(&creds)
-                        .map(|rows| {
-                            rows.iter()
-                                .filter_map(|row| {
-                                    row.id
-                                        .parse::<i64>()
-                                        .ok()
-                                        .map(|id| (id, row.name.clone()))
-                                })
-                                .collect::<Vec<_>>()
-                        }),
-                    _ => steam
-                        .familles_list(&creds)
-                        .map(|rows| {
-                            rows.iter()
-                                .filter_map(|(id, name)| {
-                                    id.parse::<i64>().ok().map(|id| (id, name.clone()))
-                                })
-                                .collect::<Vec<_>>()
-                        }),
-                };
-                let _ = tx.send(fetched);
+                let _ = tx.send(super::fetch_metadata::fetch_and_warm(
+                    &steam, &db, kind, &creds,
+                ));
             });
             let refresh_manage = refresh_manage.clone();
             let manage_search = manage_search.clone();
@@ -716,35 +695,15 @@ pub(super) fn show_entity_dialog(
             super::helpers::poll_channel(rx, move |fetched| {
                 warming.set(false);
                 match fetched {
-                    // A cancelled fetch frees the strip silently (the
-                    // cancel click already froze its labels) and leaves
-                    // the marker absent, so the next manage entry
-                    // retries.
-                    Ok(entries) if entries.is_empty() => {}
-                    Ok(entries) => {
-                        let db = state.borrow().db.clone();
-                        if let Err(e) = ira_db::warm_entity_cache(&db, kind, &entries) {
-                            eprintln!("Failed to warm the entity cache: {e}");
-                            job.finish(
-                                &state,
-                                &crate::tr!("Fetch failed"),
-                                &crate::tr!("Fetch failed: {}").replacen("{}", &e, 1),
-                            );
-                            return;
-                        }
-                        if let Err(e) =
-                            ira_db::set_entity_fetched(&db, kind, chrono::Utc::now().timestamp())
-                        {
-                            eprintln!("Failed to mark the fetch: {e}");
-                        }
+                    // A cancelled run never calls fetch_and_warm, so the
+                    // marker stays absent and the next manage entry
+                    // retries; finish() itself goes silent on cancel.
+                    Ok(count) => {
                         refresh_manage(&manage_search.text());
                         job.finish(
                             &state,
-                            &crate::tr!("{} entries cached").replacen(
-                                "{}",
-                                &entries.len().to_string(),
-                                1,
-                            ),
+                            &crate::tr!("{} entries cached")
+                                .replacen("{}", &count.to_string(), 1),
                             &done_status,
                         );
                     }

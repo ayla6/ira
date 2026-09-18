@@ -445,6 +445,7 @@ fn populate_search_results(
             ira_db::scraper_companies_search(&state.borrow().db, term).unwrap_or_default()
         }
         EntityKind::Genre => ira_db::search_genres(&state.borrow().db, term).unwrap_or_default(),
+        EntityKind::Family => ira_db::search_families(&state.borrow().db, term).unwrap_or_default(),
     };
     if rows.is_empty() && term.is_empty() {
         list.append(&status_row(&field.empty_text()));
@@ -481,6 +482,7 @@ fn populate_search_results(
                         ira_db::steam_company_entity(&state.borrow().db, &term)
                     }
                     EntityKind::Genre => ira_db::local_genre_entity(&state.borrow().db, &term),
+                    EntityKind::Family => ira_db::local_family_entity(&state.borrow().db, &term),
                 };
                 if let Some(entity) = entity {
                     store(entity);

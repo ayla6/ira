@@ -171,6 +171,17 @@ pub fn init_db(db_path: &str) -> DbConn {
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS scraper_families (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS scraper_game_families (
+                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                family_id INTEGER NOT NULL REFERENCES scraper_families(id) ON DELETE CASCADE,
+                PRIMARY KEY (game_id, family_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_scraper_game_families_family
+                ON scraper_game_families(family_id);
             CREATE TABLE IF NOT EXISTS scraper_misses (
                 game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
                 checked_at INTEGER NOT NULL

@@ -41,6 +41,11 @@ pub struct ScraperMetadata {
     /// All English genres, the primary one first.
     #[serde(default)]
     pub genres: Vec<ScraperEntity>,
+    /// The series the source files the entry under ("Persona",
+    /// "Megami Tensei") — harvested from matches, id-referenced like
+    /// the companies and genres.
+    #[serde(default)]
+    pub families: Vec<ScraperEntity>,
     pub players: String,
     /// ScreenScraper's community note, 0..20 (-1 = none given).
     pub rating: f64,
@@ -159,6 +164,7 @@ impl ScraperMetadata {
         Self::fold_entities(&mut self.developers, &fresh.developers);
         Self::fold_entities(&mut self.publishers, &fresh.publishers);
         Self::fold_entities(&mut self.genres, &fresh.genres);
+        Self::fold_entities(&mut self.families, &fresh.families);
         for class in &fresh.classifications {
             let canonical = crate::ratings::canonical_kind(&class.kind);
             if !self
@@ -207,6 +213,7 @@ impl ScraperMetadata {
             (&mut self.developers, &fresh.developers),
             (&mut self.publishers, &fresh.publishers),
             (&mut self.genres, &fresh.genres),
+            (&mut self.families, &fresh.families),
         ] {
             for entity in fresh_list {
                 if !list.iter().any(|held| held.id == entity.id) {
@@ -663,6 +670,24 @@ mod tests {
             ..Default::default()
         }));
         assert_eq!(stored.release_date, "2015-09-15");
+    }
+
+    #[test]
+    fn test_merge_match_folds_families_like_the_other_entities() {
+        // A hand-minted series row graduates to the source's, and new
+        // series append — the family list diff like companies and genres.
+        let mut stored = ScraperMetadata {
+            families: vec![entity("-5", "Megami Tensei")],
+            ..Default::default()
+        };
+        stored.merge_match(&ScraperMetadata {
+            families: vec![entity("841", "Megami Tensei"), entity("906", "Persona")],
+            ..Default::default()
+        });
+        assert_eq!(
+            stored.families,
+            vec![entity("841", "Megami Tensei"), entity("906", "Persona")]
+        );
     }
 
     #[test]

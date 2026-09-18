@@ -88,6 +88,11 @@ pub fn store_scraper_metadata(
         .iter()
         .filter_map(|genre| genre.id.parse::<i64>().ok().map(|id| (id, genre.name.clone())))
         .collect();
+    let families: Vec<(i64, String)> = metadata
+        .families
+        .iter()
+        .filter_map(|famille| famille.id.parse::<i64>().ok().map(|id| (id, famille.name.clone())))
+        .collect();
     let synopses_json = serde_json::to_string(&metadata.synopses).unwrap_or_default();
     let dates_json = serde_json::to_string(
         &metadata
@@ -133,6 +138,19 @@ pub fn store_scraper_metadata(
         store_entities(&tx, "scraper_genres", &[(*id, name.clone())])?;
         tx.execute(
             "INSERT OR IGNORE INTO scraper_game_genres (game_id, genre_id) VALUES (?1, ?2)",
+            params![game_id, id],
+        )
+        .map_err(err)?;
+    }
+    tx.execute(
+        "DELETE FROM scraper_game_families WHERE game_id = ?1",
+        params![game_id],
+    )
+    .map_err(err)?;
+    for (id, name) in &families {
+        store_entities(&tx, "scraper_families", &[(*id, name.clone())])?;
+        tx.execute(
+            "INSERT OR IGNORE INTO scraper_game_families (game_id, family_id) VALUES (?1, ?2)",
             params![game_id, id],
         )
         .map_err(err)?;
@@ -447,6 +465,7 @@ pub fn scraper_metadata_for_game(
         developers: game_companies(conn, game_id, true)?,
         publishers: game_companies(conn, game_id, false)?,
         genres: game_genres(conn, game_id)?,
+        families: game_families(conn, game_id)?,
         players,
         rating,
         classifications: game_classifications(conn, game_id)?,
@@ -509,6 +528,30 @@ fn game_genres(conn: &DbConn, game_id: i64) -> Result<Vec<ira_models::ScraperEnt
     Ok(rows)
 }
 
+/// The families (series) of a game, stored order first.
+fn game_families(conn: &DbConn, game_id: i64) -> Result<Vec<ira_models::ScraperEntity>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(
+            "SELECT f.id, f.name FROM scraper_game_families gf
+             JOIN scraper_families f ON f.id = gf.family_id
+             WHERE gf.game_id = ?1
+             ORDER BY gf.rowid",
+        )
+        .map_err(err)?;
+    let rows = stmt
+        .query_map(params![game_id], |row| {
+            Ok(ira_models::ScraperEntity {
+                id: row.get::<_, i64>(0)?.to_string(),
+                name: row.get(1)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
+}
+
 /// The age-rating boards of a game, board name alphabetical.
 fn game_classifications(
     conn: &DbConn,
@@ -545,36 +588,36 @@ pub fn scraper_companies_search(
     conn: &DbConn,
     filter: &str,
 ) -> Result<Vec<ira_models::ScraperEntity>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(
-            "SELECT id, name FROM scraper_companies
-             WHERE name LIKE '%' || ?1 || '%' COLLATE NOCASE
-             ORDER BY name LIMIT 60",
-        )
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![filter.trim()], |row| {
-            Ok(ira_models::ScraperEntity {
-                id: row.get::<_, i64>(0)?.to_string(),
-                name: row.get(1)?,
-            })
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
+    entity_search(conn, "scraper_companies", filter)
 }
 
 /// Genres whose name contains the filter, for the picker's search.
 pub fn search_genres(conn: &DbConn, filter: &str) -> Result<Vec<ira_models::ScraperEntity>, String> {
+    entity_search(conn, "scraper_genres", filter)
+}
+
+/// Families (series) whose name contains the filter, for the picker's
+/// search. The cache fills as games get matched.
+pub fn search_families(
+    conn: &DbConn,
+    filter: &str,
+) -> Result<Vec<ira_models::ScraperEntity>, String> {
+    entity_search(conn, "scraper_families", filter)
+}
+
+/// A LIKE search over one of the scraper lookup tables, for the pickers.
+fn entity_search(
+    conn: &DbConn,
+    table: &str,
+    filter: &str,
+) -> Result<Vec<ira_models::ScraperEntity>, String> {
     let c = crate::lock_db(conn)?;
     let mut stmt = c
-        .prepare(
-            "SELECT id, name FROM scraper_genres
+        .prepare(&format!(
+            "SELECT id, name FROM {table}
              WHERE name LIKE '%' || ?1 || '%' COLLATE NOCASE
-             ORDER BY name LIMIT 60",
-        )
+             ORDER BY name LIMIT 60"
+        ))
         .map_err(err)?;
     let rows = stmt
         .query_map(params![filter.trim()], |row| {
@@ -593,11 +636,25 @@ pub fn search_genres(conn: &DbConn, filter: &str) -> Result<Vec<ira_models::Scra
 /// when one's tokens match, else a freshly allocated local genre under a
 /// negative id. `None` only for names with no identifying tokens.
 pub fn local_genre_entity(conn: &DbConn, name: &str) -> Option<ira_models::ScraperEntity> {
+    local_entity(conn, "scraper_genres", name)
+}
+
+/// The family entity for a hand-typed series name — same rules as the
+/// genre mint.
+pub fn local_family_entity(conn: &DbConn, name: &str) -> Option<ira_models::ScraperEntity> {
+    local_entity(conn, "scraper_families", name)
+}
+
+/// The shared mint behind the genre and family pickers: the cache's own
+/// row when one's tokens match, else a fresh local row under a negative
+/// id — the namespace the source's positive ids can never reach.
+/// `None` only for names with no identifying tokens.
+fn local_entity(conn: &DbConn, table: &str, name: &str) -> Option<ira_models::ScraperEntity> {
     let tokens = ira_models::company_tokens(name);
     if tokens.is_empty() {
         return None;
     }
-    if let Ok(found) = search_genres(conn, name) {
+    if let Ok(found) = entity_search(conn, table, name) {
         if let Some(entity) = found.iter().find(|e| ira_models::company_tokens(&e.name) == tokens)
         {
             return Some(entity.clone());
@@ -606,7 +663,7 @@ pub fn local_genre_entity(conn: &DbConn, name: &str) -> Option<ira_models::Scrap
     let c = crate::lock_db(conn).ok()?;
     let min: i64 = c
         .query_row(
-            "SELECT COALESCE(MIN(id), 0) FROM scraper_genres WHERE id < 0",
+            &format!("SELECT COALESCE(MIN(id), 0) FROM {table} WHERE id < 0"),
             [],
             |row| row.get(0),
         )
@@ -614,7 +671,7 @@ pub fn local_genre_entity(conn: &DbConn, name: &str) -> Option<ira_models::Scrap
     let id = min - 1;
     let name = name.trim().to_string();
     let _ = c.execute(
-        "INSERT INTO scraper_genres (id, name) VALUES (?1, ?2)",
+        &format!("INSERT INTO {table} (id, name) VALUES (?1, ?2)"),
         rusqlite::params![id, name],
     );
     Some(ira_models::ScraperEntity {
@@ -698,6 +755,10 @@ mod tests {
                     id: "2620".into(),
                     name: "Role Playing Game".into(),
                 }],
+                families: vec![ira_models::ScraperEntity {
+                    id: "732".into(),
+                    name: "Dragon Quest".into(),
+                }],
                 players: "1-4".into(),
                 rating: 18.0,
                 classifications: vec![ira_models::ScraperClassification {
@@ -741,6 +802,15 @@ mod tests {
         );
         // Unknown ids resolve to nothing.
         assert_eq!(scraper_company_name(&conn, 1).unwrap(), None);
+        let metadata = scraper_metadata_for_game(&conn, id).unwrap().unwrap();
+        assert_eq!(
+            metadata.families,
+            vec![ira_models::ScraperEntity {
+                id: "732".to_string(),
+                name: "Dragon Quest".to_string()
+            }]
+        );
+        assert_eq!(search_families(&conn, "quest").unwrap().len(), 1);
         let synopses: Vec<(String, String)> = serde_json::from_str(&entry.synopsis).unwrap();
         assert_eq!(synopses, vec![("en".to_string(), "The first two quests.".to_string())]);
         let dates: std::collections::HashMap<String, String> =

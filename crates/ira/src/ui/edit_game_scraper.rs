@@ -371,6 +371,7 @@ pub(super) enum EntityKind {
     Developer,
     Publisher,
     Genre,
+    Family,
 }
 
 /// Which metadata field a row edits: its display names (one entry reads
@@ -396,12 +397,13 @@ impl EntityField {
             EntityKind::Developer | EntityKind::Publisher => {
                 crate::tr!("Companies appear here as games get matched")
             }
+            EntityKind::Family => crate::tr!("Families appear here as games get matched"),
             EntityKind::Genre => crate::tr!("No results found"),
         }
     }
 }
 
-fn entity_fields() -> [EntityField; 3] {
+fn entity_fields() -> [EntityField; 4] {
     [
         EntityField {
             label: crate::tr!("Developers"),
@@ -429,6 +431,15 @@ fn entity_fields() -> [EntityField; 3] {
             remove: |m, gone| m.genres.retain(|e| e.id != gone.id),
             push: |m, entity| m.genres.push(entity),
             set: |m, list| m.genres = list,
+        },
+        EntityField {
+            label: crate::tr!("Families"),
+            singular: crate::tr!("Family"),
+            kind: EntityKind::Family,
+            get: |m| &m.families,
+            remove: |m, gone| m.families.retain(|e| e.id != gone.id),
+            push: |m, entity| m.families.push(entity),
+            set: |m, list| m.families = list,
         },
     ]
 }

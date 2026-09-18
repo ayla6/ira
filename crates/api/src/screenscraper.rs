@@ -34,6 +34,8 @@ pub struct ScrapedGame {
     pub publishers: Vec<ira_models::ScraperEntity>,
     /// All English genres, the primary one first.
     pub genres: Vec<ira_models::ScraperEntity>,
+    /// The series groupings the source files the entry under.
+    pub families: Vec<ira_models::ScraperEntity>,
     pub players: String,
     /// ScreenScraper's community note, 0..20 (-1 = none given).
     pub rating: f64,
@@ -64,6 +66,7 @@ impl ScrapedGame {
             developers: self.developers.clone(),
             publishers: self.publishers.clone(),
             genres: self.genres.clone(),
+            families: self.families.clone(),
             players: self.players.clone(),
             rating: self.rating,
             classifications: self.classifications.clone(),
@@ -334,6 +337,10 @@ struct SsJeu {
     publishers: Vec<SsEntity>,
     #[serde(default)]
     genres: Option<SsGenres>,
+    /// The series the entry belongs to:
+    /// `<familles><famille id="732" nom="Dragon Quest"/></familles>`.
+    #[serde(default, rename = "familles")]
+    families: Option<SsFamilles>,
     #[serde(default)]
     joueurs: Option<String>,
     #[serde(default)]
@@ -385,6 +392,26 @@ struct SsText {
 struct SsGenres {
     #[serde(default, rename = "genre")]
     genre: Vec<SsGenre>,
+}
+
+/// `<familles>` — the series groupings the community files entries
+/// under ("Persona", "Megami Tensei").
+#[derive(Debug, Deserialize)]
+struct SsFamilles {
+    #[serde(default, rename = "famille")]
+    famille: Vec<SsFamille>,
+}
+
+/// One family: the name rides the `nom` attribute; some answers carry
+/// it as text content instead, so both are read and `nom` wins.
+#[derive(Debug, Deserialize)]
+struct SsFamille {
+    #[serde(rename = "@id", default)]
+    id: String,
+    #[serde(rename = "@nom", default)]
+    nom: String,
+    #[serde(default, rename = "$text")]
+    text: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -536,6 +563,25 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
                 .collect()
         })
         .unwrap_or_default();
+    let families: Vec<ira_models::ScraperEntity> = jeu
+        .families
+        .as_ref()
+        .map(|f| {
+            f.famille
+                .iter()
+                .filter(|famille| !famille.id.is_empty())
+                .map(|famille| ira_models::ScraperEntity {
+                    id: famille.id.clone(),
+                    name: if famille.nom.is_empty() {
+                        famille.text.clone()
+                    } else {
+                        famille.nom.clone()
+                    },
+                })
+                .filter(|famille| !famille.name.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
     let rating = jeu
         .note
         .as_deref()
@@ -609,6 +655,7 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
         developers: entity_list(&jeu.developers),
         publishers: entity_list(&jeu.publishers),
         genres,
+        families,
         players: jeu.joueurs.as_deref().unwrap_or_default().trim().to_string(),
         rating,
         classifications,
@@ -1031,6 +1078,10 @@ mod tests {
             <media type="box-2D" region="us" format="png">https://ss.example/dq2_box.png</media>
             <media type="sstitle" region="us" format="png">https://ss.example/dq2_title.png</media>
           </medias>
+          <familles>
+            <famille id="732" nom="Dragon Quest"/>
+            <famille id="1234">Text-Named Series</famille>
+          </familles>
         </jeu>
         <jeu id="2124">
           <noms><nom region="us">Dragon Quest I &amp; II (dup)</nom></noms>
@@ -1089,6 +1140,15 @@ mod tests {
                 .map(|g| (g.id.as_str(), g.name.as_str()))
                 .collect::<Vec<_>>(),
             vec![("2620", "Role Playing Game"), ("2406", "Adventure")]
+        );
+        // The series the source files the entry under, `nom` attribute
+        // first and text content as the fallback spelling.
+        assert_eq!(
+            game.families
+                .iter()
+                .map(|f| (f.id.as_str(), f.name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("732", "Dragon Quest"), ("1234", "Text-Named Series")]
         );
         assert_eq!(game.players, "1-4");
         assert_eq!(game.rating, 18.0);

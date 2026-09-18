@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-18 15:24-0300\n"
+"POT-Creation-Date: 2026-09-18 15:52-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -252,7 +252,7 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:32
 #: crates/ira/src/ui/auto_add_dialog.rs:785
-#: crates/ira/src/ui/entity_manager.rs:130
+#: crates/ira/src/ui/entity_manager.rs:180
 msgid "Name"
 msgstr ""
 
@@ -376,8 +376,8 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:330
 #: crates/ira/src/ui/edit_game_scraper.rs:410
-#: crates/ira/src/ui/entity_manager.rs:211
-#: crates/ira/src/ui/entity_manager.rs:287
+#: crates/ira/src/ui/entity_manager.rs:275
+#: crates/ira/src/ui/entity_manager.rs:355
 #: crates/ira/src/ui/ra_match_dialog.rs:149
 #: crates/ira/src/ui/sgdb_match_dialog.rs:252
 #: crates/ira/src/ui/ss_match_dialog.rs:163
@@ -659,7 +659,7 @@ msgid "Delete Group"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/all_games.rs:754
-#: crates/ira/src/ui/entity_manager.rs:132
+#: crates/ira/src/ui/entity_manager.rs:182
 #: crates/ira/src/ui/group_dialog.rs:71
 #: crates/ira/src/ui/sidebar.rs:402
 msgid "Rename"
@@ -776,7 +776,7 @@ msgid "Remove \"{}\"?"
 msgstr ""
 
 #: crates/ira/src/ui/context_menu_actions.rs:111
-#: crates/ira/src/ui/entity_manager.rs:68
+#: crates/ira/src/ui/entity_manager.rs:121
 msgid "Remove"
 msgstr ""
 
@@ -1023,6 +1023,7 @@ msgid "Already centralized"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_dialog.rs:496
+#: crates/ira/src/ui/entity_manager.rs:209
 #: crates/ira/src/ui/input_profile_editor.rs:140
 #: crates/ira/src/ui/input_profile_editor_save.rs:131
 #: crates/ira/src/ui/profile_dialog.rs:452
@@ -1119,8 +1120,8 @@ msgid "Search"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:82
-#: crates/ira/src/ui/entity_manager.rs:101
-#: crates/ira/src/ui/entity_manager.rs:170
+#: crates/ira/src/ui/entity_manager.rs:150
+#: crates/ira/src/ui/entity_manager.rs:231
 msgid "Search…"
 msgstr ""
 
@@ -1704,50 +1705,59 @@ msgstr ""
 msgid "Fetching store metadata…"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:35
+#: crates/ira/src/ui/entity_manager.rs:63
 #, rust-format
 msgid "Used by {} games"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:36
+#: crates/ira/src/ui/entity_manager.rs:64
 msgid "Unused"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:56
+#: crates/ira/src/ui/entity_manager.rs:109
 msgid "No aliases"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:134
+#: crates/ira/src/ui/entity_manager.rs:167
+msgid "Discard changes and go back"
+msgstr ""
+
+#: crates/ira/src/ui/entity_manager.rs:184
 msgid ""
 "A renamed entry keeps its name when the source answers with the old spelling"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:140
+#: crates/ira/src/ui/entity_manager.rs:190
 msgid "Aliases"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:142
+#: crates/ira/src/ui/entity_manager.rs:192
 msgid "Incoming names on this list store as the entity above"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:147
+#: crates/ira/src/ui/entity_manager.rs:197
 msgid "Add alias…"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:151
-#: crates/ira/src/ui/entity_manager.rs:164
+#: crates/ira/src/ui/entity_manager.rs:201
+#: crates/ira/src/ui/entity_manager.rs:225
 msgid "Merge into…"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:209
+#: crates/ira/src/ui/entity_manager.rs:207
+#: crates/ira/src/ui/input_profile_editor_save.rs:130
+msgid "Discard"
+msgstr ""
+
+#: crates/ira/src/ui/entity_manager.rs:273
 msgid "Nothing in the cache yet — it fills as games get matched"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:296
+#: crates/ira/src/ui/entity_manager.rs:364
 msgid "Merge"
 msgstr ""
 
-#: crates/ira/src/ui/entity_manager.rs:396
+#: crates/ira/src/ui/entity_manager.rs:528
 msgid "Manage"
 msgstr ""
 
@@ -3047,10 +3057,6 @@ msgstr ""
 
 #: crates/ira/src/ui/input_profile_editor_save.rs:127
 msgid "Save this layout before closing?"
-msgstr ""
-
-#: crates/ira/src/ui/input_profile_editor_save.rs:130
-msgid "Discard"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_general_page.rs:14

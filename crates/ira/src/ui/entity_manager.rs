@@ -5,9 +5,14 @@
 //! name means a canonical entry; a merge moves all game references to
 //! one survivor (the ScreenScraper id wins when there is exactly one)
 //! and leaves the absorbed spelling behind as an alias, so the dedupe
-//! holds against the next match. Every operation re-syncs the open
-//! game settings' draft, whose staged copies would otherwise write the
-//! pre-edit spellings right back.
+//! holds against the next match.
+//!
+//! The entity page stages its edits — the name and the alias list only
+//! reach the database when Save is pressed, and Back or Discard throws
+//! them away — so a stray enter or trash click never writes anything.
+//! Every operation re-syncs the open game settings' draft, whose
+//! staged copies would otherwise write the pre-edit spellings right
+//! back.
 
 use adw::prelude::*;
 use std::cell::RefCell;
@@ -26,6 +31,29 @@ pub(super) fn managed_kind(field: &EntityField) -> &'static str {
         EntityKind::Genre => ira_db::KIND_GENRE,
         EntityKind::Family => ira_db::KIND_FAMILY,
     }
+}
+
+/// One alias as the entity page stages it: `rowid` is `Some` for an
+/// alias already in the database, `None` for one added since.
+#[derive(Clone)]
+struct AliasDraft {
+    rowid: Option<i64>,
+    text: String,
+}
+
+/// The staged edits of the entity page — what Save commits and Discard
+/// throws away.
+#[derive(Default, Clone)]
+struct EntityEdits {
+    /// The name as typed. Empty counts as "nothing typed" and refuses
+    /// to save.
+    name: String,
+    /// The name the database had when the page loaded.
+    original_name: String,
+    aliases: Vec<AliasDraft>,
+    /// The alias rowids the database had when the page loaded — a
+    /// staged list missing one of these means a removal to commit.
+    original_rowids: Vec<i64>,
 }
 
 /// One entity's usage count as a subtitle — the number that makes a
@@ -47,32 +75,53 @@ fn refresh_open_settings(state: &SharedState) {
     }
 }
 
-/// Rebuild the alias rows for one entity, each with its remove button.
-fn refresh_alias_list(state: &SharedState, kind: &'static str, id: i64, alias_list: &gtk4::Box) {
+/// Load an entity's stored state into the page's staging area.
+fn load_edits(db: &ira_db::DbConn, kind: &'static str, id: i64) -> EntityEdits {
+    let name = ira_db::list_entities(db, kind, "")
+        .unwrap_or_default()
+        .into_iter()
+        .find(|(row_id, _)| *row_id == id)
+        .map(|(_, name)| name)
+        .unwrap_or_default();
+    let aliases: Vec<AliasDraft> = ira_db::entity_aliases(db, kind, id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(rowid, text)| AliasDraft {
+            rowid: Some(rowid),
+            text,
+        })
+        .collect();
+    let original_rowids = aliases.iter().filter_map(|draft| draft.rowid).collect();
+    EntityEdits {
+        name: name.clone(),
+        original_name: name,
+        aliases,
+        original_rowids,
+    }
+}
+
+/// Repaint the staged alias rows — each with its remove button, which
+/// edits the staging area only.
+fn repaint_alias_list(alias_list: &gtk4::Box, edits: &Rc<RefCell<EntityEdits>>) {
     clear_children(alias_list);
-    let db = state.borrow().db.clone();
-    let aliases = ira_db::entity_aliases(&db, kind, id).unwrap_or_default();
-    if aliases.is_empty() {
+    let drafts = edits.borrow().aliases.clone();
+    if drafts.is_empty() {
         alias_list.append(&status_row(&crate::tr!("No aliases")));
         return;
     }
-    for (alias_id, text) in aliases {
+    for (index, draft) in drafts.iter().enumerate() {
         let row = adw::ActionRow::new();
         row.set_use_markup(false);
-        row.set_title(&text);
-        let state = state.clone();
+        row.set_title(&draft.text);
+        let edits = edits.clone();
         let list_for_closure = alias_list.clone();
         let remove = gtk4::Button::from_icon_name("user-trash-symbolic");
         remove.add_css_class(CSS_FLAT);
         remove.set_valign(gtk4::Align::Center);
         remove.set_tooltip_text(Some(&crate::tr!("Remove")));
         remove.connect_clicked(move |_| {
-            let db = state.borrow().db.clone();
-            if let Err(e) = ira_db::remove_entity_alias(&db, alias_id) {
-                eprintln!("Failed to remove the alias: {e}");
-                return;
-            }
-            refresh_alias_list(&state, kind, id, &list_for_closure);
+            edits.borrow_mut().aliases.remove(index);
+            repaint_alias_list(&list_for_closure, &edits);
         });
         row.add_suffix(&remove);
         alias_list.append(&row);
@@ -110,11 +159,12 @@ pub(super) fn show_entity_manager(
     list_box.append(&list_scrolled);
     list_toolbar.set_content(Some(&list_box));
 
-    // ——— Entity page: rename, aliases, merge ———
+    // ——— Entity page: staged rename and aliases, Save to commit ———
     let entity_toolbar = adw::ToolbarView::new();
     let entity_header = adw::HeaderBar::new();
     let back_btn = gtk4::Button::from_icon_name("go-previous-symbolic");
     back_btn.add_css_class(CSS_FLAT);
+    back_btn.set_tooltip_text(Some(&crate::tr!("Discard changes and go back")));
     let entity_title = gtk4::Label::new(None);
     entity_title.add_css_class("heading");
     entity_header.set_title_widget(Some(&entity_title));
@@ -151,6 +201,17 @@ pub(super) fn show_entity_manager(
     let merge_btn = gtk4::Button::with_label(&crate::tr!("Merge into…"));
     merge_btn.set_halign(gtk4::Align::Start);
     entity_content.append(&merge_btn);
+
+    let button_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
+    button_row.set_halign(gtk4::Align::End);
+    let discard_btn = gtk4::Button::with_label(&crate::tr!("Discard"));
+    discard_btn.add_css_class(CSS_FLAT);
+    let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
+    save_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    button_row.append(&discard_btn);
+    button_row.append(&save_btn);
+    entity_content.append(&button_row);
+
     let entity_scrolled = gtk4::ScrolledWindow::new();
     entity_scrolled.set_vexpand(true);
     entity_scrolled.set_child(Some(&entity_content));
@@ -188,14 +249,17 @@ pub(super) fn show_entity_manager(
 
     let state = Rc::new(state.clone());
     let selected: Rc<RefCell<Option<i64>>> = Default::default();
+    let edits: Rc<RefCell<EntityEdits>> = Default::default();
 
     // The list page: every cached entity, alphabetically, with its
-    // usage. A row's pen button opens the entity page.
+    // usage. A row's pen button opens the entity page with the
+    // entity's stored state loaded for staging.
     let refresh_list = {
         let state = state.clone();
         let list = list.clone();
         let stack = stack.clone();
         let selected = selected.clone();
+        let edits = edits.clone();
         let entity_title = entity_title.clone();
         let name_entry = name_entry.clone();
         let alias_list = alias_list.clone();
@@ -221,15 +285,19 @@ pub(super) fn show_entity_manager(
                 let state = state.clone();
                 let stack = stack.clone();
                 let selected = selected.clone();
+                let edits = edits.clone();
                 let entity_title = entity_title.clone();
                 let name_entry = name_entry.clone();
                 let alias_list = alias_list.clone();
-                let title = name.clone();
                 row.add_suffix(&pen_button(move |_| {
+                    let db = state.borrow().db.clone();
+                    let loaded = load_edits(&db, kind, id);
+                    entity_title.set_text(&loaded.name);
+                    name_entry.set_text(&loaded.name);
+                    name_entry.remove_css_class(CSS_ERROR);
+                    repaint_alias_list(&alias_list, &edits);
+                    *edits.borrow_mut() = loaded;
                     selected.replace(Some(id));
-                    entity_title.set_text(&title);
-                    name_entry.set_text(&title);
-                    refresh_alias_list(&state, kind, id, &alias_list);
                     stack.set_visible_child_name("entity");
                 }));
                 list.append(&row);
@@ -321,54 +389,118 @@ pub(super) fn show_entity_manager(
         });
     }
     {
-        // Rename on apply; the row latches in the db, and the page and
-        // list repaint with the new spelling.
+        // Typing stages; nothing is written until Save. An empty name
+        // refuses to save (and flags the entry) rather than erasing
+        // the entity.
+        let edits = edits.clone();
+        name_entry.connect_changed(move |entry| {
+            edits.borrow_mut().name = entry.text().trim().to_string();
+        });
+    }
+    {
+        // An alias typed on apply joins the staged list; Save is what
+        // teaches it to the database. A spelling already staged — an
+        // existing alias or a pending one — is ignored.
+        let edits = edits.clone();
+        let alias_list = alias_list.clone();
+        alias_entry.connect_apply(move |entry| {
+            let text = entry.text().trim().to_string();
+            if text.is_empty() {
+                return;
+            }
+            let mut staged = edits.borrow_mut();
+            if staged
+                .aliases
+                .iter()
+                .any(|draft| draft.text.eq_ignore_ascii_case(&text))
+            {
+                entry.set_text("");
+                return;
+            }
+            staged.aliases.push(AliasDraft {
+                rowid: None,
+                text: text.clone(),
+            });
+            drop(staged);
+            entry.set_text("");
+            repaint_alias_list(&alias_list, &edits);
+        });
+    }
+    {
+        // Save commits the staged name (when it changed) and the alias
+        // diff. A failure flags the name entry red and touches nothing
+        // else; success reloads the page from the database.
         let state = state.clone();
         let selected = selected.clone();
-        let entity_title = entity_title.clone();
+        let edits = edits.clone();
         let name_entry = name_entry.clone();
+        let alias_list = alias_list.clone();
         let refresh_list = refresh_list.clone();
         let search = search.clone();
-        name_entry.connect_apply(move |entry| {
+        save_btn.connect_clicked(move |_| {
             let Some(id) = *selected.borrow() else {
                 return;
             };
-            let name = entry.text().trim().to_string();
-            if name.is_empty() {
-                return;
-            }
             let db = state.borrow().db.clone();
-            if let Err(e) = ira_db::rename_entity(&db, kind, id, &name) {
-                eprintln!("Failed to rename the entity: {e}");
+            let staged = edits.borrow().clone();
+            if staged.name.is_empty() {
+                name_entry.add_css_class(CSS_ERROR);
                 return;
             }
-            entity_title.set_text(&name);
+            let mut failed = false;
+            if staged.name != staged.original_name {
+                if let Err(e) = ira_db::rename_entity(&db, kind, id, &staged.name) {
+                    eprintln!("Failed to rename the entity: {e}");
+                    failed = true;
+                }
+            }
+            if !failed {
+                for rowid in &staged.original_rowids {
+                    let still_staged = staged.aliases.iter().any(|draft| draft.rowid == Some(*rowid));
+                    if !still_staged {
+                        if let Err(e) = ira_db::remove_entity_alias(&db, *rowid) {
+                            eprintln!("Failed to remove the alias: {e}");
+                        }
+                    }
+                }
+                for draft in &staged.aliases {
+                    if draft.rowid.is_none() {
+                        if let Err(e) = ira_db::add_entity_alias(&db, kind, &draft.text, id) {
+                            eprintln!("Failed to add the alias: {e}");
+                        }
+                    }
+                }
+            }
+            if failed {
+                name_entry.add_css_class(CSS_ERROR);
+                return;
+            }
+            name_entry.remove_css_class(CSS_ERROR);
+            let reloaded = load_edits(&db, kind, id);
+            name_entry.set_text(&reloaded.name);
+            repaint_alias_list(&alias_list, &edits);
+            *edits.borrow_mut() = reloaded;
             refresh_open_settings(&state);
             refresh_list(&search.text());
         });
     }
     {
-        // An alias declared on apply — a repeated alias re-targets, so
-        // a mistake is fixed by declaring it again.
+        // Discard throws the staged edits away and re-reads the entity.
         let state = state.clone();
         let selected = selected.clone();
-        let alias_entry = alias_entry.clone();
+        let edits = edits.clone();
+        let name_entry = name_entry.clone();
         let alias_list = alias_list.clone();
-        alias_entry.connect_apply(move |entry| {
+        discard_btn.connect_clicked(move |_| {
             let Some(id) = *selected.borrow() else {
                 return;
             };
-            let text = entry.text().trim().to_string();
-            if text.is_empty() {
-                return;
-            }
             let db = state.borrow().db.clone();
-            if let Err(e) = ira_db::add_entity_alias(&db, kind, &text, id) {
-                eprintln!("Failed to add the alias: {e}");
-                return;
-            }
-            entry.set_text("");
-            refresh_alias_list(&state, kind, id, &alias_list);
+            let reloaded = load_edits(&db, kind, id);
+            name_entry.set_text(&reloaded.name);
+            name_entry.remove_css_class(CSS_ERROR);
+            repaint_alias_list(&alias_list, &edits);
+            *edits.borrow_mut() = reloaded;
         });
     }
     {

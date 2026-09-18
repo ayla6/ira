@@ -509,7 +509,7 @@ fn add_steam_link_row(
 ) {
     let db_id = game.db_id;
     let row = adw::EntryRow::new();
-    row.set_title(&crate::tr!("Steam app ID"));
+    row.set_title(&crate::tr!("Steam"));
     row.set_text(&game.steam_link_id);
     row.set_tooltip_text(Some(&crate::tr!(
         "Links this game to a Steam entry for metadata only"
@@ -616,8 +616,9 @@ fn build_steam_app_id_row(
     match_on_select: bool,
 ) -> adw::EntryRow {
     let row = adw::EntryRow::new();
-    row.set_title(&crate::tr!("Steam app ID"));
+    row.set_title(&crate::tr!("Steam"));
     row.set_text(&game.app_id);
+    row.set_tooltip_text(Some(&crate::tr!("The Steam app id this game matches against")));
     let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
     search_btn.set_valign(gtk4::Align::Center);
     search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
@@ -834,6 +835,12 @@ pub(super) fn build_game_general_page(
         build_service_ids_section(&service_group, game, state, win);
     let language_row = build_language_section(&service_group, state, game, languages);
     let migrate_btn = build_save_migration_section(&service_group, state, game);
+    // The match row re-appends to the Service group's end on every
+    // rebuild — build the group's own rows first, then attach it, or
+    // its first repaint would move it from top to bottom mid-session.
+    if let Some(ref slot) = scraper_slot {
+        super::edit_game_scraper::rebuild_scraper_rows(state, game, win, slot);
+    }
     if has_service_ids || language_row.is_some() || migrate_btn.is_some() {
         general_page.append(&service_group);
     }

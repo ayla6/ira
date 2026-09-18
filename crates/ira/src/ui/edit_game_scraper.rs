@@ -173,6 +173,11 @@ pub(super) fn apply_scraper_draft(state: &SharedState, db_id: i64) -> bool {
             if let Err(e) = ira_db::clear_screenscraper_match(&state.borrow().db, db_id) {
                 eprintln!("Failed to unmatch: {e}");
             }
+            // The user said no: no automatic pass may pick this game
+            // again — the same promise the RA and SGDB unmatches make.
+            if let Err(e) = ira_db::set_manual_unmatch(&state.borrow().db, db_id, true) {
+                eprintln!("Failed to mark the game manually unmatched: {e}");
+            }
             if let Some(g) = state
                 .borrow_mut()
                 .games
@@ -180,6 +185,7 @@ pub(super) fn apply_scraper_draft(state: &SharedState, db_id: i64) -> bool {
                 .find(|g| g.db_id == db_id)
             {
                 g.screenscraper_id.clear();
+                g.manual_unmatch = true;
             }
         }
     }
@@ -225,8 +231,8 @@ fn fold_match(draft: &mut ScraperMetadata, picked: &ScrapedGame) {
 }
 
 /// Stage a picked ScreenScraper match onto the dialog's draft: the
-/// revert snapshot is taken once, the answer folds into the draft, the
-/// title entry picks up the entry's name when the stored title came
+/// revert snapshot is taken once and the answer folds into the draft;
+/// the title entry picks up the entry's name when the stored title came
 /// from a dump and the user hasn't retyped it. Nothing is written until
 /// Save.
 fn stage_ss_match(state: &SharedState, db_id: i64, picked: &ScrapedGame, slot: &ScraperSlot) {
@@ -239,7 +245,7 @@ fn stage_ss_match(state: &SharedState, db_id: i64, picked: &ScrapedGame, slot: &
     *slot.pending.borrow_mut() = SsPending::Match(Box::new(picked.clone()));
     fill_title_entry(state, db_id, picked);
     repaint_slot(state, db_id);
-    slot.set_match_status(&crate::tr!("Applies when you save"));
+    slot.set_match_status("");
 }
 
 /// Stage an unmatch. The id leaves the draft at once — the rows flip to
@@ -250,20 +256,18 @@ fn stage_ss_unmatch(state: &SharedState, db_id: i64, slot: &ScraperSlot) {
     let db_matched = ira_db::find_by_db_id(&state.borrow().db, db_id)
         .map(|entry| entry.is_some_and(|e| !e.screenscraper_id.is_empty()))
         .unwrap_or(false);
-    let status = if db_matched {
+    if db_matched {
         slot.draft.borrow_mut().ss_id = String::new();
         *slot.pending.borrow_mut() = SsPending::Unmatch;
-        crate::tr!("Unmatches when you save")
     } else {
         if let Some(pre) = slot.pre_match.borrow_mut().take() {
             *slot.draft.borrow_mut() = pre;
         }
         slot.draft.borrow_mut().ss_id = String::new();
         *slot.pending.borrow_mut() = SsPending::None;
-        String::new()
-    };
+    }
     repaint_slot(state, db_id);
-    slot.set_match_status(&status);
+    slot.set_match_status("");
 }
 
 /// Fold a refetched answer into the draft, gaps only — a refetch never
@@ -344,6 +348,20 @@ fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &Scra
 /// the rating spin): those rows show their edit already, and a rebuild
 /// would pull the widget out from under the user.
 pub(super) fn refresh_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &ScraperSlot) {
+    rebuild_rows(state, game, win, slot);
+}
+
+/// Rebuild a slot's rows once the settings page has finished assembling
+/// the Service group: the match row re-appends to the group's end on
+/// every rebuild, so attaching it before the group's own rows exist
+/// would make its first repaint jump it from the top to the bottom
+/// mid-session. Calling this puts the row where every rebuild keeps it.
+pub(super) fn rebuild_scraper_rows(
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    slot: &ScraperSlot,
+) {
     rebuild_rows(state, game, win, slot);
 }
 /// Which kind of entity a metadata field collects — decides the search
@@ -882,12 +900,14 @@ fn search_row(
     // search/auto-match row below.
     let ss_id = slot.draft.borrow().ss_id.clone();
     let matched = !ss_id.is_empty();
+    // The row names the service; the state rides in the subtitle, like
+    // the Steam row next to it.
+    row.set_title(&crate::tr!("ScreenScraper"));
     if matched {
         // The entry's id is known, so gaps can be filled without any
         // rematch ambiguity: one exact fetch by id, merged over what's
         // stored. Unmatch stays for genuinely wrong matches.
-        row.set_title(&crate::tr!("Matched"));
-        row.set_subtitle(&crate::tr!("SS ID: {}").replacen("{}", &ss_id, 1));
+        row.set_subtitle(&crate::tr!("Matched · ID {}").replacen("{}", &ss_id, 1));
         // The entry's page on the site — what got matched, one click away.
         let open = gtk4::Button::from_icon_name("adw-external-link-symbolic");
         open.add_css_class(CSS_FLAT);
@@ -960,7 +980,7 @@ fn search_row(
     // system search, cross-platform diff, garnish — from here, without
     // waiting for the next mass-matcher opening.
     let auto_matchable = game.kind.is_pc() && game.platform_id.parse::<u32>().is_ok();
-    row.set_title(&crate::tr!("Not matched yet"));
+    row.set_subtitle(&crate::tr!("Not matched"));
 
     if auto_matchable {
         let btn = gtk4::Button::with_label(&crate::tr!("Auto match"));

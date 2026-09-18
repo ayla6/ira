@@ -5,8 +5,8 @@ use adw::prelude::*;
 pub fn show_create_group_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some(&crate::tr!("New collection")),
-        Some(&crate::tr!("Enter a name for the collection:")),
+        Some(&crate::tr!("New group")),
+        Some(&crate::tr!("Enter a name for the group:")),
     );
 
     let entry = gtk4::Entry::new();
@@ -55,7 +55,7 @@ pub fn show_create_group_dialog(state: &SharedState) {
 pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name: &str) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some(&crate::tr!("Rename collection")),
+        Some(&crate::tr!("Rename group")),
         Some(&crate::tr!("Enter a new name:")),
     );
 
@@ -105,9 +105,9 @@ pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name
 pub fn show_delete_group_dialog(state: &SharedState, group_id: i64, name: &str) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
-        Some(&crate::tr!("Delete collection")),
+        Some(&crate::tr!("Delete group")),
         Some(
-            &crate::tr!("Delete \u{201c}{}\u{201d}? Games in this collection will not be removed.")
+            &crate::tr!("Delete \u{201c}{}\u{201d}? Games in this group will not be removed.")
                 .replacen("{}", name, 1),
         ),
     );

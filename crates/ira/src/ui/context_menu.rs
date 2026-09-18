@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use super::context_menu_actions::{
     setup_controller_action, setup_delete_game_action, setup_edit_action, setup_hide_action,
-    setup_multi_new_collection_action, setup_multi_toggle_group_action,
+    setup_multi_entity_add_actions, setup_multi_new_collection_action,
+    setup_multi_toggle_group_action,
     setup_multi_toggle_hide_action, setup_new_collection_action,
     setup_open_game_folder_action, setup_open_gog_status_action, setup_open_images_action,
     setup_open_save_location_action, setup_open_steam_status_action, setup_open_wine_prefix_action,
@@ -46,7 +47,7 @@ fn build_collections_submenu(
         collections_menu.append_section(None, &gio::Menu::new());
     }
     collections_menu.append(
-        Some(&crate::tr!("Add to new collection…")),
+        Some(&crate::tr!("Add to new group…")),
         Some("game.new_collection"),
     );
     collections_menu
@@ -188,7 +189,7 @@ pub fn show_game_context_menu(
     };
     let collections_menu =
         build_collections_submenu(&groups, |g| game_groups.iter().any(|gg| gg.id == g.id));
-    menu.append_submenu(Some(&crate::tr!("Collections")), &collections_menu);
+    menu.append_submenu(Some(&crate::tr!("Groups")), &collections_menu);
 
     if !manual_script.is_empty() {
         menu.append(
@@ -283,7 +284,22 @@ pub fn show_multi_game_context_menu(
                 .is_some_and(|ids| ids.contains(&g.id))
         })
     });
-    menu.append_submenu(Some(&crate::tr!("Collections")), &collections_menu);
+    menu.append_submenu(Some(&crate::tr!("Groups")), &collections_menu);
+
+    // Mass metadata adds: only in the multi selection, where one pick
+    // lands on many games at once.
+    let metadata_section = gio::Menu::new();
+    metadata_section.append(Some(&crate::tr!("Add to family…")), Some("game.mass_family"));
+    metadata_section.append(Some(&crate::tr!("Add to genre…")), Some("game.mass_genre"));
+    metadata_section.append(
+        Some(&crate::tr!("Add to developer…")),
+        Some("game.mass_developer"),
+    );
+    metadata_section.append(
+        Some(&crate::tr!("Add to publisher…")),
+        Some("game.mass_publisher"),
+    );
+    menu.append_section(None, &metadata_section);
 
     let all_hidden = db_ids.iter().all(|&db_id| {
         state
@@ -307,7 +323,8 @@ pub fn show_multi_game_context_menu(
 
     setup_multi_toggle_group_action(&actions, state.clone(), ids.clone());
     setup_multi_new_collection_action(&actions, state.clone(), ids.clone());
-    setup_multi_toggle_hide_action(&actions, state.clone(), ids, all_hidden);
+    setup_multi_toggle_hide_action(&actions, state.clone(), ids.clone(), all_hidden);
+    setup_multi_entity_add_actions(&actions, state.clone(), ids);
 
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }

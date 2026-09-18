@@ -103,6 +103,44 @@ pub fn start_steam_refetch(state: &SharedState, force: bool) -> bool {
     true
 }
 
+/// Fetch the genre table whole, on demand: the settings row's explicit
+/// action, usable as a refetch since it ignores the fetched-at marker.
+pub fn start_genre_warm(state: &SharedState) -> bool {
+    let Some(job) = super::fetch_images::begin_strip_job(
+        state,
+        &crate::tr!("Fetching genres…"),
+        &crate::tr!("Fetching the genre table…"),
+    ) else {
+        return false;
+    };
+    let (steam, cfg, db) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.cfg.clone(), s.db.clone())
+    };
+    let creds = ira_api::ScraperCreds::from_account(
+        cfg.screenscraper_id.clone(),
+        cfg.screenscraper_password.clone(),
+    );
+    let (tx, rx) = std::sync::mpsc::channel::<Result<usize, String>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(fetch_and_warm_genres(&steam, &db, &creds));
+    });
+    let state = state.clone();
+    super::helpers::poll_channel(rx, move |fetched| match fetched {
+        Ok(count) => job.finish(
+            &state,
+            &crate::tr!("{} entries cached").replacen("{}", &count.to_string(), 1),
+            &crate::tr!("Genre table fetched"),
+        ),
+        Err(e) => job.finish(
+            &state,
+            &crate::tr!("Fetch failed"),
+            &crate::tr!("Fetch failed: {}").replacen("{}", &e, 1),
+        ),
+    });
+    true
+}
+
 /// Games whose stored metadata misses something Steam can give, and
 /// which the pass can actually read: a stored Steam link (a console
 /// game linked to the store before) or a PC game whose platform id is

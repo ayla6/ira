@@ -169,21 +169,6 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_toolbar.add_bottom_bar(&fetch_indicator.widget());
     sidebar_toolbar.set_reveal_bottom_bars(false);
 
-    // The group-by picker: the sidebar derives one collapsible category
-    // per value of the chosen dimension.
-    let group_by_labels: Vec<&str> = ira_models::GroupBy::ALL
-        .iter()
-        .map(|mode| mode.display_label())
-        .collect();
-    let group_by_dd = gtk4::DropDown::new(
-        Some(gtk4::StringList::new(&group_by_labels)),
-        gtk4::Expression::NONE,
-    );
-    group_by_dd.set_selected(state.borrow().cfg.group_by.index() as u32);
-    group_by_dd.set_tooltip_text(Some(&crate::tr!("Group games by")));
-    group_by_dd.add_css_class(CSS_FLAT);
-    sidebar_header.pack_end(&group_by_dd);
-
     sidebar_toolbar.add_top_bar(&sidebar_header);
 
     let sidebar_scroll = gtk4::ScrolledWindow::new();
@@ -200,22 +185,6 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_view.set_show_separators(false);
     sidebar_scroll.set_child(Some(&sidebar_view));
     sidebar_toolbar.set_content(Some(&sidebar_scroll));
-
-    {
-        let state_gg = state.clone();
-        group_by_dd.connect_selected_notify(move |dd| {
-            let group_by = ira_models::GroupBy::from_index(dd.selected() as usize);
-            if state_gg.borrow().cfg.group_by == group_by {
-                return;
-            }
-            state_gg.borrow_mut().cfg.group_by = group_by;
-            if let Err(e) = state_gg.borrow().cfg.save() {
-                eprintln!("Failed to save config: {}", e);
-            }
-            state_gg.borrow_mut().selected_group = GroupSelection::AllGames;
-            super::sidebar::rebuild_sidebar_and_show_grid(&state_gg);
-        });
-    }
 
     let sidebar_page = adw::NavigationPage::new(&sidebar_toolbar, "Games");
     split_view.set_sidebar(Some(&sidebar_page));
@@ -459,6 +428,52 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
                     .borrow()
                     .sort_label
                     .set_text(mode_c.display_label());
+                rebuild_sidebar_and_show_grid(&state_clone);
+            }
+        });
+    }
+
+    // ── Group by: the second function of this popover. A dimension
+    // turns the sidebar into one collapsible category per value. ──
+    vbox.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
+    let group_heading = gtk4::Label::new(Some(&crate::tr!("Group by")));
+    group_heading.set_xalign(0.0);
+    group_heading.set_hexpand(true);
+    vbox.append(&group_heading);
+
+    let mut group_first_btn: Option<gtk4::CheckButton> = None;
+    for mode in ira_models::GroupBy::ALL {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        row.set_size_request(-1, 36);
+
+        let check = gtk4::CheckButton::new();
+        if *mode == state.borrow().cfg.group_by {
+            check.set_active(true);
+        }
+        if let Some(ref first) = group_first_btn {
+            check.set_group(Some(first));
+        } else {
+            group_first_btn = Some(check.clone());
+        }
+
+        let label = gtk4::Label::new(Some(mode.display_label()));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+
+        row.append(&check);
+        row.append(&label);
+        vbox.append(&row);
+
+        let state_clone = state.clone();
+        let check_clone = check.clone();
+        let mode_c = *mode;
+        check.connect_toggled(move |_| {
+            if check_clone.is_active() && state_clone.borrow().cfg.group_by != mode_c {
+                state_clone.borrow_mut().cfg.group_by = mode_c;
+                if let Err(e) = state_clone.borrow().cfg.save() {
+                    eprintln!("Failed to save config: {}", e);
+                }
+                state_clone.borrow_mut().selected_group = GroupSelection::AllGames;
                 rebuild_sidebar_and_show_grid(&state_clone);
             }
         });

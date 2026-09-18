@@ -119,6 +119,19 @@ pub(super) fn build_settings_pages(
     });
     all_row.add_suffix(&all_btn);
     fetch_group.add(&all_row);
+    let genres_row = adw::ActionRow::new();
+    genres_row.set_title(&crate::tr!("Genre table"));
+    genres_row.set_subtitle(&crate::tr!(
+        "Fetches ScreenScraper's whole genre list for the pickers — also the refetch"
+    ));
+    let genres_btn = gtk4::Button::with_label(&crate::tr!("Fetch"));
+    genres_btn.set_valign(gtk4::Align::Center);
+    let genres_state = state.clone();
+    genres_btn.connect_clicked(move |_| {
+        super::fetch_metadata::start_genre_warm(&genres_state);
+    });
+    genres_row.add_suffix(&genres_btn);
+    fetch_group.add(&genres_row);
     let force_row = adw::ActionRow::new();
     force_row.set_title(&crate::tr!("Everything, even complete games"));
     force_row.set_subtitle(&crate::tr!(

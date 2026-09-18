@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-18 19:50-0300\n"
+"POT-Creation-Date: 2026-09-18 20:16-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -19,7 +19,7 @@ msgstr ""
 
 #: crates/ira/src/game_list.rs:271
 #: crates/ira/src/ui/message_helpers.rs:203
-#: crates/ira/src/ui/window.rs:304
+#: crates/ira/src/ui/window.rs:273
 msgid "Preparing game library…"
 msgstr ""
 
@@ -177,7 +177,7 @@ msgstr ""
 #: crates/ira/src/ui/add_game_dialog.rs:54
 #: crates/ira/src/ui/input_profile_editor.rs:317
 #: crates/ira/src/ui/input_profile_stick_settings.rs:62
-#: crates/ira/src/ui/settings_dialog_pages.rs:243
+#: crates/ira/src/ui/settings_dialog_pages.rs:256
 msgid "General"
 msgstr ""
 
@@ -198,7 +198,7 @@ msgstr ""
 #: crates/ira/src/ui/background.rs:19
 #: crates/ira/src/ui/big_picture/keyboard.rs:619
 #: crates/ira/src/ui/context_menu_actions.rs:110
-#: crates/ira/src/ui/context_menu_actions.rs:433
+#: crates/ira/src/ui/context_menu_actions.rs:636
 #: crates/ira/src/ui/edit_game_controller.rs:445
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:252
 #: crates/ira/src/ui/edit_game_pages.rs:308
@@ -482,7 +482,7 @@ msgstr ""
 #: crates/ira/src/ui/image_manager.rs:231
 #: crates/ira/src/ui/image_manager.rs:255
 #: crates/ira/src/ui/image_manager.rs:320
-#: crates/ira/src/ui/settings_dialog_pages.rs:305
+#: crates/ira/src/ui/settings_dialog_pages.rs:318
 #: crates/ira/src/ui/settings_pages.rs:157
 #: crates/ira/src/ui/steam_search_dialog.rs:193
 msgid "Steam"
@@ -624,7 +624,7 @@ msgstr ""
 #: crates/ira/src/ui/big_picture/all_games.rs:230
 #: crates/ira/src/ui/big_picture/game_menu.rs:237
 #: crates/ira/src/ui/input_profile_search_filters.rs:100
-#: crates/ira/src/ui/window.rs:246
+#: crates/ira/src/ui/window.rs:215
 msgid "Sort by"
 msgstr ""
 
@@ -638,6 +638,8 @@ msgid "Everything"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/all_games.rs:269
+#: crates/ira/src/ui/context_menu.rs:192
+#: crates/ira/src/ui/context_menu.rs:287
 msgid "Groups"
 msgstr ""
 
@@ -649,7 +651,7 @@ msgstr ""
 #: crates/ira/src/ui/big_picture/all_games.rs:761
 #: crates/ira/src/ui/big_picture/all_games.rs:766
 #: crates/ira/src/ui/big_picture/view.rs:124
-#: crates/ira/src/ui/context_menu.rs:73
+#: crates/ira/src/ui/context_menu.rs:74
 #: crates/ira/src/ui/play_button.rs:28
 #: crates/ira/src/ui/play_button.rs:48
 msgid "Play"
@@ -783,116 +785,153 @@ msgid "Remove"
 msgstr ""
 
 #: crates/ira/src/ui/context_menu_actions.rs:423
-#: crates/ira/src/ui/group_dialog.rs:8
-msgid "New collection"
+#: crates/ira/src/ui/context_menu.rs:292
+msgid "Add to family…"
 msgstr ""
 
 #: crates/ira/src/ui/context_menu_actions.rs:424
-#: crates/ira/src/ui/group_dialog.rs:9
+#: crates/ira/src/ui/context_menu.rs:293
+msgid "Add to genre…"
+msgstr ""
+
+#: crates/ira/src/ui/context_menu_actions.rs:425
+#: crates/ira/src/ui/context_menu.rs:295
+msgid "Add to developer…"
+msgstr ""
+
+#: crates/ira/src/ui/context_menu_actions.rs:426
+#: crates/ira/src/ui/context_menu.rs:299
+msgid "Add to publisher…"
+msgstr ""
+
+#: crates/ira/src/ui/context_menu_actions.rs:468
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:182
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:195
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:269
+msgid "Search…"
+msgstr ""
+
+#: crates/ira/src/ui/context_menu_actions.rs:523
+#: crates/ira/src/ui/context_menu_actions.rs:549
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:156
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:993
+#: crates/ira/src/ui/edit_game_metadata_editors.rs:41
+#: crates/ira/src/ui/edit_game_metadata_editors.rs:91
+#: crates/ira/src/ui/settings_pages.rs:1296
+msgid "Add"
+msgstr ""
+
+#: crates/ira/src/ui/context_menu_actions.rs:548
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:526
+#: crates/ira/src/ui/settings_pages.rs:1333
+#, rust-format
+msgid "Add \"{}\""
+msgstr ""
+
+#: crates/ira/src/ui/context_menu_actions.rs:626
+msgid "New collection"
+msgstr ""
+
+#: crates/ira/src/ui/context_menu_actions.rs:627
 msgid "Enter a name for the collection:"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:427
+#: crates/ira/src/ui/context_menu_actions.rs:630
 #: crates/ira/src/ui/group_dialog.rs:13
 msgid "Collection name"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:434
+#: crates/ira/src/ui/context_menu_actions.rs:637
 #: crates/ira/src/ui/group_dialog.rs:21
 msgid "Create"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:49
-msgid "Add to new collection…"
+#: crates/ira/src/ui/context_menu.rs:50
+msgid "Add to new group…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:76
+#: crates/ira/src/ui/context_menu.rs:77
 msgid "Edit game settings"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:78
+#: crates/ira/src/ui/context_menu.rs:79
 #: crates/ira/src/ui/game_header.rs:316
 msgid "Controller settings"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:82
+#: crates/ira/src/ui/context_menu.rs:83
 #: crates/ira/src/ui/game_header.rs:109
 msgid "View play history"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:150
+#: crates/ira/src/ui/context_menu.rs:151
 msgid "Game location"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:156
+#: crates/ira/src/ui/context_menu.rs:157
 msgid "Wine prefix"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:160
+#: crates/ira/src/ui/context_menu.rs:161
 msgid "Data location"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:165
+#: crates/ira/src/ui/context_menu.rs:166
 msgid "Save location"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:171
-#: crates/ira/src/ui/context_menu.rs:176
+#: crates/ira/src/ui/context_menu.rs:172
+#: crates/ira/src/ui/context_menu.rs:177
 msgid "Achievement status"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:181
+#: crates/ira/src/ui/context_menu.rs:182
 msgid "Open folder"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:191
-#: crates/ira/src/ui/context_menu.rs:286
-msgid "Collections"
-msgstr ""
-
-#: crates/ira/src/ui/context_menu.rs:195
+#: crates/ira/src/ui/context_menu.rs:196
 msgid "Run manual script"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:201
-#: crates/ira/src/ui/context_menu.rs:297
+#: crates/ira/src/ui/context_menu.rs:202
+#: crates/ira/src/ui/context_menu.rs:313
 msgid "Unhide game"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:203
-#: crates/ira/src/ui/context_menu.rs:299
+#: crates/ira/src/ui/context_menu.rs:204
+#: crates/ira/src/ui/context_menu.rs:315
 msgid "Hide game"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:213
+#: crates/ira/src/ui/context_menu.rs:214
 msgid "Remove game"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:336
+#: crates/ira/src/ui/context_menu.rs:353
 msgid "Icon"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:337
+#: crates/ira/src/ui/context_menu.rs:354
 msgid "Capsule"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:338
+#: crates/ira/src/ui/context_menu.rs:355
 msgid "Square"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:339
+#: crates/ira/src/ui/context_menu.rs:356
 msgid "Header"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:340
+#: crates/ira/src/ui/context_menu.rs:357
 msgid "Logo"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:341
+#: crates/ira/src/ui/context_menu.rs:358
 msgid "Hero"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:358
+#: crates/ira/src/ui/context_menu.rs:375
 msgid "Reset image"
 msgstr ""
 
@@ -1042,22 +1081,8 @@ msgstr ""
 msgid "Unused"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:156
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:993
-#: crates/ira/src/ui/edit_game_metadata_editors.rs:41
-#: crates/ira/src/ui/edit_game_metadata_editors.rs:91
-#: crates/ira/src/ui/settings_pages.rs:1296
-msgid "Add"
-msgstr ""
-
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:160
 msgid "Rename entries, teach aliases, merge duplicates"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:182
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:195
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:269
-msgid "Search…"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:212
@@ -1115,12 +1140,6 @@ msgstr ""
 msgid "Manage"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:526
-#: crates/ira/src/ui/settings_pages.rs:1333
-#, rust-format
-msgid "Add \"{}\""
-msgstr ""
-
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:548
 msgid "Nothing in the cache yet — it fills as games get matched"
 msgstr ""
@@ -1130,28 +1149,34 @@ msgid "Merge"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:660
+#: crates/ira/src/ui/fetch_metadata.rs:111
 msgid "Fetching genres…"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:661
+#: crates/ira/src/ui/fetch_metadata.rs:112
 msgid "Fetching the genre table…"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:662
+#: crates/ira/src/ui/fetch_metadata.rs:133
 msgid "Genre table fetched"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:700
+#: crates/ira/src/ui/fetch_metadata.rs:132
 #, rust-format
 msgid "{} entries cached"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:708
+#: crates/ira/src/ui/fetch_metadata.rs:137
 msgid "Fetch failed"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:709
 #: crates/ira/src/ui/edit_game_scraper.rs:976
+#: crates/ira/src/ui/fetch_metadata.rs:138
 #, rust-format
 msgid "Fetch failed: {}"
 msgstr ""
@@ -1284,7 +1309,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:35
 #: crates/ira/src/ui/edit_game_overlay.rs:78
-#: crates/ira/src/ui/settings_dialog_pages.rs:251
+#: crates/ira/src/ui/settings_dialog_pages.rs:264
 msgid "Overlay"
 msgstr ""
 
@@ -1577,7 +1602,7 @@ msgid "Age rating"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:926
-#: crates/ira/src/ui/settings_dialog_pages.rs:286
+#: crates/ira/src/ui/settings_dialog_pages.rs:299
 msgid "ScreenScraper"
 msgstr ""
 
@@ -1830,19 +1855,19 @@ msgid "Fetching ScreenScraper data…"
 msgstr ""
 
 #: crates/ira/src/ui/fetch_metadata.rs:40
-#: crates/ira/src/ui/fetch_metadata.rs:339
+#: crates/ira/src/ui/fetch_metadata.rs:377
 msgid "Fetching missing metadata…"
 msgstr ""
 
 #: crates/ira/src/ui/fetch_metadata.rs:64
 #: crates/ira/src/ui/fetch_metadata.rs:99
-#: crates/ira/src/ui/fetch_metadata.rs:369
+#: crates/ira/src/ui/fetch_metadata.rs:407
 #, rust-format
 msgid "{} of {} games updated"
 msgstr ""
 
 #: crates/ira/src/ui/fetch_metadata.rs:65
-#: crates/ira/src/ui/fetch_metadata.rs:370
+#: crates/ira/src/ui/fetch_metadata.rs:408
 msgid "Metadata fetched"
 msgstr ""
 
@@ -1858,11 +1883,11 @@ msgstr ""
 msgid "Steam data fetched"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:338
+#: crates/ira/src/ui/fetch_metadata.rs:376
 msgid "Fetching metadata…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:409
+#: crates/ira/src/ui/fetch_metadata.rs:447
 msgid "the genre table"
 msgstr ""
 
@@ -1930,7 +1955,7 @@ msgstr ""
 
 #: crates/ira/src/ui/game_header.rs:346
 #: crates/ira/src/ui/helpers.rs:150
-#: crates/ira/src/ui/window.rs:342
+#: crates/ira/src/ui/window.rs:311
 msgid "Settings"
 msgstr ""
 
@@ -1945,7 +1970,7 @@ msgid "Reset"
 msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:47
-#: crates/ira/src/ui/settings_dialog_pages.rs:353
+#: crates/ira/src/ui/settings_dialog_pages.rs:366
 msgid "RetroAchievements"
 msgstr ""
 
@@ -2131,8 +2156,16 @@ msgstr ""
 msgid "{completed} of {total} sources"
 msgstr ""
 
+#: crates/ira/src/ui/group_dialog.rs:8
+msgid "New group"
+msgstr ""
+
+#: crates/ira/src/ui/group_dialog.rs:9
+msgid "Enter a name for the group:"
+msgstr ""
+
 #: crates/ira/src/ui/group_dialog.rs:58
-msgid "Rename collection"
+msgid "Rename group"
 msgstr ""
 
 #: crates/ira/src/ui/group_dialog.rs:59
@@ -2140,12 +2173,12 @@ msgid "Enter a new name:"
 msgstr ""
 
 #: crates/ira/src/ui/group_dialog.rs:108
-msgid "Delete collection"
+msgid "Delete group"
 msgstr ""
 
 #: crates/ira/src/ui/group_dialog.rs:110
 #, rust-format
-msgid "Delete “{}”? Games in this collection will not be removed."
+msgid "Delete “{}”? Games in this group will not be removed."
 msgstr ""
 
 #: crates/ira/src/ui/helpers.rs:916
@@ -3932,7 +3965,7 @@ msgstr ""
 #: crates/ira/src/ui/input_profile_preview.rs:209
 #: crates/ira/src/ui/input_profile_search_filters.rs:111
 #: crates/ira/src/ui/input_profile_settings.rs:155
-#: crates/ira/src/ui/settings_dialog_pages.rs:259
+#: crates/ira/src/ui/settings_dialog_pages.rs:272
 msgid "Controller"
 msgstr ""
 
@@ -4169,7 +4202,7 @@ msgid "over {parent}"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_settings.rs:94
-#: crates/ira/src/ui/settings_dialog_pages.rs:332
+#: crates/ira/src/ui/settings_dialog_pages.rs:345
 msgid "Profiles"
 msgstr ""
 
@@ -4550,7 +4583,7 @@ msgid "Select installer files"
 msgstr ""
 
 #: crates/ira/src/ui/installer_add_dialog.rs:160
-#: crates/ira/src/ui/settings_dialog_pages.rs:325
+#: crates/ira/src/ui/settings_dialog_pages.rs:338
 msgid "Wine"
 msgstr ""
 
@@ -4706,7 +4739,7 @@ msgstr ""
 
 #: crates/ira/src/ui/mass_match_dialog.rs:511
 #: crates/ira/src/ui/mass_match_dialog.rs:525
-#: crates/ira/src/ui/window.rs:355
+#: crates/ira/src/ui/window.rs:324
 msgid "Match unmatched games"
 msgstr ""
 
@@ -5175,8 +5208,9 @@ msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_pages.rs:101
 #: crates/ira/src/ui/settings_dialog_pages.rs:114
-#: crates/ira/src/ui/settings_dialog_pages.rs:140
+#: crates/ira/src/ui/settings_dialog_pages.rs:127
 #: crates/ira/src/ui/settings_dialog_pages.rs:153
+#: crates/ira/src/ui/settings_dialog_pages.rs:166
 msgid "Fetch"
 msgstr ""
 
@@ -5191,76 +5225,85 @@ msgid ""
 msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_pages.rs:123
-msgid "Everything, even complete games"
+msgid "Genre table"
 msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_pages.rs:125
+msgid ""
+"Fetches ScreenScraper's whole genre list for the pickers — also the refetch"
+msgstr ""
+
+#: crates/ira/src/ui/settings_dialog_pages.rs:136
+msgid "Everything, even complete games"
+msgstr ""
+
+#: crates/ira/src/ui/settings_dialog_pages.rs:138
 msgid ""
 "Re-reads every matched game's entry and every linked Steam page, filling "
 "anything that appeared — new fields, series, corrections"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:127
+#: crates/ira/src/ui/settings_dialog_pages.rs:140
 msgid "Force refetch"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:136
+#: crates/ira/src/ui/settings_dialog_pages.rs:149
 msgid "Missing Steam data"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:138
+#: crates/ira/src/ui/settings_dialog_pages.rs:151
 msgid "Fills games' release dates, studios, synopses and age boards from Steam"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:149
+#: crates/ira/src/ui/settings_dialog_pages.rs:162
 msgid "Missing ScreenScraper data"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:151
+#: crates/ira/src/ui/settings_dialog_pages.rs:164
 msgid "Refetches matched games' entries by id and fills any gaps"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:267
+#: crates/ira/src/ui/settings_dialog_pages.rs:280
 msgid "Game system"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:271
+#: crates/ira/src/ui/settings_dialog_pages.rs:284
 msgid "Metadata"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:278
+#: crates/ira/src/ui/settings_dialog_pages.rs:291
 #: crates/ira/src/ui/steam_search_dialog.rs:214
 msgid "SteamGridDB"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:290
-#: crates/ira/src/ui/settings_dialog_pages.rs:297
+#: crates/ira/src/ui/settings_dialog_pages.rs:303
+#: crates/ira/src/ui/settings_dialog_pages.rs:310
 msgid "PC games"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:313
+#: crates/ira/src/ui/settings_dialog_pages.rs:326
 msgid "API emulators"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:321
+#: crates/ira/src/ui/settings_dialog_pages.rs:334
 msgid "Lutris migration"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:346
+#: crates/ira/src/ui/settings_dialog_pages.rs:359
 msgid "Emulation"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:361
+#: crates/ira/src/ui/settings_dialog_pages.rs:374
 #: crates/ira/src/ui/settings_pages.rs:162
 #: crates/ira/src/ui/settings_pages.rs:664
 msgid "ROM library"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:423
+#: crates/ira/src/ui/settings_dialog_pages.rs:436
 msgid "Linux controller"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:431
+#: crates/ira/src/ui/settings_dialog_pages.rs:444
 msgid "Wine controller"
 msgstr ""
 
@@ -5303,7 +5346,7 @@ msgid ""
 msgstr ""
 
 #: crates/ira/src/ui/settings_pages.rs:130
-#: crates/ira/src/ui/window.rs:391
+#: crates/ira/src/ui/window.rs:360
 msgid "Show hidden games"
 msgstr ""
 
@@ -5860,7 +5903,7 @@ msgid "Unknown year"
 msgstr ""
 
 #: crates/ira/src/ui/sidebar.rs:457
-msgid "Add collection"
+msgid "Add group"
 msgstr ""
 
 #: crates/ira/src/ui/ss_match_dialog.rs:173
@@ -5991,24 +6034,24 @@ msgstr ""
 msgid "Main Menu"
 msgstr ""
 
-#: crates/ira/src/ui/window.rs:183
-msgid "Group games by"
-msgstr ""
-
-#: crates/ira/src/ui/window.rs:237
+#: crates/ira/src/ui/window.rs:206
 msgid "Search games…"
 msgstr ""
 
-#: crates/ira/src/ui/window.rs:252
+#: crates/ira/src/ui/window.rs:221
 msgid "Square capsules"
 msgstr ""
 
-#: crates/ira/src/ui/window.rs:363
+#: crates/ira/src/ui/window.rs:332
 msgid "Play history"
 msgstr ""
 
-#: crates/ira/src/ui/window.rs:372
+#: crates/ira/src/ui/window.rs:341
 msgid "Rescan game library"
+msgstr ""
+
+#: crates/ira/src/ui/window.rs:439
+msgid "Group by"
 msgstr ""
 
 #: crates/ira/src/ui/wine_config_env_dll.rs:47

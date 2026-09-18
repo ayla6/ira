@@ -454,7 +454,7 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
 
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.add_css_class(CSS_FLAT);
-    add_btn.set_tooltip_text(Some(&crate::tr!("Add collection")));
+    add_btn.set_tooltip_text(Some(&crate::tr!("Add group")));
     add_btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     add_btn.connect_clicked(move |_| {

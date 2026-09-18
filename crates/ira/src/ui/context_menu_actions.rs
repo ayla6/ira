@@ -364,6 +364,209 @@ pub(super) fn setup_multi_toggle_group_action(
     actions.add_action(&toggle_group);
 }
 
+/// Which metadata list a mass entity add targets.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum MassEntityList {
+    Family,
+    Genre,
+    Developer,
+    Publisher,
+}
+
+impl MassEntityList {
+    fn search(
+        self,
+        db: &ira_db::DbConn,
+        term: &str,
+    ) -> Vec<ira_models::ScraperEntity> {
+        match self {
+            MassEntityList::Family => {
+                ira_db::search_families(db, term).unwrap_or_default()
+            }
+            MassEntityList::Genre => ira_db::search_genres(db, term).unwrap_or_default(),
+            MassEntityList::Developer | MassEntityList::Publisher => {
+                ira_db::scraper_companies_search(db, term).unwrap_or_default()
+            }
+        }
+    }
+
+    /// The entity for a hand-typed name, reusing the cache's row when
+    /// it has one.
+    fn mint(self, db: &ira_db::DbConn, term: &str) -> Option<ira_models::ScraperEntity> {
+        match self {
+            MassEntityList::Family => ira_db::local_family_entity(db, term),
+            MassEntityList::Genre => ira_db::local_genre_entity(db, term),
+            MassEntityList::Developer | MassEntityList::Publisher => {
+                ira_db::steam_company_entity(db, term)
+            }
+        }
+    }
+
+    fn target(self, meta: &mut ira_models::ScraperMetadata) -> &mut Vec<ira_models::ScraperEntity> {
+        match self {
+            MassEntityList::Family => &mut meta.families,
+            MassEntityList::Genre => &mut meta.genres,
+            MassEntityList::Developer => &mut meta.developers,
+            MassEntityList::Publisher => &mut meta.publishers,
+        }
+    }
+}
+
+/// Mass metadata adds: search the entity cache, pick one, and it lands
+/// on every selected game's record.
+pub(super) fn setup_multi_entity_add_actions(
+    actions: &gio::SimpleActionGroup,
+    state: SharedState,
+    ids: Vec<i64>,
+) {
+    let choices: [(&str, String, MassEntityList); 4] = [
+        ("mass_family", crate::tr!("Add to family…"), MassEntityList::Family),
+        ("mass_genre", crate::tr!("Add to genre…"), MassEntityList::Genre),
+        ("mass_developer", crate::tr!("Add to developer…"), MassEntityList::Developer),
+        ("mass_publisher", crate::tr!("Add to publisher…"), MassEntityList::Publisher),
+    ];
+    for (name, title, list) in choices {
+        let action = gio::SimpleAction::new(name, None);
+        let state = state.clone();
+        let ids = ids.clone();
+        action.connect_activate(move |_, _| {
+            let window = state.borrow().window.clone();
+            show_mass_entity_add(&state, &window, ids.clone(), list, title.clone());
+        });
+        actions.add_action(&action);
+    }
+}
+
+/// The search dialog behind a mass add: the cache's matches plus a
+/// custom-add row for names the sources have never listed. A pick
+/// writes every selected game's record at once.
+fn show_mass_entity_add(
+    state: &SharedState,
+    parent: &impl glib::object::IsA<gtk4::Window>,
+    ids: Vec<i64>,
+    list: MassEntityList,
+    title: String,
+) {
+    let dialog = adw::Dialog::new();
+    dialog.set_title(&title);
+    dialog.set_content_width(460);
+    dialog.set_content_height(440);
+
+    let toolbar = adw::ToolbarView::new();
+    let header = adw::HeaderBar::new();
+    let heading = gtk4::Label::new(Some(&title));
+    heading.add_css_class("heading");
+    header.set_title_widget(Some(&heading));
+    toolbar.add_top_bar(&header);
+
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+    content.set_margin_top(12);
+    content.set_margin_bottom(12);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    let entry = gtk4::SearchEntry::new();
+    entry.set_placeholder_text(Some(&crate::tr!("Search…")));
+    content.append(&entry);
+    let (scrolled, results) = super::helpers::clamped_boxed_list(460);
+    scrolled.set_vexpand(true);
+    content.append(&scrolled);
+    toolbar.set_content(Some(&content));
+    dialog.set_child(Some(&toolbar));
+
+    let state = std::rc::Rc::new(state.clone());
+    let ids = std::rc::Rc::new(ids);
+    let apply = {
+        let state = state.clone();
+        let ids = ids.clone();
+        let dialog = dialog.clone();
+        move |entity: ira_models::ScraperEntity| {
+            let db = state.borrow().db.clone();
+            for &db_id in ids.iter() {
+                let mut meta = ira_db::scraper_metadata_for_game(&db, db_id)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let target = list.target(&mut meta);
+                // The same entity twice is noise, not data.
+                if target.iter().any(|held| held.id == entity.id) {
+                    continue;
+                }
+                target.push(entity.clone());
+                if let Err(e) = ira_db::store_scraper_metadata(&db, db_id, &meta) {
+                    eprintln!("Failed to store metadata for {db_id}: {e}");
+                }
+            }
+            super::sidebar::rebuild_sidebar_and_show_grid(&state);
+            for &db_id in ids.iter() {
+                super::edit_game_scraper::refresh_scraper_section(&state, db_id);
+            }
+            dialog.close();
+        }
+    };
+
+    let populate = {
+        let state = state.clone();
+        let apply = apply.clone();
+        let results = results.clone();
+        let ids = ids.clone();
+        move |term: &str| {
+            super::helpers::clear_children(&results);
+            let db = state.borrow().db.clone();
+            let term = term.trim();
+            for entity in list.search(&db, term) {
+                let apply = apply.clone();
+                let row_entity = entity.clone();
+                let row = adw::ActionRow::new();
+                row.set_use_markup(false);
+                row.set_title(&entity.name);
+                row.set_subtitle(&format!("id {}", entity.id));
+                let pick = gtk4::Button::with_label(&crate::tr!("Add"));
+                pick.add_css_class(super::css::CSS_SUGGESTED_ACTION);
+                pick.set_valign(gtk4::Align::Center);
+                pick.connect_clicked(move |_| apply(row_entity.clone()));
+                row.add_suffix(&pick);
+                results.append(&row);
+            }
+            // The typed name itself, minted on click only — the db
+            // must not fill up with every prefix the user tried.
+            if !term.is_empty() {
+                let already_held = |db_id: i64| {
+                    let mut meta = ira_db::scraper_metadata_for_game(&db, db_id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    list.target(&mut meta)
+                        .iter()
+                        .any(|held| held.name.eq_ignore_ascii_case(term))
+                };
+                let all_held = ids.iter().all(|&db_id| already_held(db_id));
+                let apply = apply.clone();
+                let term_c = term.to_string();
+                let db_for_mint = db.clone();
+                let row = adw::ActionRow::new();
+                row.set_use_markup(false);
+                row.set_title(&crate::tr!("Add \"{}\"").replacen("{}", term, 1));
+                let pick = gtk4::Button::with_label(&crate::tr!("Add"));
+                pick.add_css_class(super::css::CSS_SUGGESTED_ACTION);
+                pick.set_valign(gtk4::Align::Center);
+                pick.set_sensitive(!all_held);
+                pick.connect_clicked(move |_| {
+                    if let Some(entity) = list.mint(&db_for_mint, &term_c) {
+                        apply(entity);
+                    }
+                });
+                row.add_suffix(&pick);
+                results.append(&row);
+            }
+        }
+    };
+    let populate_for_changed = populate.clone();
+    entry.connect_search_changed(move |entry| populate_for_changed(&entry.text()));
+    populate("");
+
+    dialog.present(Some(parent.upcast_ref()));
+}
+
 pub(super) fn setup_multi_new_collection_action(
     actions: &gio::SimpleActionGroup,
     state: SharedState,

@@ -175,6 +175,42 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
 
     ensure_default_icon(&mut game, &steam, &cfg, &save_dir);
 
+    // Art still missing after Steam and the native icon chain: SteamGridDB
+    // fills the gaps — through the game's SGDB match when there is one,
+    // otherwise through SGDB's steam endpoints by the app id — so a
+    // freshly added game never sits imageless. Only missing files
+    // download; the manual "fetch missing images" pass reuses them.
+    if steam.has_sgdb_key()
+        && (game.icon_path.is_empty()
+            || game.hero_image_path.is_empty()
+            || game.grid_path.is_empty()
+            || game.header_path.is_empty()
+            || game.logo_path.is_empty())
+    {
+        let switch_exe = cfg.console("switch").executable.clone();
+        let dir = ira_parser::game_data_dir(&save_dir, &game);
+        let (icon, hero, grid, logo, header, square) =
+            super::fetch_images::ensure_game_assets(&steam, &dir, &cfg, &game, &switch_exe);
+        if game.icon_path.is_empty() {
+            game.icon_path = icon;
+        }
+        if game.hero_image_path.is_empty() {
+            game.hero_image_path = hero;
+        }
+        if game.grid_path.is_empty() {
+            game.grid_path = grid;
+        }
+        if game.logo_path.is_empty() {
+            game.logo_path = logo;
+        }
+        if game.header_path.is_empty() {
+            game.header_path = header;
+        }
+        if game.square_path.is_empty() {
+            game.square_path = square;
+        }
+    }
+
     // PC games: even with no ScreenScraper match, the store synopsis and
     // the company cache's ids can fill the metadata record.
     if game.kind.is_pc() {

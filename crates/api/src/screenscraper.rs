@@ -9,6 +9,8 @@ use crate::screenscraper_creds::{ScraperCreds, SOFT_NAME};
 use crate::SteamDataClient;
 use ira_models::screenscraper_system_id;
 use serde::Deserialize;
+use std::collections::HashSet;
+use unicode_normalization::UnicodeNormalization;
 
 const API_URL_BASE: &str = "https://www.screenscraper.fr/api2";
 
@@ -215,6 +217,58 @@ pub fn search_url_scoped(
 /// ScreenScraper system an Ira platform maps to.
 pub fn search_url(creds: &ScraperCreds, term: &str, platform_id: &str) -> String {
     search_url_scoped(creds, term, screenscraper_system_id(platform_id))
+}
+
+/// Order search answers so the title closest to `term` comes first: the
+/// picker reads top-down, and the source's own answer order is no help
+/// to a human picking a match. The score is a Dice coefficient over the
+/// character bigrams of the normalized titles, taken over every name the
+/// candidate carries — display name and all its region names. Equal
+/// scores keep the answer's original order.
+pub fn sort_by_similarity(games: &mut Vec<ScrapedGame>, term: &str) {
+    let target = title_bigrams(&similarity_fold(term));
+    let mut keyed: Vec<(f64, ScrapedGame)> = std::mem::take(games)
+        .into_iter()
+        .map(|game| {
+            let score = std::iter::once(game.name.as_str())
+                .chain(game.names.iter().map(|(_, name)| name.as_str()))
+                .map(|name| dice(&target, &title_bigrams(&similarity_fold(name))))
+                .fold(0.0_f64, f64::max);
+            (score, game)
+        })
+        .collect();
+    keyed.sort_by(|a, b| b.0.total_cmp(&a.0));
+    *games = keyed.into_iter().map(|(_, game)| game).collect();
+}
+
+/// Lowercase, accents folded away (NFD plus the combining marks
+/// stripped), punctuation dropped — the source writes "Pokémon" and
+/// "Ace Combat 04 : Shattered Skies" where the searcher types neither.
+fn similarity_fold(title: &str) -> String {
+    title
+        .to_lowercase()
+        .nfd()
+        .filter(|c| !matches!(u32::from(*c), 0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x20D0..=0x20FF))
+        .filter(|c| c.is_ascii_alphanumeric() || c.is_whitespace())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn title_bigrams(title: &str) -> HashSet<[char; 2]> {
+    let chars: Vec<char> = title.chars().collect();
+    chars.windows(2).map(|w| [w[0], w[1]]).collect()
+}
+
+/// Dice over two bigram sets: twice the shared over the total. An empty
+/// side (a one-character title) scores 0 — a term that short leaves the
+/// answer in its original order.
+fn dice(a: &HashSet<[char; 2]>, b: &HashSet<[char; 2]>) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    2.0 * a.intersection(b).count() as f64 / (a.len() + b.len()) as f64
 }
 
 /// Regions tried in order for names, dates and media — ES-DE's fallback
@@ -1183,5 +1237,49 @@ mod tests {
     #[test]
     fn test_parse_games_rejects_garbage() {
         assert!(parse_games("<not closed").is_err());
+    }
+
+    fn scraped(ss_id: &str, name: &str) -> ScrapedGame {
+        ScrapedGame {
+            ss_id: ss_id.to_string(),
+            name: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_sort_by_similarity_puts_the_exact_title_first() {
+        let mut games = vec![
+            scraped("3", "Portal Stories: Mel"),
+            scraped("2", "Portal 2"),
+            scraped("1", "Portal"),
+        ];
+        sort_by_similarity(&mut games, "Portal");
+        assert_eq!(games[0].name, "Portal");
+        assert_eq!(games[1].name, "Portal 2");
+    }
+
+    #[test]
+    fn test_sort_by_similarity_folds_case_punctuation_and_accents() {
+        let mut games = vec![scraped("1", "Pokemon XD: Gale of Darkness")];
+        sort_by_similarity(&mut games, "  POKÉMON   XD! ");
+        assert_eq!(games[0].name, "Pokemon XD: Gale of Darkness");
+    }
+
+    #[test]
+    fn test_sort_by_similarity_scores_region_names_too() {
+        let mut french_named = scraped("1", "Le Seigneur des Anneaux");
+        french_named.names = vec![("us".to_string(), "The Lord of the Rings".to_string())];
+        let mut games = vec![scraped("2", "Totally Different Game"), french_named];
+        sort_by_similarity(&mut games, "lord of the rings");
+        assert_eq!(games[0].ss_id, "1");
+    }
+
+    #[test]
+    fn test_sort_by_similarity_keeps_order_when_nothing_matches() {
+        let mut games = vec![scraped("1", "Aaa"), scraped("2", "Bbb")];
+        sort_by_similarity(&mut games, "Zzzz");
+        assert_eq!(games[0].ss_id, "1");
+        assert_eq!(games[1].ss_id, "2");
     }
 }

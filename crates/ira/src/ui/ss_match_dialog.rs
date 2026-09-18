@@ -282,7 +282,12 @@ pub fn show_ss_search_dialog(
         let (tx, rx) = mpsc::channel::<Result<Vec<ScrapedGame>, String>>();
         let platform_id_c = platform_id.clone();
         std::thread::spawn(move || {
-            let outcome = steam.screenscraper_search(&creds, &term, &platform_id_c);
+            let outcome = steam
+                .screenscraper_search(&creds, &term, &platform_id_c)
+                .map(|mut games| {
+                    ira_api::screenscraper::sort_by_similarity(&mut games, &term);
+                    games
+                });
             let _ = tx.send(outcome);
         });
         let list_c = list.clone();

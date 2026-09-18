@@ -12,6 +12,7 @@ ira-parser = { path = "../parser" }
 tracing = "0.1"
 quick-xml = { version = "0.42.0", features = ["serialize"] }
 chrono = "0.4"
+unicode-normalization = "0.1.25"
 
 [lints]
 workspace = true

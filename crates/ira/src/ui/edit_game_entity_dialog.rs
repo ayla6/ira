@@ -640,7 +640,11 @@ pub(super) fn show_entity_dialog(
         let refresh_manage = refresh_manage.clone();
         let manage_search = manage_search.clone();
         move || {
-            if kind == ira_db::KIND_COMPANY || warming.get() {
+            // Genres only: a small fixed vocabulary worth having whole.
+            // Families are library-dependent — every match harvests the
+            // series its games actually belong to — so they and
+            // companies never bulk-fetch.
+            if kind != ira_db::KIND_GENRE || warming.get() {
                 return;
             }
             let (steam, cfg, db) = {
@@ -653,18 +657,9 @@ pub(super) fn show_entity_dialog(
             if matches!(ira_db::entity_fetched_at(&db, kind), Ok(Some(_))) {
                 return;
             }
-            let (short_label, status_label, done_status) = match kind {
-                ira_db::KIND_GENRE => (
-                    crate::tr!("Fetching genres…"),
-                    crate::tr!("Fetching the genre table…"),
-                    crate::tr!("Genre table fetched"),
-                ),
-                _ => (
-                    crate::tr!("Fetching families…"),
-                    crate::tr!("Fetching the family table…"),
-                    crate::tr!("Family table fetched"),
-                ),
-            };
+            let short_label = crate::tr!("Fetching genres…");
+            let status_label = crate::tr!("Fetching the genre table…");
+            let done_status = crate::tr!("Genre table fetched");
             let Some(job) =
                 super::fetch_images::begin_strip_job(&state, &short_label, &status_label)
             else {
@@ -683,8 +678,8 @@ pub(super) fn show_entity_dialog(
                     let _ = tx.send(Ok(0));
                     return;
                 }
-                let _ = tx.send(super::fetch_metadata::fetch_and_warm(
-                    &steam, &db, kind, &creds,
+                let _ = tx.send(super::fetch_metadata::fetch_and_warm_genres(
+                    &steam, &db, &creds,
                 ));
             });
             let refresh_manage = refresh_manage.clone();

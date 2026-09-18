@@ -144,38 +144,27 @@ fn steam_gaps(meta: &ira_models::ScraperMetadata) -> bool {
         || meta.classifications.is_empty()
 }
 
-/// Fetch one entity table (genres or families) whole, upsert it into
-/// the lookup cache under the rename latch, and stamp the fetched-at
-/// marker. Returns the entry count for the strip's summary.
-pub(crate) fn fetch_and_warm(
+/// Fetch the genre table whole, upsert it into the lookup cache under
+/// the rename latch, and stamp the fetched-at marker. Returns the
+/// entry count for the strip's summary. Families stay harvest-only:
+/// their tables are library-dependent, and the whole source list is
+/// mostly series no game in the library belongs to.
+pub(crate) fn fetch_and_warm_genres(
     steam: &ira_api::SteamDataClient,
     db: &ira_db::DbConn,
-    kind: &str,
     creds: &ira_api::ScraperCreds,
 ) -> Result<usize, String> {
-    let entries: Vec<(i64, String)> = match kind {
-        ira_db::KIND_GENRE => steam
-            .genres_list(creds)
-            .map(|rows| {
-                rows.iter()
-                    .filter_map(|row| {
-                        row.id.parse::<i64>().ok().map(|id| (id, row.name.clone()))
-                    })
-                    .collect()
-            }),
-        ira_db::KIND_FAMILY => steam
-            .familles_list(creds)
-            .map(|rows| {
-                rows.iter()
-                    .filter_map(|(id, name)| {
-                        id.parse::<i64>().ok().map(|id| (id, name.clone()))
-                    })
-                    .collect()
-            }),
-        _ => Err("no listing endpoint".to_string()),
-    }?;
-    ira_db::warm_entity_cache(db, kind, &entries)?;
-    ira_db::set_entity_fetched(db, kind, chrono::Utc::now().timestamp())?;
+    let entries: Vec<(i64, String)> = steam
+        .genres_list(creds)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    row.id.parse::<i64>().ok().map(|id| (id, row.name.clone()))
+                })
+                .collect()
+        })?;
+    ira_db::warm_entity_cache(db, ira_db::KIND_GENRE, &entries)?;
+    ira_db::set_entity_fetched(db, ira_db::KIND_GENRE, chrono::Utc::now().timestamp())?;
     Ok(entries.len())
 }
 
@@ -336,19 +325,12 @@ pub fn start_full_refetch(state: &SharedState, force: bool) -> bool {
     }
     let ss_queue = super::mass_match_ss::refetch_queue(state, force);
     let steam_queue = steam_refetch_queue(state, force);
-    // The entity tables ride along when never fetched: "everything"
-    // includes the indexes the pickers search.
-    let table_wants = |kind: &str| {
-        matches!(ira_db::entity_fetched_at(&state.borrow().db, kind), Ok(None))
-    };
-    let mut tables: Vec<&'static str> = Vec::new();
-    if table_wants(ira_db::KIND_GENRE) {
-        tables.push(ira_db::KIND_GENRE);
-    }
-    if table_wants(ira_db::KIND_FAMILY) {
-        tables.push(ira_db::KIND_FAMILY);
-    }
-    if ss_queue.is_empty() && steam_queue.is_empty() && tables.is_empty() {
+    // The genre table rides along when never fetched: "everything"
+    // includes the index the genre pickers search. Families stay
+    // harvest-only — their table is library-dependent.
+    let genres_wanted =
+        matches!(ira_db::entity_fetched_at(&state.borrow().db, ira_db::KIND_GENRE), Ok(None));
+    if ss_queue.is_empty() && steam_queue.is_empty() && !genres_wanted {
         return false;
     }
     let Some(job) = super::fetch_images::begin_strip_job(
@@ -376,14 +358,7 @@ pub fn start_full_refetch(state: &SharedState, force: bool) -> bool {
         .into_iter()
         .map(|db_id| (Source::Steam, db_id))
         .chain(ss_queue.into_iter().map(|db_id| (Source::Ss, db_id)))
-        .chain(
-            tables
-                .into_iter()
-                .map(|kind| match kind {
-                    ira_db::KIND_GENRE => (Source::GenresTable, 0),
-                    _ => (Source::FamiliesTable, 0),
-                }),
-        )
+        .chain(genres_wanted.then_some((Source::GenresTable, 0)))
         .collect();
     let rx = spawn_full_refetch_worker(jobs, steam, creds, db, Some(cancel));
     let state = state.clone();
@@ -405,7 +380,6 @@ enum Source {
     Steam,
     Ss,
     GenresTable,
-    FamiliesTable,
 }
 
 fn spawn_full_refetch_worker(
@@ -426,14 +400,13 @@ fn spawn_full_refetch_worker(
             }
             if index > 0 {
                 let pace = match source {
-                    Source::Steam | Source::GenresTable | Source::FamiliesTable => 250,
+                    Source::Steam | Source::GenresTable => 250,
                     Source::Ss => 1000,
                 };
                 std::thread::sleep(std::time::Duration::from_millis(pace));
             }
             let current = match source {
                 Source::GenresTable => crate::tr!("the genre table").to_string(),
-                Source::FamiliesTable => crate::tr!("the family table").to_string(),
                 _ => ira_db::find_by_db_id(&db, db_id)
                     .ok()
                     .flatten()
@@ -443,19 +416,13 @@ fn spawn_full_refetch_worker(
             let outcome = match source {
                 Source::Steam => steam_refetch_one(&steam, &db, db_id),
                 Source::Ss => super::mass_match_ss::refetch_one(&steam, &creds, &db, db_id),
-                Source::GenresTable | Source::FamiliesTable => {
-                    let kind = match source {
-                        Source::GenresTable => ira_db::KIND_GENRE,
-                        _ => ira_db::KIND_FAMILY,
-                    };
-                    match fetch_and_warm(&steam, &db, kind, &creds) {
-                        Ok(count) => {
-                            eprintln!("Refetch: {kind} table warmed with {count} entries");
-                            RefetchOutcome::Filled
-                        }
-                        Err(e) => RefetchOutcome::Failed(e),
+                Source::GenresTable => match fetch_and_warm_genres(&steam, &db, &creds) {
+                    Ok(count) => {
+                        eprintln!("Refetch: genre table warmed with {count} entries");
+                        RefetchOutcome::Filled
                     }
-                }
+                    Err(e) => RefetchOutcome::Failed(e),
+                },
             };
             let _ = tx.try_send(RefetchProgress {
                 done: index + 1,

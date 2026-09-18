@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-18 19:20-0300\n"
+"POT-Creation-Date: 2026-09-18 19:50-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -778,7 +778,7 @@ msgstr ""
 
 #: crates/ira/src/ui/context_menu_actions.rs:111
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:402
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:951
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:946
 msgid "Remove"
 msgstr ""
 
@@ -1043,7 +1043,7 @@ msgid "Unused"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:156
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:998
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:993
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:41
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:91
 #: crates/ira/src/ui/settings_pages.rs:1296
@@ -1129,54 +1129,42 @@ msgstr ""
 msgid "Merge"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:658
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:660
 msgid "Fetching genres…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:659
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:661
 msgid "Fetching the genre table…"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:660
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:662
 msgid "Genre table fetched"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:663
-msgid "Fetching families…"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:664
-msgid "Fetching the family table…"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:665
-msgid "Family table fetched"
-msgstr ""
-
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:705
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:700
 #, rust-format
 msgid "{} entries cached"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:713
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:708
 msgid "Fetch failed"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:714
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:709
 #: crates/ira/src/ui/edit_game_scraper.rs:976
 #, rust-format
 msgid "Fetch failed: {}"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:883
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:878
 msgid "Saved"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:939
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:934
 msgid "No aliases"
 msgstr ""
 
-#: crates/ira/src/ui/edit_game_entity_dialog.rs:996
+#: crates/ira/src/ui/edit_game_entity_dialog.rs:991
 msgid "Added"
 msgstr ""
 
@@ -1842,19 +1830,19 @@ msgid "Fetching ScreenScraper data…"
 msgstr ""
 
 #: crates/ira/src/ui/fetch_metadata.rs:40
-#: crates/ira/src/ui/fetch_metadata.rs:357
+#: crates/ira/src/ui/fetch_metadata.rs:339
 msgid "Fetching missing metadata…"
 msgstr ""
 
 #: crates/ira/src/ui/fetch_metadata.rs:64
 #: crates/ira/src/ui/fetch_metadata.rs:99
-#: crates/ira/src/ui/fetch_metadata.rs:394
+#: crates/ira/src/ui/fetch_metadata.rs:369
 #, rust-format
 msgid "{} of {} games updated"
 msgstr ""
 
 #: crates/ira/src/ui/fetch_metadata.rs:65
-#: crates/ira/src/ui/fetch_metadata.rs:395
+#: crates/ira/src/ui/fetch_metadata.rs:370
 msgid "Metadata fetched"
 msgstr ""
 
@@ -1870,16 +1858,12 @@ msgstr ""
 msgid "Steam data fetched"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:356
+#: crates/ira/src/ui/fetch_metadata.rs:338
 msgid "Fetching metadata…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_metadata.rs:435
+#: crates/ira/src/ui/fetch_metadata.rs:409
 msgid "the genre table"
-msgstr ""
-
-#: crates/ira/src/ui/fetch_metadata.rs:436
-msgid "the family table"
 msgstr ""
 
 #: crates/ira/src/ui/folder_list.rs:77

@@ -804,12 +804,16 @@ impl AllSoftwareUi {
                 .unwrap_or(ira_models::GroupSelection::AllGames);
             super::super::filter::filter_and_sort(
                 &s.games,
-                s.cfg.show_hidden_games,
-                &search,
-                &group,
-                &s.group_members,
-                s.cfg.sort_mode,
-                s.cfg.sort_descending,
+                &super::super::filter::GameFilter {
+                    show_hidden: s.cfg.show_hidden_games,
+                    search: &search,
+                    group: &group,
+                    group_members: &s.group_members,
+                    derived_members: &std::collections::HashMap::new(),
+                    sort_mode: s.cfg.sort_mode,
+                    sort_descending: s.cfg.sort_descending,
+                    entity_names: &std::collections::HashMap::new(),
+                },
             )
         };
 

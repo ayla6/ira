@@ -8,7 +8,7 @@ use super::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
 use ira_models::GroupSelection;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 fn queue_icon_load(icon: gtk4::Image, path: String) {
     let _s = tracing::info_span!("queue_icon_load", path = %path).entered();
@@ -121,7 +121,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
     let store = state.borrow().sidebar_store.clone();
     let saved_scroll = sidebar_scroll.vadjustment().value();
 
-    let (searching, show_hidden, groups, collapsed, games, group_members, running_games) = {
+    let (searching, show_hidden, groups, collapsed, games, group_members, running_games, group_by) = {
         let s = state.borrow();
         (
             !s.search_query.is_empty(),
@@ -134,6 +134,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
                 .lock()
                 .map(|games| games.keys().copied().collect::<HashSet<_>>())
                 .unwrap_or_default(),
+            s.cfg.group_by,
         )
     };
 
@@ -150,7 +151,120 @@ pub fn rebuild_sidebar(state: &SharedState) {
         .flat_map(|ids| ids.iter().copied())
         .collect();
 
-    if !searching {
+    if !searching && group_by != ira_models::GroupBy::Off {
+        // ── Derived categories: one collapsible section per value of
+        // the group-by dimension, replacing the collections view. The
+        // members map feeds the grid filter when a section is selected.
+        let db = {
+            let s = state.borrow();
+            s.db.clone()
+        };
+        let entity_names = match group_by {
+            ira_models::GroupBy::Developer => ira_db::game_entity_names(
+                &db,
+                ira_db::KIND_COMPANY,
+                Some("is_developer"),
+            )
+            .unwrap_or_default(),
+            ira_models::GroupBy::Publisher => ira_db::game_entity_names(
+                &db,
+                ira_db::KIND_COMPANY,
+                Some("is_publisher"),
+            )
+            .unwrap_or_default(),
+            ira_models::GroupBy::Genre => {
+                ira_db::game_entity_names(&db, ira_db::KIND_GENRE, None).unwrap_or_default()
+            }
+            ira_models::GroupBy::Family => {
+                ira_db::game_entity_names(&db, ira_db::KIND_FAMILY, None).unwrap_or_default()
+            }
+            _ => Default::default(),
+        };
+
+        let mut categories: Vec<(String, Vec<&Game>)> = Vec::new();
+        for game in &visible_games {
+            let key = match group_by {
+                ira_models::GroupBy::Console => ira_models::find_console(&game.platform_id)
+                    .map(|console| console.display_name.to_string())
+                    .unwrap_or_else(|| game.platform_id.clone()),
+                ira_models::GroupBy::Year => {
+                    if game.release_timestamp > 0 {
+                        use chrono::Datelike;
+                        chrono::DateTime::from_timestamp(game.release_timestamp, 0)
+                            .map(|date| date.year().to_string())
+                            .unwrap_or_default()
+                    } else {
+                        crate::tr!("Unknown year").to_string()
+                    }
+                }
+                ira_models::GroupBy::Developer
+                | ira_models::GroupBy::Publisher
+                | ira_models::GroupBy::Genre
+                | ira_models::GroupBy::Family => entity_names
+                    .get(&game.db_id)
+                    .cloned()
+                    .unwrap_or_else(|| crate::tr!("Uncategorized").to_string()),
+                ira_models::GroupBy::Off => unreachable!("guarded above"),
+            };
+            match categories
+                .iter_mut()
+                .find(|(name, _)| name.eq_ignore_ascii_case(&key))
+            {
+                Some((_, members)) => members.push(game),
+                None => categories.push((key, vec![game])),
+            }
+        }
+        // Years read newest first; named categories sort by name.
+        match group_by {
+            ira_models::GroupBy::Year => {
+                categories.sort_by(|(a, _), (b, _)| {
+                    let known_a = a != "Unknown year";
+                    let known_b = b != "Unknown year";
+                    known_b.cmp(&known_a).then_with(|| b.cmp(a))
+                });
+            }
+            _ => categories.sort_by_key(|(name, _)| name.to_lowercase()),
+        }
+
+        let mut derived: HashMap<String, HashSet<i64>> = HashMap::new();
+        for (name, members) in &categories {
+            derived.insert(
+                name.clone(),
+                members.iter().map(|game| game.db_id).collect(),
+            );
+        }
+        state.borrow_mut().derived_members = derived;
+
+        let (sort_mode, sort_descending) = {
+            let s = state.borrow();
+            (s.cfg.sort_mode, s.cfg.sort_descending)
+        };
+        for (name, members) in &categories {
+            let id = ira_models::derived_group_id(name);
+            let is_collapsed = collapsed.contains(&id);
+            items.push(SidebarItem::new_collection_header(
+                id,
+                name,
+                members.len(),
+                is_collapsed,
+            ));
+            if is_collapsed {
+                continue;
+            }
+            let mut sorted: Vec<&Game> = members.to_vec();
+            sorted.sort_by(|a, b| {
+                let ord = sort_mode.compare(a, b).then_with(|| a.db_id.cmp(&b.db_id));
+                if sort_descending {
+                    ord.reverse()
+                } else {
+                    ord
+                }
+            });
+            for game in &sorted {
+                items.push(SidebarItem::from_game(game, &running_games));
+            }
+        }
+    } else if !searching {
         for g in &groups {
             let member_ids = group_members.get(&g.id);
             let collection_games: Vec<&Game> = visible_games
@@ -197,7 +311,9 @@ pub fn rebuild_sidebar(state: &SharedState) {
                 }
             }
         }
+        state.borrow_mut().derived_members = HashMap::new();
     } else {
+        state.borrow_mut().derived_members = HashMap::new();
         let (search, sort_mode, sort_descending) = {
             let s = state.borrow();
             (
@@ -282,6 +398,7 @@ fn restore_selection(state: &SharedState) {
         let target_group_id = match &selected_group {
             GroupSelection::Collection(id) => *id,
             GroupSelection::Uncategorized => 0,
+            GroupSelection::Derived(name) => ira_models::derived_group_id(name),
             GroupSelection::AllGames => return,
         };
         for i in 0..store.n_items() {
@@ -390,7 +507,9 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
     count_label.add_css_class(CSS_DIM_LABEL);
     row.append(&count_label);
 
-    if item.kind() == SidebarItemKind::CollectionHeader {
+    if item.kind() == SidebarItemKind::CollectionHeader
+        && state.borrow().groups.iter().any(|g| g.id == group_id)
+    {
         let sc = state.clone();
         let group_name = header_name;
         let row_weak = row.downgrade();

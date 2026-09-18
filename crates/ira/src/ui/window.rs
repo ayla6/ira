@@ -102,6 +102,7 @@ pub fn build_ui(
         save_dir,
         search_query: String::new(),
         selected_group: GroupSelection::AllGames,
+        derived_members: HashMap::new(),
         groups,
         group_members,
         search_entry: gtk4::SearchEntry::new(),
@@ -168,6 +169,21 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_toolbar.add_bottom_bar(&fetch_indicator.widget());
     sidebar_toolbar.set_reveal_bottom_bars(false);
 
+    // The group-by picker: the sidebar derives one collapsible category
+    // per value of the chosen dimension.
+    let group_by_labels: Vec<&str> = ira_models::GroupBy::ALL
+        .iter()
+        .map(|mode| mode.display_label())
+        .collect();
+    let group_by_dd = gtk4::DropDown::new(
+        Some(gtk4::StringList::new(&group_by_labels)),
+        gtk4::Expression::NONE,
+    );
+    group_by_dd.set_selected(state.borrow().cfg.group_by.index() as u32);
+    group_by_dd.set_tooltip_text(Some(&crate::tr!("Group games by")));
+    group_by_dd.add_css_class(CSS_FLAT);
+    sidebar_header.pack_end(&group_by_dd);
+
     sidebar_toolbar.add_top_bar(&sidebar_header);
 
     let sidebar_scroll = gtk4::ScrolledWindow::new();
@@ -184,6 +200,22 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_view.set_show_separators(false);
     sidebar_scroll.set_child(Some(&sidebar_view));
     sidebar_toolbar.set_content(Some(&sidebar_scroll));
+
+    {
+        let state_gg = state.clone();
+        group_by_dd.connect_selected_notify(move |dd| {
+            let group_by = ira_models::GroupBy::from_index(dd.selected() as usize);
+            if state_gg.borrow().cfg.group_by == group_by {
+                return;
+            }
+            state_gg.borrow_mut().cfg.group_by = group_by;
+            if let Err(e) = state_gg.borrow().cfg.save() {
+                eprintln!("Failed to save config: {}", e);
+            }
+            state_gg.borrow_mut().selected_group = GroupSelection::AllGames;
+            super::sidebar::rebuild_sidebar_and_show_grid(&state_gg);
+        });
+    }
 
     let sidebar_page = adw::NavigationPage::new(&sidebar_toolbar, "Games");
     split_view.set_sidebar(Some(&sidebar_page));
@@ -489,7 +521,18 @@ fn connect_window_signals(
             }
             super::sidebar_item::SidebarItemKind::CollectionHeader => {
                 state_clone.borrow_mut().selected_id.clear();
-                state_clone.borrow_mut().selected_group = GroupSelection::Collection(group_id);
+                // A derived category's id is its name's hash; resolve it
+                // back so the filter reads the derived-members map.
+                let derived = state_clone
+                    .borrow()
+                    .derived_members
+                    .keys()
+                    .find(|name| ira_models::derived_group_id(name) == group_id)
+                    .cloned();
+                state_clone.borrow_mut().selected_group = match derived {
+                    Some(name) => GroupSelection::Derived(name),
+                    None => GroupSelection::Collection(group_id),
+                };
                 state_clone.borrow_mut().multi_selected_ids.clear();
                 show_grid_view(&state_clone);
             }

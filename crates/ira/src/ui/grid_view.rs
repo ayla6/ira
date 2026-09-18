@@ -118,6 +118,12 @@ fn badge_text(game: &Game, mode: SortMode, state: &SharedState) -> Option<String
                 Some(game.metacritic_score.to_string())
             }
         }
+        SortMode::Publisher | SortMode::Developer => {
+            // The credited name rides the cached entity map via the
+            // game's own name ordering; tiles without a credit show
+            // nothing rather than an empty badge.
+            None
+        }
         SortMode::SteamReview => {
             if game.steam_review_score < 0 {
                 None
@@ -149,6 +155,7 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
         match &selected_group {
             GroupSelection::AllGames => crate::tr!("All games"),
             GroupSelection::Uncategorized => crate::tr!("Uncategorized"),
+            GroupSelection::Derived(name) => name.clone(),
             GroupSelection::Collection(id) => state
                 .borrow()
                 .groups

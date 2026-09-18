@@ -99,6 +99,10 @@ pub struct AppState {
     pub save_dir: String,
     pub search_query: String,
     pub selected_group: GroupSelection,
+    /// The members of each metadata-derived category (group-by), as
+    /// computed by the last sidebar rebuild — the filter reads this
+    /// instead of the groups tables.
+    pub derived_members: HashMap<String, HashSet<i64>>,
     pub groups: Vec<Group>,
     pub group_members: HashMap<i64, HashSet<i64>>,
     pub search_entry: gtk4::SearchEntry,

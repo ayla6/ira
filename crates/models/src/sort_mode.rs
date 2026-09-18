@@ -12,6 +12,8 @@ pub enum SortMode {
     ReleaseDate,
     MetacriticScore,
     SteamReview,
+    Publisher,
+    Developer,
 }
 
 impl SortMode {
@@ -24,6 +26,8 @@ impl SortMode {
             SortMode::ReleaseDate => "release_date",
             SortMode::MetacriticScore => "metacritic_score",
             SortMode::SteamReview => "steam_review",
+            SortMode::Publisher => "publisher",
+            SortMode::Developer => "developer",
         }
     }
 
@@ -35,6 +39,8 @@ impl SortMode {
             "release_date" => SortMode::ReleaseDate,
             "metacritic_score" => SortMode::MetacriticScore,
             "steam_review" => SortMode::SteamReview,
+            "publisher" => SortMode::Publisher,
+            "developer" => SortMode::Developer,
             _ => SortMode::Alphabetical,
         }
     }
@@ -48,6 +54,8 @@ impl SortMode {
             SortMode::ReleaseDate => "Release Date",
             SortMode::MetacriticScore => "Metacritic Score",
             SortMode::SteamReview => "Steam Review",
+            SortMode::Publisher => "Publisher",
+            SortMode::Developer => "Developer",
         }
     }
 
@@ -59,6 +67,8 @@ impl SortMode {
         SortMode::ReleaseDate,
         SortMode::MetacriticScore,
         SortMode::SteamReview,
+        SortMode::Publisher,
+        SortMode::Developer,
     ];
 
     /// The orderings the UI menus offer: `ALL` minus the completion
@@ -70,6 +80,8 @@ impl SortMode {
         SortMode::ReleaseDate,
         SortMode::MetacriticScore,
         SortMode::SteamReview,
+        SortMode::Publisher,
+        SortMode::Developer,
     ];
 
     pub fn compare(&self, a: &Game, b: &Game) -> Ordering {
@@ -107,6 +119,14 @@ impl SortMode {
                 sort_desc_unknowns_last(a.steam_review_score, b.steam_review_score)
                     .then_with(|| a.sort_key().cmp(b.sort_key()))
             }
+            // Publisher and developer order by the credited name, which
+            // lives in the database — filter.rs overlays that ordering
+            // through its names map and only falls back to the title
+            // here.
+            SortMode::Publisher | SortMode::Developer => a
+                .sort_key()
+                .to_lowercase()
+                .cmp(&b.sort_key().to_lowercase()),
         }
     }
 }

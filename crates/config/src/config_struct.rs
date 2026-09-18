@@ -247,6 +247,9 @@ pub struct Config {
     pub language_preferences: Vec<String>,
     #[serde(default)]
     pub sort_mode: ira_models::SortMode,
+    /// The dimension the sidebar derives game categories from.
+    #[serde(default)]
+    pub group_by: ira_models::GroupBy,
     #[serde(default)]
     pub group_order: ira_models::GroupOrder,
     #[serde(default)]
@@ -342,6 +345,7 @@ impl Default for Config {
             centralize_game_saves: true,
             language_preferences: default_language_preferences(),
             sort_mode: ira_models::SortMode::default(),
+            group_by: ira_models::GroupBy::default(),
             group_order: ira_models::GroupOrder::default(),
             sort_descending: false,
             ra_enabled: false,

@@ -230,6 +230,9 @@ pub fn show_ss_search_dialog(
             return;
         }
     }
+    // The master switch outranks every entry point into the source — a
+    // disabled ScreenScraper means no requests at all, manual included.
+    let disabled = !state.borrow().cfg.screenscraper_enabled;
     // Say which console the search is scoped to.
     let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten();
     let console = match &entry {
@@ -254,6 +257,11 @@ pub fn show_ss_search_dialog(
     // Clicking a result's background opens its page on the site — the
     // way to check what a candidate actually is before matching it.
     // (Rows activate themselves; no list wiring needed.)
+    if disabled {
+        list.append(&status_row(&crate::tr!(
+            "ScreenScraper is disabled in Settings"
+        )));
+    }
 
     let state_c = state.clone();
     let platform_id = platform_id.to_string();
@@ -263,6 +271,13 @@ pub fn show_ss_search_dialog(
     let do_search = move || {
         let term = entry_c.text().trim().to_string();
         if term.is_empty() {
+            return;
+        }
+        if !state_c.borrow().cfg.screenscraper_enabled {
+            clear_children(&list);
+            list.append(&status_row(&crate::tr!(
+                "ScreenScraper is disabled in Settings"
+            )));
             return;
         }
         let (steam, creds) = {
@@ -304,8 +319,11 @@ pub fn show_ss_search_dialog(
         let ds = do_search.clone();
         move |_| ds()
     });
-    // The prefill is already the best query — run it on open.
-    do_search();
+    // The prefill is already the best query — run it on open. A disabled
+    // source just gets the note above; the search button stays for form.
+    if !disabled {
+        do_search();
+    }
     search_btn.connect_clicked({
         let ds = do_search.clone();
         move |_| ds()

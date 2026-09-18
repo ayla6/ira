@@ -264,6 +264,11 @@ pub struct Config {
     pub screenscraper_id: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub screenscraper_password: String,
+    /// Master switch for ScreenScraper use: the automatic match on add,
+    /// the search dialogs and the metadata passes. Off until asked for —
+    /// every request rides the service's quota.
+    #[serde(default)]
+    pub screenscraper_enabled: bool,
     #[serde(default)]
     pub consoles: HashMap<String, ConsoleConfig>,
     #[serde(default)]
@@ -344,6 +349,7 @@ impl Default for Config {
             ra_web_api_key: String::new(),
             screenscraper_id: String::new(),
             screenscraper_password: String::new(),
+            screenscraper_enabled: false,
             consoles,
             overlay: OverlaySettings::default(),
             controller_defaults: HashMap::new(),

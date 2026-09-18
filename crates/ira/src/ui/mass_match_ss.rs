@@ -216,6 +216,22 @@ pub(super) fn start_ss_batch_matching(
             HashSet::new()
         }
     };
+    // The master switch: a disabled ScreenScraper starts no pass at all.
+    // Its rows never get an answer from anywhere, so they go straight to
+    // the manual search button — which says as much when used.
+    if !state.borrow().cfg.screenscraper_enabled {
+        for (i, g) in needs_matching.iter().enumerate() {
+            let Some(ss_box) = rows.get(i).and_then(|r| r.ss.clone()) else {
+                continue;
+            };
+            if missed.contains(&g.db_id) {
+                continue;
+            }
+            show_unmatched(&ss_box, state, g.db_id, &g.name, &g.platform_id, dialog);
+            vis.pass_done(i);
+        }
+        return;
+    }
     if state.borrow().ss_job_busy.get() {
         // The background pass already owns the quota: rows still in
         // their "searching" phase get the in-flight note instead, with

@@ -159,7 +159,7 @@ fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &Scra
     }
     fact_rows(state, game, win, &metadata, slot);
     synopsis_row(win, slot, &metadata.synopses);
-    let match_row = search_row(state, game, win);
+    let match_row = search_row(state, game, win, slot);
     slot.add(match_row.clone().upcast());
     *slot.match_row.borrow_mut() = Some(match_row);
 }/// Which kind of entity a metadata field collects — decides the search
@@ -993,7 +993,12 @@ fn search_result_row(entity: &ScraperEntity, on_store: Rc<dyn Fn()>) -> adw::Act
     match_result_row(&entity.name, &format!("id {}", entity.id), move || on_store())
 }
 
-fn search_row(state: &SharedState, game: &Game, win: &adw::Window) -> adw::ActionRow {
+fn search_row(
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    slot: &ScraperSlot,
+) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     // Matched means an entry id is on record — a hand-filled record on
     // an unmatched game still gets the search/auto-match row below.

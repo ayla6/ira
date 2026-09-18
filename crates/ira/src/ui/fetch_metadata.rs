@@ -20,11 +20,14 @@ use super::state::SharedState;
 /// its record, revealing the sidebar strip. `false` when a ScreenScraper
 /// job or a strip job is already running, or nothing has gaps.
 pub fn start_metadata_refetch(state: &SharedState) -> bool {
-    let (busy, has_creds) = {
+    let (busy, allowed) = {
         let s = state.borrow();
-        (s.ss_job_busy.get(), !s.cfg.screenscraper_id.is_empty())
+        (
+            s.ss_job_busy.get(),
+            s.cfg.screenscraper_enabled && !s.cfg.screenscraper_id.is_empty(),
+        )
     };
-    if busy || !has_creds {
+    if busy || !allowed {
         return false;
     }
     let queue = super::mass_match_ss::refetch_queue(state);
@@ -302,11 +305,14 @@ pub(crate) fn steam_refetch_one(
 /// then the paced ScreenScraper pass. One strip job covers both, so
 /// "everything" really is one click.
 pub fn start_full_refetch(state: &SharedState) -> bool {
-    let (busy, has_creds) = {
+    let (busy, allowed) = {
         let s = state.borrow();
-        (s.ss_job_busy.get(), !s.cfg.screenscraper_id.is_empty())
+        (
+            s.ss_job_busy.get(),
+            s.cfg.screenscraper_enabled && !s.cfg.screenscraper_id.is_empty(),
+        )
     };
-    if busy || !has_creds {
+    if busy || !allowed {
         return false;
     }
     let ss_queue = super::mass_match_ss::refetch_queue(state);

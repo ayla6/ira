@@ -35,6 +35,7 @@ pub(super) struct SettingsPageWidgets {
     pub(super) sgdb_page: gtk4::Box,
     pub(super) sgdb_widgets: super::settings_pages::SgdbSettingsWidgets,
     pub(super) screenscraper_page: gtk4::Box,
+    pub(super) screenscraper_enable_row: adw::SwitchRow,
     pub(super) screenscraper_id_row: adw::EntryRow,
     pub(super) screenscraper_password_row: adw::PasswordEntryRow,
     pub(super) hidden_row: adw::SwitchRow,
@@ -80,8 +81,12 @@ pub(super) fn build_settings_pages(
         auto_reload_widgets,
     ) = build_general_settings_page(cfg);
     let (sgdb_page, sgdb_widgets) = super::settings_pages::build_sgdb_settings_page(cfg);
-    let (screenscraper_page, screenscraper_id_row, screenscraper_password_row) =
-        super::settings_pages::build_screenscraper_settings_page(cfg);
+    let (
+        screenscraper_page,
+        screenscraper_enable_row,
+        screenscraper_id_row,
+        screenscraper_password_row,
+    ) = super::settings_pages::build_screenscraper_settings_page(cfg);
 
     // One-click maintenance: mass refetches of what matching skips —
     // missing art, and holes in matched games' stored metadata. Both
@@ -184,6 +189,7 @@ pub(super) fn build_settings_pages(
         sgdb_page,
         sgdb_widgets,
         screenscraper_page,
+        screenscraper_enable_row,
         screenscraper_id_row,
         screenscraper_password_row,
         lang_list,

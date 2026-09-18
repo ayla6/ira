@@ -719,11 +719,25 @@ pub(super) fn build_ra_settings_page(
     (page, enable_row, username_row, web_api_row.upcast())
 }
 
-
 pub(super) fn build_screenscraper_settings_page(
     cfg: &Config,
-) -> (gtk4::Box, adw::EntryRow, adw::PasswordEntryRow) {
+) -> (
+    gtk4::Box,
+    adw::SwitchRow,
+    adw::EntryRow,
+    adw::PasswordEntryRow,
+) {
     let page = settings_page_container();
+
+    let enable_group = adw::PreferencesGroup::new();
+    let enable_row = adw::SwitchRow::new();
+    enable_row.set_title(&crate::tr!("Enable ScreenScraper"));
+    enable_row.set_subtitle(&crate::tr!(
+        "Match games and fill their metadata from screenscraper.fr, including automatically on add"
+    ));
+    enable_row.set_active(cfg.screenscraper_enabled);
+    enable_group.add(&enable_row);
+    page.append(&enable_group);
 
     let account_group = adw::PreferencesGroup::new();
     account_group.set_title(&crate::tr!("Account"));
@@ -742,7 +756,7 @@ pub(super) fn build_screenscraper_settings_page(
     account_group.add(&password_row);
     page.append(&account_group);
 
-    (page, username_row, password_row)
+    (page, enable_row, username_row, password_row)
 }
 
 pub(super) fn build_api_emulators_page(

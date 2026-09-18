@@ -132,7 +132,7 @@ pub(super) fn refresh_scraper_section(state: &SharedState, db_id: i64) -> bool {
     *slot.draft.borrow_mut() = stored_metadata(state, db_id).unwrap_or_default();
     *slot.link.borrow_mut() = game.steam_link_id.clone();
     if let SsPending::Match(picked) = &pending {
-        fold_match(&mut slot.draft.borrow_mut(), picked);
+        fold_match(state, &mut slot.draft.borrow_mut(), picked);
     }
     rebuild_rows(state, &game, &sd.window, &slot);
     true
@@ -224,10 +224,16 @@ fn repaint_slot(state: &SharedState, db_id: i64) -> bool {
 
 /// Fold a picked answer into a draft as *the match*: the source's merge
 /// rules (`ScraperMetadata::merge_match`) — scalars won where the answer
-/// has them, companies/genres/age ratings mixed in, never replaced.
-fn fold_match(draft: &mut ScraperMetadata, picked: &ScrapedGame) {
+/// has them, companies/genres/age ratings mixed in, never replaced. The
+/// answer resolves through the alias table first, so a name the user
+/// mapped to a canonical entry folds as that entry and the draft never
+/// shows the alias as a second row.
+fn fold_match(state: &SharedState, draft: &mut ScraperMetadata, picked: &ScrapedGame) {
+    let db = state.borrow().db.clone();
     let timestamp = ira_db::scraper_release_timestamp(&picked.release_date);
-    draft.merge_match(&picked.metadata(timestamp));
+    let mut fresh = picked.metadata(timestamp);
+    ira_db::resolve_metadata_aliases(&db, &mut fresh);
+    draft.merge_match(&fresh);
 }
 
 /// Stage a picked ScreenScraper match onto the dialog's draft: the
@@ -241,7 +247,7 @@ fn stage_ss_match(state: &SharedState, db_id: i64, picked: &ScrapedGame, slot: &
         *pre = Some(slot.draft.borrow().clone());
     }
     drop(pre);
-    fold_match(&mut slot.draft.borrow_mut(), picked);
+    fold_match(state, &mut slot.draft.borrow_mut(), picked);
     *slot.pending.borrow_mut() = SsPending::Match(Box::new(picked.clone()));
     fill_title_entry(state, db_id, picked);
     repaint_slot(state, db_id);
@@ -276,9 +282,12 @@ fn stage_refetch_fill(state: &SharedState, db_id: i64, picked: &ScrapedGame) -> 
     let Some(slot) = slot_for(state, db_id) else {
         return false;
     };
+    let db = state.borrow().db.clone();
     let mut draft = slot.draft.borrow_mut();
     let timestamp = ira_db::scraper_release_timestamp(&picked.release_date);
-    draft.fill_gaps(&picked.metadata(timestamp))
+    let mut fresh = picked.metadata(timestamp);
+    ira_db::resolve_metadata_aliases(&db, &mut fresh);
+    draft.fill_gaps(&fresh)
 }
 
 /// The match's name fills the title entry — visible, and still editable,

@@ -140,6 +140,16 @@ pub fn find_board(kind: &str) -> Option<&'static RatingBoard> {
     })
 }
 
+/// The stored kind for a classification: the canonical board id from the
+/// ratings table ("STEAM_GERMANY" is USK, "DEJUS" is ClassInd), so the
+/// same board arriving from two sources under two names is one rating,
+/// not two. Unknown kinds stay as they are.
+pub fn canonical_kind(kind: &str) -> String {
+    find_board(kind)
+        .map(|board| board.id.to_string())
+        .unwrap_or_else(|| kind.to_string())
+}
+
 fn normalize(kind: &str) -> String {
     kind.chars()
         .filter(|c| c.is_ascii_alphanumeric())

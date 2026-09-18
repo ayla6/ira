@@ -148,7 +148,7 @@ pub fn store_scraper_metadata(
                 (game_id, kind, value) VALUES (?1, ?2, ?3)",
             params![
                 game_id,
-                canonical_board_kind(&class.kind),
+                ira_models::ratings::canonical_kind(&class.kind),
                 class.value
             ],
         )
@@ -509,16 +509,6 @@ fn game_genres(conn: &DbConn, game_id: i64) -> Result<Vec<ira_models::ScraperEnt
     Ok(rows)
 }
 
-/// The stored kind for a classification: the canonical board id from
-/// the ratings table ("STEAM_GERMANY" is USK, "DEJUS" is ClassInd), so
-/// the same board arriving from two sources under two names lands in
-/// one row instead of showing twice. Unknown kinds stay as they are.
-fn canonical_board_kind(kind: &str) -> String {
-    ira_models::ratings::find_board(kind)
-        .map(|board| board.id.to_string())
-        .unwrap_or_else(|| kind.to_string())
-}
-
 /// The age-rating boards of a game, board name alphabetical.
 fn game_classifications(
     conn: &DbConn,
@@ -545,7 +535,7 @@ fn game_classifications(
     Ok(rows
         .into_iter()
         .map(|class| ira_models::ScraperClassification {
-            kind: canonical_board_kind(&class.kind),
+            kind: ira_models::ratings::canonical_kind(&class.kind),
             value: class.value,
         })
         .collect())

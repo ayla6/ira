@@ -6,7 +6,7 @@
 /// A ScreenScraper-referenced entity — company or genre — kept by its
 /// ScreenScraper id so several entries naming the same company resolve
 /// to one thing.
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScraperEntity {
     pub id: String,
     pub name: String,
@@ -15,7 +15,7 @@ pub struct ScraperEntity {
 /// One age-rating classification (CERO / PEGI / ESRB / ...): the board
 /// and the value it assigned. Game answers carry no classification ids —
 /// board and value are the whole identity.
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScraperClassification {
     /// The board's name as ScreenScraper reports it ("PEGI", "CERO", ...).
     pub kind: String,
@@ -64,15 +64,60 @@ impl ScraperMetadata {
         })
     }
 
+    /// Diff one entity list against a fresh answer, entry by entry:
+    ///
+    /// - same id → the source's spelling of the name wins in place (it
+    ///   corrects typos);
+    /// - same identifying tokens but the fresh entry carries a real
+    ///   ScreenScraper id where the stored one is a hand-minted local →
+    ///   the stored entry graduates to the source's row, in place — the
+    ///   same merge the store's local-company reconciliation performs,
+    ///   so the draft shows one entry and never a spelling pair;
+    /// - anything else the tokens call the same → the stored entry stays
+    ///   (the source namespace itself distinguishes two real ids);
+    /// - genuinely new → appended.
+    fn fold_entities(list: &mut Vec<ScraperEntity>, fresh: &[ScraperEntity]) {
+        'answer: for entity in fresh {
+            for held in list.iter_mut() {
+                if held.id == entity.id {
+                    held.name = entity.name.clone();
+                    continue 'answer;
+                }
+            }
+            let fresh_is_real = entity.id.parse::<i64>().is_ok_and(|id| id > 0);
+            if fresh_is_real {
+                let tokens = company_tokens(&entity.name);
+                if !tokens.is_empty() {
+                    for held in list.iter_mut() {
+                        let held_is_local =
+                            held.id.parse::<i64>().is_ok_and(|id| id < 0);
+                        if held_is_local && company_tokens(&held.name) == tokens {
+                            *held = entity.clone();
+                            continue 'answer;
+                        }
+                    }
+                }
+            }
+            if !Self::holds(list, entity) {
+                list.push(entity.clone());
+            }
+        }
+    }
+
     /// Whether the classification boards of the two records differ —
-    /// the revert button's changed test for the age-ratings row.
+    /// the revert button's changed test for the age-ratings row. Boards
+    /// compare canonically, so an entry stored under an alias and an
+    /// answer naming the board directly agree.
     pub fn classifications_differ(&self, other: &ScraperMetadata) -> bool {
         self.classifications.len() != other.classifications.len()
             || self.classifications.iter().any(|c| {
                 !other
                     .classifications
                     .iter()
-                    .any(|o| o.kind.eq_ignore_ascii_case(&c.kind) && o.value == c.value)
+                    .any(|o| {
+                        crate::ratings::canonical_kind(&o.kind) == crate::ratings::canonical_kind(&c.kind)
+                            && o.value == c.value
+                    })
             })
     }
 
@@ -89,8 +134,12 @@ impl ScraperMetadata {
     /// Fold a fresh ScreenScraper answer in as *the match*: the picked
     /// entry's id always wins, scalar fields (date, players, rating,
     /// synopses) win where the answer has them — and the multi-valued
-    /// fields (companies, genres, age ratings) only ever gain entries,
-    /// never lose what a Steam garnish or a hand edit already put there.
+    /// fields (companies, genres, age ratings) are diffed entry by
+    /// entry, merging spellings of one studio/genre into the source's
+    /// row and keeping genuinely distinct ones side by side. Nothing
+    /// already stored is dropped: for age boards the stored value stays
+    /// (Steam garnish runs first, so the store's say on a board wins)
+    /// and every board the answer brings that isn't stored yet is kept.
     pub fn merge_match(&mut self, fresh: &ScraperMetadata) {
         self.ss_id = fresh.ss_id.clone();
         if !fresh.release_date.is_empty() {
@@ -107,24 +156,20 @@ impl ScraperMetadata {
         if !fresh.synopses.is_empty() {
             self.synopses = fresh.synopses.clone();
         }
-        for (list, fresh_list) in [
-            (&mut self.developers, &fresh.developers),
-            (&mut self.publishers, &fresh.publishers),
-            (&mut self.genres, &fresh.genres),
-        ] {
-            for entity in fresh_list {
-                if !Self::holds(list, entity) {
-                    list.push(entity.clone());
-                }
-            }
-        }
+        Self::fold_entities(&mut self.developers, &fresh.developers);
+        Self::fold_entities(&mut self.publishers, &fresh.publishers);
+        Self::fold_entities(&mut self.genres, &fresh.genres);
         for class in &fresh.classifications {
+            let canonical = crate::ratings::canonical_kind(&class.kind);
             if !self
                 .classifications
                 .iter()
-                .any(|held| held.kind.eq_ignore_ascii_case(&class.kind))
+                .any(|held| crate::ratings::canonical_kind(&held.kind) == canonical)
             {
-                self.classifications.push(class.clone());
+                self.classifications.push(ScraperClassification {
+                    kind: canonical,
+                    value: class.value.clone(),
+                });
             }
         }
     }
@@ -171,10 +216,11 @@ impl ScraperMetadata {
             }
         }
         for class in &fresh.classifications {
+            let canonical = crate::ratings::canonical_kind(&class.kind);
             if !self
                 .classifications
                 .iter()
-                .any(|held| held.kind.eq_ignore_ascii_case(&class.kind))
+                .any(|held| crate::ratings::canonical_kind(&held.kind) == canonical)
             {
                 self.classifications.push(class.clone());
                 changed = true;
@@ -407,15 +453,15 @@ mod tests {
             stored.genres.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
             vec!["100", "2620"]
         );
-        // Boards fold case-insensitively; the stored value wins for a
-        // board both sides rated.
+        // Boards fold to the canonical kind; the stored value wins for
+        // a board both sides rated.
         assert_eq!(
             stored
                 .classifications
                 .iter()
                 .map(|c| (c.kind.as_str(), c.value.as_str()))
                 .collect::<Vec<_>>(),
-            vec![("ESRB", "M"), ("PEGI", "12"), ("usk", "16")]
+            vec![("ESRB", "M"), ("PEGI", "12"), ("USK", "16")]
         );
     }
 
@@ -425,18 +471,126 @@ mod tests {
             developers: vec![entity("-1", "Valve Corporation")],
             ..Default::default()
         };
-        // The source's own row for the same studio: no duplicate.
+        // The source's own row for the same studio: it graduates the
+        // local entry instead of piling a spelling pair on top.
         stored.merge_match(&ScraperMetadata {
             developers: vec![entity("594", "Valve")],
             ..Default::default()
         });
-        assert_eq!(stored.developers.len(), 1);
+        assert_eq!(stored.developers, vec![entity("594", "Valve")]);
         // Different id and different name: appended.
         stored.merge_match(&ScraperMetadata {
             developers: vec![entity("2911", "Chunsoft")],
             ..Default::default()
         });
         assert_eq!(stored.developers.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_match_graduates_a_local_company_to_the_source_row() {
+        // Steam garnish minted the studio as a local row; the match
+        // carries the real ScreenScraper one. The stored entry becomes
+        // the source's — same studio, canonical id and spelling — and
+        // no spelling pair survives the merge.
+        let mut stored = ScraperMetadata {
+            developers: vec![entity("-1", "Valve Corporation")],
+            genres: vec![entity("-3", "role playing game")],
+            ..Default::default()
+        };
+        stored.merge_match(&ScraperMetadata {
+            developers: vec![entity("594", "Valve")],
+            genres: vec![entity("2620", "Role Playing Game")],
+            ..Default::default()
+        });
+        assert_eq!(
+            stored.developers,
+            vec![entity("594", "Valve")],
+            "local id and spelling graduate to the source's row"
+        );
+        assert_eq!(
+            stored.genres,
+            vec![entity("2620", "Role Playing Game")],
+            "hand-typed genres graduate the same way"
+        );
+    }
+
+    #[test]
+    fn test_merge_match_never_downgrades_a_real_id_to_a_local_one() {
+        // The stored row is the source's already; a hand-minted local
+        // spelling arriving late must not replace it.
+        let mut stored = ScraperMetadata {
+            developers: vec![entity("594", "Valve")],
+            ..Default::default()
+        };
+        stored.merge_match(&ScraperMetadata {
+            developers: vec![entity("-1", "Valve Corporation")],
+            ..Default::default()
+        });
+        assert_eq!(stored.developers, vec![entity("594", "Valve")]);
+    }
+
+    #[test]
+    fn test_merge_match_keeps_two_real_rows_the_source_distinguishes() {
+        // Two different ScreenScraper ids whose token sets agree: the
+        // stored one wins and the answer's adds nothing — one row, not
+        // a spelling pair.
+        let mut stored = ScraperMetadata {
+            developers: vec![entity("10", "Sega")],
+            ..Default::default()
+        };
+        stored.merge_match(&ScraperMetadata {
+            developers: vec![entity("20", "Sega Games")],
+            ..Default::default()
+        });
+        assert_eq!(stored.developers, vec![entity("10", "Sega")]);
+    }
+
+    #[test]
+    fn test_merge_match_refreshes_a_name_under_the_same_id() {
+        // The source fixed a spelling: the correction rides in.
+        let mut stored = ScraperMetadata {
+            developers: vec![entity("2911", "Chunsoft")],
+            ..Default::default()
+        };
+        stored.merge_match(&ScraperMetadata {
+            developers: vec![entity("2911", "ChunSoft")],
+            ..Default::default()
+        });
+        assert_eq!(stored.developers, vec![entity("2911", "ChunSoft")]);
+    }
+
+    #[test]
+    fn test_merge_match_folds_board_aliases_and_keeps_the_stored_value() {
+        // Steam stored the board under its canonical id; ScreenScraper
+        // names an alias. One board, one entry — and the stored value
+        // stays, since the garnish ran first.
+        let mut stored = ScraperMetadata {
+            classifications: vec![class("USK", "16")],
+            ..Default::default()
+        };
+        stored.merge_match(&ScraperMetadata {
+            classifications: vec![class("STEAM_GERMANY", "12"), class("PEGI", "12")],
+            ..Default::default()
+        });
+        assert_eq!(
+            stored
+                .classifications
+                .iter()
+                .map(|c| (c.kind.as_str(), c.value.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("USK", "16"), ("PEGI", "12")]
+        );
+        // A board only the source knows is kept — every rating survives.
+        let mut bare = ScraperMetadata::default();
+        bare.merge_match(&ScraperMetadata {
+            classifications: vec![class("steam_germany", "6")],
+            ..Default::default()
+        });
+        assert_eq!(
+            bare.classifications,
+            vec![class("USK", "6")],
+            "aliases fold to the canonical kind on the way in"
+        );
     }
 
     #[test]
@@ -523,6 +677,18 @@ mod tests {
             synopses: vec![("en".into(), "One.".into())],
             ..Default::default()
         };
+        // Board aliases fold: an entry stored as USK and an answer
+        // naming STEAM_GERMANY are the same rating, not a difference.
+        let aliased = ScraperMetadata {
+            classifications: vec![class("STEAM_GERMANY", "16")],
+            synopses: vec![],
+            ..Default::default()
+        };
+        let canonical = ScraperMetadata {
+            classifications: vec![class("USK", "16")],
+            synopses: vec![],
+            ..Default::default()
+        };
         let other = ScraperMetadata {
             classifications: vec![class("PEGI", "16")],
             synopses: vec![("en".into(), "Two.".into()), ("de".into(), "Zwei.".into())],
@@ -530,6 +696,7 @@ mod tests {
         };
         assert!(!a.classifications_differ(&same));
         assert!(!a.synopses_differ(&same));
+        assert!(!aliased.classifications_differ(&canonical));
         assert!(a.classifications_differ(&other));
         assert!(a.synopses_differ(&other));
     }

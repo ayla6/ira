@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-19 04:20-0300\n"
+"POT-Creation-Date: 2026-09-19 06:01-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -222,7 +222,7 @@ msgstr ""
 #: crates/ira/src/ui/profile_dialog.rs:198
 #: crates/ira/src/ui/profile_dialog.rs:446
 #: crates/ira/src/ui/settings_pages.rs:514
-#: crates/ira/src/ui/sidebar.rs:640
+#: crates/ira/src/ui/sidebar.rs:598
 msgid "Cancel"
 msgstr ""
 
@@ -720,7 +720,7 @@ msgstr ""
 #: crates/ira/src/ui/big_picture/all_games.rs:754
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:210
 #: crates/ira/src/ui/group_dialog.rs:71
-#: crates/ira/src/ui/sidebar.rs:714
+#: crates/ira/src/ui/sidebar.rs:672
 msgid "Rename"
 msgstr ""
 
@@ -767,9 +767,9 @@ msgstr ""
 #: crates/ira/src/ui/installer_add_dialog.rs:799
 #: crates/ira/src/ui/play_history.rs:223
 #: crates/ira/src/ui/profile_dialog.rs:199
-#: crates/ira/src/ui/sidebar.rs:602
-#: crates/ira/src/ui/sidebar.rs:641
-#: crates/ira/src/ui/sidebar.rs:715
+#: crates/ira/src/ui/sidebar.rs:560
+#: crates/ira/src/ui/sidebar.rs:599
+#: crates/ira/src/ui/sidebar.rs:673
 msgid "Delete"
 msgstr ""
 
@@ -1965,6 +1965,17 @@ msgstr ""
 msgid "the genre table"
 msgstr ""
 
+#: crates/ira/src/ui/filter.rs:150
+#: crates/ira/src/ui/filter.rs:173
+msgid "Unknown year"
+msgstr ""
+
+#: crates/ira/src/ui/filter.rs:159
+#: crates/ira/src/ui/grid_view.rs:157
+#: crates/ira/src/ui/sidebar.rs:647
+msgid "Uncategorized"
+msgstr ""
+
 #: crates/ira/src/ui/folder_list.rs:77
 msgid "Change folder"
 msgstr ""
@@ -2203,29 +2214,23 @@ msgstr ""
 
 #: crates/ira/src/ui/grid_view.rs:156
 #: crates/ira/src/ui/grid_view.rs:165
-#: crates/ira/src/ui/sidebar.rs:510
+#: crates/ira/src/ui/sidebar.rs:468
 msgid "All games"
 msgstr ""
 
-#: crates/ira/src/ui/grid_view.rs:157
-#: crates/ira/src/ui/sidebar.rs:229
-#: crates/ira/src/ui/sidebar.rs:689
-msgid "Uncategorized"
-msgstr ""
-
-#: crates/ira/src/ui/grid_view.rs:591
+#: crates/ira/src/ui/grid_view.rs:663
 msgid "Loading game library"
 msgstr ""
 
-#: crates/ira/src/ui/grid_view.rs:659
+#: crates/ira/src/ui/grid_view.rs:731
 msgid "No games found"
 msgstr ""
 
-#: crates/ira/src/ui/grid_view.rs:661
+#: crates/ira/src/ui/grid_view.rs:733
 msgid "Try a different title, platform, or sort title"
 msgstr ""
 
-#: crates/ira/src/ui/grid_view.rs:675
+#: crates/ira/src/ui/grid_view.rs:747
 #, rust-format
 msgid "{completed} of {total} sources"
 msgstr ""
@@ -5971,28 +5976,24 @@ msgstr ""
 msgid "Switch to grid view"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:220
-msgid "Unknown year"
-msgstr ""
-
-#: crates/ira/src/ui/sidebar.rs:517
+#: crates/ira/src/ui/sidebar.rs:475
 msgid "Add group"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:527
+#: crates/ira/src/ui/sidebar.rs:485
 msgid "New auto group"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:581
-#: crates/ira/src/ui/sidebar.rs:601
+#: crates/ira/src/ui/sidebar.rs:539
+#: crates/ira/src/ui/sidebar.rs:559
 msgid "Edit rules"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:634
+#: crates/ira/src/ui/sidebar.rs:592
 msgid "Delete auto group"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:636
+#: crates/ira/src/ui/sidebar.rs:594
 #, rust-format
 msgid "The rules of \"{}\" go away. The games themselves stay."
 msgstr ""

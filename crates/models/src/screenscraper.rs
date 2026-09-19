@@ -268,6 +268,10 @@ pub fn scraper_console_id(kind: crate::GameKind, platform_id: &str) -> String {
     match kind {
         crate::GameKind::Ps4 => "ps4".to_string(),
         crate::GameKind::Ps3 => "ps3".to_string(),
+        // 3DS and Wii U games carry their title id as the platform id;
+        // the console they scrape under comes from the kind.
+        crate::GameKind::ThreeDS => "3ds".to_string(),
+        crate::GameKind::WiiU => "wiiu".to_string(),
         _ => platform_id.to_string(),
     }
 }
@@ -724,6 +728,21 @@ mod tests {
         assert!(!aliased.classifications_differ(&canonical));
         assert!(a.classifications_differ(&other));
         assert!(a.synopses_differ(&other));
+    }
+
+    #[test]
+    fn test_scraper_console_id_maps_title_id_platforms() {
+        use super::scraper_console_id;
+        assert_eq!(
+            scraper_console_id(crate::GameKind::ThreeDS, "0004000000054000"),
+            "3ds"
+        );
+        assert_eq!(
+            scraper_console_id(crate::GameKind::WiiU, "0005000010101B00"),
+            "wiiu"
+        );
+        // PS4/PS3 keep mapping by kind: the console, not the serial.
+        assert_eq!(scraper_console_id(crate::GameKind::Ps4, "CUSA00001"), "ps4");
     }
 
     #[test]

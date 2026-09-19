@@ -9,6 +9,28 @@ use std::sync::mpsc;
 use super::css::*;
 use super::helpers::{clear_children, poll_channel, replace_row_actions, status_row};
 use super::rom_name::{clean_rom_name, pick_search_name};
+
+/// The `system:` prefix on a manual search term: "system:n64 Mario 64"
+/// scopes the query to a console, by platform key or raw ScreenScraper
+/// id. Returns the scope override and the term that follows it.
+fn split_system_prefix(term: &str) -> (Option<u32>, String) {
+    let Some(rest) = term.strip_prefix("system:") else {
+        return (None, term.to_string());
+    };
+    let (key, remainder) = match rest.split_once(' ') {
+        Some((key, remainder)) => (key.trim(), remainder.trim()),
+        None => (rest.trim(), ""),
+    };
+    let system = key
+        .parse::<u32>()
+        .ok()
+        .or_else(|| ira_models::screenscraper_system_id(key));
+    match system {
+        Some(system) => (Some(system), remainder.to_string()),
+        // A "system:" with no known console searches the raw text.
+        None => (None, term.to_string()),
+    }
+}
 use super::steam_search_dialog::{
     build_search_dialog, match_result_row, status_label, SearchDialogWidgets,
 };
@@ -277,15 +299,17 @@ pub fn show_ss_search_dialog(
                 ),
             )
         };
+        // "system:n64 ..." overrides the console the search scopes to.
+        let (system_override, term) = split_system_prefix(&term);
+        let system = system_override.or_else(|| ira_models::screenscraper_system_id(&platform_id));
         // The request runs off-thread; say so instead of leaving the
         // previous results (or an empty list) looking frozen.
         clear_children(&list);
         list.append(&status_row(&crate::tr!("Searching ScreenScraper…")));
         let (tx, rx) = mpsc::channel::<Result<Vec<ScrapedGame>, String>>();
-        let platform_id_c = platform_id.clone();
         std::thread::spawn(move || {
             let outcome = steam
-                .screenscraper_search(&creds, &term, &platform_id_c)
+                .screenscraper_search_in(&creds, &term, system)
                 .map(|mut games| {
                     ira_api::screenscraper::sort_by_similarity(&mut games, &term);
                     games
@@ -409,4 +433,33 @@ pub(super) fn show_matched(ss_box: &gtk4::Box) {
     replace_row_actions(ss_box, |ab| {
         ab.append(&status_label(&crate::tr!("SS: matched"), CSS_SUCCESS_LABEL));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_system_prefix;
+
+    #[test]
+    fn test_split_system_prefix_scopes_and_strips() {
+        assert_eq!(
+            split_system_prefix("system:n64 Mario 64"),
+            (Some(14), "Mario 64".to_string())
+        );
+        // Raw ScreenScraper ids work too.
+        assert_eq!(
+            split_system_prefix("system:14 Mario 64"),
+            (Some(14), "Mario 64".to_string())
+        );
+        // No known console: raw text searches unscoped.
+        assert_eq!(
+            split_system_prefix("system:wat Mario 64"),
+            (None, "system:wat Mario 64".to_string())
+        );
+        // No prefix: untouched.
+        assert_eq!(
+            split_system_prefix("Mario 64"),
+            (None, "Mario 64".to_string())
+        );
+    }
+
 }

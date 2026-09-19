@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-18 20:48-0300\n"
+"POT-Creation-Date: 2026-09-18 21:06-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -366,7 +366,7 @@ msgstr ""
 #: crates/ira/src/ui/add_game_general.rs:303
 #: crates/ira/src/ui/ra_match_dialog.rs:207
 #: crates/ira/src/ui/sgdb_match_dialog.rs:229
-#: crates/ira/src/ui/ss_match_dialog.rs:242
+#: crates/ira/src/ui/ss_match_dialog.rs:264
 #: crates/ira/src/ui/steam_search.rs:30
 msgid "Game name…"
 msgstr ""
@@ -381,7 +381,7 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_scraper.rs:411
 #: crates/ira/src/ui/ra_match_dialog.rs:149
 #: crates/ira/src/ui/sgdb_match_dialog.rs:252
-#: crates/ira/src/ui/ss_match_dialog.rs:161
+#: crates/ira/src/ui/ss_match_dialog.rs:183
 #: crates/ira/src/ui/steam_search_dialog.rs:291
 #: crates/ira/src/ui/steam_search.rs:70
 msgid "No results found"
@@ -1619,8 +1619,8 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:953
 #: crates/ira/src/ui/edit_game_scraper.rs:1016
-#: crates/ira/src/ui/ss_match_dialog.rs:249
-#: crates/ira/src/ui/ss_match_dialog.rs:266
+#: crates/ira/src/ui/ss_match_dialog.rs:271
+#: crates/ira/src/ui/ss_match_dialog.rs:288
 msgid "ScreenScraper is disabled in Settings"
 msgstr ""
 
@@ -5918,33 +5918,33 @@ msgstr ""
 msgid "Add group"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:171
+#: crates/ira/src/ui/ss_match_dialog.rs:193
 #, rust-format
 msgid "SS ID: {}"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:226
+#: crates/ira/src/ui/ss_match_dialog.rs:248
 msgid "PC"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:237
+#: crates/ira/src/ui/ss_match_dialog.rs:259
 #, rust-format
 msgid "Match to ScreenScraper · {}"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:283
+#: crates/ira/src/ui/ss_match_dialog.rs:308
 msgid "Searching ScreenScraper…"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:360
+#: crates/ira/src/ui/ss_match_dialog.rs:384
 msgid "Matching in background…"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:386
+#: crates/ira/src/ui/ss_match_dialog.rs:410
 msgid "Search SS"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:410
+#: crates/ira/src/ui/ss_match_dialog.rs:434
 msgid "SS: matched"
 msgstr ""
 

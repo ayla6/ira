@@ -30,7 +30,22 @@ pub(crate) fn clean_rom_name(name: &str) -> String {
         }
     }
     let cleaned: String = out.replace(['_', '.'], " ");
-    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut words: Vec<&str> = cleaned.split_whitespace().collect();
+    // A token that is nothing but a console id ("0004000000054000", or
+    // the same with a region letter glued on) rides in front of hShop
+    // and dump names; it names nothing.
+    words.retain(|word| !(word.len() >= 10 && word.chars().filter(|c| c.is_ascii_digit()).count() >= 8));
+    // hShop file endings survive file_stem as whole words when the
+    // stack is deeper than one extension ("... (U).legit.decrypted").
+    const ENDINGS: &[&str] = &["legit", "pirate", "piratelegit", "decrypted", "3ds", "cci"];
+    while words.len() > 1
+        && words
+            .last()
+            .is_some_and(|last| ENDINGS.contains(&last.to_lowercase().as_str()))
+    {
+        words.pop();
+    }
+    words.join(" ")
 }
 
 /// The widening retry when the search term answers nothing: the name's
@@ -270,6 +285,22 @@ mod tests {
         assert_eq!(clean_rom_name("Catherine\u{a789} Full Body"), "Catherine: Full Body");
         // In-word dashes survive (Pac-Man must keep searching as Pac-Man).
         assert_eq!(clean_rom_name("Pac-Man Collection (USA)"), "Pac-Man Collection");
+    }
+
+    #[test]
+    fn test_clean_rom_name_strips_hshop_naming() {
+        // The hShop scheme: leading title id, serial and version tags,
+        // and a stack of pseudo-extensions.
+        assert_eq!(
+            clean_rom_name(
+                "0004000000054000 Super Mario 3D Land (CTR-P-AREE) (v0.3.0) (U).legit.decrypted"
+            ),
+            "Super Mario 3D Land"
+        );
+        // A short numeric head stays ("1943: The Battle of Midway").
+        assert_eq!(clean_rom_name("1943 The Battle of Midway"), "1943 The Battle of Midway");
+        // The last word is never stripped into an empty name.
+        assert_eq!(clean_rom_name("Decrypted"), "Decrypted");
     }
 
     #[test]

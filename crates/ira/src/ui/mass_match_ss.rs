@@ -418,7 +418,23 @@ fn resolve(
     cfg: &ira_config::Config,
     item: &BatchItem,
 ) -> Option<SsOutcome> {
-    let mut entry = ira_db::find_by_db_id(db, item.db_id).ok().flatten()?;
+    let mut entry = match ira_db::find_by_db_id(db, item.db_id) {
+        Ok(Some(entry)) => entry,
+        Ok(None) => {
+            eprintln!(
+                "SS batch: '{}' [db {}] is gone from the library, skipping",
+                item.name, item.db_id
+            );
+            return None;
+        }
+        Err(e) => {
+            eprintln!(
+                "SS batch: '{}' [db {}] lookup failed, skipping: {e}",
+                item.name, item.db_id
+            );
+            return None;
+        }
+    };
     // PS3/PS4 games carry a native product code here, not a console.
     let platform_id = ira_models::scraper_console_id(entry.kind, &entry.platform_id);
     // PC games search ScreenScraper's own Windows/Linux systems and fall

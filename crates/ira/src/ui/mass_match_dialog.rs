@@ -697,6 +697,13 @@ mod tests {
         let mut g = game(ira_models::GameKind::ThreeDS);
         g.platform_id = "3ds".to_string();
         assert!(needs_ss_match(&g));
+        // The live shape: a 3DS game carries its title id as the platform
+        // id and usually an SGDB id already — neither may keep the SS pass
+        // away, or the game silently never gets searched.
+        let mut live = game(ira_models::GameKind::ThreeDS);
+        live.platform_id = "0004000000038800".to_string();
+        live.sgdb_id = "37340".to_string();
+        assert!(needs_ss_match(&live));
         // Once metadata is on record, the pass leaves it alone.
         g.screenscraper_id = "2124".to_string();
         assert!(!needs_ss_match(&g));

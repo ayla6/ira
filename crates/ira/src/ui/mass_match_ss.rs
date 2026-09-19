@@ -1358,6 +1358,131 @@ mod tests {
     use ira_api::screenscraper::ScrapedGame;
     use ira_api::types::SteamCmdInfo;
 
+    /// The live pipeline, run for real: the actual config, the actual
+    /// quota answer, the actual games from a copy of the library database,
+    /// and the actual `resolve` on the 3DS rows. Ignored by default —
+    /// `cargo test -p ira diagnostic_live_3ds -- --ignored --nocapture`
+    /// — because it reads the keyring, spends a few quota requests, and
+    /// needs the library file. This is the thing to run when the batch
+    /// "skips" games and stderr refuses to say why.
+    #[test]
+    #[ignore = "live diagnostic: keyring, real network, live DB copy"]
+    fn diagnostic_live_3ds_ss_pipeline() {
+        let cfg = ira_config::load_config();
+        eprintln!(
+            "== config: id '{}' enabled {} password {} chars",
+            cfg.screenscraper_id,
+            cfg.screenscraper_enabled,
+            cfg.screenscraper_password.len()
+        );
+        let steam = ira_api::SteamDataClient::new(
+            cfg.steam_api_key.clone(),
+            cfg.steam_griddb_api_key.clone(),
+            &std::env::temp_dir().join("ira-diagnostic").to_string_lossy(),
+        );
+        let creds = ira_api::ScraperCreds::from_account(
+            cfg.screenscraper_id.clone(),
+            cfg.screenscraper_password.clone(),
+        );
+        match steam.screenscraper_user_infos(&creds) {
+            Ok(infos) => {
+                eprintln!(
+                    "== quota: {}/{} requests today, {}/{} not-found, {}/min, exhausted {}",
+                    infos.requests_today,
+                    infos.max_requests_per_day,
+                    infos.requests_ko_today,
+                    infos.max_requests_ko_per_day,
+                    infos.max_requests_per_min,
+                    infos.exhausted()
+                );
+                if infos.exhausted() {
+                    eprintln!(
+                        "== QUOTA SPENT: the pass stands down, every row flips to unmatched, resolve never runs"
+                    );
+                    return;
+                }
+            }
+            Err(e) => eprintln!("== quota read failed: {e}"),
+        }
+
+        let live_db = std::env::var("IRA_LIVE_DB")
+            .unwrap_or_else(|_| "/var/home/ayla/.local/share/ira/ira.db".to_string());
+        let tmp = tempfile::tempdir().unwrap();
+        let db_copy = tmp.path().join("ira.db");
+        std::fs::copy(&live_db, &db_copy).unwrap();
+        std::mem::forget(tmp);
+        let db = ira_db::init_db(db_copy.to_str().unwrap());
+        let ids: Vec<i64> = {
+            let conn = db.get().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT id FROM games WHERE kind = '3ds' ORDER BY id")
+                .unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        eprintln!("== {} 3DS rows in the library", ids.len());
+
+        let mut resolved = 0usize;
+        for id in &ids {
+            let entry = match ira_db::find_by_db_id(&db, *id) {
+                Ok(Some(entry)) => entry,
+                other => {
+                    eprintln!("== [db {id}] find_by_db_id -> {other:?}");
+                    continue;
+                }
+            };
+            let console = ira_models::scraper_console_id(entry.kind, &entry.platform_id);
+            let system = ira_models::screenscraper_system_id(&console);
+            let abs = cfg
+                .resolve_rom_path(&console, &entry.rom_path)
+                .unwrap_or_else(|| std::path::PathBuf::from(&entry.rom_path));
+            let stem = abs
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let base = super::clean_rom_name(&stem);
+            let term = super::search_term(&base);
+            eprintln!("== [db {id}] '{}' title_trusted {}", entry.title, entry.title_trusted);
+            eprintln!(
+                "     console '{console}' system {system:?} rom {} exists {}",
+                abs.display(),
+                abs.exists()
+            );
+            eprintln!("     stem '{stem}' -> base '{base}' -> term '{term}'");
+
+            // The network part, on the first few rows only: quota is a
+            // budget, and three answers tell the story.
+            let game = super::Game {
+                db_id: *id,
+                name: entry.title.clone(),
+                ..Default::default()
+            };
+            let covered = console == "3ds"
+                || ira_models::screenscraper_system_id(&console).is_some();
+            if resolved >= 3 || !covered || term.is_empty() {
+                eprintln!("     (resolve not run: covered {covered}, term '{}')", term);
+                continue;
+            }
+            resolved += 1;
+            let item = super::BatchItem {
+                name: game.name.clone(),
+                db_id: *id,
+                row_idx: 0,
+            };
+            let outcome = super::resolve(&steam, &creds, &db, &cfg, &item);
+            match outcome {
+                Some(super::SsOutcome::Hit(hit)) => {
+                    eprintln!("     resolve -> HIT ss id {} '{}'", hit.ss_id, hit.name)
+                }
+                Some(super::SsOutcome::Miss) => eprintln!("     resolve -> MISS (tombstones)"),
+                Some(super::SsOutcome::Failed(e)) => eprintln!("     resolve -> FAILED: {e}"),
+                None => eprintln!("     resolve -> SKIPPED (none)"),
+            }
+        }
+    }
+
     #[test]
     fn test_normalized_for_match_ignores_punctuation_and_case() {
         assert_eq!(

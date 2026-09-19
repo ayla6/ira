@@ -351,6 +351,8 @@ impl ControlRows {
         values_list.add_css_class(super::css::CSS_BOXED_LIST);
         let values_row = adw::ActionRow::new();
         values_row.set_title(&crate::tr!("Values"));
+        // The subtitle names the picked values, which may contain "&".
+        values_row.set_use_markup(false);
         values_row.set_activatable(true);
         let chevron = gtk4::Image::from_icon_name("go-next-symbolic");
         chevron.add_css_class(super::css::CSS_DIM_LABEL);

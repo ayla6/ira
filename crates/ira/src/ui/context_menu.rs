@@ -53,6 +53,17 @@ fn build_collections_submenu(
     collections_menu
 }
 
+/// The entity-picker entries behind "Add to" — the same actions land
+/// the pick on one game or on a whole selection.
+fn build_add_to_submenu() -> gio::Menu {
+    let menu = gio::Menu::new();
+    menu.append(Some(&crate::tr!("Family")), Some("game.mass_family"));
+    menu.append(Some(&crate::tr!("Genre")), Some("game.mass_genre"));
+    menu.append(Some(&crate::tr!("Developer")), Some("game.mass_developer"));
+    menu.append(Some(&crate::tr!("Publisher")), Some("game.mass_publisher"));
+    menu
+}
+
 pub fn show_game_context_menu(
     state: &SharedState,
     game: &Game,
@@ -191,6 +202,8 @@ pub fn show_game_context_menu(
         build_collections_submenu(&groups, |g| game_groups.iter().any(|gg| gg.id == g.id));
     menu.append_submenu(Some(&crate::tr!("Groups")), &collections_menu);
 
+    menu.append_submenu(Some(&crate::tr!("Add to")), &build_add_to_submenu());
+
     if !manual_script.is_empty() {
         menu.append(
             Some(&crate::tr!("Run manual script")),
@@ -249,6 +262,7 @@ pub fn show_game_context_menu(
     }
     setup_toggle_group_action(&actions, state.clone(), game.clone());
     setup_new_collection_action(&actions, state.clone(), game.clone());
+    setup_multi_entity_add_actions(&actions, state.clone(), vec![game.db_id]);
 
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }
@@ -286,20 +300,9 @@ pub fn show_multi_game_context_menu(
     });
     menu.append_submenu(Some(&crate::tr!("Groups")), &collections_menu);
 
-    // Mass metadata adds: only in the multi selection, where one pick
-    // lands on many games at once.
-    let metadata_section = gio::Menu::new();
-    metadata_section.append(Some(&crate::tr!("Add to family…")), Some("game.mass_family"));
-    metadata_section.append(Some(&crate::tr!("Add to genre…")), Some("game.mass_genre"));
-    metadata_section.append(
-        Some(&crate::tr!("Add to developer…")),
-        Some("game.mass_developer"),
-    );
-    metadata_section.append(
-        Some(&crate::tr!("Add to publisher…")),
-        Some("game.mass_publisher"),
-    );
-    menu.append_section(None, &metadata_section);
+    // Mass metadata adds: one pick lands on every selected game at
+    // once.
+    menu.append_submenu(Some(&crate::tr!("Add to")), &build_add_to_submenu());
 
     let all_hidden = db_ids.iter().all(|&db_id| {
         state

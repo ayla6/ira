@@ -35,6 +35,12 @@ impl ValuesPage {
 
         let search = gtk4::SearchEntry::new();
         search.set_hexpand(true);
+        // The page opens with focus already on the search, so typing
+        // just works — with the on-screen keyboard suppressed, since a
+        // hardware keyboard is the expected input here.
+        if let Some(text) = search.delegate().and_downcast::<gtk4::Text>() {
+            text.set_input_hints(gtk4::InputHints::INHIBIT_OSK);
+        }
         root.append(&search);
 
         let slot = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -84,6 +90,12 @@ impl ValuesPage {
         if let Some(f) = self.navigate.borrow().as_ref() {
             f(true);
         }
+        // An idle, so the focus lands after the stack has actually
+        // switched pages.
+        let search = self.search.clone();
+        glib::idle_add_local_once(move || {
+            search.grab_focus();
+        });
     }
 
     /// Return to the editor page.
@@ -128,6 +140,9 @@ pub(super) fn fill_check_list(
         check.set_active(picked.contains(name));
         check.set_valign(gtk4::Align::Center);
         let row = adw::ActionRow::new();
+        // Entity names are shown as typed — an "&" in "Run & Jump" is
+        // not markup.
+        row.set_use_markup(false);
         row.set_title(name);
         row.add_suffix(&check);
         row.set_activatable(true);
@@ -146,6 +161,7 @@ pub(super) fn fill_check_list(
     if names.is_empty() {
         let empty = adw::ActionRow::new();
         empty.set_title(&crate::tr!("Nothing on record for this rule yet"));
+        empty.set_use_markup(false);
         empty.add_css_class(super::css::CSS_DIM_LABEL);
         empty.set_activatable(false);
         list.append(&empty);

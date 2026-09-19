@@ -581,7 +581,7 @@ fn sidebar_bind_auto_group_header(state: &SharedState, row: &gtk4::Box, item: &S
         });
         actions.add_action(&delete_action);
 
-        super::helpers::popup_context_popover(&r, &popover, &actions, "grp.auto", x as i32, y as i32);
+        super::helpers::popup_context_popover(&r, &popover, &actions, "grp", x as i32, y as i32);
     });
     row.add_controller(right_click);
 }

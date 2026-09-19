@@ -249,7 +249,10 @@ pub fn screenscraper_matches_by_serial(platform_id: &str) -> bool {
 /// Disc consoles here match by serial instead; Switch and Wii U have no
 /// serials on ScreenScraper at all and match by title.
 pub fn screenscraper_hashes_content(platform_id: &str) -> bool {
-    !matches!(platform_id, "ps2" | "ps3" | "wii" | "gc" | "switch" | "wiiu")
+    // 3DS dumps are encrypted; their md5 never agrees with
+    // ScreenScraper's decrypted-hash lookup, so they match by title
+    // like the switch does.
+    !matches!(platform_id, "ps2" | "ps3" | "wii" | "gc" | "switch" | "wiiu" | "3ds")
 }
 
 /// Consoles whose scan-time titles come from official metadata (param.sfo,
@@ -743,6 +746,12 @@ mod tests {
         );
         // PS4/PS3 keep mapping by kind: the console, not the serial.
         assert_eq!(scraper_console_id(crate::GameKind::Ps4, "CUSA00001"), "ps4");
+    }
+
+    #[test]
+    fn test_3ds_matches_by_title_not_hash() {
+        assert!(!crate::screenscraper_hashes_content("3ds"));
+        assert!(crate::screenscraper_hashes_content("snes"));
     }
 
     #[test]

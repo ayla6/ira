@@ -72,6 +72,7 @@ pub const CSS_COVER_NAME_FALLBACK: &str = "cover-name-fallback";
 pub const CSS_DESTRUCTIVE_ACTION: &str = "destructive-action";
 pub const CSS_DIM_LABEL: &str = "dim-label";
 pub const CSS_ERROR: &str = "error";
+pub const CSS_SMALL_TEXT: &str = "small-text";
 pub const CSS_FLAT: &str = "flat";
 pub const CSS_GAME_COVER_PIC: &str = "game-cover-pic";
 pub const CSS_GAME_GRID: &str = "game-grid";
@@ -106,6 +107,7 @@ pub const CSS_COMMAND_TILE_ACTIVE: &str = "command-tile-active";
 
 pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
+.small-text { font-size: 0.85em; }
 .global-bar trough { background-color: transparent; border: none; }
 .global-bar progress { border: none; border-radius: 0; }
  .hidden-game { opacity: 0.5; }

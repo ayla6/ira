@@ -274,6 +274,9 @@ pub fn show_ss_search_dialog(
 
     let state_c = state.clone();
     let platform_id = platform_id.to_string();
+    // Search generation: a slow answer from an earlier request must
+    // never overwrite the results of a newer one.
+    let generation = std::rc::Rc::new(std::cell::Cell::new(0u64));
 
     let entry_c = entry.clone();
     let dialog_c = dialog.clone();
@@ -306,6 +309,8 @@ pub fn show_ss_search_dialog(
         // previous results (or an empty list) looking frozen.
         clear_children(&list);
         list.append(&status_row(&crate::tr!("Searching ScreenScraper…")));
+        let this_generation = generation.get() + 1;
+        generation.set(this_generation);
         let (tx, rx) = mpsc::channel::<Result<Vec<ScrapedGame>, String>>();
         std::thread::spawn(move || {
             let outcome = steam
@@ -321,7 +326,13 @@ pub fn show_ss_search_dialog(
         let dialog_c2 = dialog_c.clone();
         let sink_c2 = sink.clone();
         let on_match_c2 = on_match.clone();
+        let generation = generation.clone();
         poll_channel(rx, move |outcome| {
+            // An older request arriving late is dropped: its query lost
+            // the race to a newer one.
+            if generation.get() != this_generation {
+                return;
+            }
             populate_results(
                 &list_c,
                 &state_c2,

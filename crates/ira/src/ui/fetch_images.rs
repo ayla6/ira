@@ -176,12 +176,9 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
 fn details_markup(done: usize, total: usize, current: &str) -> String {
     let counts = format!("{} / {}", done, total);
     if current.is_empty() {
-        format!("<span size='small'>{counts}</span>")
+        counts
     } else {
-        format!(
-            "<span size='small'>{counts} · {}</span>",
-            super::helpers::esc(current)
-        )
+        format!("{} · {}", counts, super::helpers::esc(current))
     }
 }
 
@@ -585,12 +582,9 @@ pub fn begin_image_save(state: &SharedState, title: &str) -> Option<SaveProgress
         let fraction = update.done as f64 / update.total.max(1) as f64;
         indicator.bar.set_fraction(fraction);
         indicator.ring.set_fraction(fraction);
-        indicator.details.set_markup(&format!(
-            "<span size='small'>{}</span>",
-            super::helpers::esc(&format!(
-                "{} / {} · {}",
-                update.done, update.total, update.current
-            ))
+        indicator.details.set_text(&format!(
+            "{} / {} · {}",
+            update.done, update.total, update.current
         ));
         glib::ControlFlow::Continue
     });
@@ -664,6 +658,7 @@ impl FetchIndicator {
         details.set_xalign(0.0);
         details.set_use_markup(true);
         details.add_css_class(super::css::CSS_DIM_LABEL);
+        details.add_css_class(super::css::CSS_SMALL_TEXT);
         details.add_css_class("numeric");
         let bar = gtk4::ProgressBar::new();
         bar.set_valign(gtk4::Align::Center);

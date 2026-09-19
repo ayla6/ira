@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-18 21:06-0300\n"
+"POT-Creation-Date: 2026-09-18 21:34-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -204,7 +204,7 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_pages.rs:308
 #: crates/ira/src/ui/edit_game_playtime.rs:257
 #: crates/ira/src/ui/edit_game_variants.rs:137
-#: crates/ira/src/ui/fetch_images.rs:680
+#: crates/ira/src/ui/fetch_images.rs:675
 #: crates/ira/src/ui/group_dialog.rs:20
 #: crates/ira/src/ui/group_dialog.rs:70
 #: crates/ira/src/ui/group_dialog.rs:115
@@ -1620,7 +1620,7 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_scraper.rs:953
 #: crates/ira/src/ui/edit_game_scraper.rs:1016
 #: crates/ira/src/ui/ss_match_dialog.rs:271
-#: crates/ira/src/ui/ss_match_dialog.rs:288
+#: crates/ira/src/ui/ss_match_dialog.rs:291
 msgid "ScreenScraper is disabled in Settings"
 msgstr ""
 
@@ -1833,33 +1833,33 @@ msgstr ""
 msgid "Fetching missing images…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:474
+#: crates/ira/src/ui/fetch_images.rs:471
 #, rust-format
 msgid "{} games needed new art"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:479
+#: crates/ira/src/ui/fetch_images.rs:476
 msgid "Images fetched"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:560
+#: crates/ira/src/ui/fetch_images.rs:557
 msgid "Saving images…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:563
+#: crates/ira/src/ui/fetch_images.rs:560
 #, rust-format
 msgid "Saving images for {}"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:572
+#: crates/ira/src/ui/fetch_images.rs:569
 msgid "Images saved"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:575
+#: crates/ira/src/ui/fetch_images.rs:572
 msgid "Edited images saved"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:737
+#: crates/ira/src/ui/fetch_images.rs:732
 msgid "Cancelled"
 msgstr ""
 
@@ -5932,19 +5932,19 @@ msgstr ""
 msgid "Match to ScreenScraper · {}"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:308
+#: crates/ira/src/ui/ss_match_dialog.rs:311
 msgid "Searching ScreenScraper…"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:384
+#: crates/ira/src/ui/ss_match_dialog.rs:395
 msgid "Matching in background…"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:410
+#: crates/ira/src/ui/ss_match_dialog.rs:421
 msgid "Search SS"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:434
+#: crates/ira/src/ui/ss_match_dialog.rs:445
 msgid "SS: matched"
 msgstr ""
 

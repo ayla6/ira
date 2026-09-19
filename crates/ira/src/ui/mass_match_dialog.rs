@@ -492,7 +492,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
 
     let (needs_matching, title_map) = collect_unmatched_games(state);
-
+    eprintln!("Mass matcher: opening with {} candidate game(s)", needs_matching.len());
     if needs_matching.is_empty() {
         let d = adw::AlertDialog::new(
             Some(&crate::tr!("Nothing to match")),
@@ -554,9 +554,9 @@ pub fn show_mass_match_dialog(state: &SharedState) {
             HashSet::new()
         }
     };
-    // Hiding starts on, matching the active switch below: done and
-    // failed rows stay out of the list until it is switched off.
-    let show_finished = Rc::new(Cell::new(false));
+    // show_finished mirrors the switch below, inverted: with the switch
+    // off, nothing hides and every row plays its pass out in the open.
+    let show_finished = Rc::new(Cell::new(true));
     let vis = RowVis::new(state, needs_matching.to_vec(), show_finished.clone());
     let vis_toggle = vis.clone();
     let rows = populate_match_list(&list, &needs_matching, state, dialog.upcast_ref(), &ss_missed, &vis);
@@ -564,7 +564,11 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     vis.apply_all();
     let show_finished_c = show_finished.clone();
     let hide_switch = gtk4::Switch::new();
-    hide_switch.set_active(true);
+    // Hiding starts off: the whole point of the dialog is watching what
+    // each source does with each row — rows flipping to "Matched" or to
+    // the manual-search button must stay visible, not vanish mid-pass.
+    // The switch still retires them on demand.
+    hide_switch.set_active(false);
     hide_switch.set_valign(gtk4::Align::Center);
     hide_switch.connect_active_notify(move |toggle| {
         show_finished_c.set(!toggle.is_active());

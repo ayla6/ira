@@ -225,6 +225,9 @@ pub(super) fn start_ss_batch_matching(
     // Its rows never get an answer from anywhere, so they go straight to
     // the manual search button — which says as much when used.
     if !state.borrow().cfg.screenscraper_enabled {
+        eprintln!(
+            "ScreenScraper batch: disabled in the settings, no pass runs"
+        );
         for (i, g) in needs_matching.iter().enumerate() {
             let Some(ss_box) = rows.get(i).and_then(|r| r.ss.clone()) else {
                 continue;
@@ -241,6 +244,7 @@ pub(super) fn start_ss_batch_matching(
         // The background pass already owns the quota: rows still in
         // their "searching" phase get the in-flight note instead, with
         // their manual search button.
+        eprintln!("ScreenScraper batch: another ScreenScraper job owns the quota, no pass runs");
         for (i, g) in needs_matching.iter().enumerate() {
             let Some(ss_box) = rows.get(i).and_then(|r| r.ss.clone()) else {
                 continue;
@@ -276,6 +280,7 @@ pub(super) fn start_ss_batch_matching(
         })
         .collect();
     if queue.is_empty() {
+        eprintln!("ScreenScraper batch: every covered game already has its answer");
         return;
     }
     eprintln!("ScreenScraper batch: {} game(s) to resolve", queue.len());
@@ -399,10 +404,13 @@ pub(super) fn start_ss_batch_matching(
     });
 }
 
-/// Off-thread: the hash search answers authoritatively when the ROM's md5
-/// is known to the source; otherwise one title search runs with the ROM
-/// file's clean name, and its top candidates must plausibly *be* the game
-/// to count — a wrong auto-match would stick forever.
+/// Off-thread: one game through the pipeline — the content hash where the
+/// console matches by digest, the disc serial where it has one, and one
+/// platform-narrowed title search with the ROM file's clean name last.
+/// A stage's answer ends the pass, and its top candidates must plausibly
+/// *be* the game to count — a wrong auto-match would stick forever.
+/// `None` skips the game entirely: the entry is gone, the game is a PC
+/// one routed to its own matcher, or the console has no mapping.
 fn resolve(
     steam: &SteamDataClient,
     creds: &ScraperCreds,
@@ -444,132 +452,172 @@ fn resolve(
         .resolve_rom_path(&platform_id, &entry.rom_path)
         .unwrap_or_else(|| std::path::PathBuf::from(&entry.rom_path));
 
-    // The exact hash search runs only on consoles where file digests are
-    // the matching key — disc consoles go serial-first below, and their
-    // multi-gigabyte images never get hashed at all. NDS rows keep an
-    // RA-flavored rom_hash, so the plain content md5 wins when the scan
-    // has filled it. romnom carries the real file name with extension,
-    // exactly what ScreenScraper's rom index stores (ES-DE sends it the
-    // same way); the stem alone loses the match.
-    // ── Stage 1: content hash — the exact-match search on consoles
-    // where file digests are the matching key. ──
-    if ira_models::screenscraper_hashes_content(&platform_id) {
-        let verbose = verbose_logging();
-        let pick = rom_extension_pick(&platform_id);
-        // Hash on demand — digest and inner-file size in one streaming
-        // pass — and keep the pair stored so this costs nothing next
-        // time. The size is the inner ROM's own, never the container's:
-        // a wrong size reads as a miss, an absent one still matches on
-        // the digest alone. A row whose digest is already stored from
-        // the scan but whose size never landed gets only the size —
-        // re-reading whole archives on every run was the batch's CPU
-        // spike.
-        if entry.hashes.md5.is_empty() {
-            match ira_platforms::rom_hash::content_md5_and_size(&abs, &pick) {
-                Some((hash, size)) => {
-                    for (key, value) in [("md5", hash.clone()), ("size", size.to_string())] {
-                        if let Err(e) = ira_db::set_hash_key(db, item.db_id, key, &value) {
-                            eprintln!("SS batch: failed to store the {key}: {e}");
-                        }
+    Some(
+        hash_search(steam, creds, db, item, &mut entry, &abs, &platform_id)
+            .or_else(|| serial_search(steam, creds, db, &abs, &platform_id))
+            .unwrap_or_else(|| title_search(steam, creds, item, &entry, &abs, &platform_id)),
+    )
+}
+
+/// ── Stage 1: content hash — the exact-match search on consoles where
+/// file digests are the matching key. A hit or a failed request ends the
+/// pass; no hashing at all, no usable digest, and no answer all fall
+/// through to the serial stage. Disc consoles never enter here — their
+/// multi-gigabyte images are never hashed. NDS rows keep an RA-flavored
+/// rom_hash, so the plain content md5 wins when the scan has filled it.
+fn hash_search(
+    steam: &SteamDataClient,
+    creds: &ScraperCreds,
+    db: &ira_db::DbConn,
+    item: &BatchItem,
+    entry: &mut ira_models::GameEntry,
+    abs: &std::path::Path,
+    platform_id: &str,
+) -> Option<SsOutcome> {
+    if !ira_models::screenscraper_hashes_content(platform_id) {
+        return None;
+    }
+    let verbose = verbose_logging();
+    let pick = rom_extension_pick(platform_id);
+    // Hash on demand — digest and inner-file size in one streaming pass —
+    // and keep the pair stored so this costs nothing next time. The size
+    // is the inner ROM's own, never the container's: a wrong size reads
+    // as a miss, an absent one still matches on the digest alone. A row
+    // whose digest is already stored from the scan but whose size never
+    // landed gets only the size — re-reading whole archives on every run
+    // was the batch's CPU spike.
+    if entry.hashes.md5.is_empty() {
+        match ira_platforms::rom_hash::content_md5_and_size(abs, &pick) {
+            Some((hash, size)) => {
+                for (key, value) in [("md5", hash.clone()), ("size", size.to_string())] {
+                    if let Err(e) = ira_db::set_hash_key(db, item.db_id, key, &value) {
+                        eprintln!("SS batch: failed to store the {key}: {e}");
                     }
-                    entry.hashes.md5 = hash;
-                    entry.hashes.size = size as i64;
                 }
-                None => eprintln!("SS batch: could not hash {}", abs.display()),
+                entry.hashes.md5 = hash;
+                entry.hashes.size = size as i64;
             }
-        } else if entry.hashes.size == 0 {
-            match ira_platforms::archives::entry_size(&abs, &pick) {
-                Some(size) => {
-                    if let Err(e) =
-                        ira_db::set_hash_key(db, item.db_id, "size", &size.to_string())
-                    {
-                        eprintln!("SS batch: failed to store the size: {e}");
-                    }
-                    entry.hashes.size = size as i64;
-                }
-                None => eprintln!("SS batch: could not size {}", abs.display()),
-            }
+            None => eprintln!("SS batch: could not hash {}", abs.display()),
         }
-        if !entry.hashes.md5.is_empty() {
-            let romnom = std::path::Path::new(&abs)
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| item.name.clone());
-            let lookup = if entry.hashes.size > 0 {
-                steam.screenscraper_rom_lookup(
-                    creds,
-                    &romnom,
-                    &platform_id,
-                    Some((entry.hashes.md5.as_str(), entry.hashes.size as u64)),
-                )
-            } else {
-                steam.screenscraper_rom_lookup(creds, &romnom, &platform_id, None)
-            };
-            match lookup {
-                Err(e) => {
-                    eprintln!("SS batch: '{romnom}' [{platform_id}] lookup failed: {e}");
-                    return Some(SsOutcome::Failed(e));
+    } else if entry.hashes.size == 0 {
+        match ira_platforms::archives::entry_size(abs, &pick) {
+            Some(size) => {
+                if let Err(e) = ira_db::set_hash_key(db, item.db_id, "size", &size.to_string()) {
+                    eprintln!("SS batch: failed to store the size: {e}");
                 }
-                Ok(games) => {
-                    if let Some(game) = games.into_iter().next() {
-                        if verbose {
-                            eprintln!(
-                                "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
-                                game.ss_id, game.name
-                            );
-                        }
-                        return Some(SsOutcome::Hit(Box::new(game)));
-                    }
-                    if verbose {
-                        eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit");
-                    }
+                entry.hashes.size = size as i64;
+            }
+            None => eprintln!("SS batch: could not size {}", abs.display()),
+        }
+    }
+    if entry.hashes.md5.is_empty() {
+        return None;
+    }
+    // romnom carries the real file name with extension, exactly what
+    // ScreenScraper's rom index stores (ES-DE sends it the same way);
+    // the stem alone loses the match.
+    let romnom = abs
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| item.name.clone());
+    let lookup = if entry.hashes.size > 0 {
+        steam.screenscraper_rom_lookup(
+            creds,
+            &romnom,
+            platform_id,
+            Some((entry.hashes.md5.as_str(), entry.hashes.size as u64)),
+        )
+    } else {
+        steam.screenscraper_rom_lookup(creds, &romnom, platform_id, None)
+    };
+    match lookup {
+        Err(e) => {
+            eprintln!("SS batch: '{romnom}' [{platform_id}] lookup failed: {e}");
+            return Some(SsOutcome::Failed(e));
+        }
+        Ok(games) => {
+            if let Some(game) = games.into_iter().next() {
+                if verbose {
+                    eprintln!(
+                        "SS batch: '{romnom}' [{platform_id}] hash hit -> ss id {} '{}'",
+                        game.ss_id, game.name
+                    );
                 }
+                return Some(SsOutcome::Hit(Box::new(game)));
+            }
+            if verbose {
+                eprintln!("SS batch: '{romnom}' [{platform_id}] no hash hit");
             }
         }
     }
+    None
+}
 
-    // ── Stage 2: disc serial — the next-best exact identity after no
-    // hash hit (or no hashing at all); it survives chd/rvz repacks
-    // that scramble every file digest. Normalized to ScreenScraper's
-    // dashed uppercase form: raw PS2 serials arrive as SLES_520.05
-    // from SYSTEM.CNF. Only serial-shaped values qualify.
-    let serial = ira_models::screenscraper_matches_by_serial(&platform_id)
-        .then(|| ira_platforms::rom_serial::read_serial_cached(db, &abs))
+/// ── Stage 2: disc serial — the next-best exact identity after no hash
+/// hit (or no hashing at all); it survives chd/rvz repacks that scramble
+/// every file digest. Normalized to ScreenScraper's dashed uppercase
+/// form: raw PS2 serials arrive as SLES_520.05 from SYSTEM.CNF. Only
+/// serial-shaped values qualify — plain numbers are RA ids, 16-hex title
+/// ids and 4-letter NDS gamecodes are not serials. A serial the source
+/// answers but does not know falls through to the title search.
+fn serial_search(
+    steam: &SteamDataClient,
+    creds: &ScraperCreds,
+    db: &ira_db::DbConn,
+    abs: &std::path::Path,
+    platform_id: &str,
+) -> Option<SsOutcome> {
+    // No serial on record for this console or this disc: the title
+    // search takes over.
+    let serial = ira_models::screenscraper_matches_by_serial(platform_id)
+        .then(|| ira_platforms::rom_serial::read_serial_cached(db, abs))
         .flatten()
         .map(|s| normalize_serial(&s))
-        .filter(|s| looks_like_serial(s));
-    if let Some(serial) = serial {
-        match steam.screenscraper_serial_lookup(creds, &serial, &platform_id) {
-            Err(e) => {
-                eprintln!("SS batch: serial '{serial}' lookup failed: {e}");
-                return Some(SsOutcome::Failed(e));
-            }
-            Ok(games) => {
-                if let Some(game) = games.into_iter().next() {
-                    if verbose_logging() {
-                        eprintln!(
-                            "SS batch: serial '{serial}' [{platform_id}] hit -> ss id {} '{}'",
-                            game.ss_id, game.name
-                        );
-                    }
-                    return Some(SsOutcome::Hit(Box::new(game)));
-                }
-            }
+        .filter(|s| looks_like_serial(s))?;
+    match steam.screenscraper_serial_lookup(creds, &serial, platform_id) {
+        Err(e) => {
+            eprintln!("SS batch: serial '{serial}' lookup failed: {e}");
+            Some(SsOutcome::Failed(e))
         }
-        eprintln!("SS batch: serial '{serial}' [{platform_id}] unknown to the source");
+        Ok(games) => match games.into_iter().next() {
+            Some(game) => {
+                if verbose_logging() {
+                    eprintln!(
+                        "SS batch: serial '{serial}' [{platform_id}] hit -> ss id {} '{}'",
+                        game.ss_id, game.name
+                    );
+                }
+                Some(SsOutcome::Hit(Box::new(game)))
+            }
+            None => {
+                eprintln!("SS batch: serial '{serial}' [{platform_id}] unknown to the source");
+                None
+            }
+        },
     }
+}
 
-    // No hash hit: one title search, preferring the ROM file name — the
-    // library title is user-editable and drifts from the dump, while the
-    // file name is what the scene shipped. The word search is a substring
-    // match over ScreenScraper's own names, byte-sensitive about
-    // separator spacing, and a series head buries the game among its
-    // siblings — so the search goes out with the distinctive tail
-    // (rom_name::search_term) and the acceptance comparison, which
-    // flattens punctuation, matches the full name against the
-    // candidates. A stem that is only a bare title id cannot be searched
-    // at all, so the library title stands in.
-    let stem = std::path::Path::new(&abs)
+/// ── Stage 3: one title search, preferring the ROM file name — the
+/// library title is user-editable and drifts from the dump, while the
+/// file name is what the scene shipped. The word search is a substring
+/// match over ScreenScraper's own names, byte-sensitive about
+/// separator spacing, and a series head buries the game among its
+/// siblings — so the search goes out with the distinctive tail
+/// (rom_name::search_term) and the acceptance comparison, which
+/// flattens punctuation, matches the full name against the
+/// candidates. Always terminal: a confirmed miss tombstones the game;
+/// a failed request leaves it untombed for the next opening.
+fn title_search(
+    steam: &SteamDataClient,
+    creds: &ScraperCreds,
+    item: &BatchItem,
+    entry: &ira_models::GameEntry,
+    abs: &std::path::Path,
+    platform_id: &str,
+) -> SsOutcome {
+    // A stem that is only a bare title id cannot be searched at all, so
+    // the library title stands in.
+    let stem = abs
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
@@ -579,7 +627,7 @@ fn resolve(
     // (switch); every other console searches from the ROM file name,
     // with the title only taking over when the file lost its
     // punctuation.
-    let trusted = entry.title_trusted || ira_models::title_from_trusted_source(&platform_id);
+    let trusted = entry.title_trusted || ira_models::title_from_trusted_source(platform_id);
     let bases = [
         clean_rom_name(&stem),
         clean_rom_name(&entry.title),
@@ -587,7 +635,7 @@ fn resolve(
     ];
     let Some(full) = pick_search_name(trusted, &bases[0], &bases[1], &bases[2]) else {
         eprintln!("SS batch: [{platform_id}] no usable name to search");
-        return Some(SsOutcome::Failed("no usable name".to_string()));
+        return SsOutcome::Failed("no usable name".to_string());
     };
     // Region tags never gate anything — plenty of dumps carry none — they
     // only matter when two candidates match equally well.
@@ -598,12 +646,12 @@ fn resolve(
         // (a title-id-named dump waiting on enrichment). Leave untombed
         // so the next opening retries with whatever name exists by then.
         eprintln!("SS batch: [{platform_id}] no usable search term");
-        return Some(SsOutcome::Failed("no usable search term".to_string()));
+        return SsOutcome::Failed("no usable search term".to_string());
     }
-    match steam.screenscraper_search(creds, &term, &platform_id) {
+    match steam.screenscraper_search(creds, &term, platform_id) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [{platform_id}] search failed: {e}");
-            Some(SsOutcome::Failed(e))
+            SsOutcome::Failed(e)
         }
         Ok(candidates) => {
             let verbose = verbose_logging();
@@ -612,10 +660,10 @@ fn resolve(
             // name's other side gets one widened try before the miss.
             let candidates = if candidates.is_empty() {
                 match alt_search_term(&full) {
-                    Some(alt) => match steam.screenscraper_search(creds, &alt, &platform_id) {
+                    Some(alt) => match steam.screenscraper_search(creds, &alt, platform_id) {
                         Err(e) => {
                             eprintln!("SS batch: '{alt}' [{platform_id}] search failed: {e}");
-                            return Some(SsOutcome::Failed(e));
+                            return SsOutcome::Failed(e);
                         }
                         Ok(widened) => {
                             if verbose {
@@ -645,7 +693,7 @@ fn resolve(
                             game.ss_id, game.name
                         );
                     }
-                    Some(SsOutcome::Hit(Box::new(game.clone())))
+                    SsOutcome::Hit(Box::new(game.clone()))
                 }
                 None => {
                     eprintln!(
@@ -653,7 +701,7 @@ fn resolve(
                         candidates.len(),
                         candidate_names(&candidates)
                     );
-                    Some(SsOutcome::Miss)
+                    SsOutcome::Miss
                 }
             }
         }

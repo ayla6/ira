@@ -845,7 +845,9 @@ fn rating_row(slot: &ScraperSlot, stored: f64) -> adw::SpinRow {
 /// language they sent stays stored, this row only edits the one on
 /// display. Clicking toggles between the four-line summary and the full
 /// text; the pen opens the text editor, and a staged match that brought
-/// its own text adds the revert button beside it.
+/// its own text adds the revert button beside it. A game with no
+/// synopsis at all still gets the row — the pen is how a hand-written
+/// one gets in.
 fn synopsis_row(
     state: &SharedState,
     game: &Game,
@@ -853,19 +855,21 @@ fn synopsis_row(
     slot: &ScraperSlot,
     synopses: &[(String, String)],
 ) {
-    let Some((lang, text)) = synopses
+    let (lang, text) = synopses
         .iter()
         .find(|(langue, _)| langue == "en")
         .or_else(|| synopses.first())
         .cloned()
-    else {
-        return;
-    };
+        .unwrap_or_else(|| ("en".to_string(), String::new()));
 
     let row = adw::ActionRow::new();
     row.set_use_markup(false);
     row.set_title(&crate::tr!("Synopsis"));
-    row.set_subtitle(&text);
+    if text.is_empty() {
+        row.set_subtitle(&crate::tr!("Nothing written yet"));
+    } else {
+        row.set_subtitle(&text);
+    }
     row.set_subtitle_lines(4);
     let expanded = std::cell::Cell::new(false);
     row.set_activatable(true);

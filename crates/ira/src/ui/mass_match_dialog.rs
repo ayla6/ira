@@ -612,9 +612,12 @@ fn create_match_row(
     // Game titles are shown as typed — "Fear & Hunger" is not markup.
     row.set_use_markup(false);
     row.set_title(name);
-    // Long local names wrap to two lines at most, then ellipsize, so the
-    // suffix status label and buttons keep a usable share of the row width.
-    row.set_title_lines(2);
+    // Long names ellipsize like every list row; the full name rides the
+    // tooltip. Reserving two title lines here made each title label
+    // measure two lines high and collapse to one at the real width —
+    // GTK's "adjusted size ... must not decrease below" warning printed
+    // once per visible row every time the dialog opened.
+    row.set_tooltip_text(Some(name));
 
     let action_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     action_box.set_valign(gtk4::Align::Center);

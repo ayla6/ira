@@ -19,5 +19,6 @@
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/left-large-symbolic.svg">icons/left-large-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/right-large-symbolic.svg">icons/right-large-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/entry-clear-symbolic.svg">icons/entry-clear-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/16x16/actions/funnel-symbolic.svg">icons/funnel-symbolic.svg</file>
   </gresource>
 </gresources>

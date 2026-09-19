@@ -472,7 +472,7 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
 
     // The auto-group button sits left of the plain one: search-like
     // icon for a rule-defined group.
-    let auto_btn = gtk4::Button::from_icon_name("edit-find-symbolic");
+    let auto_btn = gtk4::Button::from_icon_name("funnel-symbolic");
     auto_btn.add_css_class(CSS_FLAT);
     auto_btn.set_tooltip_text(Some(&crate::tr!("New auto group")));
     auto_btn.set_valign(gtk4::Align::Center);

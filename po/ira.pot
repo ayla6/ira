@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-19 15:59-0300\n"
+"POT-Creation-Date: 2026-09-19 16:38-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -195,7 +195,7 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_dialog.rs:200
 #: crates/ira/src/ui/add_game.rs:22
-#: crates/ira/src/ui/auto_group_dialog.rs:90
+#: crates/ira/src/ui/auto_group_dialog.rs:137
 #: crates/ira/src/ui/background.rs:19
 #: crates/ira/src/ui/big_picture/keyboard.rs:619
 #: crates/ira/src/ui/context_menu_actions.rs:110
@@ -255,7 +255,7 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:32
 #: crates/ira/src/ui/auto_add_dialog.rs:785
-#: crates/ira/src/ui/auto_group_dialog.rs:52
+#: crates/ira/src/ui/auto_group_dialog.rs:98
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:208
 msgid "Name"
 msgstr ""
@@ -608,12 +608,17 @@ msgstr ""
 msgid "OK"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:32
-#: crates/ira/src/ui/auto_group_dialog.rs:38
+#: crates/ira/src/ui/auto_group_dialog.rs:45
+#: crates/ira/src/ui/auto_group_dialog.rs:55
+#: crates/ira/src/ui/auto_group_dialog.rs:78
 msgid "Auto group"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:92
+#: crates/ira/src/ui/auto_group_dialog.rs:79
+msgid "Pick values"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:139
 #: crates/ira/src/ui/edit_game_dialog.rs:496
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:254
 #: crates/ira/src/ui/input_profile_editor.rs:140
@@ -623,81 +628,75 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:171
+#: crates/ira/src/ui/auto_group_dialog.rs:218
 msgid "all of"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:172
+#: crates/ira/src/ui/auto_group_dialog.rs:219
 msgid "any of"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:173
+#: crates/ira/src/ui/auto_group_dialog.rs:220
 msgid "exactly one of"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:230
+#: crates/ira/src/ui/auto_group_dialog.rs:375
 #: crates/ira/src/ui/game_settings.rs:647
 #: crates/ira/src/ui/steam_search_dialog.rs:333
 msgid "Match"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:232
+#: crates/ira/src/ui/auto_group_dialog.rs:377
 msgid "A game joins the group when the rule groups below combine as chosen."
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:235
+#: crates/ira/src/ui/auto_group_dialog.rs:380
 msgid "Groups combine when"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:245
+#: crates/ira/src/ui/auto_group_dialog.rs:390
 #: crates/ira/src/ui/sidebar.rs:487
 msgid "Add group"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:338
+#: crates/ira/src/ui/auto_group_dialog.rs:487
 msgid "Rules match"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:344
+#: crates/ira/src/ui/auto_group_dialog.rs:493
 msgid "Remove this group"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:356
+#: crates/ira/src/ui/auto_group_dialog.rs:505
 msgid "Add rule"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:433
+#: crates/ira/src/ui/auto_group_dialog.rs:587
 msgid "Remove this rule"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:448
+#: crates/ira/src/ui/auto_group_dialog.rs:613
 msgid "From"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:450
+#: crates/ira/src/ui/auto_group_dialog.rs:615
 msgid "To"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:453
+#: crates/ira/src/ui/auto_group_dialog.rs:622
 msgid "Played at least this many hours; 0 is no floor"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:457
+#: crates/ira/src/ui/auto_group_dialog.rs:626
 msgid "Played at most this many hours; 0 is no ceiling"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:462
-#: crates/ira/src/ui/auto_group_dialog.rs:494
-msgid "Pick values"
-msgstr ""
-
-#: crates/ira/src/ui/auto_group_dialog.rs:496
-#, rust-format
-msgid "{} picked"
-msgstr ""
-
-#: crates/ira/src/ui/auto_group_dialog.rs:527
+#: crates/ira/src/ui/auto_group_dialog.rs:666
 msgid "Nothing on record for this rule yet"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:797
+msgid "Any value"
 msgstr ""
 
 #: crates/ira/src/ui/background.rs:14

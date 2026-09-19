@@ -105,6 +105,10 @@ pub struct AppState {
     pub derived_members: HashMap<String, HashSet<i64>>,
     pub groups: Vec<Group>,
     pub group_members: HashMap<i64, HashSet<i64>>,
+    /// The stored auto-group rules; ids are negated database ids so they
+    /// share `group_members` with user collections without colliding.
+    /// Membership is derived, never stored here.
+    pub auto_groups: Vec<ira_models::AutoGroup>,
     pub search_entry: gtk4::SearchEntry,
     pub sort_label: gtk4::Label,
     pub collapsed_collections: HashSet<i64>,

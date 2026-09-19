@@ -1,11 +1,14 @@
 mod achievement_rows;
 mod achievement_view;
+mod auto_groups;
 pub mod big_picture;
 mod background;
 pub mod big_picture_font;
+mod auto_group_dialog;
 mod context_menu;
 mod context_menu_actions;
 mod css;
+mod date_pick;
 mod disk_space;
 mod folder_list;
 mod enrichment;

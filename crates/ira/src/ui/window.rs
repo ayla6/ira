@@ -39,7 +39,7 @@ pub fn build_ui(
 ) -> SharedState {
     let _span = tracing::info_span!("build_ui").entered();
     let save_dir = cfg.save_dir.clone();
-    let (groups, group_members) = {
+    let (groups, group_members, auto_groups) = {
         let _s = tracing::info_span!("build_ui_load_groups").entered();
         let groups = ira_db::get_all_groups(&ctx.db).unwrap_or_else(|e| {
             eprintln!("Failed to load groups: {}", e);
@@ -55,7 +55,8 @@ pub fn build_ui(
                 (g.id, ids.into_iter().collect())
             })
             .collect();
-        (groups, group_members)
+        let auto_groups = super::auto_groups::load_auto_groups(&ctx.db);
+        (groups, group_members, auto_groups)
     };
 
     let sidebar_store = gio::ListStore::new::<super::sidebar_item::SidebarItem>();
@@ -105,6 +106,7 @@ pub fn build_ui(
         derived_members: HashMap::new(),
         groups,
         group_members,
+        auto_groups,
         search_entry: gtk4::SearchEntry::new(),
         sort_label: gtk4::Label::new(Some(SortMode::Alphabetical.display_label())),
         collapsed_collections: HashSet::new(),
@@ -548,6 +550,15 @@ fn connect_window_signals(
                     Some(name) => GroupSelection::Derived(name),
                     None => GroupSelection::Collection(group_id),
                 };
+                state_clone.borrow_mut().multi_selected_ids.clear();
+                show_grid_view(&state_clone);
+            }
+            super::sidebar_item::SidebarItemKind::AutoGroupHeader => {
+                state_clone.borrow_mut().selected_id.clear();
+                // The header carries the negated memory id; the members
+                // live under the same key in group_members.
+                state_clone.borrow_mut().selected_group =
+                    GroupSelection::Collection(group_id);
                 state_clone.borrow_mut().multi_selected_ids.clear();
                 show_grid_view(&state_clone);
             }

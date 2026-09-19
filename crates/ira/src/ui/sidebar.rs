@@ -6,7 +6,7 @@ use super::search::SearchQuery;
 use super::sidebar_item::{SidebarItem, SidebarItemKind};
 use super::state::SharedState;
 use crate::Game;
-use gtk4::prelude::*;
+use adw::prelude::*;
 use ira_models::GroupSelection;
 use std::collections::{HashMap, HashSet};
 
@@ -117,6 +117,10 @@ pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
 
 pub fn rebuild_sidebar(state: &SharedState) {
     let _span = tracing::info_span!("rebuild_sidebar").entered();
+    // Auto-group memberships are derived, never stored: every rebuild
+    // re-runs the rules over the live games, which is how a fresh match
+    // or a play session moves games between groups by itself.
+    super::auto_groups::refresh_auto_members(state);
     let sidebar_scroll = state.borrow().sidebar_scroll.clone();
     let store = state.borrow().sidebar_store.clone();
     let saved_scroll = sidebar_scroll.vadjustment().value();
@@ -306,6 +310,43 @@ pub fn rebuild_sidebar(state: &SharedState) {
             }
         }
 
+        // ── Auto groups: rule-managed sections between the collections
+        // and the uncategorized tail. Their memberships were folded into
+        // group_members under negated ids by the refresh above. ──
+        let auto_groups = state.borrow().auto_groups.clone();
+        for group in &auto_groups {
+            let member_ids = state
+                .borrow()
+                .group_members
+                .get(&group.id)
+                .cloned()
+                .unwrap_or_default();
+            let mut collection_games: Vec<&Game> = visible_games
+                .iter()
+                .filter(|game| member_ids.contains(&game.db_id))
+                .copied()
+                .collect();
+            sort_grid_order(
+                &mut collection_games,
+                sort_mode,
+                sort_descending,
+                &sort_entity_names,
+            );
+
+            let is_collapsed = collapsed.contains(&group.id);
+            items.push(SidebarItem::new_auto_group_header(
+                group.id,
+                &group.name,
+                collection_games.len(),
+                is_collapsed,
+            ));
+            if !is_collapsed {
+                for game in &collection_games {
+                    items.push(SidebarItem::from_game(game, &running_games));
+                }
+            }
+        }
+
         let mut uncategorized: Vec<&Game> = visible_games
             .iter()
             .filter(|g| !grouped_ids.contains(&g.db_id))
@@ -422,7 +463,8 @@ fn restore_selection(state: &SharedState) {
         for i in 0..store.n_items() {
             if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
                 let is_header = item.kind() == SidebarItemKind::CollectionHeader
-                    || item.kind() == SidebarItemKind::UncategorizedHeader;
+                    || item.kind() == SidebarItemKind::UncategorizedHeader
+                    || item.kind() == SidebarItemKind::AutoGroupHeader;
                 if is_header && item.group_id() == target_group_id {
                     select_row_silently(state, Some(i));
                     return;
@@ -479,6 +521,139 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
         super::group_dialog::show_create_group_dialog(&sc);
     });
     row.append(&add_btn);
+
+    let auto_btn = gtk4::Button::from_icon_name("funnel-symbolic");
+    auto_btn.add_css_class(CSS_FLAT);
+    auto_btn.set_tooltip_text(Some(&crate::tr!("New auto group")));
+    auto_btn.set_valign(gtk4::Align::Center);
+    let sc = state.clone();
+    auto_btn.connect_clicked(move |_| {
+        super::auto_group_dialog::show_auto_group_create(&sc);
+    });
+    row.append(&auto_btn);
+}
+
+/// The rule-managed group header: collapse arrow and name like a
+/// collection, plus a pencil straight into the rule editor and a
+/// right-click menu for editing or deleting the group.
+fn sidebar_bind_auto_group_header(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
+    row.add_css_class(CSS_SIDEBAR_ROW_PAD_HEADER);
+    let group_id = item.group_id();
+    let collapsed = item.collapsed();
+
+    let arrow_icon = if collapsed {
+        "pan-end-symbolic"
+    } else {
+        "pan-down-symbolic"
+    };
+    let arrow = gtk4::Image::from_icon_name(arrow_icon);
+    arrow.set_pixel_size(14);
+    arrow.set_valign(gtk4::Align::Center);
+
+    let sc = state.clone();
+    let click = gtk4::GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
+        let mut s = sc.borrow_mut();
+        if s.collapsed_collections.contains(&group_id) {
+            s.collapsed_collections.remove(&group_id);
+        } else {
+            s.collapsed_collections.insert(group_id);
+        }
+        drop(s);
+        rebuild_sidebar(&sc);
+    });
+    arrow.add_controller(click);
+    row.append(&arrow);
+
+    let label = gtk4::Label::new(Some(&item.name()));
+    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.set_tooltip_text(Some(&item.name()));
+    row.append(&label);
+
+    let count_label = gtk4::Label::new(Some(&item.count().to_string()));
+    count_label.add_css_class(CSS_DIM_LABEL);
+    row.append(&count_label);
+
+    let edit = gtk4::Button::from_icon_name("document-edit-symbolic");
+    edit.add_css_class(CSS_FLAT);
+    edit.set_tooltip_text(Some(&crate::tr!("Edit rules")));
+    edit.set_valign(gtk4::Align::Center);
+    {
+        let sc = state.clone();
+        edit.connect_clicked(move |_| {
+            super::auto_group_dialog::show_auto_group_edit(&sc, group_id);
+        });
+    }
+    row.append(&edit);
+
+    let sc = state.clone();
+    let row_weak = row.downgrade();
+    let group_name = item.name();
+    let right_click = gtk4::GestureClick::new();
+    right_click.set_button(3);
+    right_click.connect_pressed(move |_, _, x, y| {
+        let Some(r) = row_weak.upgrade() else {
+            return;
+        };
+        let menu = gio::Menu::new();
+        menu.append(Some(&crate::tr!("Edit rules")), Some("grp.auto-edit"));
+        menu.append(Some(&crate::tr!("Delete")), Some("grp.auto-delete"));
+
+        let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+        popover.set_halign(gtk4::Align::Start);
+        popover.set_has_arrow(false);
+
+        let actions = gio::SimpleActionGroup::new();
+        let sc2 = sc.clone();
+        let gname = group_name.clone();
+        let edit_action = gio::SimpleAction::new("auto-edit", None);
+        edit_action.connect_activate(move |_, _| {
+            super::auto_group_dialog::show_auto_group_edit(&sc2, group_id);
+        });
+        actions.add_action(&edit_action);
+
+        let sc2 = sc.clone();
+        let delete_action = gio::SimpleAction::new("auto-delete", None);
+        delete_action.connect_activate(move |_, _| {
+            confirm_delete_auto_group(&sc2, group_id, &gname);
+        });
+        actions.add_action(&delete_action);
+
+        super::helpers::popup_context_popover(&r, &popover, &actions, "grp.auto", x as i32, y as i32);
+    });
+    row.add_controller(right_click);
+}
+
+/// Deleting a rule group drops the rules, never the games — say so in
+/// the confirmation, then rebuild everything.
+fn confirm_delete_auto_group(state: &SharedState, group_id: i64, name: &str) {
+    let window = state.borrow().window.clone();
+    let dialog = adw::AlertDialog::new(
+        Some(&crate::tr!("Delete auto group")),
+        Some(
+            &crate::tr!("The rules of \"{}\" go away. The games themselves stay.")
+                .replacen("{}", name, 1),
+        ),
+    );
+    dialog.add_response("cancel", &crate::tr!("Cancel"));
+    dialog.add_response("delete", &crate::tr!("Delete"));
+    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    let sc = state.clone();
+    dialog.connect_response(Some("delete"), move |_, _| {
+        let db = sc.borrow().db.clone();
+        let db_id = super::auto_groups::to_db_id(group_id);
+        if let Err(e) = ira_db::delete_auto_group(&db, db_id) {
+            eprintln!("Failed to delete the auto group: {e}");
+            return;
+        }
+        sc.borrow_mut().auto_groups.retain(|g| g.id != group_id);
+        sc.borrow_mut().collapsed_collections.remove(&group_id);
+        sc.borrow_mut().selected_group = GroupSelection::AllGames;
+        rebuild_sidebar(&sc);
+    });
+    dialog.present(Some(&window));
 }
 
 fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
@@ -646,6 +821,9 @@ fn sidebar_bind_factory(
         SidebarItemKind::AllGames => sidebar_bind_all_games(state, &row),
         SidebarItemKind::CollectionHeader | SidebarItemKind::UncategorizedHeader => {
             sidebar_bind_collection_header(state, &row, &item);
+        }
+        SidebarItemKind::AutoGroupHeader => {
+            sidebar_bind_auto_group_header(state, &row, &item);
         }
         SidebarItemKind::Game => sidebar_bind_game(state, &row, &item),
     }

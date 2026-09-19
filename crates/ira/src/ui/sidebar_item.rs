@@ -6,6 +6,8 @@ pub enum SidebarItemKind {
     #[default]
     AllGames,
     CollectionHeader,
+    /// A rule-managed group header; `group_id` is the negated memory id.
+    AutoGroupHeader,
     Game,
     UncategorizedHeader,
 }
@@ -68,6 +70,17 @@ impl SidebarItem {
         let obj: Self = glib::Object::new();
         let imp = obj.imp();
         *imp.kind.borrow_mut() = SidebarItemKind::CollectionHeader;
+        imp.group_id.set(group_id);
+        *imp.name.borrow_mut() = name.to_string();
+        imp.count.set(count);
+        imp.collapsed.set(collapsed);
+        obj
+    }
+
+    pub fn new_auto_group_header(group_id: i64, name: &str, count: usize, collapsed: bool) -> Self {
+        let obj: Self = glib::Object::new();
+        let imp = obj.imp();
+        *imp.kind.borrow_mut() = SidebarItemKind::AutoGroupHeader;
         imp.group_id.set(group_id);
         *imp.name.borrow_mut() = name.to_string();
         imp.count.set(count);

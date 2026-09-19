@@ -136,6 +136,11 @@ pub fn init_db(db_path: &str) -> DbConn {
                 group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
                 PRIMARY KEY (game_id, group_id)
             );
+            CREATE TABLE IF NOT EXISTS auto_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                criteria TEXT NOT NULL DEFAULT '[]'
+            );
             CREATE INDEX IF NOT EXISTS idx_game_groups_group ON game_groups(group_id);
             CREATE TABLE IF NOT EXISTS game_playtime_links (
                 game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,

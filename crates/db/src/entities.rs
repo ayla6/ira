@@ -274,6 +274,77 @@ pub fn game_entity_names(
     Ok(rows.into_iter().collect())
 }
 
+/// Every credited name per game, not just one: the auto-group value
+/// rules match when any of a game's genres (or studios, or families)
+/// agrees, unlike the group-by category pick which needs a single name.
+pub fn game_entity_names_all(
+    conn: &DbConn,
+    kind: &str,
+    role: Option<&str>,
+) -> Result<std::collections::HashMap<i64, Vec<String>>, String> {
+    let spec = spec(kind);
+    let role_sql = match role {
+        Some(role) => format!("AND gc.{role} = 1"),
+        None => String::new(),
+    };
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT gc.game_id, c.name
+             FROM {junction} gc
+             JOIN {lookup} c ON c.id = gc.{col}
+             WHERE 1 = 1 {role_sql}
+             ORDER BY c.name COLLATE NOCASE",
+            junction = spec.junction,
+            lookup = spec.lookup,
+            col = spec.column,
+        ))
+        .map_err(err)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    let mut map: std::collections::HashMap<i64, Vec<String>> = Default::default();
+    for (game_id, name) in rows {
+        map.entry(game_id).or_default().push(name);
+    }
+    Ok(map)
+}
+
+/// The distinct names a dimension has on record, for the rule editor's
+/// value pickers.
+pub fn distinct_entity_names(
+    conn: &DbConn,
+    kind: &str,
+    role: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let spec = spec(kind);
+    let role_sql = match role {
+        Some(role) => format!("WHERE gc.{role} = 1"),
+        None => String::new(),
+    };
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT DISTINCT c.name FROM {lookup} c
+             JOIN {junction} gc ON gc.{col} = c.id {role_sql}
+             ORDER BY c.name COLLATE NOCASE",
+            junction = spec.junction,
+            lookup = spec.lookup,
+            col = spec.column,
+        ))
+        .map_err(err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
+}
+
 /// A user rename: the new spelling lands and latches the row, so the
 /// store's freshen-from-source pass stops overwriting it.
 pub fn rename_entity(conn: &DbConn, kind: &str, id: i64, name: &str) -> Result<(), String> {

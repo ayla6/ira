@@ -14,12 +14,14 @@ mod sessions;
 mod settings;
 mod setup;
 mod variants;
+mod auto_groups;
 
 pub use crud::*;
 pub use entities::*;
 pub use discs::*;
 pub use game_config::*;
 pub use groups::*;
+pub use auto_groups::*;
 pub use links::*;
 pub use lookup::*;
 pub use metadata::*;

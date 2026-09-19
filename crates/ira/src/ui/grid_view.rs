@@ -404,7 +404,10 @@ fn make_bind(
             let badge = gtk4::Label::new(Some(&text));
             badge.set_valign(gtk4::Align::End);
             badge.set_halign(gtk4::Align::Center);
-            badge.set_margin_bottom(-12);
+            // No negative margins here: GTK 4 sizes labels in one pass
+            // with the margin and in another without, and every relayout
+            // printed "adjusted size vertical min 8 must not decrease
+            // below min 20" — once per visible tile with a badge.
             badge.add_css_class(CSS_COVER_BADGE);
             overlay.add_overlay(&badge);
             unsafe { vbox.set_data::<gtk4::Label>("badge", badge) };

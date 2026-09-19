@@ -249,9 +249,9 @@ pub fn screenscraper_matches_by_serial(platform_id: &str) -> bool {
 /// Disc consoles here match by serial instead; Switch and Wii U have no
 /// serials on ScreenScraper at all and match by title.
 pub fn screenscraper_hashes_content(platform_id: &str) -> bool {
-    // 3DS dumps are encrypted; their md5 never agrees with
-    // ScreenScraper's decrypted-hash lookup, so they match by title
-    // like the switch does.
+    // 3DS is excluded by decision: its dumps' md5s are not on the
+    // source, so hashing could only answer misses — 3DS matches by
+    // title search, like the switch.
     !matches!(platform_id, "ps2" | "ps3" | "wii" | "gc" | "switch" | "wiiu" | "3ds")
 }
 

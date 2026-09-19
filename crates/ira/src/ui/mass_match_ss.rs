@@ -425,7 +425,19 @@ fn resolve(
         };
         return Some(run_pc_matching(steam, creds, db, &target));
     }
-    screenscraper_system_id(&platform_id)?;
+    // The id itself is unused here — the search scopes by the console
+    // string — but its absence is what skips the console.
+    let Some(_) = screenscraper_system_id(&platform_id) else {
+        // A console with no ScreenScraper mapping can only ever be
+        // matched by hand. This skip is why a title-id platform id was
+        // invisible for months: 3DS games resolved here to their title
+        // id, went silent, and the batch looked broken.
+        eprintln!(
+            "SS batch: '{}' [{platform_id}] has no ScreenScraper system mapping, skipping",
+            item.name
+        );
+        return None;
+    };
     // ROM paths are stored relative to the console's folder in the ROM
     // roots; every file access resolves through the config first.
     let abs = cfg
@@ -439,6 +451,8 @@ fn resolve(
     // has filled it. romnom carries the real file name with extension,
     // exactly what ScreenScraper's rom index stores (ES-DE sends it the
     // same way); the stem alone loses the match.
+    // ── Stage 1: content hash — the exact-match search on consoles
+    // where file digests are the matching key. ──
     if ira_models::screenscraper_hashes_content(&platform_id) {
         let verbose = verbose_logging();
         let pick = rom_extension_pick(&platform_id);
@@ -514,11 +528,11 @@ fn resolve(
         }
     }
 
-    // No hash hit: a disc serial read from the scan's cache is the
-    // next-best exact identity — it survives chd/rvz repacks that
-    // scramble every file digest. Normalized to ScreenScraper's dashed
-    // uppercase form: raw PS2 serials arrive as SLES_520.05 from
-    // SYSTEM.CNF. Only serial-shaped values qualify.
+    // ── Stage 2: disc serial — the next-best exact identity after no
+    // hash hit (or no hashing at all); it survives chd/rvz repacks
+    // that scramble every file digest. Normalized to ScreenScraper's
+    // dashed uppercase form: raw PS2 serials arrive as SLES_520.05
+    // from SYSTEM.CNF. Only serial-shaped values qualify.
     let serial = ira_models::screenscraper_matches_by_serial(&platform_id)
         .then(|| ira_platforms::rom_serial::read_serial_cached(db, &abs))
         .flatten()

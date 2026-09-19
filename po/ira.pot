@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-19 06:01-0300\n"
+"POT-Creation-Date: 2026-09-19 15:59-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -195,7 +195,7 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_dialog.rs:200
 #: crates/ira/src/ui/add_game.rs:22
-#: crates/ira/src/ui/auto_group_dialog.rs:102
+#: crates/ira/src/ui/auto_group_dialog.rs:90
 #: crates/ira/src/ui/background.rs:19
 #: crates/ira/src/ui/big_picture/keyboard.rs:619
 #: crates/ira/src/ui/context_menu_actions.rs:110
@@ -222,7 +222,7 @@ msgstr ""
 #: crates/ira/src/ui/profile_dialog.rs:198
 #: crates/ira/src/ui/profile_dialog.rs:446
 #: crates/ira/src/ui/settings_pages.rs:514
-#: crates/ira/src/ui/sidebar.rs:598
+#: crates/ira/src/ui/sidebar.rs:600
 msgid "Cancel"
 msgstr ""
 
@@ -255,7 +255,7 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:32
 #: crates/ira/src/ui/auto_add_dialog.rs:785
-#: crates/ira/src/ui/auto_group_dialog.rs:49
+#: crates/ira/src/ui/auto_group_dialog.rs:52
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:208
 msgid "Name"
 msgstr ""
@@ -608,20 +608,12 @@ msgstr ""
 msgid "OK"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:31
-#: crates/ira/src/ui/auto_group_dialog.rs:37
+#: crates/ira/src/ui/auto_group_dialog.rs:32
+#: crates/ira/src/ui/auto_group_dialog.rs:38
 msgid "Auto group"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:55
-msgid "Rules"
-msgstr ""
-
-#: crates/ira/src/ui/auto_group_dialog.rs:80
-msgid "Add rule"
-msgstr ""
-
-#: crates/ira/src/ui/auto_group_dialog.rs:104
+#: crates/ira/src/ui/auto_group_dialog.rs:92
 #: crates/ira/src/ui/edit_game_dialog.rs:496
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:254
 #: crates/ira/src/ui/input_profile_editor.rs:140
@@ -631,33 +623,80 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:233
-msgid "From"
+#: crates/ira/src/ui/auto_group_dialog.rs:171
+msgid "all of"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:172
+msgid "any of"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:173
+msgid "exactly one of"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:230
+#: crates/ira/src/ui/game_settings.rs:647
+#: crates/ira/src/ui/steam_search_dialog.rs:333
+msgid "Match"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:232
+msgid "A game joins the group when the rule groups below combine as chosen."
 msgstr ""
 
 #: crates/ira/src/ui/auto_group_dialog.rs:235
+msgid "Groups combine when"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:245
+#: crates/ira/src/ui/sidebar.rs:487
+msgid "Add group"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:338
+msgid "Rules match"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:344
+msgid "Remove this group"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:356
+msgid "Add rule"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:433
+msgid "Remove this rule"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:448
+msgid "From"
+msgstr ""
+
+#: crates/ira/src/ui/auto_group_dialog.rs:450
 msgid "To"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:237
+#: crates/ira/src/ui/auto_group_dialog.rs:453
 msgid "Played at least this many hours; 0 is no floor"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:239
+#: crates/ira/src/ui/auto_group_dialog.rs:457
 msgid "Played at most this many hours; 0 is no ceiling"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:243
-#: crates/ira/src/ui/auto_group_dialog.rs:275
+#: crates/ira/src/ui/auto_group_dialog.rs:462
+#: crates/ira/src/ui/auto_group_dialog.rs:494
 msgid "Pick values"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:277
+#: crates/ira/src/ui/auto_group_dialog.rs:496
 #, rust-format
 msgid "{} picked"
 msgstr ""
 
-#: crates/ira/src/ui/auto_group_dialog.rs:308
+#: crates/ira/src/ui/auto_group_dialog.rs:527
 msgid "Nothing on record for this rule yet"
 msgstr ""
 
@@ -720,7 +759,7 @@ msgstr ""
 #: crates/ira/src/ui/big_picture/all_games.rs:754
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:210
 #: crates/ira/src/ui/group_dialog.rs:71
-#: crates/ira/src/ui/sidebar.rs:672
+#: crates/ira/src/ui/sidebar.rs:674
 msgid "Rename"
 msgstr ""
 
@@ -767,9 +806,9 @@ msgstr ""
 #: crates/ira/src/ui/installer_add_dialog.rs:799
 #: crates/ira/src/ui/play_history.rs:223
 #: crates/ira/src/ui/profile_dialog.rs:199
-#: crates/ira/src/ui/sidebar.rs:560
-#: crates/ira/src/ui/sidebar.rs:599
-#: crates/ira/src/ui/sidebar.rs:673
+#: crates/ira/src/ui/sidebar.rs:562
+#: crates/ira/src/ui/sidebar.rs:601
+#: crates/ira/src/ui/sidebar.rs:675
 msgid "Delete"
 msgstr ""
 
@@ -1972,7 +2011,7 @@ msgstr ""
 
 #: crates/ira/src/ui/filter.rs:159
 #: crates/ira/src/ui/grid_view.rs:157
-#: crates/ira/src/ui/sidebar.rs:647
+#: crates/ira/src/ui/sidebar.rs:649
 msgid "Uncategorized"
 msgstr ""
 
@@ -2167,11 +2206,6 @@ msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:621
 msgid "The Steam app id this game matches against"
-msgstr ""
-
-#: crates/ira/src/ui/game_settings.rs:647
-#: crates/ira/src/ui/steam_search_dialog.rs:333
-msgid "Match"
 msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:649
@@ -5976,24 +6010,20 @@ msgstr ""
 msgid "Switch to grid view"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:475
-msgid "Add group"
-msgstr ""
-
-#: crates/ira/src/ui/sidebar.rs:485
+#: crates/ira/src/ui/sidebar.rs:477
 msgid "New auto group"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:539
-#: crates/ira/src/ui/sidebar.rs:559
+#: crates/ira/src/ui/sidebar.rs:541
+#: crates/ira/src/ui/sidebar.rs:561
 msgid "Edit rules"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:592
+#: crates/ira/src/ui/sidebar.rs:594
 msgid "Delete auto group"
 msgstr ""
 
-#: crates/ira/src/ui/sidebar.rs:594
+#: crates/ira/src/ui/sidebar.rs:596
 #, rust-format
 msgid "The rules of \"{}\" go away. The games themselves stay."
 msgstr ""

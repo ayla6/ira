@@ -470,6 +470,18 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
     label.set_hexpand(true);
     row.append(&label);
 
+    // The auto-group button sits left of the plain one: search-like
+    // icon for a rule-defined group.
+    let auto_btn = gtk4::Button::from_icon_name("edit-find-symbolic");
+    auto_btn.add_css_class(CSS_FLAT);
+    auto_btn.set_tooltip_text(Some(&crate::tr!("New auto group")));
+    auto_btn.set_valign(gtk4::Align::Center);
+    let sc = state.clone();
+    auto_btn.connect_clicked(move |_| {
+        super::auto_group_dialog::show_auto_group_create(&sc);
+    });
+    row.append(&auto_btn);
+
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.add_css_class(CSS_FLAT);
     add_btn.set_tooltip_text(Some(&crate::tr!("Add group")));
@@ -479,16 +491,6 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
         super::group_dialog::show_create_group_dialog(&sc);
     });
     row.append(&add_btn);
-
-    let auto_btn = gtk4::Button::from_icon_name("funnel-symbolic");
-    auto_btn.add_css_class(CSS_FLAT);
-    auto_btn.set_tooltip_text(Some(&crate::tr!("New auto group")));
-    auto_btn.set_valign(gtk4::Align::Center);
-    let sc = state.clone();
-    auto_btn.connect_clicked(move |_| {
-        super::auto_group_dialog::show_auto_group_create(&sc);
-    });
-    row.append(&auto_btn);
 }
 
 /// The rule-managed group header: collapse arrow and name like a

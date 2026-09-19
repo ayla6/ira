@@ -10,7 +10,7 @@
 //! without ever colliding.
 
 use super::state::SharedState;
-use ira_models::{AutoDimension, AutoGroup, AutoGroupContext};
+use ira_models::{AutoDimension, AutoGroup, AutoGroupContext, AutoNode};
 use std::collections::{HashMap, HashSet};
 
 /// The stored groups, ids negated for in-memory use. Loading is
@@ -55,10 +55,20 @@ pub(crate) fn refresh_auto_members(state: &SharedState) {
         state.borrow_mut().group_members.retain(|k, _| *k >= 0);
         return;
     }
+    // A dimension is queried only when some leaf rule reads it.
     let wants = |dimension: AutoDimension| {
+        fn tree_wants(node: &AutoNode, dimension: AutoDimension) -> bool {
+            match node {
+                AutoNode::None => false,
+                AutoNode::Rule(criterion) => criterion.dimension == dimension,
+                AutoNode::Logic { nodes, .. } => {
+                    nodes.iter().any(|node| tree_wants(node, dimension))
+                }
+            }
+        }
         auto_groups
             .iter()
-            .any(|group| group.criteria.iter().any(|c| c.dimension == dimension))
+            .any(|group| tree_wants(&group.root, dimension))
     };
     let db = state.borrow().db.clone();
     let genres = if wants(AutoDimension::Genre) {

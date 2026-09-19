@@ -28,7 +28,7 @@ pub mod variant;
 pub use achievement::{AchievementStatus, GogAchievementStatus, MergedAchievement, StringOrMap};
 pub use app_details::{AppDetails, DlcInfo, UfsPathTransform, UfsRootOverride, UfsSaveFile};
 pub use asset_type::{AssetType, LogoPosition};
-pub use auto_group::{AutoCriterion, AutoDimension, AutoGroup, AutoGroupContext};
+pub use auto_group::{AutoCriterion, AutoDimension, AutoGroup, AutoGroupContext, AutoLogic, AutoNode};
 pub use consoles::{all_consoles, console_has_ra, find_console, ConsoleDef, CONSOLES};
 pub use disc::GameDisc;
 pub use fullscreen::fullscreen_args;

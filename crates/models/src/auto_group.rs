@@ -145,7 +145,69 @@ pub struct AutoGroupContext {
     pub publishers: HashMap<i64, Vec<String>>,
 }
 
-/// A named rule set. The id is what the rest of the app files the group
+/// How a set of nodes combines: all of them (AND), any of them (OR),
+/// or exactly one of them (XOR).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AutoLogic {
+    #[default]
+    All,
+    Any,
+    One,
+}
+
+impl AutoLogic {
+    pub fn display_label(self) -> &'static str {
+        match self {
+            AutoLogic::All => "all of",
+            AutoLogic::Any => "any of",
+            AutoLogic::One => "exactly one of",
+        }
+    }
+
+    fn combine(&self, mut results: impl Iterator<Item = bool>) -> bool {
+        match self {
+            // The rules are pure lookups, so short-circuiting is safe.
+            AutoLogic::All => results.all(|r| r),
+            AutoLogic::Any => results.any(|r| r),
+            AutoLogic::One => results.filter(|r| *r).count() == 1,
+        }
+    }
+}
+
+/// One node of a rule tree: either a leaf criterion or a nested group of
+/// nodes under its own gate. `(genre: visual novel AND console: snes)
+/// OR (genre: action AND console: psx)` is `Any([All([leaf, leaf]),
+/// All([leaf, leaf])])`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum AutoNode {
+    #[default]
+    None,
+    Logic {
+        logic: AutoLogic,
+        nodes: Vec<AutoNode>,
+    },
+    Rule(AutoCriterion),
+}
+
+impl AutoNode {
+    /// Empty trees match nothing, so a half-built group never swallows
+    /// the whole library: an AND with no children has nothing to agree
+    /// with, and an OR with no children has nothing to fire.
+    pub fn matches(&self, game: &Game, ctx: &AutoGroupContext) -> bool {
+        match self {
+            AutoNode::None => false,
+            AutoNode::Rule(criterion) => criterion.matches(game, ctx),
+            AutoNode::Logic { logic, nodes } => {
+                if nodes.is_empty() {
+                    return false;
+                }
+                logic.combine(nodes.iter().map(|node| node.matches(game, ctx)))
+            }
+        }
+    }
+}
+
+/// A named rule tree. The id is what the rest of the app files the group
 /// under; the app allocates stable negative ids so they can share the
 /// collection machinery without colliding with the database's own.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -154,13 +216,13 @@ pub struct AutoGroup {
     pub id: i64,
     pub name: String,
     #[serde(default)]
-    pub criteria: Vec<AutoCriterion>,
+    pub root: AutoNode,
 }
 
 impl AutoGroup {
-    /// Every rule line must agree.
+    /// The tree decides; an empty tree matches nothing.
     pub fn matches(&self, game: &Game, ctx: &AutoGroupContext) -> bool {
-        self.criteria.iter().all(|c| c.matches(game, ctx))
+        self.root.matches(game, ctx)
     }
 }
 
@@ -178,6 +240,18 @@ mod tests {
             release_timestamp: 794_870_400,
             playtime: 12.5,
             ..Game::default()
+        }
+    }
+
+    fn leaf_criterion(dimension: AutoDimension, value: &str) -> AutoCriterion {
+        AutoCriterion {
+            dimension,
+            values: if value.is_empty() {
+                vec![]
+            } else {
+                vec![value.to_string()]
+            },
+            ..Default::default()
         }
     }
 
@@ -298,32 +372,122 @@ mod tests {
         let group = AutoGroup {
             id: -1,
             name: "SNES JRPGs".into(),
-            criteria: vec![
-                AutoCriterion {
-                    dimension: AutoDimension::Console,
-                    values: vec!["SNES".into()],
-                    ..Default::default()
-                },
-                AutoCriterion {
-                    dimension: AutoDimension::Genre,
-                    values: vec!["JRPG".into()],
-                    ..Default::default()
-                },
-            ],
+            root: AutoNode::Logic {
+                logic: AutoLogic::All,
+                nodes: vec![
+                    AutoNode::Rule(AutoCriterion {
+                        dimension: AutoDimension::Console,
+                        values: vec!["SNES".into()],
+                        ..Default::default()
+                    }),
+                    AutoNode::Rule(AutoCriterion {
+                        dimension: AutoDimension::Genre,
+                        values: vec!["JRPG".into()],
+                        ..Default::default()
+                    }),
+                ],
+            },
         };
         assert!(group.matches(&g, &ctx));
         let refused = AutoGroup {
-            criteria: vec![
-                group.criteria[0].clone(),
-                AutoCriterion {
-                    dimension: AutoDimension::Playtime,
-                    min_hours: Some(100.0),
-                    ..Default::default()
-                },
-            ],
+            root: AutoNode::Logic {
+                logic: AutoLogic::All,
+                nodes: vec![
+                    group.root.clone(),
+                    AutoNode::Rule(AutoCriterion {
+                        dimension: AutoDimension::Playtime,
+                        min_hours: Some(100.0),
+                        ..Default::default()
+                    }),
+                ],
+            },
             ..group.clone()
         };
         assert!(!refused.matches(&g, &ctx));
+    }
+
+    #[test]
+    fn test_auto_nested_groups_cover_the_or_of_ands_shape() {
+        // (genre: visual novel AND console: snes) OR (playtime: 2h+) —
+        // the user's example shape, one level of nesting each side.
+        let g = game();
+        let ctx = ctx();
+        let leaf = |dimension: AutoDimension, values: &[&str]| {
+            AutoNode::Rule(AutoCriterion {
+                dimension,
+                values: values.iter().map(|v| v.to_string()).collect(),
+                ..Default::default()
+            })
+        };
+        let group = AutoGroup {
+            id: -4,
+            name: "Nested".into(),
+            root: AutoNode::Logic {
+                logic: AutoLogic::Any,
+                nodes: vec![
+                    AutoNode::Logic {
+                        logic: AutoLogic::All,
+                        nodes: vec![leaf(AutoDimension::Genre, &["JRPG"]), leaf(AutoDimension::Console, &["SNES"])],
+                    },
+                    AutoNode::Logic {
+                        logic: AutoLogic::All,
+                        nodes: vec![AutoNode::Rule(AutoCriterion {
+                            dimension: AutoDimension::Playtime,
+                            min_hours: Some(100.0),
+                            ..Default::default()
+                        })],
+                    },
+                ],
+            },
+        };
+        assert!(group.matches(&g, &ctx), "the first OR side agrees");
+        // XOR over one agreeing and one refusing side fires; the
+        // empty-values leaf never matches anything.
+        let xor = AutoGroup {
+            id: -5,
+            name: "Nested XOR".into(),
+            root: AutoNode::Logic {
+                logic: AutoLogic::One,
+                nodes: vec![
+                    AutoNode::Logic {
+                        logic: AutoLogic::All,
+                        nodes: vec![
+                            leaf(AutoDimension::Genre, &["JRPG"]),
+                            leaf(AutoDimension::Console, &["SNES"]),
+                        ],
+                    },
+                    AutoNode::Rule(leaf_criterion(AutoDimension::Genre, "Shooter")),
+                ],
+            },
+        };
+        assert!(xor.matches(&g, &ctx), "exactly one side agrees");
+        // Two agreeing sides break the "exactly one" contract.
+        let two_agree = AutoGroup {
+            root: AutoNode::Logic {
+                logic: AutoLogic::One,
+                nodes: vec![
+                    AutoNode::Rule(leaf_criterion(AutoDimension::Genre, "JRPG")),
+                    AutoNode::Rule(leaf_criterion(AutoDimension::Genre, "Turn-based")),
+                ],
+            },
+            ..AutoGroup::default()
+        };
+        assert!(!two_agree.matches(&g, &ctx));
+    }
+
+    #[test]
+    fn test_auto_empty_trees_match_nothing() {
+        let g = game();
+        let ctx = ctx();
+        assert!(!AutoGroup::default().matches(&g, &ctx));
+        let empty_and = AutoGroup {
+            root: AutoNode::Logic {
+                logic: AutoLogic::All,
+                nodes: vec![],
+            },
+            ..AutoGroup::default()
+        };
+        assert!(!empty_and.matches(&g, &ctx));
     }
 
     #[test]
@@ -331,15 +495,25 @@ mod tests {
         let group = AutoGroup {
             id: -3,
             name: "Retro before 2000".into(),
-            criteria: vec![AutoCriterion {
-                dimension: AutoDimension::Released,
-                to: "2000-01-01".into(),
-                min_hours: Some(0.5),
-                ..Default::default()
-            }],
+            root: AutoNode::Logic {
+                logic: AutoLogic::All,
+                nodes: vec![
+                    AutoNode::Rule(AutoCriterion {
+                        dimension: AutoDimension::Released,
+                        to: "2000-01-01".into(),
+                        ..Default::default()
+                    }),
+                    AutoNode::Rule(AutoCriterion {
+                        dimension: AutoDimension::Playtime,
+                        min_hours: Some(0.5),
+                        ..Default::default()
+                    }),
+                ],
+            },
         };
         let json = serde_json::to_string(&group).unwrap();
         let back: AutoGroup = serde_json::from_str(&json).unwrap();
         assert_eq!(back, group);
     }
+
 }

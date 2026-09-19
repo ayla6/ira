@@ -4,7 +4,7 @@
 //! auto group without a single write.
 
 use crate::{err, DbConn};
-use ira_models::{AutoGroup, AutoCriterion};
+use ira_models::{AutoGroup, AutoNode};
 use rusqlite::params;
 use rusqlite::OptionalExtension;
 
@@ -12,12 +12,8 @@ fn group_from_row(row: &rusqlite::Row) -> rusqlite::Result<AutoGroup> {
     let id: i64 = row.get(0)?;
     let name: String = row.get(1)?;
     let json: String = row.get(2)?;
-    let criteria: Vec<AutoCriterion> = serde_json::from_str(&json).unwrap_or_default();
-    Ok(AutoGroup {
-        id,
-        name,
-        criteria,
-    })
+    let root: AutoNode = serde_json::from_str(&json).unwrap_or_default();
+    Ok(AutoGroup { id, name, root })
 }
 
 pub fn get_all_auto_groups(conn: &DbConn) -> Result<Vec<AutoGroup>, String> {
@@ -47,8 +43,8 @@ pub fn get_auto_group(conn: &DbConn, id: i64) -> Result<Option<AutoGroup>, Strin
 
 /// A name collision loses to the UNIQUE constraint and surfaces as the
 /// error string, the same way user groups behave.
-pub fn create_auto_group(conn: &DbConn, name: &str, criteria: &[AutoCriterion]) -> Result<i64, String> {
-    let json = serde_json::to_string(&criteria.to_vec()).map_err(err)?;
+pub fn create_auto_group(conn: &DbConn, name: &str, root: &AutoNode) -> Result<i64, String> {
+    let json = serde_json::to_string(root).map_err(err)?;
     let c = crate::lock_db(conn)?;
     c.execute(
         "INSERT INTO auto_groups (name, criteria) VALUES (?1, ?2)",
@@ -60,13 +56,8 @@ pub fn create_auto_group(conn: &DbConn, name: &str, criteria: &[AutoCriterion]) 
 
 /// The whole rule set is rewritten on every save — the editor hands back
 /// the full list, so a diff would only re-encode it.
-pub fn update_auto_group(
-    conn: &DbConn,
-    id: i64,
-    name: &str,
-    criteria: &[AutoCriterion],
-) -> Result<(), String> {
-    let json = serde_json::to_string(&criteria.to_vec()).map_err(err)?;
+pub fn update_auto_group(conn: &DbConn, id: i64, name: &str, root: &AutoNode) -> Result<(), String> {
+    let json = serde_json::to_string(root).map_err(err)?;
     let c = crate::lock_db(conn)?;
     c.execute(
         "UPDATE auto_groups SET name = ?1, criteria = ?2 WHERE id = ?3",
@@ -104,44 +95,44 @@ mod tests {
         pool
     }
 
-    fn criterion() -> AutoCriterion {
-        AutoCriterion {
+    fn criterion() -> AutoNode {
+        AutoNode::Rule(ira_models::AutoCriterion {
             dimension: ira_models::AutoDimension::Genre,
             values: vec!["JRPG".into()],
             ..Default::default()
-        }
+        })
     }
 
     #[test]
     fn test_create_and_load_auto_group_keeps_criteria() {
         let db = temp_db();
-        let id = create_auto_group(&db, "JRPGs", &[criterion()]).unwrap();
+        let id = create_auto_group(&db, "JRPGs", &criterion()).unwrap();
         assert!(id > 0);
         let groups = get_all_auto_groups(&db).unwrap();
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].name, "JRPGs");
-        assert_eq!(groups[0].criteria, vec![criterion()]);
+        assert_eq!(groups[0].root, criterion());
     }
 
     #[test]
     fn test_update_auto_group_rewrites_name_and_rules() {
         let db = temp_db();
-        let id = create_auto_group(&db, "Old", &[criterion()]).unwrap();
-        let changed = AutoCriterion {
+        let id = create_auto_group(&db, "Old", &criterion()).unwrap();
+        let changed = AutoNode::Rule(ira_models::AutoCriterion {
             dimension: ira_models::AutoDimension::Playtime,
             min_hours: Some(2.0),
             ..Default::default()
-        };
-        update_auto_group(&db, id, "New", std::slice::from_ref(&changed)).unwrap();
+        });
+        update_auto_group(&db, id, "New", &changed).unwrap();
         let group = get_auto_group(&db, id).unwrap().unwrap();
         assert_eq!(group.name, "New");
-        assert_eq!(group.criteria, vec![changed]);
+        assert_eq!(group.root, changed);
     }
 
     #[test]
     fn test_delete_auto_group() {
         let db = temp_db();
-        let id = create_auto_group(&db, "Temp", &[]).unwrap();
+        let id = create_auto_group(&db, "Temp", &AutoNode::None).unwrap();
         delete_auto_group(&db, id).unwrap();
         assert!(get_all_auto_groups(&db).unwrap().is_empty());
         assert!(get_auto_group(&db, id).unwrap().is_none());
@@ -150,8 +141,8 @@ mod tests {
     #[test]
     fn test_duplicate_name_is_rejected() {
         let db = temp_db();
-        create_auto_group(&db, "Same", &[]).unwrap();
-        assert!(create_auto_group(&db, "Same", &[]).is_err());
+        create_auto_group(&db, "Same", &AutoNode::None).unwrap();
+        assert!(create_auto_group(&db, "Same", &AutoNode::None).is_err());
     }
 
     #[test]
@@ -165,6 +156,6 @@ mod tests {
         .unwrap();
         let groups = get_all_auto_groups(&db).unwrap();
         assert_eq!(groups.len(), 1);
-        assert!(groups[0].criteria.is_empty());
+        assert!(matches!(groups[0].root, AutoNode::None));
     }
 }

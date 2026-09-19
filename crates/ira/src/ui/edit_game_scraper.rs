@@ -590,7 +590,8 @@ fn fact_rows(
 }
 
 /// The stored release date as the row's subtitle, a calendar button
-/// opening the picker — dates are picked, not typed.
+/// opening the date editor: the picker on top of what you type — the two
+/// stay in step, so either way of answering lands the same date.
 fn release_date_row(
     state: &SharedState,
     game: &Game,
@@ -607,13 +608,14 @@ fn release_date_row(
     }
 
     // libadwaita has no date picker of its own; the GNOME-apps pattern
-    // is a GtkCalendar in a popover off the row's calendar button, which
-    // also sizes itself to the content — no dead space.
+    // is a GtkCalendar in a popover off the row's calendar button. The
+    // entry above it takes the date as text — typing moves the calendar,
+    // picking fills the entry — and no dead space either way.
     let pick = gtk4::MenuButton::new();
     pick.set_icon_name("x-office-calendar-symbolic");
     pick.add_css_class(CSS_FLAT);
     pick.set_valign(gtk4::Align::Center);
-    pick.set_tooltip_text(Some(&crate::tr!("Pick a date")));
+    pick.set_tooltip_text(Some(&crate::tr!("Pick or type a date")));
 
     let calendar = gtk4::Calendar::new();
     let timestamp = ira_db::scraper_release_timestamp(release_date);
@@ -632,6 +634,20 @@ fn release_date_row(
             }
         }
     }
+
+    // The typed date, normalized, while it is still being typed: `Some`
+    // only while the entry holds a shape the parser accepts. An empty
+    // entry defers to the calendar instead.
+    let typed: std::rc::Rc<std::cell::RefCell<Option<String>>> = Default::default();
+    let entry = gtk4::Entry::new();
+    entry.set_placeholder_text(Some(&crate::tr!(
+        "1998-08-24, 24.08.1998, Aug 24 1998, 1998"
+    )));
+    entry.set_tooltip_text(Some(&crate::tr!(
+        "Type the date — the calendar follows along"
+    )));
+    entry.set_text(release_date);
+
     let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
     let clear = gtk4::Button::with_label(&crate::tr!("Clear"));
     clear.add_css_class(CSS_FLAT);
@@ -647,6 +663,7 @@ fn release_date_row(
     content.set_margin_bottom(8);
     content.set_margin_start(8);
     content.set_margin_end(8);
+    content.append(&entry);
     content.append(&calendar);
     content.append(&buttons);
     let popover = gtk4::Popover::new();
@@ -654,26 +671,91 @@ fn release_date_row(
     pick.set_popover(Some(&popover));
 
     {
-        let slot = slot.clone();
+        let typed = typed.clone();
         let calendar = calendar.clone();
+        let entry = entry.clone();
+        let apply = apply.clone();
+        // Every keystroke re-parses: a good shape selects its day in the
+        // calendar (the feedback that says the date was understood), a
+        // bad one flags the entry and stands Apply down.
+        entry.connect_changed(move |entry| {
+            let text = entry.text().trim().to_string();
+            match parse_typed_date(&text) {
+                Some(parsed) => {
+                    entry.remove_css_class("error");
+                    *typed.borrow_mut() = Some(parsed.stored);
+                    if let Ok(preset) = glib::DateTime::from_utc(
+                        parsed.year,
+                        parsed.month as i32,
+                        parsed.day as i32,
+                        0,
+                        0,
+                        0.0,
+                    ) {
+                        calendar.select_day(&preset);
+                    }
+                }
+                None if text.is_empty() => {
+                    entry.remove_css_class("error");
+                    *typed.borrow_mut() = None;
+                }
+                None => {
+                    entry.add_css_class("error");
+                    *typed.borrow_mut() = None;
+                }
+            }
+            apply.set_sensitive(text.is_empty() || typed.borrow().is_some());
+        });
+    }
+    {
+        // Picking a day fills the entry — unless the entry is what moved
+        // the calendar, whose echoed text would fight the typist.
+        let entry = entry.clone();
+        let typed = typed.clone();
+        calendar.connect_day_selected(move |calendar| {
+            let iso = calendar.date().format("%Y-%m-%d").map(|s| s.to_string());
+            let Ok(iso) = iso else { return };
+            if parse_typed_date(&entry.text()).is_some_and(|parsed| parsed.stored == iso) {
+                return;
+            }
+            *typed.borrow_mut() = Some(iso.clone());
+            entry.set_text(&iso);
+            entry.remove_css_class("error");
+        });
+    }
+    {
+        let slot = slot.clone();
+        let typed = typed.clone();
+        let calendar = calendar.clone();
+        let entry = entry.clone();
         let popover = popover.clone();
         let (state, game, win) = (state.clone(), game.clone(), win.clone());
-        apply.connect_clicked(move |_| {
-            let Some(iso) = calendar
-                .date()
-                .format("%Y-%m-%d")
-                .ok()
-                .map(|s| s.to_string())
-            else {
-                return;
+        let commit_entry = entry.clone();
+        let commit: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
+            // The entry wins while it holds a valid typed date; an empty
+            // entry applies whatever day the calendar shows.
+            let stored = if commit_entry.text().trim().is_empty() {
+                calendar
+                    .date()
+                    .format("%Y-%m-%d")
+                    .ok()
+                    .map(|s| s.to_string())
+            } else {
+                typed.borrow().clone()
             };
+            let Some(stored) = stored else { return };
             edit_field(&slot, |m| {
-                m.release_date = iso.clone();
-                m.release_timestamp = ira_db::scraper_release_timestamp(&iso);
+                m.release_date = stored.clone();
+                m.release_timestamp = ira_db::scraper_release_timestamp(&stored);
             });
             popover.popdown();
             refresh_rows(&state, &game, &win, &slot);
         });
+        apply.connect_clicked({
+            let commit = commit.clone();
+            move |_| commit()
+        });
+        entry.connect_activate(move |_| commit());
     }
     {
         let slot = slot.clone();
@@ -690,6 +772,75 @@ fn release_date_row(
     }
     row.add_suffix(&pick);
     slot.add(row.upcast());
+}
+
+/// A typed date the entry accepted: the normalized string to store and
+/// the day the calendar preview lands on.
+struct TypedDate {
+    stored: String,
+    year: i32,
+    month: u32,
+    day: u32,
+}
+
+/// The shapes a person actually types, normalized to the two stored
+/// forms (ISO `1998-08-24`, or a bare `1998` when that is all there is):
+/// ISO with any of `- / .`, day-first `24.08.1998` / `24/08/1998`,
+/// spelled months in either word order, and a bare year. Two-digit
+/// years are refused — ambiguous by half a century.
+fn parse_typed_date(text: &str) -> Option<TypedDate> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if let Ok(year) = text.parse::<i32>() {
+        return bare_year(year, text);
+    }
+    let day_first: Vec<&str> = text.split(['.', '/']).collect();
+    if day_first.len() == 3 && day_first[2].len() == 4 {
+        if let (Ok(day), Ok(month), Ok(year)) = (
+            day_first[0].parse::<u32>(),
+            day_first[1].parse::<u32>(),
+            day_first[2].parse::<i32>(),
+        ) {
+            let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+            return Some(from_naive(date));
+        }
+        return None;
+    }
+    for format in ["%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y"] {
+        if let Ok(date) = chrono::NaiveDate::parse_from_str(text, format) {
+            return Some(from_naive(date));
+        }
+    }
+    for format in ["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"] {
+        if let Ok(date) = chrono::NaiveDate::parse_from_str(text, format) {
+            return Some(from_naive(date));
+        }
+    }
+    None
+}
+
+fn bare_year(year: i32, text: &str) -> Option<TypedDate> {
+    if (1000..=3000).contains(&year) {
+        return Some(TypedDate {
+            stored: text.to_string(),
+            year,
+            month: 1,
+            day: 1,
+        });
+    }
+    None
+}
+
+fn from_naive(date: chrono::NaiveDate) -> TypedDate {
+    use chrono::Datelike;
+    TypedDate {
+        stored: date.format("%Y-%m-%d").to_string(),
+        year: date.year(),
+        month: date.month(),
+        day: date.day(),
+    }
 }
 
 /// The Age ratings entry: the title with its Edit… (and, after a staged
@@ -1190,7 +1341,60 @@ fn run_refetch_missing(
 
 #[cfg(test)]
 mod tests {
-    use super::snap_half_step;
+    use super::{parse_typed_date, snap_half_step};
+
+    #[test]
+    fn test_parse_typed_date_accepts_the_shapes_people_type() {
+        // ISO with any of the three separators.
+        assert_eq!(
+            parse_typed_date("1998-08-24").map(|d| d.stored),
+            Some("1998-08-24".into())
+        );
+        assert_eq!(
+            parse_typed_date("1998/8/24").map(|d| d.stored),
+            Some("1998-08-24".into())
+        );
+        assert_eq!(
+            parse_typed_date(" 1998.08.24 ").map(|d| d.stored),
+            Some("1998-08-24".into())
+        );
+        // Day-first, dot or slash.
+        assert_eq!(
+            parse_typed_date("24.08.1998").map(|d| d.stored),
+            Some("1998-08-24".into())
+        );
+        assert_eq!(
+            parse_typed_date("24/8/1998").map(|d| d.stored),
+            Some("1998-08-24".into())
+        );
+        // Spelled months, either word order, full or abbreviated.
+        assert_eq!(
+            parse_typed_date("24 August 1998").map(|d| d.stored),
+            Some("1998-08-24".into())
+        );
+        assert_eq!(
+            parse_typed_date("Aug 24 1998").map(|d| d.stored),
+            Some("1998-08-24".into())
+        );
+        // A bare year stays a bare year; the calendar lands on Jan 1.
+        let year = parse_typed_date("1998").unwrap();
+        assert_eq!(year.stored, "1998");
+        assert_eq!((year.year, year.month, year.day), (1998, 1, 1));
+    }
+
+    #[test]
+    fn test_parse_typed_date_refuses_the_ambiguous_and_the_impossible() {
+        // Two-digit years: ambiguous by half a century.
+        assert!(parse_typed_date("24.08.98").is_none());
+        // Impossible calendar days.
+        assert!(parse_typed_date("1998-13-45").is_none());
+        assert!(parse_typed_date("31.02.1998").is_none());
+        // Not a date at all, and not a plausible year either.
+        assert!(parse_typed_date("tomorrow").is_none());
+        assert!(parse_typed_date("42").is_none());
+        assert!(parse_typed_date("").is_none());
+        assert!(parse_typed_date("   ").is_none());
+    }
 
     #[test]
     fn test_snap_half_step_snaps_and_clamps() {

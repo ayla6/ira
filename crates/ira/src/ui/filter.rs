@@ -129,6 +129,73 @@ pub fn filter_and_sort(games: &[Game], f: &GameFilter) -> Vec<Game> {
     matched.into_iter().cloned().collect()
 }
 
+/// The category name a game lands under for a group-by dimension: the
+/// console's display name, the release year, or the credited entity.
+pub(crate) fn group_key(
+    game: &Game,
+    group_by: ira_models::GroupBy,
+    entity_names: &HashMap<i64, String>,
+) -> String {
+    match group_by {
+        ira_models::GroupBy::Console => ira_models::find_console(&game.platform_id)
+            .map(|console| console.display_name.to_string())
+            .unwrap_or_else(|| game.platform_id.clone()),
+        ira_models::GroupBy::Year => {
+            if game.release_timestamp > 0 {
+                use chrono::Datelike;
+                chrono::DateTime::from_timestamp(game.release_timestamp, 0)
+                    .map(|date| date.year().to_string())
+                    .unwrap_or_default()
+            } else {
+                crate::tr!("Unknown year").to_string()
+            }
+        }
+        ira_models::GroupBy::Developer
+        | ira_models::GroupBy::Publisher
+        | ira_models::GroupBy::Genre
+        | ira_models::GroupBy::Family => entity_names
+            .get(&game.db_id)
+            .cloned()
+            .unwrap_or_else(|| crate::tr!("Uncategorized").to_string()),
+        ira_models::GroupBy::Off => game.name.clone(),
+    }
+}
+
+/// The group-by categories over `games`, in section order: years
+/// newest-first with the unknowns last, every other dimension by name.
+/// Members keep the input order, so callers that sorted `games` by the
+/// grid's sort get section contents already in grid order.
+pub(crate) fn group_categories<'a>(
+    group_by: ira_models::GroupBy,
+    games: &[&'a Game],
+    entity_names: &HashMap<i64, String>,
+) -> Vec<(String, Vec<&'a Game>)> {
+    let unknown = crate::tr!("Unknown year");
+    let mut categories: Vec<(String, Vec<&Game>)> = Vec::new();
+    for game in games {
+        let key = group_key(game, group_by, entity_names);
+        match categories
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&key))
+        {
+            Some((_, members)) => members.push(game),
+            None => categories.push((key, vec![game])),
+        }
+    }
+    match group_by {
+        ira_models::GroupBy::Year => {
+            categories.sort_by(|(a, _), (b, _)| {
+                let known_a = a.as_str() != unknown;
+                let known_b = b.as_str() != unknown;
+                known_b.cmp(&known_a).then_with(|| b.cmp(a))
+            });
+        }
+        _ => categories.sort_by_key(|(name, _)| name.to_lowercase()),
+    }
+    categories
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::game_compare;

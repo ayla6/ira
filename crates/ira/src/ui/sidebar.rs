@@ -204,50 +204,8 @@ pub fn rebuild_sidebar(state: &SharedState) {
             _ => Default::default(),
         };
 
-        let mut categories: Vec<(String, Vec<&Game>)> = Vec::new();
-        for game in &visible_games {
-            let key = match group_by {
-                ira_models::GroupBy::Console => ira_models::find_console(&game.platform_id)
-                    .map(|console| console.display_name.to_string())
-                    .unwrap_or_else(|| game.platform_id.clone()),
-                ira_models::GroupBy::Year => {
-                    if game.release_timestamp > 0 {
-                        use chrono::Datelike;
-                        chrono::DateTime::from_timestamp(game.release_timestamp, 0)
-                            .map(|date| date.year().to_string())
-                            .unwrap_or_default()
-                    } else {
-                        crate::tr!("Unknown year").to_string()
-                    }
-                }
-                ira_models::GroupBy::Developer
-                | ira_models::GroupBy::Publisher
-                | ira_models::GroupBy::Genre
-                | ira_models::GroupBy::Family => entity_names
-                    .get(&game.db_id)
-                    .cloned()
-                    .unwrap_or_else(|| crate::tr!("Uncategorized").to_string()),
-                ira_models::GroupBy::Off => unreachable!("guarded above"),
-            };
-            match categories
-                .iter_mut()
-                .find(|(name, _)| name.eq_ignore_ascii_case(&key))
-            {
-                Some((_, members)) => members.push(game),
-                None => categories.push((key, vec![game])),
-            }
-        }
-        // Years read newest first; named categories sort by name.
-        match group_by {
-            ira_models::GroupBy::Year => {
-                categories.sort_by(|(a, _), (b, _)| {
-                    let known_a = a != "Unknown year";
-                    let known_b = b != "Unknown year";
-                    known_b.cmp(&known_a).then_with(|| b.cmp(a))
-                });
-            }
-            _ => categories.sort_by_key(|(name, _)| name.to_lowercase()),
-        }
+        let categories =
+            super::filter::group_categories(group_by, &visible_games, &entity_names);
 
         let mut derived: HashMap<String, HashSet<i64>> = HashMap::new();
         for (name, members) in &categories {

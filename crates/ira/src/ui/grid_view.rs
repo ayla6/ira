@@ -1,6 +1,6 @@
 use crate::Game;
 use gtk4::prelude::*;
-use ira_models::{GroupSelection, SortMode};
+use ira_models::{GroupBy, GroupSelection, SortMode};
 
 use super::context_menu::show_game_context_menu;
 use super::css::*;
@@ -447,6 +447,58 @@ fn make_unbind(item_size: Rc<Cell<(i32, i32)>>) -> UnbindFn {
     })
 }
 
+/// Section mode's data: when a group-by dimension is active and the grid
+/// shows the whole library, the games are ordered by category and the
+/// section titles ride along for the grid's header rows. Any other view
+/// (search, a narrowed selection, no grouping) is flat.
+fn arrange_sections(state: &SharedState, games: &[Game]) -> (Vec<Game>, Vec<(String, u32)>) {
+    let (group_by, searching) = {
+        let s = state.borrow();
+        (s.cfg.group_by, !s.search_query.is_empty())
+    };
+    let selected_all = state.borrow().selected_group == GroupSelection::AllGames;
+    if group_by == GroupBy::Off || searching || !selected_all || games.is_empty() {
+        return (games.to_vec(), Vec::new());
+    }
+    let entity_names = match group_by {
+        GroupBy::Publisher => ira_db::game_entity_names(
+            &state.borrow().db,
+            ira_db::KIND_COMPANY,
+            Some("is_publisher"),
+        )
+        .unwrap_or_default(),
+        GroupBy::Developer => ira_db::game_entity_names(
+            &state.borrow().db,
+            ira_db::KIND_COMPANY,
+            Some("is_developer"),
+        )
+        .unwrap_or_default(),
+        GroupBy::Genre => {
+            ira_db::game_entity_names(&state.borrow().db, ira_db::KIND_GENRE, None)
+                .unwrap_or_default()
+        }
+        GroupBy::Family => {
+            ira_db::game_entity_names(&state.borrow().db, ira_db::KIND_FAMILY, None)
+                .unwrap_or_default()
+        }
+        _ => Default::default(),
+    };
+    let refs: Vec<&Game> = games.iter().collect();
+    let categories = super::filter::group_categories(group_by, &refs, &entity_names);
+    let mut ordered = Vec::with_capacity(games.len());
+    let mut sections = Vec::with_capacity(categories.len());
+    for (title, members) in categories {
+        if members.is_empty() {
+            continue;
+        }
+        sections.push((title, members.len() as u32));
+        for game in members {
+            ordered.push(game.clone());
+        }
+    }
+    (ordered, sections)
+}
+
 fn build_grid_view(
     state: &SharedState,
     games: &[Game],
@@ -457,14 +509,33 @@ fn build_grid_view(
     header_box: &gtk4::Box,
 ) {
     let _span = tracing::info_span!("build_grid_view", count = games.len()).entered();
+    let (games, sections) = arrange_sections(state, games);
     let store = gio::ListStore::new::<GameItem>();
-    for game in games {
+    for game in &games {
         store.append(&GameItem::new(game));
     }
     state.borrow_mut().grid_store = store.clone();
 
     let grid = VirtualGrid::new(cover_width);
     grid.set_square(square);
+    grid.set_header_factory(
+        Rc::new(|| {
+            let label = gtk4::Label::new(None);
+            label.set_xalign(0.0);
+            label.add_css_class(CSS_SECTION_TITLE);
+            label.set_margin_start(16);
+            label.set_margin_end(16);
+            label.set_valign(gtk4::Align::End);
+            label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+            label.upcast()
+        }),
+        Rc::new(|widget, title| {
+            widget
+                .downcast_ref::<gtk4::Label>()
+                .expect("section header cell")
+                .set_text(title);
+        }),
+    );
     {
         let s = state.borrow();
         s.grid.set(Some(&grid));
@@ -492,6 +563,7 @@ fn build_grid_view(
     }));
 
     grid.set_model(&store);
+    grid.set_sections(sections);
     grid.set_header(Some(header_box));
     grid.set_hexpand(true);
     grid.set_halign(gtk4::Align::Fill);
@@ -679,9 +751,13 @@ fn progress_text(completed: usize, total: usize) -> String {
 
 pub fn refresh_grid_store(state: &SharedState) {
     let games = filtered_games(state);
+    let (games, sections) = arrange_sections(state, &games);
     let store = state.borrow().grid_store.clone();
     let new_items: Vec<GameItem> = games.iter().map(GameItem::new).collect();
     store.splice(0, store.n_items(), &new_items);
+    if let Some(grid) = state.borrow().grid.upgrade() {
+        grid.set_sections(sections);
+    }
 }
 
 /// Rebuilds the grid header (heading + recently played row) in place, for

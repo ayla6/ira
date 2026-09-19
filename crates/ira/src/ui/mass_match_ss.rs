@@ -269,16 +269,27 @@ pub(super) fn start_ss_batch_matching(
             s.cfg.clone(),
         )
     };
-    let queue: Vec<BatchItem> = needs_matching
+    // Console games go first: ScreenScraper's title search answers them
+    // in a request or two, while the PC branch fans out into Steam diff
+    // requests that can hang for a minute a game — and its rows must not
+    // starve the console passes behind them.
+    let mut queue: Vec<(bool, BatchItem)> = needs_matching
         .iter()
         .enumerate()
         .filter(|(i, g)| rows.get(*i).is_some_and(|r| r.ss.is_some()) && !missed.contains(&g.db_id))
-        .map(|(row_idx, g)| BatchItem {
-            name: g.name.clone(),
-            db_id: g.db_id,
-            row_idx,
+        .map(|(row_idx, g)| {
+            (
+                g.kind.is_pc(),
+                BatchItem {
+                    name: g.name.clone(),
+                    db_id: g.db_id,
+                    row_idx,
+                },
+            )
         })
         .collect();
+    queue.sort_by_key(|(pc, _)| *pc);
+    let queue: Vec<BatchItem> = queue.into_iter().map(|(_, item)| item).collect();
     if queue.is_empty() {
         eprintln!("ScreenScraper batch: every covered game already has its answer");
         return;

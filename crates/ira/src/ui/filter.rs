@@ -51,6 +51,36 @@ pub struct GameFilter<'a> {
     pub entity_names: &'a HashMap<i64, String>,
 }
 
+/// The ordering every game list shares — the grid's, so the sidebar can
+/// never disagree with it: the sort mode (Publisher and Developer order
+/// by the credited names from the cache, uncredited games after), ties
+/// broken by insertion id, the whole thing reversed when descending.
+pub(crate) fn game_compare(
+    a: &Game,
+    b: &Game,
+    sort_mode: SortMode,
+    descending: bool,
+    entity_names: &HashMap<i64, String>,
+) -> std::cmp::Ordering {
+    let ord = match sort_mode {
+        SortMode::Publisher | SortMode::Developer => entity_names
+            .get(&a.db_id)
+            .map(String::as_str)
+            .cmp(&entity_names.get(&b.db_id).map(String::as_str))
+            .then_with(|| {
+                a.sort_key()
+                    .to_lowercase()
+                    .cmp(&b.sort_key().to_lowercase())
+            }),
+        _ => sort_mode.compare(a, b).then_with(|| a.db_id.cmp(&b.db_id)),
+    };
+    if descending {
+        ord.reverse()
+    } else {
+        ord
+    }
+}
+
 /// The filter+sort core shared by the desktop sidebar and big-picture,
 /// so the two modes can't drift apart again: hidden handling, search,
 /// group membership, and the stable sort (equal keys tiebreak on the
@@ -95,27 +125,47 @@ pub fn filter_and_sort(games: &[Game], f: &GameFilter) -> Vec<Game> {
         })
         .collect();
 
-    matched.sort_by(|a, b| {
-        let ord = match *sort_mode {
-            // The credited names live in the database, so the entity
-            // orderings overlay their map here; uncredited games sort
-            // after the credited ones.
-            SortMode::Publisher | SortMode::Developer => entity_names
-                .get(&a.db_id)
-                .map(String::as_str)
-                .cmp(&entity_names.get(&b.db_id).map(String::as_str))
-                .then_with(|| {
-                    a.sort_key()
-                        .to_lowercase()
-                        .cmp(&b.sort_key().to_lowercase())
-                }),
-            _ => sort_mode.compare(a, b).then_with(|| a.db_id.cmp(&b.db_id)),
-        };
-        if *sort_descending {
-            ord.reverse()
-        } else {
-            ord
-        }
-    });
+    matched.sort_by(|a, b| game_compare(a, b, *sort_mode, *sort_descending, entity_names));
     matched.into_iter().cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::game_compare;
+    use crate::Game;
+    use ira_models::SortMode;
+
+    #[test]
+    fn test_game_compare_matches_the_grid_and_flips() {
+        let a = Game {
+            db_id: 1,
+            sort_title: "Alpha".into(),
+            ..Game::default()
+        };
+        let b = Game {
+            db_id: 2,
+            sort_title: "Beta".into(),
+            ..Game::default()
+        };
+
+        // Alphabetical ascending puts Alpha first; descending flips it.
+        assert_eq!(
+            game_compare(&a, &b, SortMode::Alphabetical, false, &Default::default()),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            game_compare(&a, &b, SortMode::Alphabetical, true, &Default::default()),
+            std::cmp::Ordering::Greater
+        );
+        // Equal keys tiebreak on the insertion id, in both directions.
+        let twin = Game {
+            db_id: 2,
+            sort_title: "Alpha".into(),
+            ..Game::default()
+        };
+        assert_eq!(
+            game_compare(&a, &twin, SortMode::Alphabetical, false, &Default::default()),
+            std::cmp::Ordering::Less
+        );
+    }
 }

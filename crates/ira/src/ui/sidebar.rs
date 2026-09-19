@@ -137,6 +137,25 @@ pub fn rebuild_sidebar(state: &SharedState) {
             s.cfg.group_by,
         )
     };
+    // Every game list below is ordered by the grid's own comparator, so
+    // changing the sort reshapes the sidebar alongside the grid. The
+    // entity sorts follow the credited names from the cache, exactly
+    // like filtered_games does; other modes never touch the map.
+    let (sort_mode, sort_descending) = {
+        let s = state.borrow();
+        (s.cfg.sort_mode, s.cfg.sort_descending)
+    };
+    let sort_entity_names = match sort_mode {
+        ira_models::SortMode::Publisher => {
+            ira_db::game_entity_names(&state.borrow().db, ira_db::KIND_COMPANY, Some("is_publisher"))
+                .unwrap_or_default()
+        }
+        ira_models::SortMode::Developer => {
+            ira_db::game_entity_names(&state.borrow().db, ira_db::KIND_COMPANY, Some("is_developer"))
+                .unwrap_or_default()
+        }
+        _ => Default::default(),
+    };
 
     state.borrow_mut().restoring = true;
     let old_n = store.n_items();
@@ -235,10 +254,6 @@ pub fn rebuild_sidebar(state: &SharedState) {
         }
         state.borrow_mut().derived_members = derived;
 
-        let (sort_mode, sort_descending) = {
-            let s = state.borrow();
-            (s.cfg.sort_mode, s.cfg.sort_descending)
-        };
         for (name, members) in &categories {
             let id = ira_models::derived_group_id(name);
             let is_collapsed = collapsed.contains(&id);
@@ -252,14 +267,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
                 continue;
             }
             let mut sorted: Vec<&Game> = members.to_vec();
-            sorted.sort_by(|a, b| {
-                let ord = sort_mode.compare(a, b).then_with(|| a.db_id.cmp(&b.db_id));
-                if sort_descending {
-                    ord.reverse()
-                } else {
-                    ord
-                }
-            });
+            sort_grid_order(&mut sorted, sort_mode, sort_descending, &sort_entity_names);
             for game in &sorted {
                 items.push(SidebarItem::from_game(game, &running_games));
             }
@@ -267,11 +275,17 @@ pub fn rebuild_sidebar(state: &SharedState) {
     } else if !searching {
         for g in &groups {
             let member_ids = group_members.get(&g.id);
-            let collection_games: Vec<&Game> = visible_games
+            let mut collection_games: Vec<&Game> = visible_games
                 .iter()
                 .filter(|game| member_ids.is_some_and(|ids| ids.contains(&game.db_id)))
                 .copied()
                 .collect();
+            sort_grid_order(
+                &mut collection_games,
+                sort_mode,
+                sort_descending,
+                &sort_entity_names,
+            );
 
             if collection_games.is_empty() && member_ids.is_some_and(|ids| !ids.is_empty()) {
                 continue;
@@ -292,11 +306,17 @@ pub fn rebuild_sidebar(state: &SharedState) {
             }
         }
 
-        let uncategorized: Vec<&Game> = visible_games
+        let mut uncategorized: Vec<&Game> = visible_games
             .iter()
             .filter(|g| !grouped_ids.contains(&g.db_id))
             .copied()
             .collect();
+        sort_grid_order(
+            &mut uncategorized,
+            sort_mode,
+            sort_descending,
+            &sort_entity_names,
+        );
 
         if !uncategorized.is_empty() {
             let is_collapsed = collapsed.contains(&0);
@@ -314,27 +334,13 @@ pub fn rebuild_sidebar(state: &SharedState) {
         state.borrow_mut().derived_members = HashMap::new();
     } else {
         state.borrow_mut().derived_members = HashMap::new();
-        let (search, sort_mode, sort_descending) = {
-            let s = state.borrow();
-            (
-                SearchQuery::parse(&s.search_query),
-                s.cfg.sort_mode,
-                s.cfg.sort_descending,
-            )
-        };
+        let search = SearchQuery::parse(&state.borrow().search_query);
         let mut filtered: Vec<&Game> = visible_games
             .iter()
             .filter(|g| search.matches(g))
             .copied()
             .collect();
-        filtered.sort_by(|a, b| {
-            let ord = sort_mode.compare(a, b);
-            if sort_descending {
-                ord.reverse()
-            } else {
-                ord
-            }
-        });
+        sort_grid_order(&mut filtered, sort_mode, sort_descending, &sort_entity_names);
 
         for game in &filtered {
             items.push(SidebarItem::from_game(game, &running_games));
@@ -351,6 +357,18 @@ pub fn rebuild_sidebar(state: &SharedState) {
 
     restore_selection(state);
     state.borrow_mut().restoring = false;
+}
+
+/// Order a sidebar game list exactly the way the grid orders its own:
+/// filter.rs's shared comparator. This is what makes the sidebar reshape
+/// itself when the sort changes instead of sitting still.
+fn sort_grid_order(
+    games: &mut [&Game],
+    sort_mode: ira_models::SortMode,
+    descending: bool,
+    entity_names: &HashMap<i64, String>,
+) {
+    games.sort_by(|a, b| super::filter::game_compare(a, b, sort_mode, descending, entity_names));
 }
 
 fn restore_selection(state: &SharedState) {

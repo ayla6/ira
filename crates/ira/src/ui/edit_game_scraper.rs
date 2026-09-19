@@ -607,162 +607,31 @@ fn release_date_row(
         row.set_subtitle(release_date);
     }
 
-    // libadwaita has no date picker of its own; the GNOME-apps pattern
-    // is a GtkCalendar in a popover off the row's calendar button. The
-    // entry above it takes the date as text — typing moves the calendar,
-    // picking fills the entry — and no dead space either way.
-    let pick = gtk4::MenuButton::new();
-    pick.set_icon_name("x-office-calendar-symbolic");
-    pick.add_css_class(CSS_FLAT);
-    pick.set_valign(gtk4::Align::Center);
-    pick.set_tooltip_text(Some(&crate::tr!("Pick or type a date")));
-
-    let calendar = gtk4::Calendar::new();
-    let timestamp = ira_db::scraper_release_timestamp(release_date);
-    if timestamp > 0 {
-        if let Some(date) = chrono::DateTime::from_timestamp(timestamp, 0) {
-            use chrono::Datelike;
-            if let Ok(preset) = glib::DateTime::from_utc(
-                date.year(),
-                date.month() as i32,
-                date.day() as i32,
-                0,
-                0,
-                0.0,
-            ) {
-                calendar.select_day(&preset);
-            }
-        }
-    }
-
-    // The typed date, normalized, while it is still being typed: `Some`
-    // only while the entry holds a shape the parser accepts. An empty
-    // entry defers to the calendar instead.
-    let typed: std::rc::Rc<std::cell::RefCell<Option<String>>> = Default::default();
-    let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some(&crate::tr!(
-        "1998-08-24, 24.08.1998, Aug 24 1998, 1998"
-    )));
-    entry.set_tooltip_text(Some(&crate::tr!(
-        "Type the date — the calendar follows along"
-    )));
-    entry.set_text(release_date);
-
-    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    let clear = gtk4::Button::with_label(&crate::tr!("Clear"));
-    clear.add_css_class(CSS_FLAT);
-    clear.set_halign(gtk4::Align::Start);
-    clear.set_hexpand(true);
-    let apply = gtk4::Button::with_label(&crate::tr!("Apply"));
-    apply.add_css_class(CSS_SUGGESTED_ACTION);
-    apply.set_halign(gtk4::Align::End);
-    buttons.append(&clear);
-    buttons.append(&apply);
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-    content.set_margin_top(8);
-    content.set_margin_bottom(8);
-    content.set_margin_start(8);
-    content.set_margin_end(8);
-    content.append(&entry);
-    content.append(&calendar);
-    content.append(&buttons);
-    let popover = gtk4::Popover::new();
-    popover.set_child(Some(&content));
-    pick.set_popover(Some(&popover));
-
-    {
-        let typed = typed.clone();
-        let calendar = calendar.clone();
-        let entry = entry.clone();
-        let apply = apply.clone();
-        // Every keystroke re-parses: a good shape selects its day in the
-        // calendar (the feedback that says the date was understood), a
-        // bad one flags the entry and stands Apply down.
-        entry.connect_changed(move |entry| {
-            let text = entry.text().trim().to_string();
-            match parse_typed_date(&text) {
-                Some(parsed) => {
-                    entry.remove_css_class("error");
-                    *typed.borrow_mut() = Some(parsed.stored);
-                    if let Ok(preset) = glib::DateTime::from_utc(
-                        parsed.year,
-                        parsed.month as i32,
-                        parsed.day as i32,
-                        0,
-                        0,
-                        0.0,
-                    ) {
-                        calendar.select_day(&preset);
-                    }
-                }
-                None if text.is_empty() => {
-                    entry.remove_css_class("error");
-                    *typed.borrow_mut() = None;
-                }
-                None => {
-                    entry.add_css_class("error");
-                    *typed.borrow_mut() = None;
-                }
-            }
-            apply.set_sensitive(text.is_empty() || typed.borrow().is_some());
-        });
-    }
-    {
-        // Picking a day fills the entry — unless the entry is what moved
-        // the calendar, whose echoed text would fight the typist.
-        let entry = entry.clone();
-        let typed = typed.clone();
-        calendar.connect_day_selected(move |calendar| {
-            let iso = calendar.date().format("%Y-%m-%d").map(|s| s.to_string());
-            let Ok(iso) = iso else { return };
-            if parse_typed_date(&entry.text()).is_some_and(|parsed| parsed.stored == iso) {
-                return;
-            }
-            *typed.borrow_mut() = Some(iso.clone());
-            entry.set_text(&iso);
-            entry.remove_css_class("error");
-        });
-    }
+    let pick = Rc::new(super::date_pick::DatePick::new(release_date));
+    pick.set_tooltip(&crate::tr!("Pick or type a date"));
+    let popover = pick.popover();
     {
         let slot = slot.clone();
-        let typed = typed.clone();
-        let calendar = calendar.clone();
-        let entry = entry.clone();
-        let popover = popover.clone();
         let (state, game, win) = (state.clone(), game.clone(), win.clone());
-        let commit_entry = entry.clone();
-        let commit: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
-            // The entry wins while it holds a valid typed date; an empty
-            // entry applies whatever day the calendar shows.
-            let stored = if commit_entry.text().trim().is_empty() {
-                calendar
-                    .date()
-                    .format("%Y-%m-%d")
-                    .ok()
-                    .map(|s| s.to_string())
-            } else {
-                typed.borrow().clone()
-            };
-            let Some(stored) = stored else { return };
+        pick.on_apply({
+            let pick = pick.clone();
+            move || {
+            // The typed date wins while valid; an empty entry applies
+            // whatever day the calendar shows.
+            let Some(stored) = pick.date() else { return };
             edit_field(&slot, |m| {
                 m.release_date = stored.clone();
                 m.release_timestamp = ira_db::scraper_release_timestamp(&stored);
             });
             popover.popdown();
             refresh_rows(&state, &game, &win, &slot);
+            }
         });
-        apply.connect_clicked({
-            let commit = commit.clone();
-            move |_| commit()
-        });
-        entry.connect_activate(move |_| commit());
     }
     {
         let slot = slot.clone();
-        let popover = popover.clone();
         let (state, game, win) = (state.clone(), game.clone(), win.clone());
-        clear.connect_clicked(move |_| {
-            popover.popdown();
+        pick.on_clear(move || {
             edit_field(&slot, |m| {
                 m.release_date = String::new();
                 m.release_timestamp = 0;
@@ -770,17 +639,17 @@ fn release_date_row(
             refresh_rows(&state, &game, &win, &slot);
         });
     }
-    row.add_suffix(&pick);
+    row.add_suffix(pick.button());
     slot.add(row.upcast());
 }
 
 /// A typed date the entry accepted: the normalized string to store and
 /// the day the calendar preview lands on.
-struct TypedDate {
-    stored: String,
-    year: i32,
-    month: u32,
-    day: u32,
+pub(super) struct TypedDate {
+    pub(super) stored: String,
+    pub(super) year: i32,
+    pub(super) month: u32,
+    pub(super) day: u32,
 }
 
 /// The shapes a person actually types, normalized to the two stored
@@ -788,7 +657,7 @@ struct TypedDate {
 /// ISO with any of `- / .`, day-first `24.08.1998` / `24/08/1998`,
 /// spelled months in either word order, and a bare year. Two-digit
 /// years are refused — ambiguous by half a century.
-fn parse_typed_date(text: &str) -> Option<TypedDate> {
+pub(super) fn parse_typed_date(text: &str) -> Option<TypedDate> {
     let text = text.trim();
     if text.is_empty() {
         return None;

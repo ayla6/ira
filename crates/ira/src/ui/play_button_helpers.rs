@@ -979,7 +979,7 @@ pub(super) fn launch_other(
 
     if !launch.exe.is_empty() {
         let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
-        let wine_opt = if wine.enabled { Some(&wine) } else { None };
+        let wine_opt = wine.enabled.then_some(&wine);
         ira_launcher::launch_game(
             &launch,
             wine_opt,

@@ -9,6 +9,8 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use super::helpers::clear_children;
+
 /// The check rows of one rule's value dimension: the name, its row, and
 /// its check. The editor collects the picked names from these.
 pub(super) type ValueChecks =
@@ -70,9 +72,7 @@ impl ValuesPage {
 
     /// Host `list` on this page and come to the front.
     pub(super) fn open(&self, list: &gtk4::ListBox) {
-        while let Some(child) = self.slot.first_child() {
-            self.slot.remove(&child);
-        }
+        clear_children(&self.slot);
         self.slot.append(list);
         self.search.set_text("");
 
@@ -132,9 +132,7 @@ pub(super) fn fill_check_list(
     values_row: &adw::ActionRow,
 ) {
     checks.borrow_mut().clear();
-    while let Some(child) = list.first_child() {
-        list.remove(&child);
-    }
+    clear_children(list);
     for name in names {
         let check = gtk4::CheckButton::new();
         check.set_active(picked.contains(name));

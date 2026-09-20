@@ -77,16 +77,16 @@ pub(super) fn handle_unified_sgdb_result(
         {
             g.sgdb_id = sgdb_id.clone();
         }
-        let steam_dl = state.borrow().steam.clone();
-        let sender = state.borrow().sender.clone();
-        let save_dir = state.borrow().save_dir.clone();
-        let cfg_dl = state.borrow().cfg.clone();
-        let game_for_dir = state
-            .borrow()
-            .games
-            .iter()
-            .find(|g| g.db_id == db_id)
-            .cloned();
+        let (steam_dl, sender, save_dir, cfg_dl, game_for_dir) = {
+            let s = state.borrow();
+            (
+                s.steam.clone(),
+                s.sender.clone(),
+                s.save_dir.clone(),
+                s.cfg.clone(),
+                s.games.iter().find(|g| g.db_id == db_id).cloned(),
+            )
+        };
         std::thread::spawn(move || {
             let _s = tracing::info_span!("handle_unified_sgdb_result", db_id = db_id, sgdb_id = %sgdb_id).entered();
             std::thread::sleep(std::time::Duration::from_millis(100));

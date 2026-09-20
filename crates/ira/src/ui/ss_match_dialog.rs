@@ -58,16 +58,17 @@ pub enum SsMatchSink {
 /// replaced by it.
 pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &ScrapedGame) {
     let timestamp = ira_db::scraper_release_timestamp(&picked.release_date);
-    let mut merged = ira_db::scraper_metadata_for_game(&state.borrow().db, db_id)
+    let s = state.borrow();
+    let mut merged = ira_db::scraper_metadata_for_game(&s.db, db_id)
         .ok()
         .flatten()
         .unwrap_or_default();
     merged.merge_match(&picked.metadata(timestamp));
-    if let Err(e) = ira_db::store_scraper_metadata(&state.borrow().db, db_id, &merged) {
+    if let Err(e) = ira_db::store_scraper_metadata(&s.db, db_id, &merged) {
         eprintln!("Failed to store ScreenScraper metadata: {e}");
         return;
     }
-    if let Err(e) = ira_db::clear_scraper_miss(&state.borrow().db, db_id) {
+    if let Err(e) = ira_db::clear_scraper_miss(&s.db, db_id) {
         eprintln!("Failed to clear the ScreenScraper miss marker: {e}");
     }
     // The SS title is authoritative for consoles whose own names came
@@ -78,9 +79,9 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
         .unwrap_or(false);
     let mut new_title = None;
     if replace_title && !picked.name.is_empty() {
-        if let Err(e) = ira_db::update_game_title(&state.borrow().db, db_id, &picked.name) {
+        if let Err(e) = ira_db::update_game_title(&s.db, db_id, &picked.name) {
             eprintln!("Failed to store the ScreenScraper title: {e}");
-        } else if let Err(e) = ira_db::set_title_trusted(&state.borrow().db, db_id, true) {
+        } else if let Err(e) = ira_db::set_title_trusted(&s.db, db_id, true) {
             eprintln!("Failed to mark the title trusted: {e}");
         } else {
             new_title = Some(picked.name.clone());

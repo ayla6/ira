@@ -372,6 +372,9 @@ fn apply_stick_processing(
         deadzone_inner,
         deadzone_outer,
         curve,
+        // Selection state for the settings UI: the engine only sees the
+        // exponent.
+        curve_custom: _,
         response_axis_style,
         outer_ring: _,
     } = processing;

@@ -759,6 +759,10 @@ pub struct StickProcessing {
     pub deadzone_inner: f32,
     pub deadzone_outer: f32,
     pub curve: f32,
+    /// Whether `curve` is a user-defined exponent rather than one of the
+    /// named presets. Preset values overlap custom ones (1.0 is both Linear
+    /// and a legal custom exponent), so the flag carries the selection.
+    pub curve_custom: bool,
     /// Whether the response curve bends each axis on its own or the
     /// deflection's distance from the deadzone.
     pub response_axis_style: ResponseAxisStyle,
@@ -779,6 +783,7 @@ impl Default for StickProcessing {
             deadzone_inner: 0.1,
             deadzone_outer: 0.95,
             curve: 1.0,
+            curve_custom: false,
             response_axis_style: ResponseAxisStyle::default(),
             outer_ring: None,
         }

@@ -239,10 +239,15 @@ impl ScraperMetadata {
 
 /// Consoles whose games are identified on ScreenScraper by disc serial
 /// instead of any file digest: multi-gigabyte images (PS2 DVDs, Wii/GC
-/// discs) whose repacks — chd, rvz, wux — scramble every hash, while the
-/// serial printed on the disc survives all of them.
+/// discs, Dreamcast GD-ROMs) whose repacks — chd, rvz, wux, gdi —
+/// scramble every hash, while the serial printed on the disc survives
+/// all of them. ScreenScraper stores Dreamcast serials in the raw
+/// IP.BIN form ("MK-51058-50", "HDR-0078"), so no reshaping is needed.
 pub fn screenscraper_matches_by_serial(platform_id: &str) -> bool {
-    matches!(platform_id, "ps2" | "ps3" | "wii" | "gc" | "psx" | "psp")
+    matches!(
+        platform_id,
+        "ps2" | "ps3" | "wii" | "gc" | "psx" | "psp" | "dc"
+    )
 }
 
 /// Consoles whose images are too big for content hashing to be worth it.
@@ -252,7 +257,10 @@ pub fn screenscraper_hashes_content(platform_id: &str) -> bool {
     // 3DS is excluded by decision: its dumps' md5s are not on the
     // source, so hashing could only answer misses — 3DS matches by
     // title search, like the switch.
-    !matches!(platform_id, "ps2" | "ps3" | "wii" | "gc" | "switch" | "wiiu" | "3ds")
+    !matches!(
+        platform_id,
+        "ps2" | "ps3" | "wii" | "gc" | "switch" | "wiiu" | "3ds" | "dc"
+    )
 }
 
 /// Consoles whose scan-time titles come from official metadata (param.sfo,
@@ -825,5 +833,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_dreamcast_matches_by_serial_like_the_other_disc_consoles() {
+        for platform in ["ps2", "ps3", "wii", "gc", "psx", "psp", "dc"] {
+            assert!(
+                super::screenscraper_matches_by_serial(platform),
+                "{platform} should match by serial"
+            );
+        }
+        // PS1 and PSP images are small enough to still hash; Dreamcast
+        // GD-ROMs join the big repacked images that never are.
+        for platform in ["ps2", "ps3", "wii", "gc", "dc"] {
+            assert!(
+                !super::screenscraper_hashes_content(platform),
+                "{platform} images should not be content-hashed"
+            );
+        }
+        // Cartridge-size dumps still hash.
+        assert!(super::screenscraper_hashes_content("gba"));
+        assert!(!super::screenscraper_matches_by_serial("gba"));
     }
 }

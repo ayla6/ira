@@ -9,10 +9,11 @@ struct DiscInfo {
 
 /// File types the disc reader can extract a serial from. Consoles whose
 /// ROMs are plain cartridges (nes, snes, gba, nds, …) can never yield one,
-/// so spawning the reader for them is pure waste.
+/// so spawning the reader for them is pure waste. `gdi` and `cdi` are
+/// Dreamcast GD-ROM dumps, whose serial lives in the IP.BIN boot header.
 const DISC_EXTENSIONS: &[&str] = &[
     "bin", "cue", "chd", "pbp", "iso", "ecm", "gcm", "cso", "rvz", "wia", "wud", "wux", "mdf",
-    "img", "gz",
+    "img", "gz", "gdi", "cdi",
 ];
 
 pub(crate) fn is_disc_extension(path: &Path) -> bool {

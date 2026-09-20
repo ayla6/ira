@@ -1518,6 +1518,18 @@ mod tests {
     }
 
     #[test]
+    fn test_dreamcast_serials_pass_through_normalized() {
+        // IP.BIN serials are already in ScreenScraper's dashed form;
+        // normalization only uppercases.
+        assert_eq!(super::normalize_serial("MK-51058-50"), "MK-51058-50");
+        assert_eq!(super::normalize_serial("hdr-0078"), "HDR-0078");
+        assert_eq!(super::normalize_serial("t-9701n"), "T-9701N");
+        assert!(super::looks_like_serial("MK-51058-50"));
+        assert!(super::looks_like_serial("HDR-0078"));
+        assert!(super::looks_like_serial("T-9701N"));
+    }
+
+    #[test]
     fn test_match_rank_tolerates_subtitles_rejects_sequels() {
         let target = normalized_for_match("Dragon Quest I & II");
         assert_eq!(
@@ -2013,5 +2025,78 @@ mod tests {
         // A region hint never rescues a non-match.
         let candidates = [scraped("1", &[("jp", "Completely Different Game")])];
         assert!(pick_candidate(&candidates, &target, &["jp"]).is_none());
+    }
+
+    /// Live probe of the Dreamcast serial stage: reads the real ROM
+    /// folder, extracts each dump's IP.BIN serial through the disc
+    /// reader, and asks ScreenScraper's serialnum lookup about the
+    /// first few. Ignored by default — spends quota and needs the
+    /// user's dumps:
+    /// `cargo test -p ira diagnostic_live_dc -- --ignored --nocapture`
+    /// The reader binary has to sit beside the test executable for the
+    /// serials to come out at all (`cp target/debug/ira-disc-info
+    /// target/debug/deps/`) — production finds it next to the main
+    /// binary, the test harness does not. ScreenScraper's serial data
+    /// is uneven here: some dumps' serials are known under their
+    /// Redump pressing form ("MK-51058-50") that IP.BIN never carries,
+    /// others are missing outright — a miss simply falls through to the
+    /// title search, exactly like the PS2 stage.
+    #[test]
+    #[ignore = "live diagnostic: keyring, real network, user's ROMs"]
+    fn diagnostic_live_dc_serial_pipeline() {
+        let cfg = ira_config::load_config();
+        let steam = ira_api::SteamDataClient::new(
+            cfg.steam_api_key.clone(),
+            cfg.steam_griddb_api_key.clone(),
+            &std::env::temp_dir().join("ira-diagnostic").to_string_lossy(),
+        );
+        let creds = ira_api::ScraperCreds::from_account(
+            cfg.screenscraper_id.clone(),
+            cfg.screenscraper_password.clone(),
+        );
+
+        let Some(root) = cfg.all_rom_roots().first().cloned() else {
+            eprintln!("== no ROM roots configured");
+            return;
+        };
+        let dir = root.join("dc");
+        let Ok(dumps) = std::fs::read_dir(&dir) else {
+            eprintln!("== no dc folder under {}", root.display());
+            return;
+        };
+        let mut dumps: Vec<_> = dumps
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| matches!(e, "chd" | "gdi" | "cdi"))
+            })
+            .collect();
+        dumps.sort();
+        eprintln!("== {} dc dumps under {}", dumps.len(), dir.display());
+
+        for path in dumps.iter().take(4) {
+            let serial = ira_platforms::rom_serial::read_serial(path)
+                .map(|s| super::normalize_serial(&s))
+                .filter(|s| super::looks_like_serial(s));
+            eprintln!(
+                "== '{}' serial {serial:?}",
+                path.file_name().unwrap().to_string_lossy()
+            );
+            let Some(serial) = serial else {
+                continue;
+            };
+            match steam.screenscraper_serial_lookup(&creds, &serial, "dc") {
+                Err(e) => eprintln!("     lookup failed: {e}"),
+                Ok(games) => match games.first() {
+                    Some(game) => eprintln!(
+                        "     HIT -> ss id {} '{}'",
+                        game.ss_id, game.name
+                    ),
+                    None => eprintln!("     unknown to the source"),
+                },
+            }
+        }
     }
 }

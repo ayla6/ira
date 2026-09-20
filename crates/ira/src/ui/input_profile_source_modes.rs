@@ -5,13 +5,9 @@
 //! of its mode shifts.
 
 use super::input_profile_sheet_base::{
-    is_trigger_axis, with_mapping, Reopen, SheetBase,
+    combo_row, is_trigger_axis, with_mapping, Reopen, SheetBase,
 };
-use super::input_profile_widgets::{
-    slider_row_with_scale,
-    option_picker_popover, picker_button, slider_row,
-    OptionChoice, SliderSpec,
-};
+use super::input_profile_widgets::{slider_row, slider_row_with_scale, OptionChoice, SliderSpec};
 use adw::prelude::*;
 use ira_input::{GamepadAxis, InputSource, JoystickSettings, SourceMode, StickOutput, StickProcessing};
 
@@ -123,7 +119,7 @@ pub(crate) fn curve_presets() -> Vec<OptionChoice> {
         OptionChoice {
             title: crate::tr!("Custom Curve"),
             description: Some(crate::tr!(
-                "A custom curve can be defined using the slider below the preset picker."
+                "A custom curve can be defined using the slider below."
             )),
         },
     ]
@@ -142,6 +138,17 @@ pub(crate) fn curve_preset_index(curve: f32) -> usize {
         }
     }
     CURVE_CUSTOM_INDEX
+}
+
+/// The picker's selected index. The `curve_custom` flag decides between a
+/// preset and Custom when the exponent is ambiguous — 1.0 is both Linear
+/// and a legal custom value.
+pub(crate) fn curve_combo_index(curve_custom: bool, curve: f32) -> usize {
+    if curve_custom {
+        CURVE_CUSTOM_INDEX
+    } else {
+        curve_preset_index(curve)
+    }
 }
 
 /// Response rows for a mode, shared by the base behavior group and by the
@@ -270,39 +277,60 @@ pub(crate) fn mode_setting_rows(
     rows
 }
 
-/// The preset picker row; its MenuButton carries the current preset's name.
+/// The Response curve combo: Steam's named presets plus Custom, which keeps
+/// the current exponent and reveals the slider underneath. Writes go through
+/// `processing_of` so both behaviors sharing these rows (Joystick and
+/// Joystick Mouse) pick the change up; the row's subtitle carries the
+/// selected preset's description.
 pub(crate) fn curve_preset_row(
     base: &SheetBase,
     target: ModeTarget,
     reopen: &Reopen,
-    curve: f32,
-) -> adw::ActionRow {
-    let row = adw::ActionRow::new();
-    row.set_title(&crate::tr!("Response curve"));
-    row.set_subtitle(&crate::tr!("How quickly the stick reaches full output"));
+    processing: &StickProcessing,
+) -> adw::ComboRow {
     let presets = curve_presets();
-    let current = curve_preset_index(curve);
-    let current_label = presets
-        .get(current)
-        .map(|choice| choice.title.clone())
-        .unwrap_or_else(|| crate::tr!("Custom Curve"));
-    let base_for_pick = base.clone();
-    let reopen_for_pick = reopen.clone();
-    let picker = option_picker_popover(&presets, current, move |index| {
-        if let Some(value) = curve_preset_value(index) {
-            let write = mode_writer(&base_for_pick, target);
-            write(&mut |mode| {
-                if let SourceMode::Joystick(settings) = mode {
-                    settings.processing.curve = value;
+    let current = curve_combo_index(processing.curve_custom, processing.curve);
+    let combo = combo_row(
+        &presets
+            .iter()
+            .map(|choice| choice.title.clone())
+            .collect::<Vec<_>>(),
+        current as u32,
+    );
+    combo.set_title(&crate::tr!("Response curve"));
+    let description = presets[current].description.clone().unwrap_or_default();
+    combo.set_subtitle(description.as_str());
+    let was_custom = current == CURVE_CUSTOM_INDEX;
+    let base = std::rc::Rc::new(base.clone());
+    let reopen = reopen.clone();
+    combo.connect_selected_notify(move |combo| {
+        let index = combo.selected() as usize;
+        let write = mode_writer(&base, target);
+        write(&mut |mode| {
+            if let Some(processing) = super::input_profile_stick_settings::processing_of(mode) {
+                match curve_preset_value(index) {
+                    Some(value) => {
+                        processing.curve = value;
+                        processing.curve_custom = false;
+                    }
+                    // Custom keeps the current exponent; the flag alone
+                    // distinguishes it from the matching preset.
+                    None => processing.curve_custom = true,
                 }
-            });
-            (base_for_pick.on_changed)();
+            }
+        });
+        if let Some(choice) = presets.get(index) {
+            let description = choice.description.clone().unwrap_or_default();
+            combo.set_subtitle(description.as_str());
         }
-        // Custom keeps the current exponent; the rebuild reveals the slider.
-        reopen_for_pick();
+        (base.on_changed)();
+        // Entering or leaving Custom is the only pick that changes the row
+        // set — it reveals or removes the slider underneath.
+        if was_custom != curve_preset_value(index).is_none() {
+            reopen();
+        }
     });
-    row.add_suffix(&picker_button(&current_label, &picker));
-    row
+    combo
 }
 
 pub(crate) fn curve_slider_row(
@@ -318,8 +346,10 @@ pub(crate) fn curve_slider_row(
         move |value| {
             let write = mode_writer(&base_for_change, target);
             write(&mut |mode| {
-                if let SourceMode::Joystick(settings) = mode {
-                    settings.processing.curve = value as f32;
+                if let Some(processing) = super::input_profile_stick_settings::processing_of(mode) {
+                    processing.curve = value as f32;
+                    // Dragging the slider is the Custom pick in progress.
+                    processing.curve_custom = true;
                 }
             });
             (base_for_change.on_adjusted)();
@@ -370,7 +400,7 @@ pub(crate) fn mode_slider_row(
 
 #[cfg(test)]
 mod tests {
-    use super::{curve_preset_index, curve_preset_value, CURVE_CUSTOM_INDEX};
+    use super::{curve_combo_index, curve_preset_index, curve_preset_value, CURVE_CUSTOM_INDEX};
 
     #[test]
     fn test_curve_preset_round_trip_for_named_values() {
@@ -401,5 +431,18 @@ mod tests {
         // Values saved as f32 can drift in the last decimals.
         assert_eq!(curve_preset_index(0.49999), 1);
         assert_eq!(curve_preset_index(1.004), 0);
+    }
+
+    #[test]
+    fn test_curve_combo_index_flag_decides_at_preset_values() {
+        // A preset value is only Custom when the flag says so.
+        assert_eq!(curve_combo_index(false, 1.0), 0);
+        assert_eq!(curve_combo_index(true, 1.0), CURVE_CUSTOM_INDEX);
+    }
+
+    #[test]
+    fn test_curve_combo_index_unknown_value_reads_as_custom() {
+        assert_eq!(curve_combo_index(false, 0.7), CURVE_CUSTOM_INDEX);
+        assert_eq!(curve_combo_index(false, 0.5), 1);
     }
 }

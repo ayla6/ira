@@ -7,7 +7,7 @@
 
 use super::input_profile_sheet_base::{combo_row, Reopen, SheetBase};
 use super::input_profile_source_modes::{
-    curve_preset_index, curve_preset_row, curve_slider_row, mode_slider_row, mode_writer,
+    curve_combo_index, curve_preset_row, curve_slider_row, mode_slider_row, mode_writer,
     ModeTarget, CURVE_CUSTOM_INDEX,
 };
 use super::input_profile_stick_indices::{
@@ -196,10 +196,10 @@ fn sensitivity_rows(
             },
         )
         .upcast(),
-        curve_preset_row(base, target, reopen, processing.curve).upcast(),
+        curve_preset_row(base, target, reopen, processing).upcast(),
         response_axis_style_row(base, target, processing.response_axis_style).upcast(),
     ];
-    if curve_preset_index(processing.curve) == CURVE_CUSTOM_INDEX {
+    if curve_combo_index(processing.curve_custom, processing.curve) == CURVE_CUSTOM_INDEX {
         rows.push(curve_slider_row(base, target, processing.curve));
     }
     rows

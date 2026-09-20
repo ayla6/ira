@@ -8,11 +8,10 @@ use super::input_output_picker::{show_output_picker, OutputPickerScope};
 use super::input_profile_activator_gate::activator_gate_controls;
 use super::input_profile_editor_regions::{activator_kind_label, source_label};
 use super::input_profile_options::output_display_label;
-use super::input_profile_sheet_base::{is_trigger_axis, with_mapping, Reopen, SheetBase};
-use super::input_profile_widgets::{
-    option_picker_popover, picker_button, slider_row, OptionChoice,
-    SliderSpec,
+use super::input_profile_sheet_base::{
+    combo_row, is_trigger_axis, with_mapping, Reopen, SheetBase,
 };
+use super::input_profile_widgets::{slider_row, OptionChoice, SliderSpec};
 use adw::prelude::*;
 use ira_input::{Activator, ActivatorKind, GamepadButton, InputMapping, OutputAction};
 
@@ -167,6 +166,20 @@ fn activator_header_controls(
     });
 }
 
+/// Which conditional rows a kind reveals: none, the double-press window,
+/// the long-press duration, the soft-pull threshold, or FullPress's repeat
+/// rate. Only a press-pattern pick that changes this restructures the
+/// expander and needs a rebuild.
+fn slider_kind(kind: &ActivatorKind) -> u8 {
+    match kind {
+        ActivatorKind::DoublePress { .. } => 1,
+        ActivatorKind::LongPress { .. } => 2,
+        ActivatorKind::SoftPress { .. } => 3,
+        ActivatorKind::FullPress => 4,
+        _ => 0,
+    }
+}
+
 fn activator_kind_controls(
     base: &SheetBase,
     reopen: &Reopen,
@@ -189,32 +202,46 @@ fn activator_kind_controls(
     };
 
     let choices = kind_choices(soft_pull);
-    let selected = kind_index(&activator.kind, soft_pull) as usize;
-    let current_label = choices
-        .get(selected)
-        .map(|choice| choice.title.clone())
-        .unwrap_or_else(|| crate::tr!("Click"));
-    let kind_row = adw::ActionRow::new();
-    kind_row.set_title(&crate::tr!("Press pattern"));
-    kind_row.set_subtitle(&crate::tr!("What kind of press activates this"));
+    let selected = kind_index(&activator.kind, soft_pull);
+    let combo = combo_row(
+        &choices
+            .iter()
+            .map(|choice| choice.title.clone())
+            .collect::<Vec<_>>(),
+        selected,
+    );
+    combo.set_title(&crate::tr!("Press pattern"));
+    let description = choices[selected as usize]
+        .description
+        .clone()
+        .unwrap_or_default();
+    combo.set_subtitle(description.as_str());
+    let old_slider = slider_kind(&activator.kind);
     let base_for_kind = base.clone();
     let reopen_for_kind = reopen.clone();
-    let picker = option_picker_popover(&choices, selected, move |picked| {
+    let expander_for_kind = expander.clone();
+    let choices_for_kind = choices.clone();
+    combo.connect_selected_notify(move |combo| {
+        let picked = combo.selected();
+        let new_kind = make_kind(picked, timing_window, timing_duration, soft_threshold);
         with_mapping(&base_for_kind, |input| {
             if let Some(activator) = input.activators.get_mut(index) {
-                activator.kind = make_kind(
-                    picked as u32,
-                    timing_window,
-                    timing_duration,
-                    soft_threshold,
-                );
+                activator.kind = new_kind.clone();
             }
         });
+        // The expander's title names the kind; refresh it in place instead
+        // of rebuilding for the relabel.
+        expander_for_kind.set_title(&activator_kind_label(&new_kind));
+        if let Some(choice) = choices_for_kind.get(picked as usize) {
+            let description = choice.description.clone().unwrap_or_default();
+            combo.set_subtitle(description.as_str());
+        }
         (base_for_kind.on_changed)();
-        reopen_for_kind();
+        if slider_kind(&new_kind) != old_slider {
+            reopen_for_kind();
+        }
     });
-    kind_row.add_suffix(&picker_button(&current_label, &picker));
-    expander.add_row(&kind_row);
+    expander.add_row(&combo);
 
     if let ActivatorKind::DoublePress { window_ms } = &activator.kind {
         let base = base.clone();
@@ -418,5 +445,36 @@ fn activator_setting_controls(
                 });
                 (base_for_repeat.on_adjusted)();
             }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{slider_kind, ActivatorKind};
+
+    #[test]
+    fn test_slider_kind_distinguishes_timing_sliders() {
+        // Kinds without conditional rows share a tag, so picks among them
+        // skip the rebuild; each kind revealing its own row is distinct.
+        let plain = [ActivatorKind::StartPress, ActivatorKind::Release];
+        for kind in &plain {
+            assert_eq!(slider_kind(kind), slider_kind(&ActivatorKind::StartPress));
+        }
+        let window = ActivatorKind::DoublePress { window_ms: 300 };
+        let duration = ActivatorKind::LongPress { duration_ms: 500 };
+        let threshold = ActivatorKind::SoftPress { threshold: 0.4 };
+        // FullPress stands alone: it alone reveals the repeat-rate slider.
+        let tags = [
+            slider_kind(&window),
+            slider_kind(&duration),
+            slider_kind(&threshold),
+            slider_kind(&ActivatorKind::FullPress),
+        ];
+        for (at, &tag) in tags.iter().enumerate() {
+            for &other in &tags[at + 1..] {
+                assert_ne!(tag, other);
+            }
+            assert_ne!(tag, slider_kind(&ActivatorKind::StartPress));
+        }
     }
 }

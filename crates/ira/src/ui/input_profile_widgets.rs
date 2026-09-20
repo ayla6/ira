@@ -1,11 +1,9 @@
 //! Steam-style building blocks for the input editor pages: titled setting
 //! groups rendered as boxed lists, full-width slider rows with a live value
-//! label, and a described-option popover picker (title plus description per
-//! choice, styled like a regular combo popup).
+//! label, and small row factories shared by the setting sheets.
 
-use super::css::{CSS_BOXED_LIST, CSS_CAPTION, CSS_DIM_LABEL, CSS_FLAT, CSS_HEADING};
+use super::css::{CSS_BOXED_LIST, CSS_DIM_LABEL, CSS_HEADING};
 use adw::prelude::*;
-use std::rc::Rc;
 
 /// A titled group of setting rows drawn as one boxed list. Equivalent to
 /// `adw::PreferencesGroup`, but it also accepts custom rows such as sliders.
@@ -139,87 +137,13 @@ pub(crate) fn slider_entry_row(
     slider_row(title, subtitle, spec, on_change)
 }
 
-/// One choice in an [`option_picker_popover`].
+/// One choice in a described option list: a title plus an optional
+/// explanation. Combo rows show the title in the popup and the description
+/// as the row's subtitle.
 #[derive(Clone)]
 pub(crate) struct OptionChoice {
     pub title: String,
     pub description: Option<String>,
-}
-
-/// A popover listing choices as title plus description, the current one
-/// preselected — Steam's option popup, styled like a regular combo popup.
-/// Feed the result to a `gtk4::MenuButton`.
-pub(crate) fn option_picker_popover(
-    choices: &[OptionChoice],
-    selected: usize,
-    on_pick: impl Fn(usize) + 'static,
-) -> gtk4::Popover {
-    let popover = gtk4::Popover::new();
-    popover.set_has_arrow(false);
-    let list = gtk4::ListBox::new();
-    list.set_selection_mode(gtk4::SelectionMode::Single);
-    // The same style class combo popups use, so colors and hover match
-    // every other dropdown in the app.
-    list.add_css_class(super::css::CSS_NAVIGATION_SIDEBAR);
-    list.set_size_request(360, -1);
-    for choice in choices {
-        list.append(&option_choice_row(choice));
-    }
-
-    let scroll = gtk4::ScrolledWindow::new();
-    scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-    scroll.set_max_content_height(420);
-    scroll.set_propagate_natural_height(true);
-    scroll.set_child(Some(&list));
-    popover.set_child(Some(&scroll));
-
-    if let Some(current) = list.row_at_index(selected as i32) {
-        list.select_row(Some(&current));
-    }
-
-    let on_pick = Rc::new(on_pick);
-    {
-        let popover = popover.clone();
-        list.connect_row_activated(move |_, row| {
-            popover.popdown();
-            on_pick(row.index() as usize);
-        });
-    }
-    // MenuButtons keep their popover parented, so nothing to clean up here.
-    popover
-}
-
-fn option_choice_row(choice: &OptionChoice) -> gtk4::ListBoxRow {
-    let row = gtk4::ListBoxRow::new();
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 3);
-    content.set_margin_top(10);
-    content.set_margin_bottom(10);
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    let title = gtk4::Label::new(Some(&choice.title));
-    title.set_xalign(0.0);
-    content.append(&title);
-    if let Some(description) = &choice.description {
-        let description_label = gtk4::Label::new(Some(description));
-        description_label.set_xalign(0.0);
-        description_label.set_wrap(true);
-        description_label.add_css_class(CSS_DIM_LABEL);
-        description_label.add_css_class(CSS_CAPTION);
-        content.append(&description_label);
-    }
-    row.set_child(Some(&content));
-    row
-}
-
-/// A flat menu button that opens a described-option picker; used as the
-/// suffix control of setting rows.
-pub(crate) fn picker_button(label: &str, popover: &gtk4::Popover) -> gtk4::MenuButton {
-    let button = gtk4::MenuButton::new();
-    button.set_label(label);
-    button.add_css_class(CSS_FLAT);
-    button.set_popover(Some(popover));
-    button.set_valign(gtk4::Align::Center);
-    button
 }
 
 /// A libadwaita switch row wired straight to a config field.

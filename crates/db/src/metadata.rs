@@ -482,6 +482,29 @@ pub fn scraper_metadata_for_game(
     }))
 }
 
+/// Runs an `id, name` lookup-table query and maps each row to a
+/// `ScraperEntity` — the shared shape of the company/genre/family reads
+/// and the picker searches.
+fn query_entities(
+    conn: &DbConn,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> Result<Vec<ira_models::ScraperEntity>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c.prepare(sql).map_err(err)?;
+    let rows = stmt
+        .query_map(params, |row| {
+            Ok(ira_models::ScraperEntity {
+                id: row.get::<_, i64>(0)?.to_string(),
+                name: row.get(1)?,
+            })
+        })
+        .map_err(err)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(err)?;
+    Ok(rows)
+}
+
 /// The companies credited to a game through one junction row per
 /// company — a studio that is both developer and publisher surfaces in
 /// both lists from the same row.
@@ -491,74 +514,40 @@ fn game_companies(
     developer: bool,
 ) -> Result<Vec<ira_models::ScraperEntity>, String> {
     let flag = if developer { "is_developer" } else { "is_publisher" };
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    query_entities(
+        conn,
+        &format!(
             "SELECT c.id, c.name FROM scraper_game_companies gc
              JOIN scraper_companies c ON c.id = gc.company_id
              WHERE gc.game_id = ?1 AND gc.{flag} = 1
              ORDER BY c.name"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![game_id], |row| {
-            Ok(ira_models::ScraperEntity {
-                id: row.get::<_, i64>(0)?.to_string(),
-                name: row.get(1)?,
-            })
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
+        ),
+        params![game_id],
+    )
 }
 
 /// The genres of a game, stored order first.
 fn game_genres(conn: &DbConn, game_id: i64) -> Result<Vec<ira_models::ScraperEntity>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(
-            "SELECT g.id, g.name FROM scraper_game_genres gg
-             JOIN scraper_genres g ON g.id = gg.genre_id
-             WHERE gg.game_id = ?1
-             ORDER BY gg.rowid",
-        )
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![game_id], |row| {
-            Ok(ira_models::ScraperEntity {
-                id: row.get::<_, i64>(0)?.to_string(),
-                name: row.get(1)?,
-            })
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
+    query_entities(
+        conn,
+        "SELECT g.id, g.name FROM scraper_game_genres gg
+         JOIN scraper_genres g ON g.id = gg.genre_id
+         WHERE gg.game_id = ?1
+         ORDER BY gg.rowid",
+        params![game_id],
+    )
 }
 
 /// The families (series) of a game, stored order first.
 fn game_families(conn: &DbConn, game_id: i64) -> Result<Vec<ira_models::ScraperEntity>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(
-            "SELECT f.id, f.name FROM scraper_game_families gf
-             JOIN scraper_families f ON f.id = gf.family_id
-             WHERE gf.game_id = ?1
-             ORDER BY gf.rowid",
-        )
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![game_id], |row| {
-            Ok(ira_models::ScraperEntity {
-                id: row.get::<_, i64>(0)?.to_string(),
-                name: row.get(1)?,
-            })
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
+    query_entities(
+        conn,
+        "SELECT f.id, f.name FROM scraper_game_families gf
+         JOIN scraper_families f ON f.id = gf.family_id
+         WHERE gf.game_id = ?1
+         ORDER BY gf.rowid",
+        params![game_id],
+    )
 }
 
 /// The age-rating boards of a game, board name alphabetical.
@@ -620,25 +609,15 @@ pub(crate) fn entity_search(
     table: &str,
     filter: &str,
 ) -> Result<Vec<ira_models::ScraperEntity>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    query_entities(
+        conn,
+        &format!(
             "SELECT id, name FROM {table}
              WHERE name LIKE '%' || ?1 || '%' COLLATE NOCASE
              ORDER BY name LIMIT 60"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![filter.trim()], |row| {
-            Ok(ira_models::ScraperEntity {
-                id: row.get::<_, i64>(0)?.to_string(),
-                name: row.get(1)?,
-            })
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
+        ),
+        params![filter.trim()],
+    )
 }
 
 /// The genre entity for a hand-typed name: a cached ScreenScraper genre

@@ -2,39 +2,47 @@ use std::path::{Path, PathBuf};
 
 pub const GALAXY_ID: &str = "100000000000000000";
 
+/// `<save_dir>/data/<group>/<key>` — the one shape every per-game data
+/// directory shares. `<group>` is a [`ira_models::GameKind`] folder name
+/// (so renames in the model can't silently orphan save paths) or `"ira"`
+/// for local games.
+fn data_dir_in(save_dir: &str, group: &str, key: impl std::fmt::Display) -> PathBuf {
+    Path::new(save_dir)
+        .join("data")
+        .join(group)
+        .join(key.to_string())
+}
+
 pub fn data_dir(save_dir: &str, app_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join("steam").join(app_id)
+    data_dir_in(save_dir, ira_models::GameKind::Steam.as_str(), app_id)
 }
 
 pub fn ps4_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join("ps4").join(app_id)
+    data_dir_in(save_dir, ira_models::GameKind::Ps4.as_str(), app_id)
 }
 
 pub fn ps3_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join("ps3").join(app_id)
+    data_dir_in(save_dir, ira_models::GameKind::Ps3.as_str(), app_id)
 }
 
 pub fn vita_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join("psvita").join(app_id)
+    data_dir_in(save_dir, ira_models::GameKind::PsVita.as_str(), app_id)
 }
 
 pub fn wiiu_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join("wiiu").join(app_id)
+    data_dir_in(save_dir, ira_models::GameKind::WiiU.as_str(), app_id)
 }
 
 pub fn three_ds_data_dir(save_dir: &str, app_id: &str) -> PathBuf {
-    Path::new(save_dir).join("data").join("3ds").join(app_id)
+    data_dir_in(save_dir, ira_models::GameKind::ThreeDS.as_str(), app_id)
 }
 
 pub fn switch_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
-    Path::new(save_dir).join("data").join("switch").join(db_id.to_string())
+    data_dir_in(save_dir, ira_models::GameKind::Switch.as_str(), db_id)
 }
 
 pub fn retro_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
-    Path::new(save_dir)
-        .join("data")
-        .join("retro")
-        .join(db_id.to_string())
+    data_dir_in(save_dir, ira_models::GameKind::Retro.as_str(), db_id)
 }
 
 /// Core kind-ladder shared by `game_data_dir` / `entry_data_dir`. Arm order
@@ -68,10 +76,7 @@ fn data_dir_for(
 /// The per-game data directory for games with no id of their own,
 /// keyed on Ira's row id.
 pub fn local_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
-    Path::new(save_dir)
-        .join("data")
-        .join("ira")
-        .join(db_id.to_string())
+    data_dir_in(save_dir, "ira", db_id)
 }
 
 /// Returns the data directory for a game based on its kind and trophy

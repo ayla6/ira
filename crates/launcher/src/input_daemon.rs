@@ -87,6 +87,20 @@ pub fn send_desktop_default(
     }
 }
 
+/// The desktop hold a bypassing spawn needs, given its resolved input
+/// mode: disabled means the daemon's idle desktop session must stand
+/// down for the process's lifetime, or the spawn sees the remapped
+/// virtual pad and "disabled" looks ignored. Enabled spawns own the pad
+/// through the wrapper instead, and a missing daemon (None) means the
+/// pad is already native.
+pub fn desktop_hold_if_disabled(mode: ControllerInputMode) -> Option<DaemonClient> {
+    if mode == ControllerInputMode::Disabled {
+        hold_desktop_for_game()
+    } else {
+        None
+    }
+}
+
 /// Suspends the daemon's desktop-default controller behaviour for the
 /// lifetime of the returned client: a game that bypasses the daemon (input
 /// remapping disabled or inherited-off) must not be remapped underneath by
@@ -174,5 +188,18 @@ pub fn shutdown_daemon() {
         }
         Ok(_) => {}
         Err(error) => eprintln!("ira-input: shutdown request failed: {error}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_desktop_hold_if_disabled_never_holds_enabled_spawns() {
+        // Enabled spawns own the pad through the wrapper; the hold must
+        // not even look for a daemon for them. (The disabled branch
+        // needs a live daemon, so only this side is assertable here.)
+        assert!(desktop_hold_if_disabled(ControllerInputMode::Enabled).is_none());
     }
 }

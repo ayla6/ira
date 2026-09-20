@@ -118,12 +118,7 @@ fn spawn_emulator_open(
         )?;
     }
     let env = ira_launcher::env_builder::clean_parent_env();
-    // With remapping off, the daemon's idle desktop session must stand
-    // down for the emulator's lifetime, or the bare emulator sees the
-    // remapped virtual pad — "disabled" would look ignored.
-    let desktop_hold = (mode == ControllerInputMode::Disabled)
-        .then(ira_launcher::input_daemon::hold_desktop_for_game)
-        .flatten();
+    let desktop_hold = ira_launcher::input_daemon::desktop_hold_if_disabled(mode);
     ira_launcher::wrapper::spawn_detached(
         &cmd,
         &env,

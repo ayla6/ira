@@ -809,12 +809,7 @@ pub(super) fn launch_emulator_no_game(
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(&exe, &[], None);
     let (env, input_mode) =
         build_emulator_env_and_wrap(ctx, &mut cmd, input.0, input.1.as_deref())?;
-    // With remapping disabled the daemon's idle desktop session must
-    // stand down for the emulator's lifetime, or the bare emulator
-    // sees the remapped virtual pad — "disabled" would look ignored.
-    let desktop_hold = (input_mode == ControllerInputMode::Disabled)
-        .then(ira_launcher::input_daemon::hold_desktop_for_game)
-        .flatten();
+    let desktop_hold = ira_launcher::input_daemon::desktop_hold_if_disabled(input_mode);
     ira_launcher::wrapper::spawn_detached(
         &cmd,
         &env,

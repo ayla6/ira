@@ -234,6 +234,36 @@ pub fn generate_prefix_path(base_dir: &str, slug: &str) -> String {
     }
 }
 
+/// One `wine reg add` command: `wine reg add <key> /v <value> /t <type> /d <data> /f`.
+fn reg_add(wine_exe: &str, key: &str, value: &str, reg_type: &str, data: &str) -> Vec<String> {
+    vec![
+        wine_exe.to_string(),
+        "reg".to_string(),
+        "add".to_string(),
+        key.to_string(),
+        "/v".to_string(),
+        value.to_string(),
+        "/t".to_string(),
+        reg_type.to_string(),
+        "/d".to_string(),
+        data.to_string(),
+        "/f".to_string(),
+    ]
+}
+
+/// One `wine reg delete` command: `wine reg delete <key> /v <value> /f`.
+fn reg_delete(wine_exe: &str, key: &str, value: &str) -> Vec<String> {
+    vec![
+        wine_exe.to_string(),
+        "reg".to_string(),
+        "delete".to_string(),
+        key.to_string(),
+        "/v".to_string(),
+        value.to_string(),
+        "/f".to_string(),
+    ]
+}
+
 pub fn build_wine_reg_commands(wine: &WineConfig, wine_exe: &str) -> Vec<Vec<String>> {
     let mut commands: Vec<Vec<String>> = Vec::new();
 
@@ -247,73 +277,45 @@ pub fn build_wine_reg_commands(wine: &WineConfig, wine_exe: &str) -> Vec<Vec<Str
         ]);
     }
 
-    commands.push(vec![
-        wine_exe.to_string(),
-        "reg".to_string(),
-        "add".to_string(),
-        r"HKCU\Software\Wine\X11 Driver".to_string(),
-        "/v".to_string(),
-        "MouseWarpOverride".to_string(),
-        "/t".to_string(),
-        "REG_SZ".to_string(),
-        "/d".to_string(),
-        wine.mouse_warp_override.clone(),
-        "/f".to_string(),
-    ]);
+    commands.push(reg_add(
+        wine_exe,
+        r"HKCU\Software\Wine\X11 Driver",
+        "MouseWarpOverride",
+        "REG_SZ",
+        &wine.mouse_warp_override,
+    ));
 
     if wine.dpi_enabled {
-        commands.push(vec![
-            wine_exe.to_string(),
-            "reg".to_string(),
-            "add".to_string(),
-            r"HKCU\Software\Wine\Fonts".to_string(),
-            "/v".to_string(),
-            "LogPixels".to_string(),
-            "/t".to_string(),
-            "REG_DWORD".to_string(),
-            "/d".to_string(),
-            format!("{}", wine.dpi),
-            "/f".to_string(),
-        ]);
+        commands.push(reg_add(
+            wine_exe,
+            r"HKCU\Software\Wine\Fonts",
+            "LogPixels",
+            "REG_DWORD",
+            &wine.dpi.to_string(),
+        ));
     } else {
-        commands.push(vec![
-            wine_exe.to_string(),
-            "reg".to_string(),
-            "delete".to_string(),
-            r"HKCU\Software\Wine\Fonts".to_string(),
-            "/v".to_string(),
-            "LogPixels".to_string(),
-            "/f".to_string(),
-        ]);
+        commands.push(reg_delete(
+            wine_exe,
+            r"HKCU\Software\Wine\Fonts",
+            "LogPixels",
+        ));
     }
 
-    commands.push(vec![
-        wine_exe.to_string(),
-        "reg".to_string(),
-        "add".to_string(),
-        r"HKCU\Software\Wine\WineDbg".to_string(),
-        "/v".to_string(),
-        "ShowCrashDialog".to_string(),
-        "/t".to_string(),
-        "REG_SZ".to_string(),
-        "/d".to_string(),
-        if wine.show_crash_dialogs { "1" } else { "0" }.to_string(),
-        "/f".to_string(),
-    ]);
+    commands.push(reg_add(
+        wine_exe,
+        r"HKCU\Software\Wine\WineDbg",
+        "ShowCrashDialog",
+        "REG_SZ",
+        if wine.show_crash_dialogs { "1" } else { "0" },
+    ));
 
-    commands.push(vec![
-        wine_exe.to_string(),
-        "reg".to_string(),
-        "add".to_string(),
-        r"HKCU\Software\Wine\Drivers".to_string(),
-        "/v".to_string(),
-        "Audio".to_string(),
-        "/t".to_string(),
-        "REG_SZ".to_string(),
-        "/d".to_string(),
-        wine.audio.clone(),
-        "/f".to_string(),
-    ]);
+    commands.push(reg_add(
+        wine_exe,
+        r"HKCU\Software\Wine\Drivers",
+        "Audio",
+        "REG_SZ",
+        &wine.audio,
+    ));
 
     commands
 }
@@ -371,5 +373,43 @@ mod tests {
         let base = tmp.path().to_str().unwrap();
         let p = generate_prefix_path(base, "Game!!! @#$%");
         assert_eq!(p, format!("{}/game", base));
+    }
+
+    #[test]
+    fn test_reg_add_command_shape() {
+        let cmd = reg_add("wine", r"HKCU\Wine\Drivers", "Audio", "REG_SZ", "pulse");
+        assert_eq!(
+            cmd,
+            vec![
+                "wine",
+                "reg",
+                "add",
+                r"HKCU\Wine\Drivers",
+                "/v",
+                "Audio",
+                "/t",
+                "REG_SZ",
+                "/d",
+                "pulse",
+                "/f",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_reg_delete_command_shape() {
+        let cmd = reg_delete("wine", r"HKCU\Software\Wine\Fonts", "LogPixels");
+        assert_eq!(
+            cmd,
+            vec![
+                "wine",
+                "reg",
+                "delete",
+                r"HKCU\Software\Wine\Fonts",
+                "/v",
+                "LogPixels",
+                "/f",
+            ]
+        );
     }
 }

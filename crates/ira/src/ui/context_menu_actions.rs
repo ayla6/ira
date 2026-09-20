@@ -103,47 +103,40 @@ pub(super) fn setup_delete_game_action(
     let delete_game_action = gio::SimpleAction::new("delete_game", None);
     delete_game_action.connect_activate(move |_, _| {
         let window = state.borrow().window.clone();
-        let dialog = adw::AlertDialog::new(
-            Some(&crate::tr!("Remove game?")),
-            Some(&crate::tr!("Remove \"{}\"?").replacen("{}", &game.name, 1)),
-        );
-        dialog.add_response("cancel", &crate::tr!("Cancel"));
-        dialog.add_response("delete", &crate::tr!("Remove"));
-        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-        dialog.set_close_response("cancel");
-
         let sc = state.clone();
-        dialog.connect_response(None, move |_, resp| {
-            if resp != "delete" {
-                return;
-            }
-            let db = sc.borrow().db.clone();
-            let db_id = game.db_id;
-            if let Err(e) = ira_db::delete_game_config(&db, db_id) {
-                eprintln!("Failed to delete game config: {}", e);
-            }
-            if let Err(e) = ira_db::remove_game(&db, db_id) {
-                eprintln!("Failed to remove game: {}", e);
-                return;
-            }
-            let mut s = sc.borrow_mut();
-            s.games.retain(|g| g.db_id != db_id);
-            let was_selected = ira_models::parse_db_id(&s.selected_id) == db_id;
-            if was_selected {
-                s.selected_id = String::new();
-                s.selected_group = ira_models::GroupSelection::AllGames;
-                drop(s);
-                super::sidebar::rebuild_sidebar(&sc);
-                super::message_helpers::clear_content(&sc);
-            } else {
-                drop(s);
-                super::sidebar::rebuild_sidebar(&sc);
-            }
-            super::grid_view::refresh_grid_store(&sc);
-            super::grid_view::refresh_grid_header(&sc);
-        });
-        dialog.present(Some(&window));
+        super::helpers::confirm_dialog(
+            &window,
+            &crate::tr!("Remove game?"),
+            &crate::tr!("Remove \"{}\"?").replacen("{}", &game.name, 1),
+            &crate::tr!("Remove"),
+            adw::ResponseAppearance::Destructive,
+            move || {
+                let db = sc.borrow().db.clone();
+                let db_id = game.db_id;
+                if let Err(e) = ira_db::delete_game_config(&db, db_id) {
+                    eprintln!("Failed to delete game config: {}", e);
+                }
+                if let Err(e) = ira_db::remove_game(&db, db_id) {
+                    eprintln!("Failed to remove game: {}", e);
+                    return;
+                }
+                let mut s = sc.borrow_mut();
+                s.games.retain(|g| g.db_id != db_id);
+                let was_selected = ira_models::parse_db_id(&s.selected_id) == db_id;
+                if was_selected {
+                    s.selected_id = String::new();
+                    s.selected_group = ira_models::GroupSelection::AllGames;
+                    drop(s);
+                    super::sidebar::rebuild_sidebar(&sc);
+                    super::message_helpers::clear_content(&sc);
+                } else {
+                    drop(s);
+                    super::sidebar::rebuild_sidebar(&sc);
+                }
+                super::grid_view::refresh_grid_store(&sc);
+                super::grid_view::refresh_grid_header(&sc);
+            },
+        );
     });
     actions.add_action(&delete_game_action);
 }

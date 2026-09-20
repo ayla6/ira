@@ -104,46 +104,36 @@ pub fn show_rename_group_dialog(state: &SharedState, group_id: i64, current_name
 
 pub fn show_delete_group_dialog(state: &SharedState, group_id: i64, name: &str) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(
-        Some(&crate::tr!("Delete group")),
-        Some(
-            &crate::tr!("Delete \u{201c}{}\u{201d}? Games in this group will not be removed.")
-                .replacen("{}", name, 1),
-        ),
-    );
-
-    dialog.add_response("cancel", &crate::tr!("Cancel"));
-    dialog.add_response("delete", &crate::tr!("Delete"));
-    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-    dialog.set_default_response(Some("cancel"));
-    dialog.set_close_response("cancel");
-
     let state_clone = state.clone();
-    dialog.connect_response(None, move |_, resp| {
-        if resp != "delete" {
-            return;
-        }
-        let db = state_clone.borrow().db.clone();
-        match ira_db::delete_group(&db, group_id) {
-            Ok(_) => {
-                let groups = super::helpers::logged_db_vec(
-                    "Failed to read groups",
-                    ira_db::get_all_groups(&db),
-                );
-                state_clone.borrow_mut().groups = groups;
-                state_clone.borrow_mut().group_members.remove(&group_id);
-                state_clone.borrow_mut().selected_group = ira_models::GroupSelection::AllGames;
-                let selected_id = state_clone.borrow().selected_id.clone();
-                rebuild_sidebar(&state_clone);
-                if selected_id.is_empty() {
-                    super::grid_view::show_grid_view(&state_clone);
+    super::helpers::confirm_dialog(
+        &window,
+        &crate::tr!("Delete group"),
+        &crate::tr!("Delete \u{201c}{}\u{201d}? Games in this group will not be removed.")
+            .replacen("{}", name, 1),
+        &crate::tr!("Delete"),
+        adw::ResponseAppearance::Destructive,
+        move || {
+            let db = state_clone.borrow().db.clone();
+            match ira_db::delete_group(&db, group_id) {
+                Ok(_) => {
+                    let groups = super::helpers::logged_db_vec(
+                        "Failed to read groups",
+                        ira_db::get_all_groups(&db),
+                    );
+                    state_clone.borrow_mut().groups = groups;
+                    state_clone.borrow_mut().group_members.remove(&group_id);
+                    state_clone.borrow_mut().selected_group =
+                        ira_models::GroupSelection::AllGames;
+                    let selected_id = state_clone.borrow().selected_id.clone();
+                    rebuild_sidebar(&state_clone);
+                    if selected_id.is_empty() {
+                        super::grid_view::show_grid_view(&state_clone);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to delete group: {}", e);
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to delete group: {}", e);
-            }
-        }
-    });
-
-    dialog.present(Some(&window));
+        },
+    );
 }

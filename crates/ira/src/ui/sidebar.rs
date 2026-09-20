@@ -590,30 +590,30 @@ fn sidebar_bind_auto_group_header(state: &SharedState, row: &gtk4::Box, item: &S
 /// the confirmation, then rebuild everything.
 fn confirm_delete_auto_group(state: &SharedState, group_id: i64, name: &str) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(
-        Some(&crate::tr!("Delete auto group")),
-        Some(
-            &crate::tr!("The rules of \"{}\" go away. The games themselves stay.")
-                .replacen("{}", name, 1),
-        ),
-    );
-    dialog.add_response("cancel", &crate::tr!("Cancel"));
-    dialog.add_response("delete", &crate::tr!("Delete"));
-    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     let sc = state.clone();
-    dialog.connect_response(Some("delete"), move |_, _| {
-        let db = sc.borrow().db.clone();
-        let db_id = super::auto_groups::to_db_id(group_id);
-        if let Err(e) = ira_db::delete_auto_group(&db, db_id) {
-            eprintln!("Failed to delete the auto group: {e}");
-            return;
-        }
-        sc.borrow_mut().auto_groups.retain(|g| g.id != group_id);
-        sc.borrow_mut().collapsed_collections.remove(&group_id);
-        sc.borrow_mut().selected_group = GroupSelection::AllGames;
-        rebuild_sidebar(&sc);
-    });
-    dialog.present(Some(&window));
+    super::helpers::confirm_dialog(
+        &window,
+        &crate::tr!("Delete auto group"),
+        &crate::tr!("The rules of \"{}\" go away. The games themselves stay.").replacen(
+            "{}",
+            name,
+            1,
+        ),
+        &crate::tr!("Delete"),
+        adw::ResponseAppearance::Destructive,
+        move || {
+            let db = sc.borrow().db.clone();
+            let db_id = super::auto_groups::to_db_id(group_id);
+            if let Err(e) = ira_db::delete_auto_group(&db, db_id) {
+                eprintln!("Failed to delete the auto group: {e}");
+                return;
+            }
+            sc.borrow_mut().auto_groups.retain(|g| g.id != group_id);
+            sc.borrow_mut().collapsed_collections.remove(&group_id);
+            sc.borrow_mut().selected_group = GroupSelection::AllGames;
+            rebuild_sidebar(&sc);
+        },
+    );
 }
 
 fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {

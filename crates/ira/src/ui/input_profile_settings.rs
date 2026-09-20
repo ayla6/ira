@@ -952,15 +952,6 @@ fn add_profile_row(
     let registry_for_delete = registry.clone();
     let rows_for_delete = rows.clone();
     delete.connect_clicked(move |_| {
-        let alert = adw::AlertDialog::new(
-            Some(&crate::tr!("Delete layout")),
-            Some(&crate::tr!("This removes the game layout from Ira.")),
-        );
-        alert.add_response("cancel", &crate::tr!("Cancel"));
-        alert.add_response("delete", &crate::tr!("Delete"));
-        alert.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-        alert.set_default_response(Some("cancel"));
-        alert.set_close_response("cancel");
         let path = path_for_delete.clone();
         let group = group_for_delete.clone();
         let parent = parent_for_delete.clone();
@@ -968,8 +959,13 @@ fn add_profile_row(
         let steam = steam_for_delete.clone();
         let registry = registry_for_delete.clone();
         let rows = rows_for_delete.clone();
-        alert.connect_response(None, move |_, response| {
-            if response == "delete" {
+        super::helpers::confirm_dialog(
+            &parent_for_delete,
+            &crate::tr!("Delete layout"),
+            &crate::tr!("This removes the game layout from Ira."),
+            &crate::tr!("Delete"),
+            adw::ResponseAppearance::Destructive,
+            move || {
                 if let Err(error) = std::fs::remove_file(&path) {
                     eprintln!("Failed to delete controller layout: {error}");
                 } else {
@@ -982,9 +978,8 @@ fn add_profile_row(
                         &rows,
                     );
                 }
-            }
-        });
-        alert.present(Some(&parent_for_delete));
+            },
+        );
     });
     group.add(&row);
     row

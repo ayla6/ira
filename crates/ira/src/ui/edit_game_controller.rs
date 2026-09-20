@@ -435,39 +435,33 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                 return;
             };
             let name = path_label(&path);
-            let confirm = adw::AlertDialog::builder()
-                .title(crate::tr!("Delete profile"))
-                .body(crate::tr!(
+            let row_c = row.clone();
+            let paths_c = paths.clone();
+            let save_dir_c = save_dir.clone();
+            let platform_id_c = platform_id.clone();
+            let last_real_c = last_real.clone();
+            let edit_button_c = edit_button_for_click.clone();
+            let delete_button_c = delete_button_for_click.clone();
+            super::helpers::confirm_dialog(
+                &window,
+                &crate::tr!("Delete profile"),
+                &crate::tr!(
                     "Delete \"{}\"? Every game using it falls back to no profile."
                 )
-                .replacen("{}", &name, 1))
-                .build();
-            confirm.add_response("cancel", &crate::tr!("Cancel"));
-            confirm.add_response("delete", &crate::tr!("Delete"));
-            confirm.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-            {
-                let row = row.clone();
-                let paths = paths.clone();
-                let save_dir = save_dir.clone();
-                let platform_id = platform_id.clone();
-                let last_real = last_real.clone();
-                let edit_button = edit_button_for_click.clone();
-                let delete_button = delete_button_for_click.clone();
-                confirm.connect_response(None, move |_, response| {
-                    if response != "delete" {
-                        return;
-                    }
+                .replacen("{}", &name, 1),
+                &crate::tr!("Delete"),
+                adw::ResponseAppearance::Destructive,
+                move || {
                     if let Err(error) = delete_profile(&path) {
                         eprintln!("ira: {error}");
                         return;
                     }
-                    refresh_profile_choices(&row, &paths, &save_dir, game_id, &platform_id, None, &last_real);
-                    let has_profile = selected_path(&row, &paths).is_some();
-                    edit_button.set_sensitive(has_profile);
-                    delete_button.set_sensitive(has_profile);
-                });
-            }
-            confirm.present(Some(&window));
+                    refresh_profile_choices(&row_c, &paths_c, &save_dir_c, game_id, &platform_id_c, None, &last_real_c);
+                    let has_profile = selected_path(&row_c, &paths_c).is_some();
+                    edit_button_c.set_sensitive(has_profile);
+                    delete_button_c.set_sensitive(has_profile);
+                },
+            );
             }
         });
     }

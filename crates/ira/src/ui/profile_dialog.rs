@@ -191,28 +191,23 @@ fn repopulate_profiles(
         let list_rc_del = list_rc.clone();
         let row_for_del = row.clone();
         del_btn.connect_clicked(move |_| {
-            let alert = adw::AlertDialog::new(
-                Some(&crate::tr!("Delete profile")),
-                Some(&crate::tr!("Are you sure you want to delete this profile? Games using it will keep their settings but lose the profile link.")),
-            );
-             alert.add_response("cancel", &crate::tr!("Cancel"));
-             alert.add_response("delete", &crate::tr!("Delete"));
-            alert.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-            alert.set_default_response(Some("cancel"));
-            alert.set_close_response("cancel");
             let db_c = db_del.clone();
             let list_c = list_rc_del.clone();
             let row_c = row_for_del.clone();
-            alert.connect_response(None, move |_, response| {
-                if response == "delete" {
+            super::helpers::confirm_dialog(
+                &sw_del,
+                &crate::tr!("Delete profile"),
+                &crate::tr!("Are you sure you want to delete this profile? Games using it will keep their settings but lose the profile link."),
+                &crate::tr!("Delete"),
+                adw::ResponseAppearance::Destructive,
+                move || {
                     if let Err(e) = ira_db::delete_profile(&db_c, p_id) {
                         eprintln!("Failed to delete profile: {}", e);
                     } else {
                         list_c.borrow().remove(&row_c);
                     }
-                }
-            });
-            alert.present(Some(&sw_del));
+                },
+            );
         });
         row.add_suffix(&del_btn);
 

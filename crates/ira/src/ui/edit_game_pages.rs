@@ -301,23 +301,19 @@ pub(super) fn build_api_emulator_page(
             let Some(win_c) = win_c.upgrade() else {
                 return;
             };
-            let alert = adw::AlertDialog::new(
-                Some(&crate::tr!("Uninstall API emulator?")),
-                Some(&crate::tr!("Restores the original Steam/GOG DLLs on Save")),
-            );
-            alert.add_response("cancel", &crate::tr!("Cancel"));
-            alert.add_response("uninstall", &crate::tr!("Uninstall"));
-            alert.set_response_appearance("uninstall", adw::ResponseAppearance::Destructive);
-            alert.set_default_response(Some("cancel"));
-            alert.set_close_response("cancel");
             let pu_c = pu_c.clone();
             let status_c = status_c.clone();
-            alert.choose(Some(&win_c), None::<&gio::Cancellable>, move |response| {
-                if response == "uninstall" {
+            super::helpers::confirm_dialog(
+                &win_c,
+                &crate::tr!("Uninstall API emulator?"),
+                &crate::tr!("Restores the original Steam/GOG DLLs on Save"),
+                &crate::tr!("Uninstall"),
+                adw::ResponseAppearance::Destructive,
+                move || {
                     *pu_c.borrow_mut() = true;
                     status_c.set_title(&crate::tr!("API emulator will be uninstalled on save"));
-                }
-            });
+                },
+            );
         });
         let uninstall_row = adw::ActionRow::new();
         uninstall_row.set_title(&crate::tr!("Remove emulator"));

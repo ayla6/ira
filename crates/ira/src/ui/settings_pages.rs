@@ -504,23 +504,16 @@ pub(super) fn build_lutris_settings_page(
                         return glib::ControlFlow::Break;
                     }
 
-                    let alert = adw::AlertDialog::new(
-                        Some(&crate::tr!("Import Lutris games")),
-                        Some(
-                            &crate::tr!("Import {} Lutris game(s) as managed Wine games?")
-                                .replacen("{}", &lutris_games.len().to_string(), 1),
-                        ),
-                    );
-                    alert.add_response("cancel", &crate::tr!("Cancel"));
-                    alert.add_response("migrate", &crate::tr!("Migrate"));
-                    alert.set_response_appearance("migrate", adw::ResponseAppearance::Suggested);
-                    alert.set_default_response(Some("cancel"));
-                    alert.set_close_response("cancel");
-
                     let db = db.clone();
                     let lutris_games = std::rc::Rc::new(lutris_games);
-                    alert.connect_response(None, move |_, response| {
-                        if response == "migrate" {
+                    super::helpers::confirm_dialog(
+                        &settings_win,
+                        &crate::tr!("Import Lutris games"),
+                        &crate::tr!("Import {} Lutris game(s) as managed Wine games?")
+                            .replacen("{}", &lutris_games.len().to_string(), 1),
+                        &crate::tr!("Migrate"),
+                        adw::ResponseAppearance::Suggested,
+                        move || {
                             let db = db.clone();
                             let lutris_games = (*lutris_games).clone();
                             std::thread::spawn(move || {
@@ -558,9 +551,8 @@ pub(super) fn build_lutris_settings_page(
                                 }
                                 eprintln!("Imported {} game(s), {} failed", ok, errors);
                             });
-                        }
-                    });
-                    alert.present(Some(&settings_win));
+                        },
+                    );
                     glib::ControlFlow::Break
                 }
                 Ok(Err(e)) => {

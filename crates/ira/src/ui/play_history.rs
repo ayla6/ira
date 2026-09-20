@@ -213,23 +213,14 @@ fn delete_session_with_confirm(
     if ctrl {
         do_delete();
     } else {
-        let dialog = adw::AlertDialog::new(
-            Some(&crate::tr!("Delete session")),
-            Some(&crate::tr!(
-                "Delete this play session and subtract its playtime?"
-            )),
+        super::helpers::confirm_dialog(
+            parent,
+            &crate::tr!("Delete session"),
+            &crate::tr!("Delete this play session and subtract its playtime?"),
+            &crate::tr!("Delete"),
+            adw::ResponseAppearance::Destructive,
+            do_delete,
         );
-        dialog.add_response("cancel", &crate::tr!("Cancel"));
-        dialog.add_response("delete", &crate::tr!("Delete"));
-        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-        dialog.set_close_response("cancel");
-        dialog.connect_response(None, move |_, resp| {
-            if resp == "delete" {
-                do_delete();
-            }
-        });
-        dialog.present(Some(parent));
     }
 }
 

@@ -124,33 +124,26 @@ fn build_variant_name_entry_buttons(
             return;
         };
         let variant_name = name_entry_c.text().to_string();
-        let dialog = adw::AlertDialog::new(
-            Some(&crate::tr!("Delete variant?")),
-            Some(
-                &crate::tr!("\"{}\" will be removed. Save to apply changes.").replacen(
-                    "{}",
-                    &variant_name,
-                    1,
-                ),
-            ),
-        );
-        dialog.add_response("cancel", &crate::tr!("Cancel"));
-        dialog.add_response("delete", &crate::tr!("Delete"));
-        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-        dialog.set_close_response("cancel");
         let container_cc = container_c.clone();
         let group_cc = group_c.clone();
-        dialog.connect_response(None, move |_, response| {
-            if response == "delete" {
+        super::helpers::confirm_dialog(
+            &main_win,
+            &crate::tr!("Delete variant?"),
+            &crate::tr!("\"{}\" will be removed. Save to apply changes.").replacen(
+                "{}",
+                &variant_name,
+                1,
+            ),
+            &crate::tr!("Delete"),
+            adw::ResponseAppearance::Destructive,
+            move || {
                 if let (Some(container_cc), Some(group_cc)) =
                     (container_cc.upgrade(), group_cc.upgrade())
                 {
                     container_cc.remove(&group_cc);
                 }
-            }
-        });
-        dialog.present(Some(&main_win));
+            },
+        );
     });
     name_entry.add_suffix(&del_btn);
 }
@@ -386,7 +379,7 @@ fn build_variant_card(
     container.append(&group);
 
     VarW {
-        id: if v.id > 0 { Some(v.id) } else { None },
+        id: (v.id > 0).then_some(v.id),
         name: name_entry,
         exe: exe_entry,
         wd: wd_entry,

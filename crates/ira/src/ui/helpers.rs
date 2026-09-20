@@ -582,7 +582,7 @@ pub fn open_file_location(file_path: &str) {
 }
 
 pub fn confirm_dialog(
-    parent: &adw::ApplicationWindow,
+    parent: &impl IsA<gtk4::Widget>,
     title: &str,
     body: &str,
     confirm_label: &str,

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-19 19:35-0300\n"
+"POT-Creation-Date: 2026-09-19 23:51-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -199,7 +199,7 @@ msgstr ""
 #: crates/ira/src/ui/background.rs:19
 #: crates/ira/src/ui/big_picture/keyboard.rs:619
 #: crates/ira/src/ui/context_menu_actions.rs:110
-#: crates/ira/src/ui/context_menu_actions.rs:636
+#: crates/ira/src/ui/context_menu_actions.rs:637
 #: crates/ira/src/ui/edit_game_controller.rs:445
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:252
 #: crates/ira/src/ui/edit_game_pages.rs:308
@@ -296,6 +296,7 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_launch.rs:60
 #: crates/ira/src/ui/edit_game_variants.rs:285
 #: crates/ira/src/ui/edit_game_variants.rs:291
+#: crates/ira/src/ui/game_settings_emulator.rs:105
 msgid "Executable"
 msgstr ""
 
@@ -304,6 +305,7 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_launch.rs:58
 #: crates/ira/src/ui/edit_game_variants.rs:289
 #: crates/ira/src/ui/game_header.rs:285
+#: crates/ira/src/ui/game_settings_emulator.rs:109
 #: crates/ira/src/ui/settings_console.rs:142
 #: crates/ira/src/ui/settings_console.rs:495
 msgid "Select executable"
@@ -333,14 +335,14 @@ msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:130
 #: crates/ira/src/ui/auto_add_dialog.rs:790
-#: crates/ira/src/ui/game_settings.rs:584
+#: crates/ira/src/ui/game_settings.rs:468
 msgid "Steam app ID"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:133
 #: crates/ira/src/ui/auto_add_dialog.rs:794
-#: crates/ira/src/ui/game_settings.rs:545
-#: crates/ira/src/ui/game_settings.rs:624
+#: crates/ira/src/ui/game_settings.rs:429
+#: crates/ira/src/ui/game_settings.rs:508
 #: crates/ira/src/ui/steam_search.rs:19
 msgid "Search Steam store"
 msgstr ""
@@ -353,7 +355,7 @@ msgid "Select"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_general.rs:156
-#: crates/ira/src/ui/game_settings.rs:590
+#: crates/ira/src/ui/game_settings.rs:474
 msgid "GOG product ID"
 msgstr ""
 
@@ -479,8 +481,8 @@ msgid "Search Steam…"
 msgstr ""
 
 #: crates/ira/src/ui/auto_add_dialog.rs:714
-#: crates/ira/src/ui/game_settings.rs:512
-#: crates/ira/src/ui/game_settings.rs:619
+#: crates/ira/src/ui/game_settings.rs:396
+#: crates/ira/src/ui/game_settings.rs:503
 #: crates/ira/src/ui/image_manager.rs:201
 #: crates/ira/src/ui/image_manager.rs:231
 #: crates/ira/src/ui/image_manager.rs:255
@@ -629,7 +631,7 @@ msgid "Save"
 msgstr ""
 
 #: crates/ira/src/ui/auto_group_editor.rs:40
-#: crates/ira/src/ui/game_settings.rs:647
+#: crates/ira/src/ui/game_settings.rs:531
 #: crates/ira/src/ui/steam_search_dialog.rs:333
 msgid "Match"
 msgstr ""
@@ -895,31 +897,31 @@ msgstr ""
 msgid "Remove"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:423
+#: crates/ira/src/ui/context_menu_actions.rs:424
 msgid "Add to family…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:424
+#: crates/ira/src/ui/context_menu_actions.rs:425
 msgid "Add to genre…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:425
+#: crates/ira/src/ui/context_menu_actions.rs:426
 msgid "Add to developer…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:426
+#: crates/ira/src/ui/context_menu_actions.rs:427
 msgid "Add to publisher…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:468
+#: crates/ira/src/ui/context_menu_actions.rs:469
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:182
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:195
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:269
 msgid "Search…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:523
-#: crates/ira/src/ui/context_menu_actions.rs:549
+#: crates/ira/src/ui/context_menu_actions.rs:524
+#: crates/ira/src/ui/context_menu_actions.rs:550
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:156
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:993
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:41
@@ -928,27 +930,27 @@ msgstr ""
 msgid "Add"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:548
+#: crates/ira/src/ui/context_menu_actions.rs:549
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:526
 #: crates/ira/src/ui/settings_pages.rs:1333
 #, rust-format
 msgid "Add \"{}\""
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:626
+#: crates/ira/src/ui/context_menu_actions.rs:627
 msgid "New collection"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:627
+#: crates/ira/src/ui/context_menu_actions.rs:628
 msgid "Enter a name for the collection:"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:630
+#: crates/ira/src/ui/context_menu_actions.rs:631
 #: crates/ira/src/ui/group_dialog.rs:13
 msgid "Collection name"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:637
+#: crates/ira/src/ui/context_menu_actions.rs:638
 #: crates/ira/src/ui/group_dialog.rs:21
 msgid "Create"
 msgstr ""
@@ -1632,7 +1634,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_playtime.rs:140
 #: crates/ira/src/ui/edit_game_playtime.rs:258
-#: crates/ira/src/ui/game_settings.rs:564
+#: crates/ira/src/ui/game_settings.rs:448
 msgid "Link"
 msgstr ""
 
@@ -2112,6 +2114,38 @@ msgstr ""
 msgid "Reset"
 msgstr ""
 
+#: crates/ira/src/ui/game_settings_emulator.rs:60
+#: crates/ira/src/ui/game_settings_emulator.rs:153
+msgid "Follow global"
+msgstr ""
+
+#: crates/ira/src/ui/game_settings_emulator.rs:63
+#: crates/ira/src/ui/settings_console.rs:532
+#: crates/ira/src/ui/settings_console.rs:549
+msgid "RetroArch core"
+msgstr ""
+
+#: crates/ira/src/ui/game_settings_emulator.rs:64
+msgid "Override the RetroArch core for this game"
+msgstr ""
+
+#: crates/ira/src/ui/game_settings_emulator.rs:151
+#: crates/ira/src/ui/game_settings_emulator.rs:157
+#: crates/ira/src/ui/settings_console.rs:61
+#: crates/ira/src/ui/settings_console.rs:128
+#: crates/ira/src/ui/settings_console.rs:339
+#: crates/ira/src/ui/settings_console.rs:472
+msgid "Emulator"
+msgstr ""
+
+#: crates/ira/src/ui/game_settings_emulator.rs:155
+msgid "Custom executable…"
+msgstr ""
+
+#: crates/ira/src/ui/game_settings_emulator.rs:158
+msgid "Override the emulator for this game"
+msgstr ""
+
 #: crates/ira/src/ui/game_settings.rs:47
 #: crates/ira/src/ui/settings_dialog_pages.rs:376
 msgid "RetroAchievements"
@@ -2171,92 +2205,64 @@ msgstr ""
 msgid "Override the emulator version for this game"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:291
-#: crates/ira/src/ui/game_settings.rs:354
-msgid "Follow global"
-msgstr ""
-
-#: crates/ira/src/ui/game_settings.rs:294
-#: crates/ira/src/ui/settings_console.rs:532
-#: crates/ira/src/ui/settings_console.rs:549
-msgid "RetroArch core"
-msgstr ""
-
-#: crates/ira/src/ui/game_settings.rs:295
-msgid "Override the RetroArch core for this game"
-msgstr ""
-
-#: crates/ira/src/ui/game_settings.rs:352
-#: crates/ira/src/ui/game_settings.rs:357
-#: crates/ira/src/ui/settings_console.rs:61
-#: crates/ira/src/ui/settings_console.rs:128
-#: crates/ira/src/ui/settings_console.rs:339
-#: crates/ira/src/ui/settings_console.rs:472
-msgid "Emulator"
-msgstr ""
-
-#: crates/ira/src/ui/game_settings.rs:358
-msgid "Override the emulator for this game"
-msgstr ""
-
-#: crates/ira/src/ui/game_settings.rs:482
+#: crates/ira/src/ui/game_settings.rs:366
 msgid "Game ID"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:484
+#: crates/ira/src/ui/game_settings.rs:368
 msgid "Title ID"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:487
+#: crates/ira/src/ui/game_settings.rs:371
 msgid "ROM hash"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:495
+#: crates/ira/src/ui/game_settings.rs:379
 msgid "NPWR code"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:496
+#: crates/ira/src/ui/game_settings.rs:380
 msgid "Game serial"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:515
+#: crates/ira/src/ui/game_settings.rs:399
 msgid "Links this game to a Steam entry for metadata only"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:621
+#: crates/ira/src/ui/game_settings.rs:505
 msgid "The Steam app id this game matches against"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:649
+#: crates/ira/src/ui/game_settings.rs:533
 msgid "Use"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:694
+#: crates/ira/src/ui/game_settings.rs:578
 msgid "Game language"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:696
+#: crates/ira/src/ui/game_settings.rs:580
 msgid "Language reported to the game by the API emulator"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:786
+#: crates/ira/src/ui/game_settings.rs:670
 msgid "Centralize save data"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:788
+#: crates/ira/src/ui/game_settings.rs:672
 msgid "Move saves to a persistent location and create symlinks"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:791
+#: crates/ira/src/ui/game_settings.rs:675
 #: crates/ira/src/ui/settings_pages.rs:515
 msgid "Migrate"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:810
+#: crates/ira/src/ui/game_settings.rs:694
 msgid "Identity"
 msgstr ""
 
-#: crates/ira/src/ui/game_settings.rs:820
+#: crates/ira/src/ui/game_settings.rs:704
 msgid "Service"
 msgstr ""
 

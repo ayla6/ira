@@ -278,132 +278,6 @@ fn build_shadps4_version_section(page: &gtk4::Box, game: &Game) -> Rc<RefCell<Op
     pending_version
 }
 
-fn build_core_row(
-    game: &Game,
-    cores: &[ira_platforms::emulator_detect::RaCore],
-    pending_ra_core: &Rc<RefCell<Option<String>>>,
-    emu_group: &adw::PreferencesGroup,
-) -> Option<adw::ComboRow> {
-    if cores.is_empty() {
-        return None;
-    }
-
-    let mut core_names: Vec<String> = vec![crate::tr!("Follow global")];
-    core_names.extend(cores.iter().map(|c| c.display_name.clone()));
-    let core_dropdown = adw::ComboRow::new();
-    core_dropdown.set_title(&crate::tr!("RetroArch core"));
-    core_dropdown.set_subtitle(&crate::tr!("Override the RetroArch core for this game"));
-    core_dropdown.set_model(Some(&super::helpers::string_list_from(&core_names)));
-
-    let mut selected_idx: u32 = 0;
-    if !game.ra_core.is_empty() {
-        for (i, c) in cores.iter().enumerate() {
-            if c.path == game.ra_core {
-                selected_idx = (i + 1) as u32;
-                break;
-            }
-        }
-    }
-    core_dropdown.set_selected(selected_idx);
-
-    let pending_ra_core_c = pending_ra_core.clone();
-    let cores_clone = cores.to_vec();
-    core_dropdown.connect_selected_notify(move |dd| {
-        let idx = dd.selected();
-        let path = if idx == 0 {
-            String::new()
-        } else {
-            match cores_clone.get((idx - 1) as usize) {
-                Some(c) => c.path.clone(),
-                None => return,
-            }
-        };
-        *pending_ra_core_c.borrow_mut() = Some(path);
-    });
-
-    let is_ra = !game.emulator_override.is_empty()
-        && ira_platforms::emulator_detect::is_retroarch(&game.emulator_override);
-    core_dropdown.set_visible(is_ra);
-
-    emu_group.add(&core_dropdown);
-    Some(core_dropdown)
-}
-
-fn add_emulator_dropdown_section(
-    page: &gtk4::Box,
-    game: &Game,
-    pending_ra_core: &Rc<RefCell<Option<String>>>,
-    pending_emulator: &Rc<RefCell<Option<String>>>,
-) {
-    // Retro games key detection off their console platform; Azahar and
-    // Cemu games carry a title id as platform, so map the kind instead.
-    let console_id: &str = match game.kind {
-        ira_models::GameKind::ThreeDS => "3ds",
-        ira_models::GameKind::WiiU => "wiiu",
-        _ => &game.platform_id,
-    };
-    let emulators = ira_platforms::emulator_detect::detect_emulators(console_id);
-    let cores = ira_platforms::emulator_detect::detect_ra_cores_for_console(console_id);
-    if emulators.is_empty() {
-        return;
-    }
-
-    let emu_group = adw::PreferencesGroup::new();
-    emu_group.set_title(&crate::tr!("Emulator"));
-
-    let mut emu_names: Vec<String> = vec![crate::tr!("Follow global")];
-    emu_names.extend(emulators.iter().map(|e| e.display_name.clone()));
-    let emu_dropdown = adw::ComboRow::new();
-    emu_dropdown.set_title(&crate::tr!("Emulator"));
-    emu_dropdown.set_subtitle(&crate::tr!("Override the emulator for this game"));
-    emu_dropdown.set_model(Some(&super::helpers::string_list_from(&emu_names)));
-
-    let mut selected_emu: u32 = 0;
-    if !game.emulator_override.is_empty() {
-        for (i, e) in emulators.iter().enumerate() {
-            if e.launch_command == game.emulator_override {
-                selected_emu = (i + 1) as u32;
-                break;
-            }
-        }
-    }
-    emu_dropdown.set_selected(selected_emu);
-
-    emu_group.add(&emu_dropdown);
-
-    let core_row = build_core_row(game, &cores, pending_ra_core, &emu_group);
-
-    let pending_emu_c = pending_emulator.clone();
-    let emus_clone = emulators.clone();
-    let core_row_clone = core_row;
-    emu_dropdown.connect_selected_notify(move |dd| {
-        let idx = dd.selected();
-        let cmd = if idx == 0 {
-            String::new()
-        } else {
-            match emus_clone.get((idx - 1) as usize) {
-                Some(e) => e.launch_command.clone(),
-                None => return,
-            }
-        };
-        *pending_emu_c.borrow_mut() = Some(cmd);
-
-        if let Some(ref cr) = core_row_clone {
-            let is_ra = if idx == 0 {
-                false
-            } else {
-                match emus_clone.get((idx - 1) as usize) {
-                    Some(e) => ira_platforms::emulator_detect::is_retroarch(&e.launch_command),
-                    None => false,
-                }
-            };
-            cr.set_visible(is_ra);
-        }
-    });
-
-    page.append(&emu_group);
-}
-
 fn build_ra_container(
     page: &gtk4::Box,
     state: &SharedState,
@@ -437,9 +311,19 @@ fn build_retro_emulator_and_ra(
     // generic emulator override.
     if matches!(
         game.kind,
-        ira_models::GameKind::Retro | ira_models::GameKind::Switch
+        ira_models::GameKind::Retro
+            | ira_models::GameKind::Switch
+            | ira_models::GameKind::Ps3
+            | ira_models::GameKind::WiiU
+            | ira_models::GameKind::ThreeDS
     ) {
-        add_emulator_dropdown_section(page, game, &pending_ra_core, &pending_emulator);
+        super::game_settings_emulator::add_emulator_dropdown_section(
+            page,
+            game,
+            win,
+            &pending_ra_core,
+            &pending_emulator,
+        );
     }
     if game.kind == ira_models::GameKind::Retro {
         let container = build_ra_container(page, state, game, win, pending_copies);

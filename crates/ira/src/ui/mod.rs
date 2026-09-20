@@ -50,6 +50,7 @@ mod window;
 pub use ra_match_dialog::show_ra_search_dialog;
 mod game_logo;
 mod game_settings;
+mod game_settings_emulator;
 mod image_manager;
 mod image_manager_helpers;
 mod input_calibration_dialog;

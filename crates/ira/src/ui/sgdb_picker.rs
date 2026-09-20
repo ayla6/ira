@@ -428,6 +428,14 @@ fn build_on_download(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Rc<dyn Fn()> {
                         let webp =
                             ira_parser::convert_bytes_to_lossless_webp(&bytes).unwrap_or(bytes);
                         let _ = std::fs::create_dir_all(&dest_dir_c);
+                        // The pick replaces the slot's previous art: without
+                        // this sweep an old file under another extension (or
+                        // the previous `_small` thumbnail) survives and keeps
+                        // the old picture on screen.
+                        ira_parser::remove_image_variants(
+                            std::path::Path::new(&dest_dir_c),
+                            asset_at.file_base(),
+                        );
                         let dest = std::path::Path::new(&dest_dir_c)
                             .join(&file_name_c)
                             .with_extension("webp");

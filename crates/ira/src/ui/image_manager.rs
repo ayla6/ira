@@ -772,7 +772,6 @@ fn build_dir_buttons(
             let refresh = Rc::clone(ctx.refresh_preview);
             move |path| {
                 ira_parser::remove_image_variants(&target_dir, &file_base);
-                ira_parser::remove_image_variants(&target_dir, &format!("{}_small", file_base));
                 // Decode in memory and persist WebP only: a raw copy of an
                 // .ico pick used to strand files that never converted.
                 let dest_webp = target_dir.join(format!("{file_base}.webp"));
@@ -815,8 +814,6 @@ fn build_dir_buttons(
         let refresh = Rc::clone(ctx.refresh_preview);
         reset_btn.connect_clicked(move |_| {
             ira_parser::remove_image_variants(&target_dir, &file_base);
-            let small = format!("{}_small", file_base);
-            ira_parser::remove_image_variants(&target_dir, &small);
             refresh();
         });
     }

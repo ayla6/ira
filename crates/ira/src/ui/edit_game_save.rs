@@ -595,7 +595,6 @@ fn spawn_image_copy_thread(
             let base_name = at.file_base();
             let (max_w, max_h) = at.thumb_dims();
             ira_parser::remove_image_variants(&cloud_dir, base_name);
-            ira_parser::remove_image_variants(&cloud_dir, &format!("{}_small", base_name));
 
             let dest = match img {
                 PendingImage::Path(src_path) => {
@@ -649,8 +648,6 @@ fn spawn_image_copy_thread(
                 if ext != "webp" && ext != "jpg" {
                     ira_parser::convert_to_lossless_webp(&dest);
                 }
-                let small_base = format!("{}_small", base_name);
-                ira_parser::remove_image_variants(&cloud_dir, &small_base);
                 ira_parser::ensure_small_image(&cloud_dir, base_name, max_w, max_h);
                 converted.push(base_name.to_string());
             }

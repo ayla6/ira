@@ -245,16 +245,21 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
 }
 
 /// Remove all image files with the given base_name (e.g. "icon", "hero", "vertical")
-/// in the directory, across all known image extensions. Call before saving a new
-/// image to avoid stale files with different extensions.
+/// in the directory, across all known image extensions, together with their
+/// `{base}_small` thumbnails. Call before saving a new image so nothing stale
+/// survives the replacement — neither a full-size file under another extension
+/// nor a thumbnail of the previous image (the image loader prefers `_small`
+/// files, so a leftover one would keep the old picture on screen).
 pub fn remove_image_variants(dir: &Path, base_name: &str) {
     let _s = tracing::info_span!("remove_image_variants", base_name).entered();
     // "ico" stays: edit_game_save.rs still stages picked ICO-content files as
     // transient `{base}.ico` before converting them; a failed conversion is
     // only ever cleaned up by this sweep.
-    for ext in &["png", "jpg", "jpeg", "webp", "ico"] {
-        let p = dir.join(format!("{}.{}", base_name, ext));
-        let _ = std::fs::remove_file(&p);
+    for base in [base_name.to_string(), format!("{base_name}_small")] {
+        for ext in ["png", "jpg", "jpeg", "webp", "ico"] {
+            let p = dir.join(format!("{}.{}", base, ext));
+            let _ = std::fs::remove_file(&p);
+        }
     }
 }
 
@@ -606,6 +611,32 @@ mod tests {
     fn test_full_image_path_no_small_suffix() {
         assert_eq!(full_image_path("/foo/bar/hero.jpg"), "/foo/bar/hero.jpg");
         assert_eq!(full_image_path(""), "");
+    }
+
+    #[test]
+    fn test_remove_image_variants_clears_base_and_small_family() {
+        let tmp = tempfile::tempdir().unwrap();
+        for name in [
+            "hero.webp",
+            "hero.png",
+            "hero.jpg",
+            "hero_small.webp",
+            "hero_small.jpg",
+        ] {
+            std::fs::write(tmp.path().join(name), b"stale").unwrap();
+        }
+
+        remove_image_variants(tmp.path(), "hero");
+
+        for name in [
+            "hero.webp",
+            "hero.png",
+            "hero.jpg",
+            "hero_small.webp",
+            "hero_small.jpg",
+        ] {
+            assert!(!tmp.path().join(name).is_file(), "{name} must be removed");
+        }
     }
 
     #[test]

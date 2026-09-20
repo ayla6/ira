@@ -409,7 +409,6 @@ fn reset_game_image(state: &SharedState, game: &Game, base: &str) {
     };
     let dir = ira_parser::entry_data_dir(&save_dir, &entry);
     ira_parser::remove_image_variants(&dir, base);
-    ira_parser::remove_image_variants(&dir, &format!("{base}_small"));
     if let Some(path) = ira_parser::find_image_file(&dir, base) {
         ira_images::invalidate_texture(&path.to_string_lossy());
     }

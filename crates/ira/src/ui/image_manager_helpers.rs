@@ -257,8 +257,6 @@ pub(super) fn write_native_icon_to_disk(
     };
     let _ = std::fs::create_dir_all(&image_dir);
     ira_parser::remove_image_variants(&image_dir, asset.file_base());
-    let small = format!("{}_small", asset.file_base());
-    ira_parser::remove_image_variants(&image_dir, &small);
     if std::fs::write(image_dir.join(format!("{}.webp", asset.file_base())), webp_bytes).is_err() {
         return false;
     }

@@ -43,6 +43,17 @@ pub fn cemu_choices() -> Vec<DetectedEmulator> {
     )
 }
 
+pub const PRIMEHACK_FLATPAK_ID: &str = "io.github.shiiion.primehack";
+
+/// Every installable PrimeHack variant (native + Flatpak).
+pub fn primehack_choices() -> Vec<DetectedEmulator> {
+    detect_emulator_choices(
+        &["primehack"],
+        &[(PRIMEHACK_FLATPAK_ID, "PrimeHack")],
+        "PrimeHack",
+    )
+}
+
 
 
 #[derive(Clone)]
@@ -140,6 +151,11 @@ pub fn detect_emulators(console: &str) -> Vec<DetectedEmulator> {
             "RetroArch",
         ));
     }
+    // PrimeHack is a Dolphin fork aimed at the Metroid Prime trilogy; it
+    // only plays GameCube and Wii games, so it joins just those consoles.
+    if console == "gc" || console == "wii" {
+        choices.extend(primehack_choices());
+    }
     choices
 }
 
@@ -183,11 +199,12 @@ pub fn is_retroarch(launch_command: &str) -> bool {
     launch_command.contains("retroarch") || launch_command == "flatpak:org.libretro.RetroArch"
 }
 
-/// True when the launch command targets Dolphin (a native binary or the
-/// flatpak). Dolphin accepts every disc of a game on its command line
-/// and offers in-game disc switching.
+/// True when the launch command targets Dolphin or its PrimeHack fork (a
+/// native binary or the flatpak). Both accept every disc of a game on
+/// their command line and offer in-game disc switching.
 pub fn is_dolphin(launch_command: &str) -> bool {
-    launch_command.to_lowercase().contains("dolphin")
+    let lower = launch_command.to_lowercase();
+    lower.contains("dolphin") || lower.contains("primehack")
 }
 
 fn ra_core_dirs() -> Vec<PathBuf> {
@@ -351,6 +368,9 @@ mod tests {
         assert!(is_dolphin("dolphin_emulator"));
         assert!(is_dolphin("/usr/bin/dolphin-emu"));
         assert!(is_dolphin("flatpak:org.DolphinEmu.dolphin-emu"));
+        assert!(is_dolphin("primehack"));
+        assert!(is_dolphin("/usr/bin/primehack"));
+        assert!(is_dolphin("flatpak:io.github.shiiion.primehack"));
         assert!(!is_dolphin("retroarch"));
         assert!(!is_dolphin("flatpak:org.libretro.RetroArch"));
         assert!(!is_dolphin("/usr/bin/duckstation-qt"));

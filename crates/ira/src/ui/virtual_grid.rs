@@ -220,14 +220,17 @@ mod imp {
         /// full-width header per section. Measure, allocation, and cell
         /// geometry all read this one plan, so the two modes cannot
         /// drift. The ys are absolute: the pinned header's height is
-        /// included.
-        fn build_plan(&self, width: i32, header_h: i32) -> Vec<Slot> {
+        /// included. `viewport_h` is the height the layout must fit —
+        /// 0 when there is none yet (the first measure) — and it feeds
+        /// the row-visibility clamp: without it the tiles grow to the
+        /// width's maximum step even in a window that fits two rows.
+        fn build_plan(&self, width: i32, viewport_h: i32, header_h: i32) -> Vec<Slot> {
             let sections = self.sections.borrow().clone();
             let (n_cols, item_w, item_h, sp) = compute_grid_layout(
                 width,
                 self.min_item_width.get(),
                 self.min_spacing.get(),
-                0,
+                viewport_h,
                 self.square_aspect(),
                 self.fixed_cols.get(),
             );
@@ -391,7 +394,7 @@ mod imp {
                 } else {
                     self.prev_width.get().max(1).max(800)
                 };
-                let plan = self.build_plan(width, header_h);
+                let plan = self.build_plan(width, 0, header_h);
                 let h = plan
                     .last()
                     .map(|slot| slot.y + slot.h)
@@ -437,8 +440,9 @@ mod imp {
             // the scroll window, recycling, binding, and placement all
             // read the plan, so the two modes cannot drift. The plan's
             // ys are absolute; the visible window compares in the same
-            // coordinates.
-            let plan = self.build_plan(width, header_h);
+            // coordinates. The allocated height rides along so the tile
+            // step keeps enough rows on screen.
+            let plan = self.build_plan(width, height, header_h);
             let (_, item_w, item_h, sp) = self.last_layout.get();
             let row_h = item_h + sp;
 
@@ -906,5 +910,21 @@ mod tests {
         assert_eq!(VirtualGrid::grid_spacing_for_item_w(300), 24);
         assert_eq!(VirtualGrid::grid_spacing_for_item_w(350), 28);
         assert_eq!(VirtualGrid::grid_spacing_for_item_w(400), 28);
+    }
+
+    #[test]
+    fn test_compute_grid_layout_height_clamp_keeps_rows_visible() {
+        // A wide viewport picks the top step on width alone; a short one
+        // must be clamped down so at least 2.5 rows stay visible. The
+        // section-titles plan rewrite dropped the height from this call
+        // and tiles jumped a full step bigger in short windows. (The
+        // returned width exceeds the step: the final pass widens tiles
+        // to close the row exactly.)
+        let wide = compute_grid_layout(1920, 110, 8, 0, 1.0, 0);
+        assert_eq!(wide.1, 350);
+        let short = compute_grid_layout(1920, 110, 8, 700, 1.0, 0);
+        assert_eq!(short.1, 251);
+        assert!(short.1 < wide.1);
+        assert!((700.0 / (short.1 as f64 + short.3 as f64)) >= MIN_VISIBLE_ROWS);
     }
 }

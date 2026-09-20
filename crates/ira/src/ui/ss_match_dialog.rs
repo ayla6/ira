@@ -58,33 +58,39 @@ pub enum SsMatchSink {
 /// replaced by it.
 pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &ScrapedGame) {
     let timestamp = ira_db::scraper_release_timestamp(&picked.release_date);
-    let s = state.borrow();
-    let mut merged = ira_db::scraper_metadata_for_game(&s.db, db_id)
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    merged.merge_match(&picked.metadata(timestamp));
-    if let Err(e) = ira_db::store_scraper_metadata(&s.db, db_id, &merged) {
-        eprintln!("Failed to store ScreenScraper metadata: {e}");
-        return;
-    }
-    if let Err(e) = ira_db::clear_scraper_miss(&s.db, db_id) {
-        eprintln!("Failed to clear the ScreenScraper miss marker: {e}");
-    }
-    // The SS title is authoritative for consoles whose own names came
-    // from file stems or shortened ROM headers; trusted sources (official
-    // console headers, RA, the user's own edits) keep theirs.
-    let replace_title = entry_title_trusted(state, db_id)
-        .map(|trusted| !trusted)
-        .unwrap_or(false);
     let mut new_title = None;
-    if replace_title && !picked.name.is_empty() {
-        if let Err(e) = ira_db::update_game_title(&s.db, db_id, &picked.name) {
-            eprintln!("Failed to store the ScreenScraper title: {e}");
-        } else if let Err(e) = ira_db::set_title_trusted(&s.db, db_id, true) {
-            eprintln!("Failed to mark the title trusted: {e}");
-        } else {
-            new_title = Some(picked.name.clone());
+    // The shared borrow lives only through the DB writes: the games
+    // update at the end takes the RefCell mutably, and an overlapping
+    // borrow panics — a long-held `s` here killed the batch pass's
+    // main-loop task on the very first hit.
+    {
+        let s = state.borrow();
+        let mut merged = ira_db::scraper_metadata_for_game(&s.db, db_id)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        merged.merge_match(&picked.metadata(timestamp));
+        if let Err(e) = ira_db::store_scraper_metadata(&s.db, db_id, &merged) {
+            eprintln!("Failed to store ScreenScraper metadata: {e}");
+            return;
+        }
+        if let Err(e) = ira_db::clear_scraper_miss(&s.db, db_id) {
+            eprintln!("Failed to clear the ScreenScraper miss marker: {e}");
+        }
+        // The SS title is authoritative for consoles whose own names came
+        // from file stems or shortened ROM headers; trusted sources (official
+        // console headers, RA, the user's own edits) keep theirs.
+        let replace_title = entry_title_trusted(state, db_id)
+            .map(|trusted| !trusted)
+            .unwrap_or(false);
+        if replace_title && !picked.name.is_empty() {
+            if let Err(e) = ira_db::update_game_title(&s.db, db_id, &picked.name) {
+                eprintln!("Failed to store the ScreenScraper title: {e}");
+            } else if let Err(e) = ira_db::set_title_trusted(&s.db, db_id, true) {
+                eprintln!("Failed to mark the title trusted: {e}");
+            } else {
+                new_title = Some(picked.name.clone());
+            }
         }
     }
     if let Some(g) = state

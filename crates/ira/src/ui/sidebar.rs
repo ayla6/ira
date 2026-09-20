@@ -494,8 +494,8 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
 }
 
 /// The rule-managed group header: collapse arrow and name like a
-/// collection, plus a pencil straight into the rule editor and a
-/// right-click menu for editing or deleting the group.
+/// collection, plus a right-click menu for editing or deleting the
+/// group.
 fn sidebar_bind_auto_group_header(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
     row.add_css_class(CSS_SIDEBAR_ROW_PAD_HEADER);
     let group_id = item.group_id();
@@ -535,18 +535,6 @@ fn sidebar_bind_auto_group_header(state: &SharedState, row: &gtk4::Box, item: &S
     let count_label = gtk4::Label::new(Some(&item.count().to_string()));
     count_label.add_css_class(CSS_DIM_LABEL);
     row.append(&count_label);
-
-    let edit = gtk4::Button::from_icon_name("document-edit-symbolic");
-    edit.add_css_class(CSS_FLAT);
-    edit.set_tooltip_text(Some(&crate::tr!("Edit rules")));
-    edit.set_valign(gtk4::Align::Center);
-    {
-        let sc = state.clone();
-        edit.connect_clicked(move |_| {
-            super::auto_group_dialog::show_auto_group_edit(&sc, group_id);
-        });
-    }
-    row.append(&edit);
 
     let sc = state.clone();
     let row_weak = row.downgrade();

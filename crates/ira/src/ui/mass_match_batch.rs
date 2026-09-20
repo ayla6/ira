@@ -43,6 +43,18 @@ pub(super) struct RowActions {
     pub(super) steam: Option<gtk4::Box>,
 }
 
+/// A panic payload's message, for the batch's panic logs. Takes the
+/// owned payload: a `&Box` argument coerces to `&(dyn Any + Send)` in
+/// one step that points the downcast at the wrong place, and the miss
+/// reads as "no panic message".
+fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no panic message".to_string())
+}
+
 /// Shared shape of every batch pass: one sequential worker thread computes
 /// matches over `queue`, and each result is applied on the main loop as
 /// it arrives. `worker` runs off-thread and must not touch GTK; it waits
@@ -72,12 +84,11 @@ pub(super) fn run_batch<T: Send + 'static>(
                 worker(item)
             }))
             .unwrap_or_else(|panic| {
-                let message = panic
-                    .downcast_ref::<&str>()
-                    .map(|s| s.to_string())
-                    .or_else(|| panic.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "worker panicked".to_string());
-                eprintln!("batch worker panicked on '{}': {message}", item.name);
+                eprintln!(
+                    "batch worker panicked on '{}': {}",
+                    item.name,
+                    panic_message(panic)
+                );
                 None
             });
             let _ = tx.try_send(BatchHit {
@@ -98,7 +109,34 @@ pub(super) fn run_batch<T: Send + 'static>(
     // The sentinel hit closes the pass; afterwards the senders are gone
     // and the watch loop ends on its own.
     super::helpers::watch_channel(rx, move |hit| {
-        on_result(hit);
+        // A panicking applier must not end the delivery: glib cancels
+        // this future on unwind, and every row after the panicking one
+        // would sit in its "searching" state forever, the sentinel
+        // unprocessed. Log and keep the pass going — the mirror of the
+        // worker's guard above.
+        let what = if hit.row_idx == BATCH_FINISHED {
+            "the pass sentinel".to_string()
+        } else {
+            format!("'{}'", hit.name)
+        };
+        if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            on_result(hit)
+        })) {
+            eprintln!("batch applier panicked on {what}: {}", panic_message(panic));
+        }
         glib::ControlFlow::Continue
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::panic_message;
+
+    #[test]
+    fn test_panic_message_extracts_string_payloads() {
+        assert_eq!(panic_message(Box::new("boom")), "boom");
+        assert_eq!(panic_message(Box::new(String::from("bang"))), "bang");
+        // A payload that is neither string shape still logs something.
+        assert_eq!(panic_message(Box::new(7u32)), "no panic message");
+    }
 }

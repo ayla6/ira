@@ -323,7 +323,7 @@ pub(crate) fn curve_preset_row(
             let description = choice.description.clone().unwrap_or_default();
             combo.set_subtitle(description.as_str());
         }
-        (base.on_changed)();
+        (base.on_adjusted)();
         // Entering or leaving Custom is the only pick that changes the row
         // set — it reveals or removes the slider underneath.
         if was_custom != curve_preset_value(index).is_none() {

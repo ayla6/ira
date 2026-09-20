@@ -209,7 +209,7 @@ pub(crate) fn sync_stick_dpad_directions(
 }
 
 /// Refresh the expander header's summary label from the current mapping.
-fn refresh_header_summary(base: &SheetBase) {
+pub(crate) fn refresh_header_summary(base: &SheetBase) {
     if let Some(label) = base.header_summary.borrow().as_ref() {
         label.set_text(&summary_text(base.source, find_mapping(base).as_ref()));
     }
@@ -322,10 +322,6 @@ pub(crate) fn input_expander_row(
         source,
         device: ctx.device.clone(),
         backend: ctx.profile.borrow().backend,
-        on_changed: {
-            let ctx = ctx.clone();
-            Rc::new(move || (ctx.on_dirty)())
-        },
         on_adjusted: {
             let ctx = ctx.clone();
             Rc::new(move || (ctx.on_adjusted)())

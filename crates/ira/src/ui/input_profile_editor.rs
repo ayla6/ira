@@ -325,7 +325,7 @@ fn build_pages(
     super::input_profile_controller_page::add_controller_groups(
         &general_box,
         &ctx.profile,
-        &ctx.on_dirty,
+        &ctx.on_adjusted,
     );
 
     for region in Region::ALL {
@@ -350,17 +350,10 @@ fn build_pages(
             &crate::tr!("Gyro"),
             "gyro",
         ));
-    add_gyro_group(
-        &gyro_box,
-        gyro,
-        ctx.device.as_ref(),
-        &ctx.on_dirty,
-        &ctx.on_adjusted,
-    );
+    add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_adjusted);
     super::input_profile_gyro_motion::add_gyro_motion_groups(
         &gyro_box,
         gyro,
-        &ctx.on_dirty,
         &ctx.on_adjusted,
     );
 

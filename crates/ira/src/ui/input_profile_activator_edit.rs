@@ -7,6 +7,7 @@ use super::helpers::esc;
 use super::input_output_picker::{show_output_picker, OutputPickerScope};
 use super::input_profile_activator_gate::activator_gate_controls;
 use super::input_profile_editor_regions::{activator_kind_label, source_label};
+use super::input_profile_input_rows::refresh_header_summary;
 use super::input_profile_options::output_display_label;
 use super::input_profile_sheet_base::{
     combo_row, is_trigger_axis, with_mapping, Reopen, SheetBase,
@@ -116,7 +117,8 @@ pub(crate) fn activator_rows(
                         GamepadButton::A,
                     )]));
             });
-            (base.on_changed)();
+            refresh_header_summary(&base);
+            (base.on_adjusted)();
             reopen();
         });
     }
@@ -161,7 +163,8 @@ fn activator_header_controls(
                 input.activators.remove(index);
             }
         });
-        (base.on_changed)();
+        refresh_header_summary(&base);
+        (base.on_adjusted)();
         reopen();
     });
 }
@@ -236,7 +239,7 @@ fn activator_kind_controls(
             let description = choice.description.clone().unwrap_or_default();
             combo.set_subtitle(description.as_str());
         }
-        (base_for_kind.on_changed)();
+        (base_for_kind.on_adjusted)();
         if slider_kind(&new_kind) != old_slider {
             reopen_for_kind();
         }
@@ -337,7 +340,8 @@ fn activator_output_rows(
                     }
                 }
             });
-            (base.on_changed)();
+            refresh_header_summary(&base);
+            (base.on_adjusted)();
             reopen();
         });
         expander.add_row(&output_row);
@@ -373,7 +377,8 @@ fn activator_output_rows(
                         activator.outputs.push(action);
                     }
                 });
-                (base.on_changed)();
+                refresh_header_summary(&base);
+                (base.on_adjusted)();
                 reopen();
             },
         );
@@ -419,7 +424,7 @@ fn activator_setting_controls(
                 activator.settings.toggle = switch.is_active();
             }
         });
-        (base_for_toggle.on_changed)();
+        (base_for_toggle.on_adjusted)();
     });
 
     if matches!(activator.kind, ActivatorKind::FullPress) {

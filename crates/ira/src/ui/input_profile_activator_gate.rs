@@ -35,7 +35,7 @@ pub(crate) fn activator_gate_controls(
                 activator.activation = gate_from_selection(dropdown.selected(), &current);
             }
         });
-        (base_for_gate.on_changed)();
+        (base_for_gate.on_adjusted)();
         reopen();
     });
 
@@ -149,7 +149,7 @@ fn add_analog_gate_rows(
                     }
                 }
             });
-            (base.on_changed)();
+            (base.on_adjusted)();
         };
 
     let base_for_axis = base.clone();
@@ -253,7 +253,7 @@ fn gate_source_row(base: &SheetBase, index: usize, activation: &Activation) -> a
                     }
                 }
             });
-            (base.on_changed)();
+            (base.on_adjusted)();
         }
     });
     row

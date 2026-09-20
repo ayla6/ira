@@ -14,20 +14,15 @@ use std::rc::Rc;
 pub(super) fn add_gyro_motion_groups(
     page: &gtk4::Box,
     gyro: &Rc<RefCell<GyroConfig>>,
-    on_dirty: &Rc<dyn Fn()>,
     on_adjusted: &Rc<dyn Fn()>,
 ) {
-    page.append(&momentum_group(gyro, on_dirty, on_adjusted));
-    page.append(&dampening_group(gyro, on_dirty, on_adjusted));
+    page.append(&momentum_group(gyro, on_adjusted));
+    page.append(&dampening_group(gyro, on_adjusted));
 }
 
 /// Momentum: after the gyro deactivates, its last motion keeps outputting
 /// while friction bleeds it off — Steam's "Enable Momentum" panel.
-fn momentum_group(
-    gyro: &Rc<RefCell<GyroConfig>>,
-    on_dirty: &Rc<dyn Fn()>,
-    on_adjusted: &Rc<dyn Fn()>,
-) -> gtk4::Box {
+fn momentum_group(gyro: &Rc<RefCell<GyroConfig>>, on_adjusted: &Rc<dyn Fn()>) -> gtk4::Box {
     let group = SettingGroup::new(
         Some(&crate::tr!("Momentum")),
         Some(&crate::tr!(
@@ -61,12 +56,12 @@ fn momentum_group(
         initial_enabled,
         {
             let gyro = gyro.clone();
-            let on_dirty = on_dirty.clone();
+            let on_adjusted = on_adjusted.clone();
             let friction = friction.clone();
             move |active| {
                 gyro.borrow_mut().momentum.enabled = active;
                 friction.set_sensitive(active);
-                on_dirty();
+                on_adjusted();
             }
         },
     );
@@ -79,11 +74,7 @@ fn momentum_group(
 
 /// Trigger dampening: gyro mouse output scales down while the chosen
 /// trigger is held, so aiming steadies while shooting.
-fn dampening_group(
-    gyro: &Rc<RefCell<GyroConfig>>,
-    on_dirty: &Rc<dyn Fn()>,
-    on_adjusted: &Rc<dyn Fn()>,
-) -> gtk4::Box {
+fn dampening_group(gyro: &Rc<RefCell<GyroConfig>>, on_adjusted: &Rc<dyn Fn()>) -> gtk4::Box {
     let group = SettingGroup::new(
         Some(&crate::tr!("Trigger dampening")),
         Some(&crate::tr!(
@@ -114,13 +105,13 @@ fn dampening_group(
     amount.set_sensitive(gyro.borrow().trigger_dampening != TriggerDampening::Off);
 
     let gyro_for_mode = gyro.clone();
-    let on_dirty_for_mode = on_dirty.clone();
+    let on_adjusted_for_mode = on_adjusted.clone();
     let amount_for_mode = amount.clone();
     mode.connect_selected_notify(move |dropdown| {
         let selected = dampening_from_index(dropdown.selected());
         gyro_for_mode.borrow_mut().trigger_dampening = selected;
         amount_for_mode.set_sensitive(selected != TriggerDampening::Off);
-        on_dirty_for_mode();
+        on_adjusted_for_mode();
     });
 
     group.add(&mode);

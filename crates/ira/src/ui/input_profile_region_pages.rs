@@ -30,12 +30,14 @@ pub(crate) struct PagesCtx {
     /// that moves the editing target.
     pub indicator: Rc<super::input_profile_set_indicator::SetIndicator>,
     pub device: Option<ira_input::DeviceInfo>,
-    /// Structural edits (mode swaps, rebinds, set changes) that change what
-    /// the pages show: refreshes Save/Apply and rebuilds every region page.
+    /// Structural edits that change what the region pages show — the d-pad
+    /// group behavior, quick rebinds, set/layer management: refreshes
+    /// Save/Apply and rebuilds every region page.
     pub on_dirty: Rc<dyn Fn()>,
-    /// Continuous edits (slider drags, keystrokes) that only change stored
-    /// values: refreshes Save/Apply alone. A drag must not rebuild the page
-    /// it is happening in — the recreated slider would lose the gesture.
+    /// Value edits (slider drags, switch toggles, combo picks) that only
+    /// change stored values: refreshes Save/Apply alone. A drag must not
+    /// rebuild the page it is happening in — the recreated slider would
+    /// lose the gesture.
     pub on_adjusted: Rc<dyn Fn()>,
     /// The editor's live gyro config: per-input sheets that touch shared
     /// calibration (the flick stick's dots per 360°) must write the same
@@ -176,7 +178,7 @@ fn dpad_behavior_rows(ctx: &PagesCtx) -> Vec<adw::ComboRow> {
             write_dpad_mode(&ctx_for_output, Some(ira_input::SourceMode::Joystick(
                 ira_input::JoystickSettings::new(output_choice),
             )));
-            (ctx_for_output.on_dirty)();
+            (ctx_for_output.on_adjusted)();
         });
         rows.push(output);
     }

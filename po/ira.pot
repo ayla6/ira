@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-20 01:42-0300\n"
+"POT-Creation-Date: 2026-09-20 02:01-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -207,7 +207,7 @@ msgstr ""
 #: crates/ira/src/ui/helpers.rs:107
 #: crates/ira/src/ui/helpers.rs:593
 #: crates/ira/src/ui/helpers.rs:969
-#: crates/ira/src/ui/input_profile_editor.rs:450
+#: crates/ira/src/ui/input_profile_editor.rs:443
 #: crates/ira/src/ui/input_profile_editor_save.rs:129
 #: crates/ira/src/ui/input_profile_output_capture.rs:55
 #: crates/ira/src/ui/installer_add_dialog.rs:643
@@ -1259,10 +1259,10 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_scraper.rs:490
 #: crates/ira/src/ui/input_output_picker.rs:141
 #: crates/ira/src/ui/input_profile_action_sets.rs:217
-#: crates/ira/src/ui/input_profile_input_rows.rs:413
-#: crates/ira/src/ui/input_profile_input_rows.rs:439
-#: crates/ira/src/ui/input_profile_input_rows.rs:452
-#: crates/ira/src/ui/input_profile_region_pages.rs:343
+#: crates/ira/src/ui/input_profile_input_rows.rs:409
+#: crates/ira/src/ui/input_profile_input_rows.rs:435
+#: crates/ira/src/ui/input_profile_input_rows.rs:448
+#: crates/ira/src/ui/input_profile_region_pages.rs:345
 #: crates/ira/src/ui/input_profile_source_modes.rs:55
 #: crates/ira/src/ui/wine_config_widget.rs:397
 msgid "None"
@@ -2784,7 +2784,7 @@ msgid "Gamepad"
 msgstr ""
 
 #: crates/ira/src/ui/input_output_picker.rs:38
-#: crates/ira/src/ui/input_profile_gyro_card.rs:553
+#: crates/ira/src/ui/input_profile_gyro_card.rs:552
 #: crates/ira/src/ui/input_profile_search_filters.rs:53
 msgid "Mouse"
 msgstr ""
@@ -2796,7 +2796,7 @@ msgstr ""
 
 #: crates/ira/src/ui/input_output_picker.rs:49
 #: crates/ira/src/ui/input_profile_action_sets.rs:71
-#: crates/ira/src/ui/input_profile_editor.rs:373
+#: crates/ira/src/ui/input_profile_editor.rs:366
 msgid "Action Sets"
 msgstr ""
 
@@ -3004,114 +3004,114 @@ msgstr ""
 msgid "Action set when cursor hidden"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:47
+#: crates/ira/src/ui/input_profile_activator_edit.rs:48
 #: crates/ira/src/ui/input_profile_editor_regions.rs:254
 msgid "Click"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:49
+#: crates/ira/src/ui/input_profile_activator_edit.rs:50
 msgid "The regular activation: fires when the input is pressed"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:53
+#: crates/ira/src/ui/input_profile_activator_edit.rs:54
 #: crates/ira/src/ui/input_profile_editor_regions.rs:255
 msgid "Double press"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:55
+#: crates/ira/src/ui/input_profile_activator_edit.rs:56
 msgid "Fires when the input is pressed twice in quick succession"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:59
+#: crates/ira/src/ui/input_profile_activator_edit.rs:60
 #: crates/ira/src/ui/input_profile_editor_regions.rs:256
 msgid "Long press"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:61
+#: crates/ira/src/ui/input_profile_activator_edit.rs:62
 msgid "Fires when the input is held past the hold duration"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:65
+#: crates/ira/src/ui/input_profile_activator_edit.rs:66
 #: crates/ira/src/ui/input_profile_editor_regions.rs:257
 msgid "On press down"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:67
+#: crates/ira/src/ui/input_profile_activator_edit.rs:68
 msgid "Fires the instant the input goes down, without waiting for the release"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:71
+#: crates/ira/src/ui/input_profile_activator_edit.rs:72
 #: crates/ira/src/ui/input_profile_editor_regions.rs:258
 msgid "On release"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:72
+#: crates/ira/src/ui/input_profile_activator_edit.rs:73
 msgid "Fires when the input is released"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:77
+#: crates/ira/src/ui/input_profile_activator_edit.rs:78
 #: crates/ira/src/ui/input_profile_editor_regions.rs:259
 msgid "Soft pull"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:79
+#: crates/ira/src/ui/input_profile_activator_edit.rs:80
 msgid ""
 "Fires when the trigger crosses the soft pull threshold, before the full pull"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:104
+#: crates/ira/src/ui/input_profile_activator_edit.rs:105
 msgid "Add activator"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:154
+#: crates/ira/src/ui/input_profile_activator_edit.rs:156
 msgid "Remove activator"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:213
+#: crates/ira/src/ui/input_profile_activator_edit.rs:216
 msgid "Press pattern"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:249
+#: crates/ira/src/ui/input_profile_activator_edit.rs:252
 msgid "Double-press window"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:250
+#: crates/ira/src/ui/input_profile_activator_edit.rs:253
 msgid "Time allowed between the two presses"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:258
+#: crates/ira/src/ui/input_profile_activator_edit.rs:261
 msgid "Hold duration"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:260
+#: crates/ira/src/ui/input_profile_activator_edit.rs:263
 msgid "How long the input must be held before it fires"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:269
+#: crates/ira/src/ui/input_profile_activator_edit.rs:272
 msgid "Soft pull threshold"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:270
+#: crates/ira/src/ui/input_profile_activator_edit.rs:273
 msgid "Trigger travel that fires the soft pull"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:348
+#: crates/ira/src/ui/input_profile_activator_edit.rs:352
 msgid "Add output…"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:351
+#: crates/ira/src/ui/input_profile_activator_edit.rs:355
 msgid "Add output"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:412
+#: crates/ira/src/ui/input_profile_activator_edit.rs:417
 msgid "Toggle instead of hold"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:433
+#: crates/ira/src/ui/input_profile_activator_edit.rs:438
 msgid "Repeat every"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_activator_edit.rs:434
+#: crates/ira/src/ui/input_profile_activator_edit.rs:439
 msgid "Re-fires the outputs while the input is held"
 msgstr ""
 
@@ -3210,14 +3210,14 @@ msgstr ""
 
 #: crates/ira/src/ui/input_profile_editor_regions.rs:191
 #: crates/ira/src/ui/input_profile_editor_regions.rs:291
-#: crates/ira/src/ui/input_profile_region_pages.rs:166
+#: crates/ira/src/ui/input_profile_region_pages.rs:168
 #: crates/ira/src/ui/input_profile_stick_settings.rs:248
 msgid "Left Joystick"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_editor_regions.rs:198
 #: crates/ira/src/ui/input_profile_editor_regions.rs:299
-#: crates/ira/src/ui/input_profile_region_pages.rs:167
+#: crates/ira/src/ui/input_profile_region_pages.rs:169
 #: crates/ira/src/ui/input_profile_stick_settings.rs:248
 msgid "Right Joystick"
 msgstr ""
@@ -3233,7 +3233,7 @@ msgid "Could not load profile: {}"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_editor.rs:350
-#: crates/ira/src/ui/input_profile_gyro_card.rs:54
+#: crates/ira/src/ui/input_profile_gyro_card.rs:53
 #: crates/ira/src/ui/input_profile_search_filters.rs:54
 msgid "Gyro"
 msgstr ""
@@ -3302,340 +3302,340 @@ msgstr ""
 msgid "Backend"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:56
+#: crates/ira/src/ui/input_profile_gyro_card.rs:55
 msgid ""
 "Rotating the controller steers the output. Yaw and pitch are measured "
 "relative to gravity, so aiming stays consistent no matter how the controller "
 "is held."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:65
+#: crates/ira/src/ui/input_profile_gyro_card.rs:64
 msgid "Choose Gyro Button(s)"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:71
+#: crates/ira/src/ui/input_profile_gyro_card.rs:70
 msgid "Button"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:73
+#: crates/ira/src/ui/input_profile_gyro_card.rs:72
 #: crates/ira/src/ui/input_profile_stick_settings.rs:38
 #: crates/ira/src/ui/input_profile_stick_settings.rs:65
 msgid "Output"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:76
+#: crates/ira/src/ui/input_profile_gyro_card.rs:75
 msgid ""
 "Native motion sensors pass the controller's real sensor on to the game "
 "(Switch Pro, DualShock 4 and DualSense with a motion sensor)"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:88
+#: crates/ira/src/ui/input_profile_gyro_card.rs:87
 msgid "Gyro Angles to mouse Pixels (Dots Per 360°)"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:90
+#: crates/ira/src/ui/input_profile_gyro_card.rs:89
 msgid ""
 "One full 360° turn of the gyro moves the mouse this many pixels at 1x "
 "sensitivity. Shared with the Flick Stick so both calibrate against the same "
 "in-game angle."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:103
+#: crates/ira/src/ui/input_profile_gyro_card.rs:102
 #: crates/ira/src/ui/input_profile_stick_settings.rs:284
 msgid "Rotate Output"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:105
+#: crates/ira/src/ui/input_profile_gyro_card.rs:104
 msgid "Adjust the 2D output of the gyroscope clockwise/counter clockwise"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:118
+#: crates/ira/src/ui/input_profile_gyro_card.rs:117
 msgid "Maximum Joystick Output"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:120
+#: crates/ira/src/ui/input_profile_gyro_card.rs:119
 msgid ""
 "Maximum gyro input speed maps to this joystick output. Decrease it to avoid "
 "triggering a game's \"Extra Yaw\" setting."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:131
+#: crates/ira/src/ui/input_profile_gyro_card.rs:130
 msgid "Circular"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:132
+#: crates/ira/src/ui/input_profile_gyro_card.rs:131
 #: crates/ira/src/ui/input_profile_stick_settings.rs:222
 msgid "Per Axis"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:137
+#: crates/ira/src/ui/input_profile_gyro_card.rs:136
 #: crates/ira/src/ui/input_profile_stick_settings.rs:218
 msgid "Response Axis Style"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:139
+#: crates/ira/src/ui/input_profile_gyro_card.rs:138
 msgid ""
 "Apply the response curve per axis, or based on the distance from the center"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:154
+#: crates/ira/src/ui/input_profile_gyro_card.rs:153
 msgid "Joystick Power Curve"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:156
+#: crates/ira/src/ui/input_profile_gyro_card.rs:155
 msgid ""
 "How aggressively the joystick output deflects: 0.1 extremely aggressive, 1 "
 "linear, 4 extremely relaxed"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:166
+#: crates/ira/src/ui/input_profile_gyro_card.rs:165
 msgid "Lock at Edges"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:168
+#: crates/ira/src/ui/input_profile_gyro_card.rs:167
 msgid ""
 "Locks joystick output to the maximum deflection angle; off lets diagonals "
 "use the full output range"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:184
+#: crates/ira/src/ui/input_profile_gyro_card.rs:183
 msgid "Gyro Speed Deadzone"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:186
+#: crates/ira/src/ui/input_profile_gyro_card.rs:185
 msgid ""
 "The minimum speed the gyro must move before there is a reaction. Combats "
 "hand shake; rotation lost to the deadzone is recovered when moving fast."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:197
+#: crates/ira/src/ui/input_profile_gyro_card.rs:196
 msgid "Enable gyro"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:214
+#: crates/ira/src/ui/input_profile_gyro_card.rs:213
 #: crates/ira/src/ui/input_profile_source_modes.rs:176
 #: crates/ira/src/ui/input_profile_stick_settings.rs:34
 msgid "Sensitivity"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:215
+#: crates/ira/src/ui/input_profile_gyro_card.rs:214
 msgid "Multiplier applied to gyro motion; type for precise values"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:224
-#: crates/ira/src/ui/input_profile_gyro_card.rs:417
+#: crates/ira/src/ui/input_profile_gyro_card.rs:223
+#: crates/ira/src/ui/input_profile_gyro_card.rs:416
 msgid "Invert horizontal"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:237
-#: crates/ira/src/ui/input_profile_gyro_card.rs:418
+#: crates/ira/src/ui/input_profile_gyro_card.rs:236
+#: crates/ira/src/ui/input_profile_gyro_card.rs:417
 msgid "Invert vertical"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:250
+#: crates/ira/src/ui/input_profile_gyro_card.rs:249
 msgid "Smoothing"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:252
+#: crates/ira/src/ui/input_profile_gyro_card.rs:251
 msgid "Damps jitter while aiming slowly; flicks stay untouched"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:414
+#: crates/ira/src/ui/input_profile_gyro_card.rs:413
 msgid "Invert yaw"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:415
+#: crates/ira/src/ui/input_profile_gyro_card.rs:414
 msgid "Invert pitch"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:443
+#: crates/ira/src/ui/input_profile_gyro_card.rs:442
 msgid "Yaw"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:445
+#: crates/ira/src/ui/input_profile_gyro_card.rs:444
 msgid ""
 "Turn the controller around its own vertical axis for horizontal output. Tilt "
 "the controller up and down around its own lateral axis for vertical output. "
 "(Local Space Preset)"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:452
+#: crates/ira/src/ui/input_profile_gyro_card.rs:451
 msgid "Roll"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:454
+#: crates/ira/src/ui/input_profile_gyro_card.rs:453
 msgid ""
 "Lean the controller around its forward axis for horizontal output. Tilt the "
 "controller up and down around its own lateral axis for vertical output. "
 "(Local Space Preset)"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:461
+#: crates/ira/src/ui/input_profile_gyro_card.rs:460
 msgid "Yaw + Roll"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:463
+#: crates/ira/src/ui/input_profile_gyro_card.rs:462
 msgid ""
 "Yaw + Roll adds the Lean and Turn together for horizontal output. Tilting "
 "the controller up and down around its own lateral axis still moves the "
 "output up and down. (Local Space Preset)"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:470
+#: crates/ira/src/ui/input_profile_gyro_card.rs:469
 msgid "Player Space"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:472
+#: crates/ira/src/ui/input_profile_gyro_card.rs:471
 msgid ""
 "Player Space uses Yaw + Roll around the gravity axis for horizontal output, "
 "and Local Pitch for vertical output."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:479
+#: crates/ira/src/ui/input_profile_gyro_card.rs:478
 msgid "World Space"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:481
+#: crates/ira/src/ui/input_profile_gyro_card.rs:480
 msgid ""
 "World Space uses all rotation around the gravity axis for horizontal output, "
 "and World Pitch for vertical output, but does not move vertically when the "
 "controller is tilted on its side."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:488
+#: crates/ira/src/ui/input_profile_gyro_card.rs:487
 msgid "Laser Pointer"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:490
+#: crates/ira/src/ui/input_profile_gyro_card.rs:489
 msgid ""
 "Acts similar to a laser pointer. Great for cursor control on a stand-alone "
 "controller."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:511
+#: crates/ira/src/ui/input_profile_gyro_card.rs:510
 msgid "Orientation"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:531
+#: crates/ira/src/ui/input_profile_gyro_card.rs:530
 msgid "None (Gyro Always On)"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:532
+#: crates/ira/src/ui/input_profile_gyro_card.rs:531
 msgid "Hold to Enable Gyro"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:533
+#: crates/ira/src/ui/input_profile_gyro_card.rs:532
 msgid "Hold to Suppress Gyro"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:534
+#: crates/ira/src/ui/input_profile_gyro_card.rs:533
 msgid "Toggle Gyro On/Off"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:543
+#: crates/ira/src/ui/input_profile_gyro_card.rs:542
 msgid "The gyro is always on"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:544
+#: crates/ira/src/ui/input_profile_gyro_card.rs:543
 msgid "Gyro is off unless any assigned button is held."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:545
+#: crates/ira/src/ui/input_profile_gyro_card.rs:544
 msgid "Gyro is on unless any assigned button is held."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:546
+#: crates/ira/src/ui/input_profile_gyro_card.rs:545
 msgid "Gyro will toggle on or off any time an assigned button is pressed."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:554
+#: crates/ira/src/ui/input_profile_gyro_card.rs:553
 msgid "Left stick"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:555
+#: crates/ira/src/ui/input_profile_gyro_card.rs:554
 msgid "Right stick"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_card.rs:556
+#: crates/ira/src/ui/input_profile_gyro_card.rs:555
 msgid "Native motion sensors"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:32
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:27
 msgid "Momentum"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:34
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:29
 msgid ""
 "When the gyro deactivates, its motion continues to output for a short time. "
 "Friction controls how quickly it slows down."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:43
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:38
 msgid "Friction"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:45
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:40
 msgid "How quickly the glide slows down; higher stops sooner"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:57
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:52
 msgid "Enable momentum"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:59
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:54
 msgid "Let the last gyro motion glide to a stop instead of cutting off"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:88
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:79
 msgid "Trigger dampening"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:90
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:81
 msgid "Reduces gyro mouse output while the chosen trigger is held"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:98
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:89
 msgid "Trigger press mouse dampening"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:99
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:90
 msgid "Which trigger state steadies the aim"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:101
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:92
 msgid "Dampening amount"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:103
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:94
 msgid "How much gyro output is removed while the trigger is held"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:134
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:125
 msgid "Off"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:135
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:126
 msgid "Right Trigger Soft Pull"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:136
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:127
 msgid "Right Trigger Full Pull"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:137
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:128
 msgid "Left Trigger Soft Pull"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:138
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:129
 msgid "Left Trigger Full Pull"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_gyro_motion.rs:139
+#: crates/ira/src/ui/input_profile_gyro_motion.rs:130
 msgid "Both Triggers Full Pull"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_input_rows.rs:135
-#: crates/ira/src/ui/input_profile_region_pages.rs:146
+#: crates/ira/src/ui/input_profile_region_pages.rs:148
 msgid "Behavior"
 msgstr ""
 
@@ -3653,92 +3653,92 @@ msgstr ""
 msgid "Direction Commands"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:369
+#: crates/ira/src/ui/input_profile_input_rows.rs:365
 msgid "Unbound"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:380
+#: crates/ira/src/ui/input_profile_input_rows.rs:376
 msgid "Not mapped"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:414
+#: crates/ira/src/ui/input_profile_input_rows.rs:410
 msgid "The d-pad sends nothing"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:417
-#: crates/ira/src/ui/input_profile_input_rows.rs:462
-#: crates/ira/src/ui/input_profile_region_pages.rs:345
+#: crates/ira/src/ui/input_profile_input_rows.rs:413
+#: crates/ira/src/ui/input_profile_input_rows.rs:458
+#: crates/ira/src/ui/input_profile_region_pages.rs:347
 #: crates/ira/src/ui/input_profile_source_modes.rs:57
 msgid "Directional Pad"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:419
+#: crates/ira/src/ui/input_profile_input_rows.rs:415
 msgid "The standard d-pad; each direction keeps its own command"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:423
-#: crates/ira/src/ui/input_profile_region_pages.rs:347
+#: crates/ira/src/ui/input_profile_input_rows.rs:419
+#: crates/ira/src/ui/input_profile_region_pages.rs:349
 #: crates/ira/src/ui/input_profile_source_modes.rs:58
 msgid "Button Pad"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:425
+#: crates/ira/src/ui/input_profile_input_rows.rs:421
 msgid "Each direction is its own independent button, with no d-pad semantics"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:429
-#: crates/ira/src/ui/input_profile_input_rows.rs:456
+#: crates/ira/src/ui/input_profile_input_rows.rs:425
+#: crates/ira/src/ui/input_profile_input_rows.rs:452
 #: crates/ira/src/ui/input_profile_source_modes.rs:56
 msgid "Joystick"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:431
+#: crates/ira/src/ui/input_profile_input_rows.rs:427
 msgid ""
 "The four directions deflect a virtual joystick — for games and menus that "
 "only read the stick"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:440
+#: crates/ira/src/ui/input_profile_input_rows.rs:436
 msgid "The trigger only runs its click bindings"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:443
+#: crates/ira/src/ui/input_profile_input_rows.rs:439
 #: crates/ira/src/ui/input_profile_source_modes.rs:61
 msgid "Trigger"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:445
+#: crates/ira/src/ui/input_profile_input_rows.rs:441
 msgid ""
 "The trigger sends an analog value; soft and full pulls get their own bindings"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:453
+#: crates/ira/src/ui/input_profile_input_rows.rs:449
 msgid "The stick sends nothing"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:458
+#: crates/ira/src/ui/input_profile_input_rows.rs:454
 msgid "Deflection drives a virtual joystick — the standard analog movement"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:463
+#: crates/ira/src/ui/input_profile_input_rows.rs:459
 msgid "Deflection presses the d-pad directions"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:466
+#: crates/ira/src/ui/input_profile_input_rows.rs:462
 #: crates/ira/src/ui/input_profile_source_modes.rs:59
 msgid "Joystick Mouse"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:467
+#: crates/ira/src/ui/input_profile_input_rows.rs:463
 msgid "Deflection moves the mouse pointer"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:470
+#: crates/ira/src/ui/input_profile_input_rows.rs:466
 #: crates/ira/src/ui/input_profile_source_modes.rs:60
 msgid "Flick Stick"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_input_rows.rs:472
+#: crates/ira/src/ui/input_profile_input_rows.rs:468
 msgid ""
 "Direction sets the facing; a flick turns instantly — pairs well with gyro"
 msgstr ""
@@ -4159,16 +4159,16 @@ msgstr ""
 msgid "Import failed: {}"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_region_pages.rs:163
+#: crates/ira/src/ui/input_profile_region_pages.rs:165
 #: crates/ira/src/ui/input_profile_stick_settings.rs:246
 msgid "Output Joystick"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_region_pages.rs:164
+#: crates/ira/src/ui/input_profile_region_pages.rs:166
 msgid "Which stick the d-pad drives"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_region_pages.rs:258
+#: crates/ira/src/ui/input_profile_region_pages.rs:260
 #, rust-format
 msgid "Bind {}"
 msgstr ""

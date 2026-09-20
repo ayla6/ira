@@ -65,7 +65,7 @@ fn backend_group(ctx: &PagesCtx) -> adw::PreferencesGroup {
             _ => VirtualGamepadBackend::XInput,
         };
         ctx_for_backend.profile.borrow_mut().backend = backend;
-        (ctx_for_backend.on_dirty)();
+        (ctx_for_backend.on_adjusted)();
     });
 
     group

@@ -50,7 +50,7 @@ pub(crate) fn shift_rows(base: &SheetBase, reopen: &Reopen) -> Vec<gtk4::Widget>
                     activators: Vec::new(),
                 });
             });
-            (base.on_changed)();
+            (base.on_adjusted)();
             reopen();
         }
     });
@@ -164,7 +164,7 @@ fn remove_shift_button(base: &SheetBase, reopen: &Reopen, shift_index: usize) ->
                 input.mode_shifts.remove(shift_index);
             }
         });
-        (base.on_changed)();
+        (base.on_adjusted)();
         reopen();
     });
     trash

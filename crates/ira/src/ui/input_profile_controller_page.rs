@@ -13,7 +13,7 @@ use std::rc::Rc;
 pub(crate) fn add_controller_groups(
     page: &gtk4::Box,
     profile: &Rc<RefCell<InputProfile>>,
-    on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
 ) {
     let haptics = SettingGroup::new(
         Some(&crate::tr!("Haptics")),
@@ -27,10 +27,10 @@ pub(crate) fn add_controller_groups(
         profile.borrow().rumble,
         {
             let profile = profile.clone();
-            let on_dirty = on_dirty.clone();
+            let on_adjusted = on_adjusted.clone();
             move |active| {
                 profile.borrow_mut().rumble = active;
-                on_dirty();
+                on_adjusted();
             }
         },
     );

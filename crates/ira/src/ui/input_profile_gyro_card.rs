@@ -47,7 +47,6 @@ pub(super) fn add_gyro_group(
     page: &gtk4::Box,
     gyro: &Rc<RefCell<GyroConfig>>,
     device: Option<&DeviceInfo>,
-    on_dirty: &Rc<dyn Fn()>,
     on_adjusted: &Rc<dyn Fn()>,
 ) {
     let group = SettingGroup::new(
@@ -132,7 +131,7 @@ pub(super) fn add_gyro_group(
             crate::tr!("Per Axis"),
         ];
         let gyro = gyro.clone();
-        let on_dirty = on_dirty.clone();
+        let on_adjusted = on_adjusted.clone();
         let combo = combo_row(&styles, response_style_index(&stick.response_style));
         combo.set_title(&crate::tr!("Response Axis Style"));
         combo.set_subtitle(&crate::tr!(
@@ -143,7 +142,7 @@ pub(super) fn add_gyro_group(
                 1 => ira_input::GyroStickResponseStyle::PerAxis,
                 _ => ira_input::GyroStickResponseStyle::Circular,
             };
-            on_dirty();
+            on_adjusted();
         });
         combo
     };
@@ -170,10 +169,10 @@ pub(super) fn add_gyro_group(
         stick.lock_at_edges,
         {
             let gyro = gyro.clone();
-            let on_dirty = on_dirty.clone();
+            let on_adjusted = on_adjusted.clone();
             move |active| {
                 gyro.borrow_mut().stick.lock_at_edges = active;
-                on_dirty();
+                on_adjusted();
             }
         },
     );
@@ -196,16 +195,16 @@ pub(super) fn add_gyro_group(
     let widgets = GyroWidgets {
         enable: switch_row(&crate::tr!("Enable gyro"), None, gyro.borrow().enabled, {
             let gyro = gyro.clone();
-            let on_dirty = on_dirty.clone();
+            let on_adjusted = on_adjusted.clone();
             move |active| {
                 gyro.borrow_mut().enabled = active;
-                on_dirty();
+                on_adjusted();
             }
         }),
         activation,
         button,
         output,
-        orientation: orientation_row(gyro, on_dirty, gyro.borrow().orientation),
+        orientation: orientation_row(gyro, on_adjusted, gyro.borrow().orientation),
         sensitivity: {
             let gyro = gyro.clone();
             let on_adjusted = on_adjusted.clone();
@@ -226,10 +225,10 @@ pub(super) fn add_gyro_group(
             gyro.borrow().invert_x,
             {
                 let gyro = gyro.clone();
-                let on_dirty = on_dirty.clone();
+                let on_adjusted = on_adjusted.clone();
                 move |active| {
                     gyro.borrow_mut().invert_x = active;
-                    on_dirty();
+                    on_adjusted();
                 }
             },
         ),
@@ -239,10 +238,10 @@ pub(super) fn add_gyro_group(
             gyro.borrow().invert_y,
             {
                 let gyro = gyro.clone();
-                let on_dirty = on_dirty.clone();
+                let on_adjusted = on_adjusted.clone();
                 move |active| {
                     gyro.borrow_mut().invert_y = active;
-                    on_dirty();
+                    on_adjusted();
                 }
             },
         ),
@@ -254,10 +253,10 @@ pub(super) fn add_gyro_group(
             gyro.borrow().smoothing,
             {
                 let gyro = gyro.clone();
-                let on_dirty = on_dirty.clone();
+                let on_adjusted = on_adjusted.clone();
                 move |active| {
                     gyro.borrow_mut().smoothing = active;
-                    on_dirty();
+                    on_adjusted();
                 }
             },
         ),
@@ -288,7 +287,7 @@ pub(super) fn add_gyro_group(
     group.add(&widgets.stick_lock_edges);
     group.add(&widgets.stick_deadzone);
     page.append(&group.root);
-    connect_gyro_changes(&widgets, &button_options, gyro, on_dirty);
+    connect_gyro_changes(&widgets, &button_options, gyro, on_adjusted);
 }
 
 fn response_style_index(style: &ira_input::GyroStickResponseStyle) -> u32 {
@@ -302,7 +301,7 @@ fn connect_gyro_changes(
     widgets: &GyroWidgets,
     button_options: &[(InputSource, String)],
     gyro: &Rc<RefCell<GyroConfig>>,
-    on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
 ) {
     // The enable switch and output write the config through their own
     // construction closures; these connections just refresh dependent rows.
@@ -313,7 +312,7 @@ fn connect_gyro_changes(
     });
 
     let gyro_for_output = gyro.clone();
-    let on_dirty_for_output = on_dirty.clone();
+    let on_adjusted_for_output = on_adjusted.clone();
     let widgets_for_output = widgets.clone();
     widgets.output.connect_selected_notify(move |dropdown| {
         gyro_for_output.borrow_mut().output = match dropdown.selected() {
@@ -323,20 +322,20 @@ fn connect_gyro_changes(
             _ => GyroOutput::Mouse,
         };
         update_dependency_rows(&widgets_for_output, &gyro_for_output.borrow());
-        on_dirty_for_output();
+        on_adjusted_for_output();
     });
 
-    connect_activation_changes(widgets, button_options, gyro, on_dirty);
+    connect_activation_changes(widgets, button_options, gyro, on_adjusted);
 }
 
 fn connect_activation_changes(
     widgets: &GyroWidgets,
     button_options: &[(InputSource, String)],
     gyro: &Rc<RefCell<GyroConfig>>,
-    on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
 ) {
     let gyro_for_activation = gyro.clone();
-    let on_dirty_for_activation = on_dirty.clone();
+    let on_adjusted_for_activation = on_adjusted.clone();
     let button_options_for_activation = button_options.to_vec();
     let widgets_for_activation = widgets.clone();
     widgets.activation.connect_selected_notify(move |dropdown| {
@@ -345,12 +344,12 @@ fn connect_activation_changes(
             dropdown.selected(),
             &button_options_for_activation,
             &gyro_for_activation,
-            &on_dirty_for_activation,
+            &on_adjusted_for_activation,
         );
     });
 
     let gyro_for_button = gyro.clone();
-    let on_dirty_for_button = on_dirty.clone();
+    let on_adjusted_for_button = on_adjusted.clone();
     let activation_for_button = widgets.activation.clone();
     let button_options_for_button = button_options.to_vec();
     widgets.button.connect_selected_notify(move |dropdown| {
@@ -368,7 +367,7 @@ fn connect_activation_changes(
             (current, _) => current,
         };
         drop(gyro);
-        on_dirty_for_button();
+        on_adjusted_for_button();
     });
 }
 
@@ -377,7 +376,7 @@ fn apply_activation_selection(
     selected: u32,
     button_options: &[(InputSource, String)],
     gyro: &Rc<RefCell<GyroConfig>>,
-    on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
 ) {
     let fallback_button = button_options
         .get(widgets.button.selected() as usize)
@@ -396,7 +395,7 @@ fn apply_activation_selection(
     widgets
         .activation
         .set_subtitle(&activation_description(selected));
-    on_dirty();
+    on_adjusted();
 }
 
 fn update_dependency_rows(widgets: &GyroWidgets, gyro: &GyroConfig) {
@@ -496,7 +495,7 @@ fn orientation_choices() -> Vec<(GyroOrientation, OptionChoice)> {
 
 fn orientation_row(
     gyro: &Rc<RefCell<GyroConfig>>,
-    on_dirty: &Rc<dyn Fn()>,
+    on_adjusted: &Rc<dyn Fn()>,
     orientation: GyroOrientation,
 ) -> adw::ComboRow {
     let choices = orientation_choices();
@@ -512,7 +511,7 @@ fn orientation_row(
     let description = choices[current].1.description.clone().unwrap_or_default();
     combo.set_subtitle(description.as_str());
     let gyro = gyro.clone();
-    let on_dirty = on_dirty.clone();
+    let on_adjusted = on_adjusted.clone();
     let choices_for_signal = choices.clone();
     combo.connect_selected_notify(move |combo| {
         let Some((orientation, choice)) = choices_for_signal.get(combo.selected() as usize) else {
@@ -521,7 +520,7 @@ fn orientation_row(
         gyro.borrow_mut().orientation = *orientation;
         let description = choice.description.clone().unwrap_or_default();
         combo.set_subtitle(description.as_str());
-        on_dirty();
+        on_adjusted();
     });
     combo
 }

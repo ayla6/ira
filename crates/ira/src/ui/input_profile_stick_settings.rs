@@ -366,8 +366,8 @@ fn deadzone_source_row(
                 processing.deadzone = deadzone_from_index(index);
             }
         });
-        (base.on_changed)();
-        // The rebuild reveals or removes the inner/outer sliders.
+        (base.on_adjusted)();
+        // The refill reveals or removes the inner/outer sliders.
         reopen();
     });
     combo
@@ -384,7 +384,7 @@ pub(super) fn write_processing(
             mutate(processing);
         }
     });
-    (base.on_changed)();
+    (base.on_adjusted)();
 }
 
 /// One switch row bound to a bool field of the targeted SourceMode.
@@ -400,7 +400,7 @@ pub(super) fn mode_switch_row(
     switch_row(title, subtitle, active, move |enabled| {
         let write = mode_writer(&base, target);
         write(&mut |mode| mutate(mode, enabled));
-        (base.on_changed)();
+        (base.on_adjusted)();
     })
 }
 
@@ -424,7 +424,7 @@ pub(crate) fn mode_combo_row(
         let write = mode_writer(&base, target);
         let index = combo.selected() as usize;
         write(&mut |mode| mutate(mode, index));
-        (base.on_changed)();
+        (base.on_adjusted)();
     });
     combo
 }

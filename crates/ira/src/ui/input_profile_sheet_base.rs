@@ -34,9 +34,10 @@ pub(crate) struct SheetBase {
     pub(crate) source: InputSource,
     pub(crate) device: Option<ira_input::DeviceInfo>,
     pub(crate) backend: ira_input::VirtualGamepadBackend,
-    pub(crate) on_changed: OnChanged,
-    /// Continuous edits (slider drags): refreshes the editor's Save/Apply
-    /// state without rebuilding, so the dragged slider survives the gesture.
+    /// Value edits (slider drags, switch toggles, combo picks): refreshes
+    /// the editor's Save/Apply state without rebuilding, so the edited row
+    /// and the page's scroll survive. Structural edits additionally refill
+    /// the expander through the `Reopen` hook.
     pub(crate) on_adjusted: OnChanged,
     /// Coalesces deferred rebuilds so a burst of change notifications only
     /// rebuilds once.

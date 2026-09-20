@@ -108,17 +108,31 @@ fn separator_segments(name: &str) -> Vec<&str> {
         .collect()
 }
 
-/// How many separator characters a name carries — hyphens, colons
-/// (including switch's U+A789), dashes and apostrophes. ScreenScraper's
-/// names keep their punctuation and match byte-sensitively, so the
-/// punctuation-richer of two names is the better search base: a ROM
-/// renamed without its colon ("NieRAutomata The End of YoRHa Edition")
-/// searches as a glued token that exists in no ScreenScraper name, while
-/// the console header's title still reads "NieR:Automata …".
-pub(crate) fn separator_richness(name: &str) -> usize {
-    name.chars()
-        .filter(|c| matches!(c, '-' | ':' | '\u{2013}' | '\u{2014}' | '\u{a789}' | '\''))
-        .count()
+/// The separators a raw dump name carries outside its `(...)`/`[...]`
+/// tags: the search-relevant punctuation plus the filesystem-safe
+/// stand-ins `_` and `.` that cleaning turns back into word breaks.
+/// This is the file-vs-title evidence — ScreenScraper's names keep
+/// their punctuation and match byte-sensitively, and a dump whose
+/// title-colon became `Echoes_` still carries the separator, while a
+/// file renamed with the punctuation deleted ("NieRAutomata") carries
+/// none and can only search as a glued token that exists in no
+/// ScreenScraper name.
+fn raw_separator_richness(name: &str) -> usize {
+    let mut depth = 0usize;
+    let mut separators = 0usize;
+    for c in name.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            '-' | ':' | '.' | '_' | '\'' | '\u{2013}' | '\u{2014}' | '\u{a789}'
+                if depth == 0 =>
+            {
+                separators += 1
+            }
+            _ => {}
+        }
+    }
+    separators
 }
 
 /// The name the search builds from. When the title comes from the game's
@@ -127,33 +141,44 @@ pub(crate) fn separator_richness(name: &str) -> usize {
 /// the game's own name beats any file naming, and the cleaner has
 /// already normalized the ™ and pseudo-colon glyphs it carries. Every
 /// other console searches from the ROM file name (3DS-era titles drift
-/// from the dumps), unless the file was stripped of its punctuation —
-/// renamed for the filesystem — in which case the punctuation-richer
-/// title takes over, because ScreenScraper's names keep their
-/// punctuation and match byte-sensitively. Nameless and bare-title-id
-/// candidates never qualify.
+/// from the dumps), and the dump keeps the lead unless its raw name
+/// carries fewer separators than the title — punctuation deleted, not
+/// swapped for `_`/`.`, the one case where the file searches as a glued
+/// token the source's names cannot match. Separator evidence is judged
+/// on the raw names so a file's stand-in separators count as the word
+/// breaks they clean into; the console menu's abbreviations (3DS SMDH
+/// short titles fit 32 characters: "FE Echoes…") never outrank a healthy
+/// dump. Nameless and bare-title-id candidates never qualify, and the
+/// cleaner normalizes whatever wins.
 pub(crate) fn pick_search_name(
     trusted_title: bool,
-    stem: &str,
-    title: &str,
-    display: &str,
+    raw_stem: &str,
+    raw_title: &str,
+    raw_display: &str,
 ) -> Option<String> {
-    let all: [&str; 3] = if trusted_title {
-        [title, stem, display]
-    } else {
-        [stem, title, display]
-    };
-    let usable = |t: &&str| !t.is_empty() && !looks_like_title_id(t);
+    let raws = [raw_stem, raw_title, raw_display];
+    let cleaned = [
+        clean_rom_name(raw_stem),
+        clean_rom_name(raw_title),
+        clean_rom_name(raw_display),
+    ];
+    // [stem, title, display], with the title first when it is
+    // authoritative.
+    let order: [usize; 3] = if trusted_title { [1, 0, 2] } else { [0, 1, 2] };
+    let usable = |i: usize| !cleaned[i].is_empty() && !looks_like_title_id(&cleaned[i]);
     if trusted_title {
-        return all.into_iter().find(|t| usable(t)).map(|t| t.to_string());
+        return order.into_iter().find(|&i| usable(i)).map(|i| cleaned[i].clone());
     }
-    all.into_iter()
-        .filter(|t| usable(t))
-        .fold(None::<&str>, |best, t| match best {
-            Some(b) if separator_richness(b) >= separator_richness(t) => Some(b),
-            _ => Some(t),
+    order
+        .into_iter()
+        .filter(|&i| usable(i))
+        .fold(None::<usize>, |best, i| match best {
+            Some(b) if raw_separator_richness(raws[b]) >= raw_separator_richness(raws[i]) => {
+                Some(b)
+            }
+            _ => Some(i),
         })
-        .map(str::to_string)
+        .map(|i| cleaned[i].clone())
 }
 
 /// The one term the word search gets. Live probes against jeuRecherche:
@@ -253,8 +278,8 @@ fn bracket_groups(name: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        alt_search_term, clean_rom_name, looks_like_title_id, pick_search_name, region_hints,
-        search_term, separator_richness,
+        alt_search_term, clean_rom_name, looks_like_title_id, pick_search_name,
+        raw_separator_richness, region_hints, search_term,
     };
 
     #[test]
@@ -395,13 +420,59 @@ mod tests {
     }
 
     #[test]
-    fn test_separator_richness_counts_search_relevant_punctuation() {
-        assert_eq!(separator_richness("NieRAutomata The End"), 0);
-        assert_eq!(separator_richness("NieR:Automata The End"), 1);
-        assert_eq!(separator_richness("Emio \u{2013} The Smiling Man\u{a789} FDC"), 2);
-        assert_eq!(separator_richness("Baldur's Gate"), 1);
-        // The ™-class glyphs are not separators; clean_rom_name drops them.
-        assert_eq!(separator_richness("Bayonetta\u{2122}"), 0);
+    fn test_raw_separator_richness_counts_stand_ins_skips_tags() {
+        // Filesystem stand-ins count: cleaning turns them into word breaks.
+        assert_eq!(raw_separator_richness("Echoes_ Shadows"), 1);
+        assert_eq!(raw_separator_richness("Fire.Emblem.Echoes"), 2);
+        // Punctuation deleted outright counts as nothing.
+        assert_eq!(raw_separator_richness("NieRAutomata The End"), 0);
+        // Dump tags are not the title's punctuation.
+        assert_eq!(raw_separator_richness("Game (CTR-P-AJUE) [v1.0]"), 0);
+        assert_eq!(
+            raw_separator_richness("Emio \u{2013} The Smiling Man\u{a789} FDC"),
+            2
+        );
+    }
+
+    #[test]
+    fn test_pick_search_name_keeps_a_file_whose_colon_went_underscore() {
+        // The hShop scheme: leading title id, serial and version tags, and
+        // the title's colon swapped for a filesystem-safe `_`. The
+        // stand-in is still the separator — the console menu's SMDH short
+        // title ("FE Echoes: …" fits 32 characters) must not take the
+        // search over from a dump that accepts exactly.
+        assert_eq!(
+            pick_search_name(
+                false,
+                "00040000001B4000 Fire Emblem Echoes_ Shadows of Valentia (CTR-P-AJUE) (v0.1.0) (U)",
+                "FE Echoes: Shadows of Valentia",
+                "FE Echoes: Shadows of Valentia",
+            )
+            .as_deref(),
+            Some("Fire Emblem Echoes Shadows of Valentia"),
+        );
+    }
+
+    #[test]
+    fn test_pick_search_name_glued_file_still_loses_to_punctuated_title() {
+        // The punctuation was deleted outright: the file searches as a
+        // glued token that exists in no ScreenScraper name, so the
+        // punctuated title rescues the search.
+        assert_eq!(
+            pick_search_name(
+                false,
+                "NieRAutomata The End of YoRHa Edition",
+                "NieR:Automata The End of YoRHa Edition",
+                "",
+            )
+            .as_deref(),
+            Some("NieR:Automata The End of YoRHa Edition"),
+        );
+        // A tag's hyphens are not the title's separators either.
+        assert_eq!(
+            pick_search_name(false, "Some Game (CTR-P-AJUE)", "Some Game: Sub", "").as_deref(),
+            Some("Some Game: Sub"),
+        );
     }
 
     #[test]

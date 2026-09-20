@@ -8,7 +8,7 @@ use std::sync::mpsc;
 
 use super::css::*;
 use super::helpers::{clear_children, poll_channel, replace_row_actions, status_row};
-use super::rom_name::{clean_rom_name, pick_search_name};
+use super::rom_name::pick_search_name;
 
 /// The `system:` prefix on a manual search term: "system:n64 Mario 64"
 /// scopes the query to a console, by platform key or raw ScreenScraper
@@ -115,20 +115,13 @@ fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
     // title first. Every other console searches from the ROM file name.
     // pick_search_name filters bare title ids out of every candidate,
     // so a dump named nothing but its id can never become the term.
-    let stem = clean_rom_name(
-        &std::path::Path::new(&entry.rom_path)
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-    );
+    let stem = std::path::Path::new(&entry.rom_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let trusted =
         entry.title_trusted || entry.kind.is_pc() || ira_models::title_from_trusted_source(&console);
-    pick_search_name(
-        trusted,
-        &stem,
-        &clean_rom_name(&entry.title),
-        &entry.title,
-    )
+    pick_search_name(trusted, &stem, &entry.title, &entry.title)
 }
 
 /// Whether the row's current title is already authoritative: edited by the

@@ -652,15 +652,10 @@ fn title_search(
     // from a trusted source (the console header, an RA/SS match, the
     // user) or the console carries authoritative internal titles
     // (switch); every other console searches from the ROM file name,
-    // with the title only taking over when the file lost its
-    // punctuation.
+    // with the title only taking over when the file's separators were
+    // deleted outright, not swapped for filesystem-safe stand-ins.
     let trusted = entry.title_trusted || ira_models::title_from_trusted_source(platform_id);
-    let bases = [
-        clean_rom_name(&stem),
-        clean_rom_name(&entry.title),
-        clean_rom_name(&item.name),
-    ];
-    let Some(full) = pick_search_name(trusted, &bases[0], &bases[1], &bases[2]) else {
+    let Some(full) = pick_search_name(trusted, &stem, &entry.title, &item.name) else {
         eprintln!("SS batch: [{platform_id}] no usable name to search");
         return SsOutcome::Failed("no usable name".to_string());
     };

@@ -32,6 +32,33 @@ pub(crate) fn logged_game_config(
     })
 }
 
+/// Copy a launch profile's wine choices onto `wine` — a profile pins the
+/// version, prefix, arch and umu routing.
+pub(crate) fn apply_wine_profile(
+    wine: &mut ira_models::WineConfig,
+    profile: &ira_models::WineProfile,
+) {
+    wine.version = profile.wine_version.clone();
+    wine.custom_wine_path = profile.custom_wine_path.clone();
+    wine.prefix = profile.prefix.clone();
+    wine.arch = profile.arch.clone();
+    wine.umu_enabled = profile.umu_enabled;
+}
+
+/// [`apply_wine_profile`] for a game's saved profile id: a stale id
+/// (profile deleted elsewhere) or a DB error leaves the defaults.
+pub(crate) fn apply_game_wine_profile(
+    wine: &mut ira_models::WineConfig,
+    db: &DbConn,
+    profile_id: Option<i64>,
+) {
+    if let Some(pid) = profile_id {
+        if let Ok(Some(profile)) = ira_db::get_profile(db, pid) {
+            apply_wine_profile(wine, &profile);
+        }
+    }
+}
+
 /// DB reads that must not abort the surrounding UI action (group menus,
 /// charts, lists): log the failure instead of silently returning empty.
 pub(crate) fn logged_db_vec<T>(what: &str, result: Result<Vec<T>, String>) -> Vec<T> {

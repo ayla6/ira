@@ -921,15 +921,7 @@ pub(super) fn launch_other(
         }
     }
 
-    if let Some(pid) = profile_id {
-        if let Ok(Some(profile)) = ira_db::get_profile(ctx.db, pid) {
-            wine.version = profile.wine_version;
-            wine.custom_wine_path = profile.custom_wine_path;
-            wine.prefix = profile.prefix;
-            wine.arch = profile.arch;
-            wine.umu_enabled = profile.umu_enabled;
-        }
-    }
+    super::helpers::apply_game_wine_profile(&mut wine, ctx.db, profile_id);
 
     wine = wine.merge_with_default(app_default_wine);
 

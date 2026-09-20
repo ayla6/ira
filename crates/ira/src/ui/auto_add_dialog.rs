@@ -1836,11 +1836,7 @@ pub(super) fn resolve_wine_config(profiles: &[WineProfile], profile_id: Option<i
     };
     if let Some(pid) = profile_id {
         if let Some(profile) = profiles.iter().find(|p| p.id == pid) {
-            wine.version = profile.wine_version.clone();
-            wine.custom_wine_path = profile.custom_wine_path.clone();
-            wine.prefix = profile.prefix.clone();
-            wine.arch = profile.arch.clone();
-            wine.umu_enabled = profile.umu_enabled;
+            super::helpers::apply_wine_profile(&mut wine, profile);
         }
     }
     wine

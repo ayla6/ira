@@ -297,15 +297,11 @@ fn build_launch_config_and_wine(
         params.saved_profile_id
     };
 
-    if let Some(pid) = new_profile_id {
-        if let Ok(Some(profile)) = ira_db::get_profile(&params.state.borrow().db, pid) {
-            wine.version = profile.wine_version;
-            wine.custom_wine_path = profile.custom_wine_path;
-            wine.prefix = profile.prefix;
-            wine.arch = profile.arch;
-            wine.umu_enabled = profile.umu_enabled;
-        }
-    }
+    super::helpers::apply_game_wine_profile(
+        &mut wine,
+        &params.state.borrow().db,
+        new_profile_id,
+    );
 
     (launch, wine, new_profile_id)
 }

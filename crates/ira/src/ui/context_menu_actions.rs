@@ -166,6 +166,7 @@ pub(super) fn setup_run_manual_script_action(
             working_dir.as_deref(),
             game.db_id,
             header,
+            None,
         ) {
             eprintln!("Failed to run manual script: {}", e);
         }

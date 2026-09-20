@@ -256,6 +256,7 @@ pub fn spawn_detached(
     cwd: Option<&str>,
     log_key: i64,
     header: String,
+    desktop_hold: Option<DaemonClient>,
 ) -> Result<(), String> {
     // No PDEATHSIG: these processes are called from short-lived helper
     // threads and must survive both the thread and Ira itself.
@@ -270,15 +271,22 @@ pub fn spawn_detached(
     pipe_lines_to_log(child.stderr.take(), stderr_log);
 
     let exit_log = log.clone();
-    std::thread::spawn(move || match child.wait() {
-        Ok(status) => {
-            exit_log
-                .lock()
-                .unwrap()
-                .push(format!("Process exited with status {status}"));
-        }
-        Err(error) => {
-            eprintln!("launch: failed to read detached process status: {error}");
+    std::thread::spawn(move || {
+        // Held until the process exits: a detached spawn opened with
+        // input remapping disabled must not be remapped underneath by
+        // the daemon's idle desktop session. Dropping the client when
+        // this thread ends releases the hold, however the process ends.
+        let _desktop_hold = desktop_hold;
+        match child.wait() {
+            Ok(status) => {
+                exit_log
+                    .lock()
+                    .unwrap()
+                    .push(format!("Process exited with status {status}"));
+            }
+            Err(error) => {
+                eprintln!("launch: failed to read detached process status: {error}");
+            }
         }
     });
     Ok(())

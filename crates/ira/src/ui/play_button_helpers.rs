@@ -241,7 +241,7 @@ fn build_emulator_env_and_wrap(
     cmd: &mut Vec<String>,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<(Vec<(String, String)>, ControllerInputMode), String> {
     let mut env = ira_launcher::env_builder::clean_parent_env();
 
     let (launch, wine, _profile_id) =
@@ -335,7 +335,9 @@ fn build_emulator_env_and_wrap(
         );
     }
 
-    Ok(env)
+    // The resolved mode tells a no-game caller whether the daemon's
+    // idle desktop session has to stand down for the spawned process.
+    Ok((env, input_mode))
 }
 
 /// If the command is a Flatpak invocation, inject overlay env vars as `--env` flags
@@ -493,7 +495,7 @@ pub(super) fn launch_retro(
         fullscreen_flag,
         rom_root,
     );
-    let env = build_emulator_env_and_wrap(
+    let (env, _) = build_emulator_env_and_wrap(
         ctx,
         &mut cmd,
         cc.controller_mode,
@@ -587,7 +589,7 @@ fn launch_emulator(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
+    let (env, _) = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
     spawn_and_monitor(ctx, &cmd, &env, label)
 }
 
@@ -805,13 +807,21 @@ pub(super) fn launch_emulator_no_game(
     let input = console_controller_input(cfg, &console_id);
 
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(&exe, &[], None);
-    let env = build_emulator_env_and_wrap(ctx, &mut cmd, input.0, input.1.as_deref())?;
+    let (env, input_mode) =
+        build_emulator_env_and_wrap(ctx, &mut cmd, input.0, input.1.as_deref())?;
+    // With remapping disabled the daemon's idle desktop session must
+    // stand down for the emulator's lifetime, or the bare emulator
+    // sees the remapped virtual pad — "disabled" would look ignored.
+    let desktop_hold = (input_mode == ControllerInputMode::Disabled)
+        .then(ira_launcher::input_daemon::hold_desktop_for_game)
+        .flatten();
     ira_launcher::wrapper::spawn_detached(
         &cmd,
         &env,
         None,
         ctx.game_id,
         format!("Started {} (no game)", ctx.game_name),
+        desktop_hold,
     )
 }
 

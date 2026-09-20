@@ -5,6 +5,7 @@ macro_rules! esde_console {
         ConsoleDef {
             id: $id,
             display_name: $display_name,
+            search_aliases: &[],
             ra_console_id: 0,
             extensions: $extensions,
             binary_names: $binary_names,

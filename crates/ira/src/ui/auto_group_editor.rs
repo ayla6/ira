@@ -8,10 +8,12 @@
 use adw::prelude::*;
 use ira_models::{AutoCriterion, AutoDimension, AutoGroup, AutoLogic, AutoNode};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 
-use super::auto_group_values_page::{fill_check_list, picked_values, ValueChecks, ValuesPage};
+use super::auto_group_values_page::{
+    fill_check_list, picked_values, ValueChecks, ValueMenus, ValuesPage,
+};
 use super::date_pick::DatePick;
 
 pub(super) struct GroupsUi {
@@ -30,7 +32,7 @@ impl GroupsUi {
     /// Builds the editor over `menus`, optionally prefilled from a
     /// saved group (the edit path).
     pub(super) fn new(
-        menus: &Rc<HashMap<AutoDimension, Vec<String>>>,
+        menus: &Rc<ValueMenus>,
         values_page: &Rc<ValuesPage>,
         existing: Option<&AutoGroup>,
     ) -> Self {
@@ -125,7 +127,7 @@ impl GroupsUi {
 /// Appends one rule-group card to the card stack, optionally prefilled
 /// with a saved gate and rules (the edit path).
 fn add_group_card(
-    menus: &Rc<HashMap<AutoDimension, Vec<String>>>,
+    menus: &Rc<ValueMenus>,
     inner: &Rc<RefCell<GroupsInner>>,
     values_page: &Rc<ValuesPage>,
     group_box: &gtk4::Box,
@@ -147,7 +149,7 @@ struct GroupCollector {
     gate: adw::ComboRow,
     card: adw::PreferencesGroup,
     add_rule_row: adw::ButtonRow,
-    menus: Rc<HashMap<AutoDimension, Vec<String>>>,
+    menus: Rc<ValueMenus>,
     values_page: Rc<ValuesPage>,
     rules: Rc<RefCell<Vec<CriterionEditor>>>,
 }
@@ -169,7 +171,7 @@ impl GroupCollector {
 /// rows, and the add-rule row. Removals work through the shared
 /// registry, so no call site needs to know a card's index.
 fn build_group_card(
-    menus: &Rc<HashMap<AutoDimension, Vec<String>>>,
+    menus: &Rc<ValueMenus>,
     inner: &Rc<RefCell<GroupsInner>>,
     values_page: &Rc<ValuesPage>,
 ) -> (adw::PreferencesGroup, GroupCollector) {
@@ -229,7 +231,7 @@ impl CriterionEditor {
     fn new(
         card: &adw::PreferencesGroup,
         add_rule_row: &adw::ButtonRow,
-        menus: &Rc<HashMap<AutoDimension, Vec<String>>>,
+        menus: &Rc<ValueMenus>,
         initial: Option<&AutoCriterion>,
         values_page: &Rc<ValuesPage>,
     ) -> Self {
@@ -349,6 +351,7 @@ impl ControlRows {
         // the values page when activated and gets it back on return.
         let values_list = gtk4::ListBox::new();
         values_list.add_css_class(super::css::CSS_BOXED_LIST);
+        let value_checks: ValueChecks = Default::default();
         let values_row = adw::ActionRow::new();
         values_row.set_title(&crate::tr!("Values"));
         // The subtitle names the picked values, which may contain "&".
@@ -360,7 +363,8 @@ impl ControlRows {
         {
             let values_page = values_page.clone();
             let list = values_list.clone();
-            values_row.connect_activated(move |_| values_page.open(&list));
+            let checks = value_checks.clone();
+            values_row.connect_activated(move |_| values_page.open(&list, &checks));
         }
 
         let from_pick = Rc::new(DatePick::new(&initial.from));
@@ -372,7 +376,7 @@ impl ControlRows {
 
         Self {
             values_list,
-            value_checks: Default::default(),
+            value_checks,
             values_row,
             from_pick,
             from_row,
@@ -397,12 +401,7 @@ impl ControlRows {
 
     /// Shows the rows `dimension` needs; value dimensions refill the
     /// check list with `picked` pre-checked.
-    fn sync(
-        &self,
-        dimension: AutoDimension,
-        picked: HashSet<String>,
-        menus: &HashMap<AutoDimension, Vec<String>>,
-    ) {
+    fn sync(&self, dimension: AutoDimension, picked: HashSet<String>, menus: &ValueMenus) {
         let named = !matches!(
             dimension,
             AutoDimension::Released | AutoDimension::Playtime
@@ -415,11 +414,11 @@ impl ControlRows {
         self.min_hours.set_visible(hours);
         self.max_hours.set_visible(hours);
         if named {
-            let names = menus.get(&dimension).cloned().unwrap_or_default();
+            let options = menus.get(&dimension).cloned().unwrap_or_default();
             fill_check_list(
                 &self.values_list,
                 &self.value_checks,
-                &names,
+                &options,
                 picked,
                 &self.values_row,
             );

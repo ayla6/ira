@@ -1,20 +1,52 @@
 //! The value-picking page of the auto group dialog: a search entry over
 //! a boxed list of check rows. Rule rows hand their list to
 //! [`ValuesPage::open`], which hosts it until the back button returns
-//! to the editor; the search entry narrows the hosted rows as you type.
+//! to the editor; the search entry narrows the hosted rows as you type,
+//! matching each option's haystack, not just its shown name.
 
 use adw::prelude::*;
 use gtk4::glib;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use super::helpers::clear_children;
 
-/// The check rows of one rule's value dimension: the name, its row, and
-/// its check. The editor collects the picked names from these.
+/// One pickable value of a rule dimension: the stored name plus the
+/// haystack its row searches against — lowercased with whitespace
+/// dropped, so spacing never matters. For consoles the haystack also
+/// carries hidden terms — "ps1" finds "PlayStation 1" — while only the
+/// full name shows.
+#[derive(Clone)]
+pub(super) struct ValueOption {
+    pub value: String,
+    pub search: String,
+}
+
+impl ValueOption {
+    /// A plain value whose search haystack is the name itself.
+    pub fn plain(value: String) -> Self {
+        let search = normalize_query(&value);
+        Self { value, search }
+    }
+}
+
+/// The query-side of the haystack normalization: lowercased, all
+/// whitespace dropped.
+fn normalize_query(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect()
+}
+
+/// The value menus of every dimension, as offered by the dialog's pickers.
+pub(super) type ValueMenus = HashMap<ira_models::AutoDimension, Vec<ValueOption>>;
+
+/// One row of a rule's value dimension: the option, its row, and its
+/// check. The editor collects the picked names from these.
 pub(super) type ValueChecks =
-    Rc<RefCell<Vec<(String, adw::ActionRow, gtk4::CheckButton)>>>;
+    Rc<RefCell<Vec<(ValueOption, adw::ActionRow, gtk4::CheckButton)>>>;
 
 /// The page-switch callback: `true` when the values page came up.
 pub(super) type NavigateFn = Rc<dyn Fn(bool)>;
@@ -70,8 +102,9 @@ impl ValuesPage {
         *self.navigate.borrow_mut() = Some(f);
     }
 
-    /// Host `list` on this page and come to the front.
-    pub(super) fn open(&self, list: &gtk4::ListBox) {
+    /// Host `list` on this page and come to the front. `checks` drives
+    /// the search: each row hides unless its haystack matches the query.
+    pub(super) fn open(&self, list: &gtk4::ListBox, checks: &ValueChecks) {
         clear_children(&self.slot);
         self.slot.append(list);
         self.search.set_text("");
@@ -81,9 +114,9 @@ impl ValuesPage {
         if let Some(handler) = old {
             self.search.disconnect(handler);
         }
-        let list = list.clone();
+        let checks = checks.clone();
         let handler = self.search.connect_search_changed(move |search| {
-            apply_filter(&list, &search.text());
+            apply_filter(&checks, &search.text());
         });
         *self.filter_handler.borrow_mut() = Some(handler);
 
@@ -106,42 +139,35 @@ impl ValuesPage {
     }
 }
 
-fn apply_filter(list: &gtk4::ListBox, query: &str) {
-    let query = query.trim().to_lowercase();
-    let mut child = list.first_child();
-    while let Some(row) = child {
-        let next = row.next_sibling();
-        let show = query.is_empty()
-            || row
-                .downcast_ref::<adw::ActionRow>()
-                .is_some_and(|r| r.title().to_lowercase().contains(&query));
-        row.set_visible(show);
-        child = next;
+fn apply_filter(checks: &ValueChecks, query: &str) {
+    let query = normalize_query(query.trim());
+    for (opt, row, _) in checks.borrow().iter() {
+        row.set_visible(query.is_empty() || opt.search.contains(&query));
     }
 }
 
 /// Builds one rule's check list for a value dimension: a boxed list of
-/// one row per known name, `picked` pre-checked. Activating a row
+/// one row per known option, `picked` pre-checked. Activating a row
 /// toggles its check — the row is in the list box, so activation
 /// actually fires — and every change refreshes the rule row's subtitle.
 pub(super) fn fill_check_list(
     list: &gtk4::ListBox,
     checks: &ValueChecks,
-    names: &[String],
+    options: &[ValueOption],
     picked: HashSet<String>,
     values_row: &adw::ActionRow,
 ) {
     checks.borrow_mut().clear();
     clear_children(list);
-    for name in names {
+    for opt in options {
         let check = gtk4::CheckButton::new();
-        check.set_active(picked.contains(name));
+        check.set_active(picked.contains(&opt.value));
         check.set_valign(gtk4::Align::Center);
         let row = adw::ActionRow::new();
         // Entity names are shown as typed — an "&" in "Run & Jump" is
         // not markup.
         row.set_use_markup(false);
-        row.set_title(name);
+        row.set_title(&opt.value);
         row.add_suffix(&check);
         row.set_activatable(true);
         {
@@ -154,9 +180,14 @@ pub(super) fn fill_check_list(
             check.connect_toggled(move |_| refresh_values_row(&checks, &values_row));
         }
         list.append(&row);
-        checks.borrow_mut().push((name.clone(), row, check));
+        checks
+            .borrow_mut()
+            .push((ValueOption {
+                value: opt.value.clone(),
+                search: opt.search.clone(),
+            }, row, check));
     }
-    if names.is_empty() {
+    if options.is_empty() {
         let empty = adw::ActionRow::new();
         empty.set_title(&crate::tr!("Nothing on record for this rule yet"));
         empty.set_use_markup(false);
@@ -183,6 +214,24 @@ pub(super) fn picked_values(checks: &ValueChecks) -> Vec<String> {
         .borrow()
         .iter()
         .filter(|(_, _, check)| check.is_active())
-        .map(|(name, _, _)| name.clone())
+        .map(|(opt, _, _)| opt.value.clone())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_value_option_plain_searches_its_own_name() {
+        let opt = ValueOption::plain("Run & Jump".to_string());
+        assert_eq!(opt.value, "Run & Jump");
+        assert_eq!(opt.search, "run&jump");
+    }
+
+    #[test]
+    fn test_normalize_query_drops_spacing() {
+        assert_eq!(normalize_query("  Game Boy Advance "), "gameboyadvance");
+        assert_eq!(normalize_query("   "), "");
+    }
 }

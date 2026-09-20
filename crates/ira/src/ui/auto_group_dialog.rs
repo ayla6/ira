@@ -6,10 +6,9 @@
 
 use adw::prelude::*;
 use ira_models::{AutoDimension, AutoGroup};
-use std::collections::HashMap;
 use std::rc::Rc;
 use super::auto_group_editor::GroupsUi;
-use super::auto_group_values_page::ValuesPage;
+use super::auto_group_values_page::{ValueMenus, ValueOption, ValuesPage};
 use super::state::SharedState;
 
 const MAIN_PAGE: &str = "main";
@@ -177,27 +176,49 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
 
 /// One value menu per dimension, fetched once per dialog: the pickers
 /// offer what the library has on record (plus the console set, which is
-/// closed).
-fn dimension_menus(state: &SharedState) -> HashMap<AutoDimension, Vec<String>> {
+/// closed). Consoles search on their hidden aliases too — "ps1" finds
+/// "PlayStation 1" — while only the full name is stored or shown.
+fn dimension_menus(state: &SharedState) -> ValueMenus {
     let db = state.borrow().db.clone();
     let load = |kind: &str, role: Option<&str>| {
         ira_db::distinct_entity_names(&db, kind, role).unwrap_or_default()
     };
-    let mut menus = HashMap::new();
-    menus.insert(AutoDimension::Genre, load(ira_db::KIND_GENRE, None));
-    menus.insert(AutoDimension::Family, load(ira_db::KIND_FAMILY, None));
+    let mut menus = ValueMenus::new();
+    menus.insert(
+        AutoDimension::Genre,
+        load(ira_db::KIND_GENRE, None)
+            .into_iter()
+            .map(ValueOption::plain)
+            .collect(),
+    );
+    menus.insert(
+        AutoDimension::Family,
+        load(ira_db::KIND_FAMILY, None)
+            .into_iter()
+            .map(ValueOption::plain)
+            .collect(),
+    );
     menus.insert(
         AutoDimension::Developer,
-        load(ira_db::KIND_COMPANY, Some("is_developer")),
+        load(ira_db::KIND_COMPANY, Some("is_developer"))
+            .into_iter()
+            .map(ValueOption::plain)
+            .collect(),
     );
     menus.insert(
         AutoDimension::Publisher,
-        load(ira_db::KIND_COMPANY, Some("is_publisher")),
+        load(ira_db::KIND_COMPANY, Some("is_publisher"))
+            .into_iter()
+            .map(ValueOption::plain)
+            .collect(),
     );
     menus.insert(
         AutoDimension::Console,
         ira_models::all_consoles()
-            .map(|c| c.display_name.to_string())
+            .map(|c| ValueOption {
+                value: c.display_name.to_string(),
+                search: c.search_haystack(),
+            })
             .collect(),
     );
     menus

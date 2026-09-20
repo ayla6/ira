@@ -3,6 +3,10 @@ use crate::kind::GameKind;
 pub struct ConsoleDef {
     pub id: &'static str,
     pub display_name: &'static str,
+    /// Search-only terms: abbreviations and alternate names that should
+    /// find the console without being shown anywhere ("ps1" for
+    /// "PlayStation 1").
+    pub search_aliases: &'static [&'static str],
     pub ra_console_id: u32,
     pub extensions: &'static [&'static str],
     pub binary_names: &'static [&'static str],
@@ -14,6 +18,22 @@ pub struct ConsoleDef {
 impl ConsoleDef {
     pub fn uses_rom_folder(&self) -> bool {
         !matches!(self.id, "ps3" | "ps4" | "psvita" | "wiiu")
+    }
+
+    /// Everything a hidden search should match for this console: the
+    /// display name, the id, and the aliases, lowercased with all
+    /// whitespace dropped, so queries match regardless of spacing
+    /// ("gameboy" finds "Game Boy"). Only the display name is ever shown.
+    pub fn search_haystack(&self) -> String {
+        let mut terms = String::new();
+        terms.push_str(&self.display_name.to_lowercase());
+        terms.push(' ');
+        terms.push_str(self.id);
+        for alias in self.search_aliases {
+            terms.push(' ');
+            terms.push_str(alias);
+        }
+        terms.chars().filter(|c| !c.is_whitespace()).collect()
     }
 
     /// The kind ROM-library entries of this console carry: Switch is a
@@ -31,7 +51,8 @@ impl ConsoleDef {
 pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "psx",
-        display_name: "PS1",
+        display_name: "PlayStation 1",
+        search_aliases: &["ps1"],
         ra_console_id: 12,
         extensions: &["bin", "cue", "chd", "pbp", "iso", "ecm"],
         binary_names: &["duckstation-qt", "duckstation"],
@@ -41,7 +62,8 @@ pub const CONSOLES: &[ConsoleDef] = &[
     },
     ConsoleDef {
         id: "ps2",
-        display_name: "PS2",
+        display_name: "PlayStation 2",
+        search_aliases: &[],
         ra_console_id: 21,
         extensions: &["iso", "bin", "cue", "chd", "gz", "elf"],
         binary_names: &["pcsx2-qt", "pcsx2"],
@@ -51,7 +73,8 @@ pub const CONSOLES: &[ConsoleDef] = &[
     },
     ConsoleDef {
         id: "psp",
-        display_name: "PSP",
+        display_name: "PlayStation Portable",
+        search_aliases: &[],
         ra_console_id: 41,
         extensions: &["iso", "cso", "chd", "pbp", "prx"],
         binary_names: &["ppsspp", "PPSSPPSDL"],
@@ -62,6 +85,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "nes",
         display_name: "NES",
+        search_aliases: &["nintendo entertainment system"],
         ra_console_id: 7,
         extensions: &["nes", "unf", "fds", "7z", "zip"],
         binary_names: &[],
@@ -72,6 +96,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "snes",
         display_name: "SNES",
+        search_aliases: &["super nintendo entertainment system"],
         ra_console_id: 3,
         extensions: &["smc", "sfc", "fig", "7z", "zip"],
         binary_names: &[],
@@ -82,6 +107,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "gb",
         display_name: "Game Boy",
+        search_aliases: &[],
         ra_console_id: 4,
         extensions: &["gb", "7z", "zip"],
         binary_names: &[],
@@ -92,6 +118,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "gbc",
         display_name: "Game Boy Color",
+        search_aliases: &[],
         ra_console_id: 6,
         extensions: &["gbc", "7z", "zip"],
         binary_names: &[],
@@ -102,6 +129,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "gba",
         display_name: "Game Boy Advance",
+        search_aliases: &[],
         ra_console_id: 5,
         extensions: &["gba", "7z", "zip"],
         binary_names: &[],
@@ -112,6 +140,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "n64",
         display_name: "Nintendo 64",
+        search_aliases: &[],
         ra_console_id: 2,
         extensions: &["n64", "z64", "v64", "7z", "zip"],
         binary_names: &[],
@@ -122,6 +151,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "n64dd",
         display_name: "Nintendo 64DD",
+        search_aliases: &[],
         ra_console_id: 2,
         extensions: &["ndd", "7z", "zip"],
         binary_names: &[],
@@ -132,6 +162,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "nds",
         display_name: "Nintendo DS",
+        search_aliases: &[],
         ra_console_id: 18,
         // DS ROMs (nds/srl/dsi/ids, optionally Zstandard-compressed) plus
         // the archive formats melonDS opens; the scanner matches the final
@@ -149,6 +180,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "gc",
         display_name: "GameCube",
+        search_aliases: &[],
         ra_console_id: 16,
         extensions: &["iso", "gcm", "rvz", "gcz"],
         binary_names: &["dolphin-emu", "dolphin_emulator", "dolphin"],
@@ -159,6 +191,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "wii",
         display_name: "Wii",
+        search_aliases: &[],
         ra_console_id: 19,
         extensions: &["iso", "wbfs", "gcm", "rvz", "gcz"],
         binary_names: &["dolphin-emu", "dolphin_emulator", "dolphin"],
@@ -169,6 +202,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "virtualboy",
         display_name: "Virtual Boy",
+        search_aliases: &["vb"],
         ra_console_id: 28,
         extensions: &["vb", "7z", "zip"],
         binary_names: &[],
@@ -179,6 +213,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "sat",
         display_name: "Satellaview",
+        search_aliases: &[],
         ra_console_id: 3,
         extensions: &["bs", "7z", "zip"],
         binary_names: &[],
@@ -189,6 +224,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "md",
         display_name: "Mega Drive",
+        search_aliases: &["sega genesis"],
         ra_console_id: 1,
         extensions: &["md", "bin", "gen", "smd", "7z", "zip"],
         binary_names: &[],
@@ -199,6 +235,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "sms",
         display_name: "Master System",
+        search_aliases: &["sega master system"],
         ra_console_id: 11,
         extensions: &["sms", "bin", "sg", "7z", "zip"],
         binary_names: &[],
@@ -209,6 +246,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "saturn",
         display_name: "Saturn",
+        search_aliases: &["sega saturn"],
         ra_console_id: 39,
         extensions: &["bin", "cue", "chd", "iso"],
         binary_names: &[],
@@ -219,6 +257,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "dc",
         display_name: "Dreamcast",
+        search_aliases: &["sega dreamcast"],
         ra_console_id: 40,
         extensions: &["cdi", "gdi", "chd"],
         binary_names: &[],
@@ -229,6 +268,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "gg",
         display_name: "Game Gear",
+        search_aliases: &["sega game gear"],
         ra_console_id: 15,
         extensions: &["gg", "7z", "zip"],
         binary_names: &[],
@@ -239,6 +279,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "neogeo",
         display_name: "Neo Geo",
+        search_aliases: &[],
         ra_console_id: 27,
         extensions: &["neo", "7z", "zip"],
         binary_names: &[],
@@ -249,6 +290,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "ngp",
         display_name: "Neo Geo Pocket",
+        search_aliases: &[],
         ra_console_id: 14,
         extensions: &["ngp", "ngc", "7z", "zip"],
         binary_names: &[],
@@ -259,6 +301,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "pce",
         display_name: "PC Engine",
+        search_aliases: &["turbografx-16"],
         ra_console_id: 8,
         extensions: &["pce", "bin", "cue", "7z", "zip"],
         binary_names: &[],
@@ -269,6 +312,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "pcecd",
         display_name: "PC Engine CD",
+        search_aliases: &["turbografx cd"],
         ra_console_id: 76,
         extensions: &["chd", "cue"],
         binary_names: &[],
@@ -279,6 +323,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "ws",
         display_name: "WonderSwan",
+        search_aliases: &[],
         ra_console_id: 53,
         extensions: &["ws", "7z", "zip"],
         binary_names: &[],
@@ -289,6 +334,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     ConsoleDef {
         id: "wsc",
         display_name: "WonderSwan Color",
+        search_aliases: &[],
         ra_console_id: 53,
         extensions: &["wsc", "7z", "zip"],
         binary_names: &[],
@@ -322,9 +368,43 @@ mod tests {
     #[test]
     fn test_find_console_psx() {
         let c = find_console("psx").unwrap();
-        assert_eq!(c.display_name, "PS1");
+        assert_eq!(c.display_name, "PlayStation 1");
         assert_eq!(c.ra_console_id, 12);
         assert!(c.extensions.contains(&"bin"));
+    }
+
+    #[test]
+    fn test_search_haystack_finds_by_alias_only() {
+        let psx = find_console("psx").unwrap();
+        let hay = psx.search_haystack();
+        for query in ["playstation1", "ps1", "psx"] {
+            assert!(hay.contains(query), "{query} not found in haystack: {hay}");
+        }
+        let gba = find_console("gba").unwrap();
+        let hay = gba.search_haystack();
+        for query in ["gameboyadvance", "gba", "gameboy"] {
+            assert!(hay.contains(query), "{query} not found in haystack: {hay}");
+        }
+    }
+
+    #[test]
+    fn test_search_haystack_is_normalized() {
+        for c in all_consoles() {
+            let hay = c.search_haystack();
+            assert_eq!(hay, hay.to_lowercase(), "{}", c.id);
+            assert!(!hay.chars().any(|ch| ch.is_whitespace()), "{}", c.id);
+        }
+    }
+
+    #[test]
+    fn test_search_haystack_covers_display_name_and_id() {
+        for c in all_consoles() {
+            let hay = c.search_haystack();
+            let name = c.display_name.to_lowercase();
+            let name: String = name.chars().filter(|ch| !ch.is_whitespace()).collect();
+            assert!(hay.contains(&name), "{}", c.id);
+            assert!(hay.contains(c.id), "{}", c.id);
+        }
     }
 
     #[test]

@@ -31,6 +31,8 @@ pub struct BigPictureUi {
     pub(super) game_menu: super::game_menu::GameMenu,
     /// The virtual keyboard, topmost over everything while open.
     pub(super) keyboard: super::keyboard::Keyboard,
+    /// The black "game running" screen, over everything while a game runs.
+    pub(super) running: super::running::RunningOverlay,
 }
 
 /// Build the big-picture window (fullscreen is applied by main.rs) and take over
@@ -146,6 +148,11 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     let keyboard = super::keyboard::Keyboard::new(state);
     overlay.add_overlay(keyboard.root());
     overlay.set_measure_overlay(keyboard.root(), false);
+    // The running screen sits over everything, menus included: while a
+    // game runs there is nothing else to reach for.
+    let running = super::running::RunningOverlay::new();
+    overlay.add_overlay(running.root());
+    overlay.set_measure_overlay(running.root(), false);
 
     let ui = BigPictureUi {
         status,
@@ -156,6 +163,7 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
         all,
         game_menu,
         keyboard,
+        running,
     };
     (overlay, ui)
 }
@@ -256,6 +264,16 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
 
 fn route(state: &SharedState, command: NavCommand, engage: bool) {
     let mouse_drove = super::mouse::note_controller_use(state);
+    // While the black running screen covers the shell the library is
+    // not navigable: the game owns the screen until it exits.
+    if state
+        .borrow()
+        .big_picture
+        .as_ref()
+        .is_some_and(|big| big.is_running_showing())
+    {
+        return;
+    }
     // The virtual keyboard swallows navigation while it is open: arrows
     // walk the keys, Confirm types, B deletes, Options cancels.
     {

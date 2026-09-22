@@ -22,6 +22,14 @@ pub(super) enum MenuKind {
     GroupOrder,
     /// Ask before a group is deleted; carries its id and name.
     ConfirmDelete { id: i64, name: String },
+    /// Boot one disc of a multi-disc game on a single-disc emulator.
+    /// The gamepad/keyboard walks the discs; confirming boots it.
+    Discs {
+        db_id: i64,
+        variant_id: Option<i64>,
+        game_name: String,
+        discs: Vec<ira_models::GameDisc>,
+    },
 }
 
 /// One actionable row of the open menu.
@@ -32,6 +40,7 @@ enum MenuRow {
     Sort(ira_models::SortMode),
     GroupOrder(ira_models::GroupOrder),
     DeleteGroup { id: i64 },
+    Disc { id: i64 },
     Cancel,
 }
 
@@ -188,6 +197,24 @@ impl GameMenu {
                 }
                 self.close();
             }
+            MenuRow::Disc { id } => {
+                let Some(MenuKind::Discs {
+                    db_id, variant_id, ..
+                }) = self.kind.borrow().clone()
+                else {
+                    return;
+                };
+                self.close();
+                if let Err(e) =
+                    crate::ui::play_button::launch_game_disc(state, db_id, variant_id, id)
+                {
+                    eprintln!("Failed to launch game: {e}");
+                    let _ = state
+                        .borrow()
+                        .sender
+                        .send(crate::AppMessage::AddGameError(e));
+                }
+            }
             MenuRow::Cancel => {
                 self.close();
             }
@@ -282,6 +309,35 @@ impl GameMenu {
                 let index = rows.len();
                 self.append_row(state, &crate::tr!("No"), index, false);
                 rows.push(MenuRow::Cancel);
+                *self.rows.borrow_mut() = rows;
+            }
+            MenuKind::Discs {
+                game_name, discs, ..
+            } => {
+                let header = gtk4::Label::new(Some(&game_name));
+                header.set_xalign(0.0);
+                header.set_wrap(true);
+                header.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+                header.add_css_class(CSS_BP_MENU_TITLE);
+                crate::ui::helpers::crisp_label(&header);
+                self.panel.append(&header);
+                let subtitle = gtk4::Label::new(Some(&crate::tr!("Select a disc")));
+                subtitle.set_xalign(0.0);
+                subtitle.add_css_class(CSS_DIM_LABEL);
+                crate::ui::helpers::crisp_label(&subtitle);
+                self.panel.append(&subtitle);
+
+                let mut rows = Vec::new();
+                for disc in &discs {
+                    let name = if disc.label.is_empty() {
+                        crate::tr!("Disc {}").replacen("{}", &disc.disc_number.to_string(), 1)
+                    } else {
+                        disc.label.clone()
+                    };
+                    let index = rows.len();
+                    self.append_row(state, &name, index, false);
+                    rows.push(MenuRow::Disc { id: disc.id });
+                }
                 *self.rows.borrow_mut() = rows;
             }
         }

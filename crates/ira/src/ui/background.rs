@@ -100,7 +100,7 @@ pub fn restore_content(state: &SharedState) {
 
     if selected_id.is_empty() {
         clear_content(state);
-        select_row_silently(state, Some(0));
+        select_row_silently(state, None);
         show_grid_view(state);
         return;
     }
@@ -119,7 +119,7 @@ pub fn restore_content(state: &SharedState) {
     } else {
         state.borrow_mut().selected_id.clear();
         clear_content(state);
-        select_row_silently(state, Some(0));
+        select_row_silently(state, None);
         show_grid_view(state);
     }
 }

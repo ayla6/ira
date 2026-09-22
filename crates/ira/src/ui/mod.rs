@@ -11,6 +11,8 @@ mod context_menu;
 mod context_menu_actions;
 mod css;
 mod date_pick;
+mod disc_art;
+mod disc_picker;
 mod disk_space;
 mod folder_list;
 mod enrichment;

@@ -161,6 +161,7 @@ fn active_toplevel_or(fallback: &adw::ApplicationWindow) -> gtk4::Widget {
 
 fn handle_game_stopped(state: &SharedState, db_id: i64) {
     state.borrow().running_games.lock().unwrap().remove(&db_id);
+    super::big_picture::hide_running(state);
     set_sidebar_playing(state, db_id, false);
     refresh_steam_playtimes_for(state, &[db_id]);
     if let Some(ref watcher) = state.borrow().watcher {
@@ -171,6 +172,16 @@ fn handle_game_stopped(state: &SharedState, db_id: i64) {
 
 fn handle_game_started(state: &SharedState, db_id: i64) {
     set_sidebar_playing(state, db_id, true);
+    let game_name = state
+        .borrow()
+        .games
+        .iter()
+        .find(|g| g.db_id == db_id)
+        .map(|g| g.name.clone())
+        .unwrap_or_default();
+    if !game_name.is_empty() {
+        super::big_picture::show_running(state, &game_name);
+    }
     trim_stale_images(state, db_id);
     let (watcher, game, save_dir) = {
         let s = state.borrow();

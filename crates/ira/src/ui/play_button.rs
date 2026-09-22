@@ -171,6 +171,74 @@ pub fn launch_game(
     game_id: i64,
     variant_id: Option<i64>,
 ) -> Result<bool, String> {
+    if maybe_show_disc_picker(state, game_id, variant_id) {
+        return Ok(false);
+    }
+    launch_game_with_disc(state, game_id, variant_id, None)
+}
+
+/// Boot one disc of a multi-disc game: the picker calls this after the
+/// player chooses, so it never re-opens the picker itself.
+pub fn launch_game_disc(
+    state: &SharedState,
+    game_id: i64,
+    variant_id: Option<i64>,
+    disc_id: i64,
+) -> Result<bool, String> {
+    launch_game_with_disc(state, game_id, variant_id, Some(disc_id))
+}
+
+/// Show the disc picker for a multi-disc game on a single-disc emulator
+/// and report whether one was shown. Dolphin boots every disc at once,
+/// so its games never stop here.
+fn maybe_show_disc_picker(
+    state: &SharedState,
+    game_id: i64,
+    variant_id: Option<i64>,
+) -> bool {
+    let (db, cfg, kind, platform_id, per_game_emu, game_name) = {
+        let s = state.borrow();
+        let game = s.games.iter().find(|g| g.db_id == game_id);
+        let Some(game) = game else {
+            return false;
+        };
+        (
+            s.db.clone(),
+            s.cfg.clone(),
+            game.kind,
+            game.platform_id.clone(),
+            game.emulator_override.clone(),
+            game.name.clone(),
+        )
+    };
+    if !matches!(
+        kind,
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch
+    ) {
+        return false;
+    }
+    let discs = ira_db::get_discs(&db, game_id).unwrap_or_default();
+    if discs.len() <= 1 {
+        return false;
+    }
+    let exe = play_button_helpers::retro_exe(&cfg, &platform_id, &per_game_emu);
+    if !play_button_helpers::needs_disc_picker(exe, discs.len()) {
+        return false;
+    }
+    if super::big_picture::is_big_picture() {
+        super::big_picture::show_disc_picker(state, game_id, variant_id);
+    } else {
+        super::disc_picker::present(state, game_id, variant_id, &game_name, &discs);
+    }
+    true
+}
+
+fn launch_game_with_disc(
+    state: &SharedState,
+    game_id: i64,
+    variant_id: Option<i64>,
+    disc_override: Option<i64>,
+) -> Result<bool, String> {
     let (
         running_games,
         sender,
@@ -311,6 +379,7 @@ pub fn launch_game(
         system_defaults,
         controller_input_mode,
         controller_input_profile,
+        disc_override,
     };
 
     // An emulated game with no emulator configured never reaches the spawn:
@@ -551,6 +620,7 @@ pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), Stri
         system_defaults,
         controller_input_mode,
         controller_input_profile,
+        disc_override: None,
     };
 
     play_button_helpers::launch_emulator_no_game(

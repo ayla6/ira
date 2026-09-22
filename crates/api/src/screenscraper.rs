@@ -50,6 +50,10 @@ pub struct ScrapedGame {
     /// Region-picked title screen URL — the fallback for consoles whose
     /// cover art runs ugly, 3DS above all.
     pub title_screen: Option<String>,
+    /// Per-disc physical-media art (`support-2D`), as `(disc number, URL)`
+    /// sorted by number. Multi-disc games carry one entry per CD; the
+    /// disc-picker tiles use them, with a numbered fallback when absent.
+    pub disc_images: Vec<(i32, String)>,
     /// The console the entry belongs to, as ScreenScraper names it
     /// ("Nintendo 64"). Empty when the answer carries no system.
     pub system_name: String,
@@ -452,6 +456,10 @@ struct SsMedia {
     kind: String,
     #[serde(rename = "@region", default)]
     region: String,
+    /// The support (disc/cartridge) number this media shows, 1-based.
+    /// Present on the per-disc media of multi-disc games; absent means 1.
+    #[serde(rename = "@support", default)]
+    support: String,
     #[serde(default, rename = "$text")]
     url: String,
 }
@@ -635,6 +643,9 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
     let screenshot = medias.and_then(|m| media_url(&m.media, "ss", &regions));
     let box2d = medias.and_then(|m| media_url(&m.media, "box-2D", &regions));
     let title_screen = medias.and_then(|m| media_url(&m.media, "sstitle", &regions));
+    let disc_images = medias
+        .map(|m| disc_media_urls(&m.media, &regions))
+        .unwrap_or_default();
     // Every region's name, entities decoded so comparisons see real
     // characters, deduplicated.
     let mut names: Vec<(String, String)> = Vec::new();
@@ -663,6 +674,7 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
         screenshot,
         box2d,
         title_screen,
+        disc_images,
         system_name: jeu
             .system
             .as_ref()
@@ -703,6 +715,34 @@ fn media_url(medias: &[SsMedia], kind: &str, regions: &[&str]) -> Option<String>
         .map(|m| (m.region.clone(), m.url.clone()))
         .collect();
     pick(regions, &matches).map(|url| url.replace(' ', "%20"))
+}
+
+/// One per-disc art entry: the support number and its region-picked
+/// `support-2D` URL, ready for a picker tile.
+pub struct DiscMedia {
+    pub disc: i32,
+    pub png: Vec<u8>,
+}
+
+/// The region-picked `support-2D` URL for every disc the answer carries.
+/// Multi-disc games tag each media node with a `support` attribute
+/// (`<media type="support-2D" region="eu" support="2">`); nodes without
+/// one are disc 1. URLs get the same space-escaping as `media_url`.
+fn disc_media_urls(medias: &[SsMedia], regions: &[&str]) -> Vec<(i32, String)> {
+    let mut per_disc: std::collections::HashMap<i32, Vec<(String, String)>> = Default::default();
+    for media in medias.iter().filter(|m| m.kind == "support-2D") {
+        let disc = media.support.parse::<i32>().unwrap_or(1);
+        per_disc
+            .entry(disc)
+            .or_default()
+            .push((media.region.clone(), media.url.clone()));
+    }
+    let mut out: Vec<(i32, String)> = per_disc
+        .into_iter()
+        .filter_map(|(disc, urls)| pick(regions, &urls).map(|url| (disc, url.replace(' ', "%20"))))
+        .collect();
+    out.sort_by_key(|(disc, _)| *disc);
+    out
 }
 
 // ——— genre table ———
@@ -877,6 +917,50 @@ impl SteamDataClient {
         resp.bytes()
             .map(|b| b.to_vec())
             .map_err(|e| format!("ScreenScraper media download failed: {e}"))
+    }
+
+    /// The per-disc physical-media art for one game (`support-2D`), PNG
+    /// bytes keyed by disc number, for the disc-picker tiles. The jeuInfos
+    /// answer is cached like the genre table — one request per game, ever
+    /// — and each downloaded image lands next to it, so repeat pickers
+    /// never touch the network. Discs the service has no art for are
+    /// simply absent; the picker falls back to a numbered icon.
+    pub fn screenscraper_disc_media(
+        &self,
+        creds: &ScraperCreds,
+        ss_id: &str,
+    ) -> Result<Vec<DiscMedia>, String> {
+        if !creds.is_configured() || ss_id.is_empty() {
+            return Ok(Vec::new());
+        }
+        let scrapers = self.cache_dir.join("scrapers");
+        let xml = self.cached_or_fetch(
+            &scrapers,
+            &format!("jeu_{ss_id}.xml"),
+            &game_info_by_id_url(creds, ss_id),
+        )?;
+        let Some(game) = parse_games(&xml)?.into_iter().next() else {
+            return Ok(Vec::new());
+        };
+        let discs_dir = scrapers.join("discs");
+        let mut out = Vec::with_capacity(game.disc_images.len());
+        for (disc, url) in game.disc_images {
+            let path = discs_dir.join(format!("{ss_id}_{disc}.png"));
+            let png = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    let bytes = self.screenscraper_media(&url)?;
+                    if let Err(err) = std::fs::create_dir_all(&discs_dir)
+                        .and_then(|_| std::fs::write(&path, &bytes))
+                    {
+                        eprintln!("Failed to cache disc image {}: {err}", path.display());
+                    }
+                    bytes
+                }
+            };
+            out.push(DiscMedia { disc, png });
+        }
+        Ok(out)
     }
 
     /// The genre table, from the disk cache when present, fetched and
@@ -1193,6 +1277,40 @@ mod tests {
             game.title_screen.as_deref(),
             Some("https://ss.example/dq2_title.png")
         );
+    }
+
+    #[test]
+    fn test_parse_games_picks_region_and_disc_for_support_media() {
+        // Shape captured from a live jeuInfos answer for Final Fantasy VII
+        // (gameid 19249): per-disc media carry a `support` attribute,
+        // single-support nodes carry none.
+        let xml = r#"<Data><jeux><jeu id="19249">
+            <noms><nom region="us">Final Fantasy VII</nom></noms>
+            <medias>
+              <media type="support-2D" region="eu" support="1">https://ss.example/ff7_eu1 .png</media>
+              <media type="support-2D" region="us" support="1">https://ss.example/ff7_us1.png</media>
+              <media type="support-2D" region="eu" support="3">https://ss.example/ff7_eu3.png</media>
+              <media type="support-2D" region="eu" support="2">https://ss.example/ff7_eu2.png</media>
+              <media type="support-texture" region="us" support="2">https://ss.example/ff7_tex2.png</media>
+              <media type="box-2D" region="us">https://ss.example/ff7_box.png</media>
+            </medias>
+        </jeu></jeux></Data>"#;
+        let game = parse_games(xml).unwrap().remove(0);
+        // Every disc's art, sorted by number; us wins over eu for disc 1.
+        assert_eq!(
+            game.disc_images,
+            vec![
+                (1, "https://ss.example/ff7_us1.png".to_string()),
+                (2, "https://ss.example/ff7_eu2.png".to_string()),
+                (3, "https://ss.example/ff7_eu3.png".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_games_without_support_media_has_no_disc_images() {
+        let game = parse_games(SEARCH_XML).unwrap().remove(0);
+        assert!(game.disc_images.is_empty());
     }
 
     const GENRES_XML: &str = r#"<Data>

@@ -305,7 +305,16 @@ pub fn build_launch_command_with_filesystem(
         vec![exe.to_string()]
     };
     if fullscreen && !fullscreen_flag.is_empty() {
-        cmd.push(fullscreen_flag.to_string());
+        // RetroArch only honors the long `--fullscreen`: the console defs
+        // carry the standalone-emulator `-f`, which RetroArch parses as a
+        // different option and stays windowed — a small window the
+        // compositor then upscales. Standalone emulators keep their flag.
+        let flag = if is_retroarch(exe) {
+            "--fullscreen"
+        } else {
+            fullscreen_flag
+        };
+        cmd.push(flag.to_string());
     }
     // Every non-empty path becomes a file argument. Multidisc emulators
     // (Dolphin) take all of a game's discs at once for in-game switching;
@@ -561,6 +570,29 @@ mod tests {
             "--fullscreen",
         );
         assert_eq!(cmd, vec!["/usr/bin/retroarch", "/games/rom.bin"]);
+    }
+
+    #[test]
+    fn test_build_launch_command_retroarch_maps_short_flag_to_long() {
+        // The console defs carry the standalone `-f`; RetroArch only
+        // honors `--fullscreen`.
+        let cmd = build_launch_command(
+            "/usr/bin/retroarch",
+            "/games/rom.bin",
+            "/usr/lib/libretro/mgba_libretro.so",
+            true,
+            "-f",
+        );
+        assert_eq!(
+            cmd,
+            vec![
+                "/usr/bin/retroarch",
+                "-L",
+                "/usr/lib/libretro/mgba_libretro.so",
+                "--fullscreen",
+                "/games/rom.bin"
+            ]
+        );
     }
 
     #[test]

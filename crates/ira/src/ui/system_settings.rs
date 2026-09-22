@@ -285,8 +285,8 @@ pub(super) fn add_gamescope_rows(
     expander.add_row(&flags);
 
     let (w_row, w_spin, w_state) = make_spin_row(
-        &crate::tr!("Resolution width"),
-        &crate::tr!("0 = auto"),
+        &crate::tr!("Game resolution width"),
+        &crate::tr!("0 = display resolution"),
         defaults.w,
         override_vals.and_then(|o| o.w),
         0.0,
@@ -295,8 +295,8 @@ pub(super) fn add_gamescope_rows(
     expander.add_row(&w_row);
 
     let (h_row, h_spin, h_state) = make_spin_row(
-        &crate::tr!("Resolution height"),
-        &crate::tr!("0 = auto"),
+        &crate::tr!("Game resolution height"),
+        &crate::tr!("0 = display resolution"),
         defaults.h,
         override_vals.and_then(|o| o.h),
         0.0,

@@ -118,11 +118,13 @@ fn apply_system_defaults(launch: &mut ira_models::GameLaunchConfig, defaults: &S
         launch.mangohud = Some(defaults.mangohud);
     }
     // Inside a gamescope session (big picture is automatic under one, like
-    // SteamOS game mode) the session is already the compositor: never nest a
-    // second gamescope, whatever the settings say. The overlay's standalone
-    // path below keys off the session instead of the wrap.
+    // SteamOS game mode) the session is already the compositor: default to
+    // no nesting, but honor an explicit per-game opt-in. The overlay's
+    // standalone path below keys off the session instead of the wrap.
     if super::big_picture::running_in_gamescope() {
-        launch.gamescope = Some(false);
+        if launch.gamescope.is_none() {
+            launch.gamescope = Some(false);
+        }
     } else if launch.gamescope.is_none() {
         launch.gamescope = Some(defaults.gamescope);
     }
@@ -237,6 +239,29 @@ fn spawn_and_monitor(
     }
 }
 
+/// Fullscreen for an emulator launch: the configured value, forced on
+/// inside a gamescope session or ahead of a gamescope wrap. A windowed
+/// emulator has no desktop to sit on there — it would composite small
+/// and get blur-upscaled to the output.
+fn emulator_fullscreen(ctx: &LaunchCtx, configured: bool) -> bool {
+    configured
+        || super::big_picture::running_in_gamescope()
+        || gamescope_wrap_ahead(ctx)
+}
+
+/// True when this launch is about to wrap in its own gamescope.
+/// Mirrors the resolution in `apply_system_defaults`, so the prediction
+/// and the actual wrap agree.
+fn gamescope_wrap_ahead(ctx: &LaunchCtx) -> bool {
+    let in_session = super::big_picture::running_in_gamescope();
+    let (launch, _, _) = logged_game_config(ctx.db, ctx.db_id).unwrap_or_default();
+    ira_launcher::env_builder::will_wrap_gamescope(
+        launch.gamescope,
+        ctx.system_defaults.gamescope,
+        in_session,
+    )
+}
+
 /// Build env vars for emulator launches, apply performance wrappers (gamemode/
 /// mangohud/gamescope), and set up overlay env (VK layer or standalone mode).
 /// Checks per-game overlay override first, then falls back to the global source setting.
@@ -306,6 +331,11 @@ fn build_emulator_env_and_wrap(
     inject_flatpak_overlay_env(cmd, &mut env);
 
     ira_launcher::env_builder::apply_performance(cmd, &mut env, &launch, &wine);
+    ira_launcher::env_builder::apply_gamescope_display_policy(
+        cmd,
+        &mut env,
+        in_gamescope_session,
+    );
 
     if overlay_enabled && (ira_launcher::env_builder::uses_gamescope(cmd) || in_gamescope_session) {
         ira_launcher::env_builder::wrap_with_host_overlay(cmd, &capture_env);
@@ -527,7 +557,10 @@ pub(super) fn launch_retro(
         exe,
         &rom_paths,
         &resolved_core,
-        cfg.console_fullscreen(platform_id, super::big_picture::is_big_picture()),
+        emulator_fullscreen(
+            ctx,
+            cfg.console_fullscreen(platform_id, super::big_picture::is_big_picture()),
+        ),
         fullscreen_flag,
         rom_root,
     );
@@ -619,7 +652,9 @@ fn launch_emulator(
         console_mode,
         console_profile,
     } = opts;
-    let args = with_fullscreen_args(kind, fullscreen, args);
+    // A gamescope wrap or session needs the emulator fullscreen even for
+    // users who prefer windowed launches (see `emulator_fullscreen`).
+    let args = with_fullscreen_args(kind, emulator_fullscreen(ctx, fullscreen), args);
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(
         exe,
         &args,

@@ -86,6 +86,12 @@ fn main() {
     if in_gamescope && std::env::var("GDK_BACKEND").is_err() {
         std::env::set_var("GDK_BACKEND", "x11");
     }
+    // Gamescope never draws server-side decorations, and the fullscreen
+    // shell has no headerbar of its own — without this GTK paints a fake
+    // titlebar inside the fullscreen window. Respect an explicit GTK_CSD.
+    if in_gamescope && std::env::var("GTK_CSD").is_err() {
+        std::env::set_var("GTK_CSD", "0");
+    }
 
     // Big-picture entry: `--big-picture` or running under Gamescope.
     // Fullscreens the main window, dropping the desktop chrome — nothing

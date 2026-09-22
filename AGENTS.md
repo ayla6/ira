@@ -82,7 +82,7 @@ Integration:       ira-api (models, parser)
                     ira-images (models, parser; GTK)
                     ira-watcher (models, config, parser)
                     ira-launcher (models, db, overlay-ipc)
-Overlay outputs:   ira-overlay-vk, ira-overlay-shim, ira-overlay-standalone
+Overlay outputs:   ira-overlay-vk, ira-overlay-shim, ira-overlay-ui (GTK host)
 Application:       ira (main GTK/libadwaita app)
 ```
 

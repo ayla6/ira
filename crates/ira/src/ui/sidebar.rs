@@ -28,6 +28,7 @@ pub fn select_row_silently(state: &SharedState, index: Option<u32>) {
         model.unselect_all();
     }
     state.borrow_mut().restoring = false;
+    update_sticky_selection(state);
 }
 
 pub fn scroll_to_row(state: &SharedState, db_id: i64, variant_id: Option<i64>) {
@@ -165,7 +166,6 @@ pub fn rebuild_sidebar(state: &SharedState) {
     let old_n = store.n_items();
 
     let mut items: Vec<SidebarItem> = Vec::new();
-    items.push(SidebarItem::new_all_games());
 
     let visible_games: Vec<&Game> = games.iter().filter(|g| !g.hidden || show_hidden).collect();
 
@@ -391,6 +391,7 @@ fn restore_selection(state: &SharedState) {
             }
         }
         selection.set_selection(&bitset, &bitset);
+        update_sticky_selection(state);
         return;
     }
 
@@ -433,7 +434,9 @@ fn restore_selection(state: &SharedState) {
 
     state.borrow_mut().selected_id.clear();
     state.borrow_mut().selected_group = GroupSelection::AllGames;
-    select_row_silently(state, Some(0));
+    // No AllGames row exists in the store (the pinned header owns it):
+    // an empty list selection IS the AllGames state.
+    select_row_silently(state, None);
 }
 
 pub fn rebuild_sidebar_and_show_grid(state: &SharedState) {
@@ -491,6 +494,64 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
         super::group_dialog::show_create_group_dialog(&sc);
     });
     row.append(&add_btn);
+}
+
+/// The pinned library root: the same "All games" row the list used to
+/// scroll, built once and kept above the `ScrolledWindow` so it never
+/// scrolls away. No store row exists for it — empty list selection IS the
+/// AllGames state, mirrored here by `update_sticky_selection`.
+pub fn build_sticky_all_games(state: &SharedState) -> gtk4::Box {
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    row.set_hexpand(true);
+    sidebar_bind_all_games(state, &row);
+    let sc = state.clone();
+    let click = gtk4::GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
+        select_all_games(&sc);
+    });
+    row.add_controller(click);
+    // Outside a ListView the row gets no :hover styling on its own.
+    let motion = gtk4::EventControllerMotion::new();
+    let hovered = row.clone();
+    motion.connect_enter(move |_, _, _| {
+        hovered.add_css_class(CSS_SIDEBAR_STICKY_HOVER);
+    });
+    let hovered = row.clone();
+    motion.connect_leave(move |_| {
+        hovered.remove_css_class(CSS_SIDEBAR_STICKY_HOVER);
+    });
+    row.add_controller(motion);
+    row
+}
+
+/// Select the library root from the pinned header: mirrors the
+/// `AllGames` arm of the sidebar selection handler.
+pub fn select_all_games(state: &SharedState) {
+    state.borrow_mut().selected_id.clear();
+    state.borrow_mut().selected_group = GroupSelection::AllGames;
+    state.borrow_mut().multi_selected_ids.clear();
+    select_row_silently(state, None);
+    show_grid_view(state);
+}
+
+/// Mirror the list selection onto the pinned header's highlight. The
+/// header sits outside the `ListView`, so the `row:selected` CSS never
+/// applies to it — this class is its equivalent.
+pub fn update_sticky_selection(state: &SharedState) {
+    let (sticky, is_all) = {
+        let s = state.borrow();
+        (
+            s.sidebar_all_games.clone(),
+            s.selected_id.is_empty()
+                && s.selected_group == GroupSelection::AllGames
+                && s.multi_selected_ids.is_empty(),
+        )
+    };
+    if is_all {
+        sticky.add_css_class(CSS_SIDEBAR_STICKY_SELECTED);
+    } else {
+        sticky.remove_css_class(CSS_SIDEBAR_STICKY_SELECTED);
+    }
 }
 
 /// The rule-managed group header: collapse arrow and name like a
@@ -766,7 +827,9 @@ fn sidebar_bind_factory(
     row.remove_css_class(CSS_SIDEBAR_ROW_PAD_HEADER);
 
     match item.kind() {
-        SidebarItemKind::AllGames => sidebar_bind_all_games(state, &row),
+        // No store row carries this kind (the pinned header owns AllGames);
+        // kept for exhaustiveness.
+        SidebarItemKind::AllGames => {}
         SidebarItemKind::CollectionHeader | SidebarItemKind::UncategorizedHeader => {
             sidebar_bind_collection_header(state, &row, &item);
         }

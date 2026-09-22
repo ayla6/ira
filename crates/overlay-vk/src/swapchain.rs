@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use ash::vk;
 use ash::vk::Handle;
@@ -60,8 +61,15 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     let extent = create_info.image_extent;
 
     let render_pass = create_render_pass(fns, device, format);
-    let (pipeline, pipeline_layout, shader_vert, shader_frag) =
-        create_pipeline(fns, device, render_pass, extent);
+    // The canvas pipeline + texture replace the old toolkit renderer. Any
+    // failure here is non-fatal: the game presents without overlay.
+    let ui_enabled = std::env::var_os("IRA_OVERLAY_DISABLE_UI").is_none();
+    let (pipeline, pipeline_layout, shader_vert, shader_frag) = if ui_enabled {
+        crate::canvas::create_bundle(fns, device, physical_device, render_pass, sc.as_raw())
+            .unwrap_or_default()
+    } else {
+        Default::default()
+    };
     let (framebuffers, image_views) =
         create_framebuffers(fns, device, render_pass, &images, extent, format);
 
@@ -95,14 +103,7 @@ pub(crate) unsafe extern "system" fn create_swapchain(
         fences.push(fence);
     }
 
-    let ui_enabled = std::env::var_os("IRA_OVERLAY_DISABLE_UI").is_none();
-    let ui_renderer = if ui_enabled {
-        ira_overlay::ui::UiRenderer::new(fns, device, physical_device, cmd_pool, render_pass)
-    } else {
-        None
-    };
-
-    ira_overlay::ui::capture::init(fns, device, physical_device, extent, format);
+    ira_overlay::capture::init(fns, device, physical_device, extent, format);
 
     SWAPCHAINS
         .lock()
@@ -127,11 +128,79 @@ pub(crate) unsafe extern "system" fn create_swapchain(
                 semaphores,
                 fences,
                 ui_enabled,
-                ui_renderer,
             },
         );
 
+    // Bind the swapchain to its X11 window (if Xlib-backed) for input
+    // translation: windowed games report root coordinates that need the
+    // window origin subtracted to land in client space.
+    crate::canvas::bind_swapchain_window(sc.as_raw(), ci.surface.as_raw());
+
     result
+}
+
+/// Swapchain resources waiting for the GPU to finish with them. Freed once
+/// every fence signals (polled, never waited), so teardown can never hang
+/// the game thread on a wedged queue.
+struct DeadSwapchain {
+    device: vk::Device,
+    fns: DeviceFns,
+    pipeline: vk::Pipeline,
+    pipeline_layout: vk::PipelineLayout,
+    shader_vert: vk::ShaderModule,
+    shader_frag: vk::ShaderModule,
+    render_pass: vk::RenderPass,
+    framebuffers: Vec<vk::Framebuffer>,
+    image_views: Vec<vk::ImageView>,
+    semaphores: Vec<vk::Semaphore>,
+    fences: Vec<vk::Fence>,
+    cmd_pool: vk::CommandPool,
+    swapchain_key: u64,
+}
+
+static DEAD_SWAPCHAINS: Mutex<Option<Vec<DeadSwapchain>>> = Mutex::new(None);
+
+/// Frees retired swapchains whose fences all signaled (non-blocking).
+/// Entries on a dead queue never signal and leak boundedly until process
+/// exit instead of hanging teardown.
+unsafe fn sweep_dead() {
+    let mut dead = DEAD_SWAPCHAINS.lock().unwrap();
+    let Some(list) = dead.as_mut() else { return };
+    list.retain(|entry| {
+        // SUCCESS = signaled. Anything else keeps the entry, except a lost
+        // device where waiting is pointless and destruction is harmless.
+        let done = entry.fences.iter().all(|fence| {
+            matches!(
+                (entry.fns.get_fence_status)(entry.device, *fence),
+                vk::Result::SUCCESS | vk::Result::ERROR_DEVICE_LOST
+            )
+        });
+        if !done {
+            return true;
+        }
+        let fns = entry.fns;
+        let device = entry.device;
+        crate::canvas::destroy_canvas(fns, device, entry.swapchain_key);
+        for fb in &entry.framebuffers {
+            (fns.destroy_framebuffer)(device, *fb, std::ptr::null());
+        }
+        for iv in &entry.image_views {
+            (fns.destroy_image_view)(device, *iv, std::ptr::null());
+        }
+        for sem in &entry.semaphores {
+            (fns.destroy_semaphore)(device, *sem, std::ptr::null());
+        }
+        for fence in &entry.fences {
+            (fns.destroy_fence)(device, *fence, std::ptr::null());
+        }
+        (fns.destroy_pipeline)(device, entry.pipeline, std::ptr::null());
+        (fns.destroy_pipeline_layout)(device, entry.pipeline_layout, std::ptr::null());
+        (fns.destroy_shader_module)(device, entry.shader_vert, std::ptr::null());
+        (fns.destroy_shader_module)(device, entry.shader_frag, std::ptr::null());
+        (fns.destroy_render_pass)(device, entry.render_pass, std::ptr::null());
+        (fns.destroy_command_pool)(device, entry.cmd_pool, std::ptr::null());
+        false
+    });
 }
 
 pub(crate) unsafe extern "system" fn destroy_swapchain(
@@ -144,35 +213,35 @@ pub(crate) unsafe extern "system" fn destroy_swapchain(
         .unwrap()
         .as_mut()
         .and_then(|m| m.remove(&(swapchain.as_raw())));
-    if let Some(sc) = sc_data {
+        if let Some(sc) = sc_data {
         let fns = sc.fns;
 
-        let _ = (fns.device_wait_idle)(sc.device);
+        ira_overlay::capture::drain_pending();
 
-        ira_overlay::ui::capture::drain_pending();
-
-        if let Some(ui) = sc.ui_renderer {
-            ui.destroy(fns);
-        }
+        // Retire instead of destroying: freeing waits on fences below, and
+        // device_wait_idle would hang the game thread on a wedged queue.
+        sweep_dead();
+        DEAD_SWAPCHAINS
+            .lock()
+            .unwrap()
+            .get_or_insert_with(Vec::new)
+            .push(DeadSwapchain {
+                device: sc.device,
+                fns,
+                pipeline: sc.pipeline,
+                pipeline_layout: sc.pipeline_layout,
+                shader_vert: sc.shader_vert,
+                shader_frag: sc.shader_frag,
+                render_pass: sc.render_pass,
+                framebuffers: sc.framebuffers,
+                image_views: sc.image_views,
+                semaphores: sc.semaphores,
+                fences: sc.fences,
+                cmd_pool: sc.cmd_pool,
+                swapchain_key: swapchain.as_raw(),
+            });
+        // The actual swapchain belongs to the game; destroy it immediately.
         (fns.destroy_swapchain)(device, swapchain, allocator);
-        for fb in &sc.framebuffers {
-            (fns.destroy_framebuffer)(device, *fb, std::ptr::null());
-        }
-        for iv in &sc.image_views {
-            (fns.destroy_image_view)(device, *iv, std::ptr::null());
-        }
-        for sem in &sc.semaphores {
-            (fns.destroy_semaphore)(device, *sem, std::ptr::null());
-        }
-        for fence in &sc.fences {
-            (fns.destroy_fence)(device, *fence, std::ptr::null());
-        }
-        (fns.destroy_pipeline)(device, sc.pipeline, std::ptr::null());
-        (fns.destroy_pipeline_layout)(device, sc.pipeline_layout, std::ptr::null());
-        (fns.destroy_shader_module)(device, sc.shader_vert, std::ptr::null());
-        (fns.destroy_shader_module)(device, sc.shader_frag, std::ptr::null());
-        (fns.destroy_render_pass)(device, sc.render_pass, std::ptr::null());
-        (fns.destroy_command_pool)(device, sc.cmd_pool, std::ptr::null());
     } else {
         let fns = {
             let map = DEVICES.lock().unwrap();
@@ -230,120 +299,6 @@ unsafe fn create_render_pass(
     let mut rp = vk::RenderPass::null();
     let _ = (fns.create_render_pass)(device, &rp_info, std::ptr::null(), &mut rp);
     rp
-}
-
-unsafe fn create_pipeline(
-    fns: DeviceFns,
-    device: vk::Device,
-    render_pass: vk::RenderPass,
-    extent: vk::Extent2D,
-) -> (
-    vk::Pipeline,
-    vk::PipelineLayout,
-    vk::ShaderModule,
-    vk::ShaderModule,
-) {
-    let vert_code: Vec<u32> = {
-        let (chunks, _) = VERT_SPV.as_chunks::<4>();
-        chunks.iter().map(|c| u32::from_le_bytes(*c)).collect()
-    };
-    let vert_info = vk::ShaderModuleCreateInfo::default().code(&vert_code);
-    let mut shader_vert = vk::ShaderModule::null();
-    let _ = (fns.create_shader_module)(device, &vert_info, std::ptr::null(), &mut shader_vert);
-
-    let frag_code: Vec<u32> = {
-        let (chunks, _) = FRAG_SPV.as_chunks::<4>();
-        chunks.iter().map(|c| u32::from_le_bytes(*c)).collect()
-    };
-    let frag_info = vk::ShaderModuleCreateInfo::default().code(&frag_code);
-    let mut shader_frag = vk::ShaderModule::null();
-    let _ = (fns.create_shader_module)(device, &frag_info, std::ptr::null(), &mut shader_frag);
-
-    let vert_stage = vk::PipelineShaderStageCreateInfo::default()
-        .stage(vk::ShaderStageFlags::VERTEX)
-        .module(shader_vert)
-        .name(c"main");
-    let frag_stage = vk::PipelineShaderStageCreateInfo::default()
-        .stage(vk::ShaderStageFlags::FRAGMENT)
-        .module(shader_frag)
-        .name(c"main");
-
-    let stages = [vert_stage, frag_stage];
-    let vertex_input = vk::PipelineVertexInputStateCreateInfo::default();
-    let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
-        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-
-    let viewport = vk::Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: extent.width as f32,
-        height: extent.height as f32,
-        min_depth: 0.0,
-        max_depth: 1.0,
-    };
-    let scissor = vk::Rect2D {
-        offset: vk::Offset2D { x: 0, y: 0 },
-        extent,
-    };
-    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-        .viewports(std::slice::from_ref(&viewport))
-        .scissors(std::slice::from_ref(&scissor));
-
-    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
-        .depth_clamp_enable(false)
-        .rasterizer_discard_enable(false)
-        .polygon_mode(vk::PolygonMode::FILL)
-        .line_width(1.0)
-        .cull_mode(vk::CullModeFlags::NONE);
-
-    let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
-        .sample_shading_enable(false)
-        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-
-    let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-        .color_write_mask(vk::ColorComponentFlags::RGBA)
-        .blend_enable(true)
-        .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-        .alpha_blend_op(vk::BlendOp::ADD);
-
-    let color_blend = vk::PipelineColorBlendStateCreateInfo::default()
-        .attachments(std::slice::from_ref(&blend_attachment));
-
-    let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-    let dynamic = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
-
-    let layout_info = vk::PipelineLayoutCreateInfo::default();
-    let mut pipeline_layout = vk::PipelineLayout::null();
-    let _ =
-        (fns.create_pipeline_layout)(device, &layout_info, std::ptr::null(), &mut pipeline_layout);
-
-    let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(&stages)
-        .vertex_input_state(&vertex_input)
-        .input_assembly_state(&input_assembly)
-        .viewport_state(&viewport_state)
-        .rasterization_state(&rasterizer)
-        .multisample_state(&multisampling)
-        .color_blend_state(&color_blend)
-        .dynamic_state(&dynamic)
-        .layout(pipeline_layout)
-        .render_pass(render_pass);
-
-    let mut pipeline = vk::Pipeline::null();
-    let _ = (fns.create_graphics_pipelines)(
-        device,
-        vk::PipelineCache::null(),
-        1,
-        &pipeline_info as *const vk::GraphicsPipelineCreateInfo,
-        std::ptr::null(),
-        &mut pipeline as *mut vk::Pipeline,
-    );
-
-    (pipeline, pipeline_layout, shader_vert, shader_frag)
 }
 
 unsafe fn create_framebuffers(

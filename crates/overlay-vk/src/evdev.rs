@@ -20,8 +20,10 @@ use std::os::raw::c_int;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use ira_overlay::ui::{push_event, Event};
-use ira_overlay_ipc::gamepad_button_mask_from_evdev;
+use ira_overlay_ipc::{
+    gamepad_button_mask_from_evdev, CanvasCommand, CMD_ACTIVATE, CMD_NAV_DOWN, CMD_NAV_LEFT,
+    CMD_NAV_RIGHT, CMD_NAV_UP,
+};
 
 // evdev event types
 const EV_KEY: u16 = 0x01;
@@ -29,6 +31,7 @@ const EV_ABS: u16 = 0x03;
 
 // Button codes
 const BTN_SOUTH: u16 = 0x130; // A / Cross  (== BTN_GAMEPAD)
+const BTN_EAST: u16 = 0x131; // B / Circle — Big Picture back: hide overlay
 const BTN_TL: u16 = 0x136; // L1 / LB
 const BTN_TR: u16 = 0x137; // R1 / RB
 const BTN_DPAD_UP: u16 = 0x220;
@@ -255,12 +258,12 @@ fn handle_event(ev: &InputEvent) {
             match hotkey_action(held) {
                 HotkeyAction::Screenshot => {
                     TOGGLE_PENDING.store(false, Ordering::Relaxed);
-                    ira_overlay::ui::capture::request_screenshot();
+                    ira_overlay::capture::request_screenshot();
                     return;
                 }
                 HotkeyAction::Record => {
                     TOGGLE_PENDING.store(false, Ordering::Relaxed);
-                    ira_overlay::ui::capture::toggle_recording();
+                    ira_overlay::capture::toggle_recording();
                     return;
                 }
                 HotkeyAction::Toggle => {
@@ -276,18 +279,28 @@ fn handle_event(ev: &InputEvent) {
             if injected_ui_disabled() || !crate::shim_bridge::is_visible() {
                 return;
             }
-            let event = match ev.code {
-                BTN_SOUTH => Some(Event::Activate),
-                BTN_DPAD_UP => Some(Event::NavUp),
-                BTN_DPAD_DOWN => Some(Event::NavDown),
-                BTN_DPAD_LEFT => Some(Event::NavLeft),
-                BTN_DPAD_RIGHT => Some(Event::NavRight),
-                BTN_TL => Some(Event::Scroll { delta_y: -1.0 }),
-                BTN_TR => Some(Event::Scroll { delta_y: 1.0 }),
+            let kind = match ev.code {
+                BTN_SOUTH => Some(CMD_ACTIVATE),
+                BTN_EAST => {
+                    crate::shim_bridge::set_visible(false);
+                    None
+                }
+                BTN_DPAD_UP => Some(CMD_NAV_UP),
+                BTN_DPAD_DOWN => Some(CMD_NAV_DOWN),
+                BTN_DPAD_LEFT => Some(CMD_NAV_LEFT),
+                BTN_DPAD_RIGHT => Some(CMD_NAV_RIGHT),
+                BTN_TL => {
+                    crate::shim_bridge::push_canvas_command(CanvasCommand::scroll(-1.0));
+                    None
+                }
+                BTN_TR => {
+                    crate::shim_bridge::push_canvas_command(CanvasCommand::scroll(1.0));
+                    None
+                }
                 _ => None,
             };
-            if let Some(e) = event {
-                push_event(e);
+            if let Some(kind) = kind {
+                crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
             }
         }
         EV_ABS => {
@@ -298,21 +311,23 @@ fn handle_event(ev: &InputEvent) {
                 ABS_HAT0X => {
                     let prev = HAT_X.swap(ev.value, Ordering::Relaxed);
                     if prev == 0 && ev.value != 0 {
-                        push_event(if ev.value < 0 {
-                            Event::NavLeft
+                        let kind = if ev.value < 0 {
+                            CMD_NAV_LEFT
                         } else {
-                            Event::NavRight
-                        });
+                            CMD_NAV_RIGHT
+                        };
+                        crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
                     }
                 }
                 ABS_HAT0Y => {
                     let prev = HAT_Y.swap(ev.value, Ordering::Relaxed);
                     if prev == 0 && ev.value != 0 {
-                        push_event(if ev.value < 0 {
-                            Event::NavUp
+                        let kind = if ev.value < 0 {
+                            CMD_NAV_UP
                         } else {
-                            Event::NavDown
-                        });
+                            CMD_NAV_DOWN
+                        };
+                        crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
                     }
                 }
                 _ => {}

@@ -290,5 +290,17 @@ unsafe extern "system" fn create_xlib_surface(
 
     let func: vk::PFN_vkCreateXlibSurfaceKHR =
         super::negotiate::transmute_fn(gipa(instance, c"vkCreateXlibSurfaceKHR".as_ptr()));
-    func(instance, create_info, allocator, surface)
+    let result = func(instance, create_info, allocator, surface);
+    // Remember the X window behind this surface for input translation:
+    // X11 reports pointer motion in root coordinates, but the panel rect
+    // lives in client space. Windowed games need the origin subtracted.
+    if result == vk::Result::SUCCESS {
+        let info = *create_info;
+        crate::canvas::record_xlib_surface(
+            (*surface).as_raw(),
+            info.dpy as usize,
+            info.window,
+        );
+    }
+    result
 }

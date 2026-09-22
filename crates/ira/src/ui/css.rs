@@ -28,7 +28,9 @@ pub const CSS_BP_MENU_ROW_ACTIVE: &str = "bp-menu-row-active";
 pub const CSS_BP_SHOULDER: &str = "bp-shoulder";
 pub const CSS_BP_CURSOR_HIDDEN: &str = "bp-cursor-hidden";
 pub const CSS_BP_GROUP_SLOT: &str = "bp-group-slot";
-pub const CSS_BP_KEY: &str = "bp-key";
+pub const CSS_BP_RUNNING: &str = "bp-running";
+pub const CSS_BP_RUNNING_TITLE: &str = "bp-running-title";
+pub const CSS_BP_RUNNING_STATUS: &str = "bp-running-status";pub const CSS_BP_KEY: &str = "bp-key";
 pub const CSS_BP_KEY_SELECTED: &str = "bp-key-selected";
 pub const CSS_BP_KEY_ACTIVE: &str = "bp-key-active";
 pub const CSS_BP_KEY_DISABLED: &str = "bp-key-disabled";
@@ -92,6 +94,8 @@ pub const CSS_SETTINGS_HEADER: &str = "settings-header";
 pub const CSS_SETTINGS_SIDEBAR: &str = "settings-sidebar";
 pub const CSS_SIDEBAR_ROW_PAD_GAME: &str = "sidebar-row-pad-game";
 pub const CSS_SIDEBAR_ROW_PAD_HEADER: &str = "sidebar-row-pad-header";
+pub const CSS_SIDEBAR_STICKY_SELECTED: &str = "sidebar-sticky-selected";
+pub const CSS_SIDEBAR_STICKY_HOVER: &str = "sidebar-sticky-hover";
 pub const CSS_SIDEBAR_ROW_TITLE: &str = "sidebar-row-title";
 pub const CSS_SIDEBAR_SEPARATOR_ROW: &str = "sidebar-separator-row";
 pub const CSS_SUCCESS_LABEL: &str = "success-label";
@@ -104,6 +108,9 @@ pub const CSS_SQUARE_BUTTON: &str = "square-button";
 pub const CSS_STATUS_NO_SCROLL: &str = "status-no-scroll";
 pub const CSS_COMMAND_TILE: &str = "command-tile";
 pub const CSS_COMMAND_TILE_ACTIVE: &str = "command-tile-active";
+pub const CSS_DISC_TILE: &str = "disc-tile";
+pub const CSS_DISC_NUMBER: &str = "disc-number";
+pub const CSS_DISC_TILE_CAPTION: &str = "disc-tile-caption";
 
 pub const APP_CSS: &str = "
 .sidebar-row-title { min-width: 0; }
@@ -116,9 +123,33 @@ pub const APP_CSS: &str = "
  listview.navigation-sidebar row:selected > box { background-color: alpha(@theme_fg_color, 0.07); border-radius: 9px; }
  listview.navigation-sidebar row:selected > box.playing-game { background-color: alpha(@accent_color, 0.22); }
  .playing-game { color: @accent_color; background-color: alpha(@accent_color, 0.08); border-radius: 9px; }
- .sidebar-row-pad-game { padding: 4px 10px 4px 24px; }
- .sidebar-row-pad-header { padding: 4px 10px 4px 4px; }
+  .sidebar-row-pad-game { padding: 4px 10px 4px 24px; }
+  .sidebar-row-pad-header { padding: 4px 10px 4px 4px; }
+  .sidebar-sticky-selected { background-color: alpha(@theme_fg_color, 0.07); border-radius: 9px; }
+  .sidebar-sticky-hover { background-color: alpha(@theme_fg_color, 0.04); border-radius: 9px; }
 .play-btn-label { font-size: 1.15em; }
+
+.disc-tile { padding: 12px; }
+.disc-number {
+  font-size: 1.6em;
+  font-weight: 800;
+}
+.disc-tile-caption { color: alpha(@theme_fg_color, 0.6); }
+
+/* Big-picture running screen: a full-window black surface. The fade
+   itself runs from code (a frame-clock opacity ramp); the transition
+   property keeps re-shows from snapping when styles reload mid-fade. */
+.bp-running {
+    background: black;
+    transition: opacity 250ms ease;
+}
+.bp-running-title {
+    color: white;
+    font-weight: 700;
+}
+.bp-running-status {
+    color: alpha(white, 0.6);
+}
 
 .popover-menu-row {
     padding-left: 10px;
@@ -476,6 +507,8 @@ fn bp_css_header(s: f64) -> String {
     font-size: {subtitle};
     color: alpha(@theme_fg_color, 0.55);
 }}
+.bp-running-title {{ font-size: {page_title}; font-weight: 700; }}
+.bp-running-status {{ font-size: {subtitle}; }}
 "#,
         status_pad_v = px(12),
         status_pad_x = px(24),

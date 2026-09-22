@@ -1,7 +1,7 @@
 //! Shim state — input event queue, visibility flag, and mouse position.
 //! All state is process-local (the shim and Vulkan layer share the same process).
 
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use ira_overlay_ipc::{InputEventRaw, MappedShm, ShmHeader};
@@ -83,6 +83,9 @@ pub fn set_visible(v: bool) {
     eprintln!("ira-overlay-shim: set_visible({v})");
     VISIBILITY_INITIALIZED.store(true, Ordering::Release);
     OVERLAY_VISIBLE.store(v, Ordering::SeqCst);
+    if v {
+        crate::cursor::force_cursor_visible();
+    }
     if let Some(shm) = shm() {
         if let Ok(shm) = shm.lock() {
             shm.header()
@@ -102,6 +105,9 @@ pub fn toggle_visible() {
             if let Some(visible) = shm.header().toggle_visible() {
                 OVERLAY_VISIBLE.store(visible, Ordering::SeqCst);
                 eprintln!("ira-overlay-shim: toggle -> {visible}");
+                if visible {
+                    crate::cursor::force_cursor_visible();
+                }
             }
             return;
         }
@@ -109,6 +115,9 @@ pub fn toggle_visible() {
     // Fallback: local toggle (no SHM available).
     let v = !OVERLAY_VISIBLE.load(Ordering::SeqCst);
     OVERLAY_VISIBLE.store(v, Ordering::SeqCst);
+    if v {
+        crate::cursor::force_cursor_visible();
+    }
 }
 
 fn initialize_visibility() {
@@ -122,8 +131,55 @@ fn initialize_visibility() {
     }
 }
 
+static LAST_TOGGLE_KEY: AtomicU32 = AtomicU32::new(u32::MAX);
+
+/// Edge-trigger for hotkey toggles: X11 auto-repeat re-fires KeyPress for
+/// a held combination, and the SHM debounce only rate-limits (300ms), so a
+/// held Shift+Tab would strobe the overlay and land randomly. Only the
+/// first press counts until that keycode is released.
+pub fn toggle_edge(keycode: u32) -> bool {
+    LAST_TOGGLE_KEY
+        .compare_exchange(u32::MAX, keycode, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+/// Re-arms the toggle edge on key release (same keycode only; other
+/// releases must not re-arm a still-held toggle key).
+pub fn release_edge(keycode: u32) {
+    let _ = LAST_TOGGLE_KEY.compare_exchange(keycode, u32::MAX, Ordering::SeqCst, Ordering::SeqCst);
+}
+
+/// Desktop-level combos that must always reach the compositor, even with
+/// the overlay up: close window, switcher, overview, fullscreen toggle,
+/// terminal. Takes X11 keycodes (evdev + 8) and X11 modifier state.
+pub fn is_desktop_combo(keycode: u32, mods: u32) -> bool {
+    const ALT: u32 = 0x08;
+    const SUPER: u32 = 0x40;
+    const CTRL: u32 = 0x04;
+    const TAB: u32 = 15 + 8;
+    const F4: u32 = 62 + 8;
+    const ENTER: u32 = 28 + 8;
+    const T: u32 = 20 + 8;
+    const SUPER_L: u32 = 125 + 8;
+    const SUPER_R: u32 = 126 + 8;
+    if keycode == SUPER_L || keycode == SUPER_R || (mods & SUPER) != 0 {
+        return true;
+    }
+    if (mods & ALT) == 0 {
+        return false;
+    }
+    if keycode == F4 || keycode == TAB || keycode == ENTER {
+        return true;
+    }
+    (mods & CTRL) != 0 && keycode == T
+}
+
 pub fn initialize() {
     initialize_visibility();
+    static LOGGED: OnceLock<()> = OnceLock::new();
+    LOGGED.get_or_init(|| {
+        eprintln!("ira-overlay-shim: input hooks live (edge-toggle, grab-neuter, desktop-combos)");
+    });
 }
 
 /// Reads hotkey config from SHM via the canonical decoder, falling back to
@@ -195,4 +251,39 @@ pub fn mouse_pos() -> (i32, i32) {
         MOUSE_X.load(Ordering::Relaxed),
         MOUSE_Y.load(Ordering::Relaxed),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_toggle_edge_fires_once_until_release() {
+        let k = 900_001;
+        release_edge(k);
+        assert!(toggle_edge(k));
+        assert!(!toggle_edge(k));
+        assert!(!toggle_edge(k));
+        release_edge(k + 1);
+        assert!(!toggle_edge(k));
+        release_edge(k);
+        assert!(toggle_edge(k));
+        release_edge(k);
+    }
+
+    #[test]
+    fn test_is_desktop_combo() {
+        // X11 keycodes are evdev + 8; Alt = 0x08, Super = 0x40.
+        assert!(is_desktop_combo(62 + 8, 0x08)); // Alt+F4
+        assert!(is_desktop_combo(15 + 8, 0x08)); // Alt+Tab
+        assert!(is_desktop_combo(15 + 8, 0x08 | 0x01)); // Shift+Alt+Tab
+        assert!(is_desktop_combo(28 + 8, 0x08)); // Alt+Enter
+        assert!(is_desktop_combo(20 + 8, 0x08 | 0x04)); // Ctrl+Alt+T
+        assert!(is_desktop_combo(125 + 8, 0)); // Super_L alone
+        assert!(is_desktop_combo(30, 0x40)); // Super+A
+        assert!(!is_desktop_combo(28 + 8, 0)); // plain Enter
+        assert!(!is_desktop_combo(15 + 8, 0)); // plain Tab
+        assert!(!is_desktop_combo(30, 0x08)); // Alt+A stays consumed
+        assert!(!is_desktop_combo(28 + 8, 0x04)); // Ctrl+Enter stays consumed
+    }
 }

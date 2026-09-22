@@ -46,8 +46,8 @@ const MOTIONNOTIFY: i32 = 6;
 //   offset 80: unsigned int state
 //   offset 84: unsigned int keycode (XKeyEvent) / button (XButtonEvent)
 const EV_TYPE: usize = 0;
-const EV_X: usize = 64;
-const EV_Y: usize = 68;
+const EV_X_ROOT: usize = 72;
+const EV_Y_ROOT: usize = 76;
 const EV_STATE: usize = 80;
 const EV_DETAIL: usize = 84;
 
@@ -60,6 +60,12 @@ type XCheckTypedEventFn = unsafe extern "C" fn(*mut c_void, i32, *mut c_void) ->
 type XCheckTypedWindowEventFn = unsafe extern "C" fn(*mut c_void, u64, i32, *mut c_void) -> i32;
 type XCheckMaskEventFn = unsafe extern "C" fn(*mut c_void, i64, *mut c_void) -> i32;
 type XNextEventFn = unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32;
+// GrabSuccess = 0; AlreadyGrabbed = 1 (used when the real call is missing).
+type XGrabPointerFn =
+    unsafe extern "C" fn(*mut c_void, u64, i32, u32, i32, i32, u64, u64, u64) -> i32;
+type XIGrabDeviceFn =
+    unsafe extern "C" fn(*mut c_void, i32, u64, u64, u64, i32, i32, i32, *mut c_void) -> i32;
+type XGrabKeyboardFn = unsafe extern "C" fn(*mut c_void, u64, i32, i32, i32, u64) -> i32;
 
 fn resolve(name: &std::ffi::CStr) -> *mut c_void {
     unsafe { libc::dlsym(libc::RTLD_NEXT, name.as_ptr()) }
@@ -71,6 +77,9 @@ static REAL_XCHECK_TYPED_EVENT: OnceLock<Option<XCheckTypedEventFn>> = OnceLock:
 static REAL_XCHECK_TYPED_WINDOW_EVENT: OnceLock<Option<XCheckTypedWindowEventFn>> = OnceLock::new();
 static REAL_XCHECK_MASK_EVENT: OnceLock<Option<XCheckMaskEventFn>> = OnceLock::new();
 static REAL_XNEXT_EVENT: OnceLock<Option<XNextEventFn>> = OnceLock::new();
+static REAL_XGRAB_POINTER: OnceLock<Option<XGrabPointerFn>> = OnceLock::new();
+static REAL_XI_GRAB_DEVICE: OnceLock<Option<XIGrabDeviceFn>> = OnceLock::new();
+static REAL_XGRAB_KEYBOARD: OnceLock<Option<XGrabKeyboardFn>> = OnceLock::new();
 
 fn xcheck_if_event() -> Option<XCheckIfEventFn> {
     *REAL_XCHECK_IF_EVENT.get_or_init(|| {
@@ -114,6 +123,37 @@ fn xnext_event() -> Option<XNextEventFn> {
     })
 }
 
+fn xgrab_pointer() -> Option<XGrabPointerFn> {
+    *REAL_XGRAB_POINTER.get_or_init(|| {
+        let p = resolve(c"XGrabPointer");
+        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
+    })
+}
+
+fn xi_grab_device() -> Option<XIGrabDeviceFn> {
+    *REAL_XI_GRAB_DEVICE.get_or_init(|| {
+        let p = resolve(c"XIGrabDevice");
+        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
+    })
+}
+
+fn xgrab_keyboard() -> Option<XGrabKeyboardFn> {
+    *REAL_XGRAB_KEYBOARD.get_or_init(|| {
+        let p = resolve(c"XGrabKeyboard");
+        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
+    })
+}
+
+/// Overlay grabs the pointer when it is up and interactive: a game grab
+/// would confine and hide the real cursor, desyncing it from the overlay
+/// (and trapping it in windowed mode). Report success without grabbing —
+/// the game proceeds as if it owned the pointer. Event consumption already
+/// starves the game of pointer input while visible, so neutering changes
+/// nothing gameplay-wise; grabs work again the moment it closes.
+fn grabs_neutered() -> bool {
+    state::overlay_active() && state::is_visible() && !state::injected_ui_disabled()
+}
+
 // --- X11 event field readers ---
 
 fn read_type(ev: *const c_void) -> i32 {
@@ -121,9 +161,12 @@ fn read_type(ev: *const c_void) -> i32 {
 }
 
 fn read_xy(ev: *const c_void) -> (i32, i32) {
+    // Root (screen) coordinates: unambiguous no matter which window the
+    // game queried the event for. The layer translates these into the
+    // game window's client space (identity for fullscreen at origin).
     unsafe {
-        let x = *((ev as *const u8).add(EV_X) as *const i32);
-        let y = *((ev as *const u8).add(EV_Y) as *const i32);
+        let x = *((ev as *const u8).add(EV_X_ROOT) as *const i32);
+        let y = *((ev as *const u8).add(EV_Y_ROOT) as *const i32);
         (x, y)
     }
 }
@@ -173,7 +216,9 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
         let rec_x11 = rec_kc + X11_KEYCODE_OFFSET;
 
         if !state::injected_ui_disabled() && (mods & tog_mods) == tog_mods && keycode == tog_x11 {
-            state::toggle_visible();
+            if state::toggle_edge(keycode) {
+                state::toggle_visible();
+            }
             return true;
         }
         if (mods & ss_mods) == ss_mods && keycode == ss_x11 {
@@ -195,6 +240,17 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
                 keycode: 0,
             });
             return true;
+        }
+    }
+
+    // Desktop-level combos always reach the compositor (checked after the
+    // hotkeys above so a configured Super-based toggle still wins).
+    if event_type == KEYPRESS || event_type == KEYRELEASE {
+        if state::is_desktop_combo(read_detail(ev), read_state(ev)) {
+            return false;
+        }
+        if event_type == KEYRELEASE {
+            state::release_edge(read_detail(ev));
         }
     }
 
@@ -387,5 +443,110 @@ pub unsafe extern "C" fn XNextEvent(display: *mut c_void, event_return: *mut c_v
             return result;
         }
         // Event was consumed — loop to get the next one.
+    }
+}
+
+/// Interposed pointer grab (see `grabs_neutered`).
+#[no_mangle]
+pub unsafe extern "C" fn XGrabPointer(
+    display: *mut c_void,
+    grab_window: u64,
+    owner_events: i32,
+    event_mask: u32,
+    pointer_mode: i32,
+    keyboard_mode: i32,
+    confine_to: u64,
+    cursor: u64,
+    time: u64,
+) -> i32 {
+    if grabs_neutered() {
+        return 0;
+    }
+    let Some(real_fn) = xgrab_pointer() else {
+        return 1;
+    };
+    real_fn(
+        display,
+        grab_window,
+        owner_events,
+        event_mask,
+        pointer_mode,
+        keyboard_mode,
+        confine_to,
+        cursor,
+        time,
+    )
+}
+
+/// Interposed XI2 device grab (see `grabs_neutered`).
+#[no_mangle]
+pub unsafe extern "C" fn XIGrabDevice(
+    display: *mut c_void,
+    deviceid: i32,
+    grab_window: u64,
+    time: u64,
+    cursor: u64,
+    grab_mode: i32,
+    paired_device_mode: i32,
+    owner_events: i32,
+    mask: *mut c_void,
+) -> i32 {
+    if grabs_neutered() {
+        return 0;
+    }
+    let Some(real_fn) = xi_grab_device() else {
+        return 1;
+    };
+    real_fn(
+        display,
+        deviceid,
+        grab_window,
+        time,
+        cursor,
+        grab_mode,
+        paired_device_mode,
+        owner_events,
+        mask,
+    )
+}
+
+/// Interposed keyboard grab (see `grabs_neutered`): with it active the
+/// compositor never sees Alt+Tab, Super or Alt+F4. Same deal as pointer.
+#[no_mangle]
+pub unsafe extern "C" fn XGrabKeyboard(
+    display: *mut c_void,
+    grab_window: u64,
+    owner_events: i32,
+    pointer_mode: i32,
+    keyboard_mode: i32,
+    time: u64,
+) -> i32 {
+    if grabs_neutered() {
+        return 0;
+    }
+    let Some(real_fn) = xgrab_keyboard() else {
+        return 1;
+    };
+    real_fn(
+        display,
+        grab_window,
+        owner_events,
+        pointer_mode,
+        keyboard_mode,
+        time,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_root_coords_match_xevent_layout() {
+        // XMotionEvent/XButtonEvent: x,y at 64/68 (window-relative),
+        // x_root/y_root at 72/76 (screen). The layer composites in screen
+        // space, so reads must use the root pair.
+        assert_eq!((EV_X_ROOT, EV_Y_ROOT), (72, 76));
+        assert_eq!((EV_STATE, EV_DETAIL), (80, 84));
     }
 }

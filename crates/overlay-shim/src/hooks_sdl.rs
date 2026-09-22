@@ -28,6 +28,7 @@ const SDL_JOYBUTTONUP: u32 = 0x604;
 
 // SDL2 controller button codes (same in SDL3)
 const BTN_A: u8 = 0;
+const BTN_B: u8 = 1;
 const BTN_GUIDE: u8 = 5;
 const BTN_LEFTSHOULDER: u8 = 9;
 const BTN_RIGHTSHOULDER: u8 = 10;
@@ -119,6 +120,12 @@ fn handle_button(button: u8) -> bool {
     // Other buttons only when overlay is visible.
     if state::injected_ui_disabled() || !state::is_visible() {
         return false;
+    }
+
+    // B is Big Picture back: hide the overlay (consumed, game never sees it).
+    if button == BTN_B {
+        state::set_visible(false);
+        return true;
     }
 
     let event = match button {

@@ -19,10 +19,17 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
-use ira_overlay::ui::{capture, push_event, Event};
-use ira_overlay_ipc::ShmHeader;
+use ira_overlay::capture;
+use ira_overlay_ipc::{CanvasCommand, ShmHeader, CMD_ACTIVATE, CMD_NAV_DOWN, CMD_NAV_LEFT,
+    CMD_NAV_RIGHT, CMD_NAV_UP};
 
 pub static HAS_FOCUS: AtomicBool = AtomicBool::new(false);
+
+/// One-shot env check for input-path diagnostics (`IRA_OVERLAY_DEBUG=1`).
+fn wl_debug() -> bool {
+    static DEBUG: OnceLock<bool> = OnceLock::new();
+    *DEBUG.get_or_init(|| std::env::var_os("IRA_OVERLAY_DEBUG").is_some())
+}
 
 // --- Tracked input state (all accessed from dispatch(), single-threaded) ---
 
@@ -35,8 +42,6 @@ static POINTER: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 // Navigation order matches ShmHeader::NAV_KEYCODES_EVDEV:
 // [Return, Up, Down, Left, Right].
 const KC_RETURN: u32 = ShmHeader::NAV_KEYCODES_EVDEV[0];
-#[cfg(debug_assertions)]
-const KC_F10: u32 = 68;
 const KC_UP: u32 = ShmHeader::NAV_KEYCODES_EVDEV[1];
 const KC_DOWN: u32 = ShmHeader::NAV_KEYCODES_EVDEV[2];
 const KC_LEFT: u32 = ShmHeader::NAV_KEYCODES_EVDEV[3];
@@ -250,22 +255,17 @@ extern "C" fn keyboard_key(_: *mut c_void, _: *mut c_void, _: u32, _: u32, key: 
     if !crate::shim_bridge::is_visible() {
         return;
     }
-    #[cfg(debug_assertions)]
-    if pressed && key == KC_F10 {
-        ira_overlay::ui::toggle_backend();
-        return;
-    }
     if pressed {
-        let event = match key {
-            KC_UP => Some(Event::NavUp),
-            KC_DOWN => Some(Event::NavDown),
-            KC_LEFT => Some(Event::NavLeft),
-            KC_RIGHT => Some(Event::NavRight),
-            KC_RETURN => Some(Event::Activate),
+        let kind = match key {
+            KC_UP => Some(CMD_NAV_UP),
+            KC_DOWN => Some(CMD_NAV_DOWN),
+            KC_LEFT => Some(CMD_NAV_LEFT),
+            KC_RIGHT => Some(CMD_NAV_RIGHT),
+            KC_RETURN => Some(CMD_ACTIVATE),
             _ => None,
         };
-        if let Some(e) = event {
-            push_event(e);
+        if let Some(kind) = kind {
+            crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
         }
     }
 }
@@ -301,7 +301,20 @@ extern "C" fn pointer_motion(_: *mut c_void, _: *mut c_void, _: u32, sx: i32, sy
     MOUSE_SY.store(sy, Ordering::Relaxed);
     if crate::shim_bridge::is_visible() {
         let (x, y) = fixed_to_f32(sx, sy);
-        push_event(Event::MouseMove { x, y });
+        // Second-source tracing: proves whether layer-Wayland pointer
+        // events fire alongside shim events in the same session.
+        if wl_debug() {
+            static LAST_WL_MS: AtomicU32 = AtomicU32::new(0);
+            let now = crate::canvas::now_ms();
+            if now.wrapping_sub(LAST_WL_MS.load(Ordering::Relaxed)) > 2000 {
+                LAST_WL_MS.store(now, Ordering::Relaxed);
+                eprintln!("ira-overlay: wayland motion surface=({x:.0},{y:.0})");
+            }
+        }
+        crate::canvas::set_last_mouse(x, y);
+        if let Some((cx, cy)) = crate::canvas::screen_to_canvas(x, y) {
+            crate::shim_bridge::push_canvas_command(CanvasCommand::mouse_move(cx, cy));
+        }
     }
 }
 
@@ -320,10 +333,14 @@ extern "C" fn pointer_button(
         MOUSE_SX.load(Ordering::Relaxed),
         MOUSE_SY.load(Ordering::Relaxed),
     );
+    crate::canvas::set_last_mouse(x, y);
+    let Some((cx, cy)) = crate::canvas::screen_to_canvas(x, y) else {
+        return;
+    };
     if state == KEY_PRESSED {
-        push_event(Event::MouseDown { x, y });
+        crate::shim_bridge::push_canvas_command(CanvasCommand::mouse_down(cx, cy, 0));
     } else {
-        push_event(Event::MouseUp { x, y });
+        crate::shim_bridge::push_canvas_command(CanvasCommand::mouse_up(cx, cy, 0));
     }
 }
 
@@ -335,7 +352,7 @@ extern "C" fn pointer_axis(_: *mut c_void, _: *mut c_void, _: u32, axis: u32, va
         return;
     }
     let delta_y = if value > 0 { 1.0 } else { -1.0 };
-    push_event(Event::Scroll { delta_y });
+    crate::shim_bridge::push_canvas_command(CanvasCommand::scroll(delta_y));
 }
 
 // --- Init / dispatch ---

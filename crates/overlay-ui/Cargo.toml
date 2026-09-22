@@ -1,0 +1,22 @@
+[package]
+name = "ira-overlay-ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+adw = { version = "0.9", package = "libadwaita", features = ["v1_6", "v1_7"] }
+gdk4 = "0.11"
+gdkx11 = { version = "0.11", package = "gdk4-x11" }
+gio = "0.22"
+glib = "0.22"
+graphene-rs = "0.22"
+gsk4 = "0.11"
+gtk4 = { version = "0.11", features = ["v4_14"] }
+ira-overlay-ipc = { version = "0.1.0", path = "../overlay-ipc" }
+libc = "0.2"
+wayland-protocols = { version = "0.32.13", features = ["server"] }
+wayland-server = "0.31.14"
+x11rb = "0.13"
+
+[lints]
+workspace = true

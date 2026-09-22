@@ -4,7 +4,6 @@ use std::sync::Mutex;
 use ash::vk;
 
 use ira_overlay::types::DeviceFns;
-use ira_overlay::ui::UiRenderer;
 
 pub type PfnGetInstanceProcAddr = Option<
     unsafe extern "system" fn(vk::Instance, *const std::os::raw::c_char) -> vk::PFN_vkVoidFunction,
@@ -88,13 +87,10 @@ pub struct SwapchainData {
     pub cmd_buffers: Vec<vk::CommandBuffer>,
     pub semaphores: Vec<vk::Semaphore>,
     pub fences: Vec<vk::Fence>,
+    /// False when IRA_OVERLAY_DISABLE_UI is set — capture still runs.
     pub ui_enabled: bool,
-    pub ui_renderer: Option<UiRenderer>,
 }
 
 pub static INSTANCES: Mutex<Option<HashMap<usize, InstanceData>>> = Mutex::new(None);
 pub static DEVICES: Mutex<Option<HashMap<usize, DeviceData>>> = Mutex::new(None);
 pub static SWAPCHAINS: Mutex<Option<HashMap<u64, SwapchainData>>> = Mutex::new(None);
-
-pub const VERT_SPV: &[u8] = include_bytes!("../shaders/vert.spv");
-pub const FRAG_SPV: &[u8] = include_bytes!("../shaders/frag.spv");

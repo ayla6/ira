@@ -290,7 +290,7 @@ fn apply_game_env_inside_gamescope(
 /// Reads system settings from GameLaunchConfig (not WineConfig — these are
 /// system-level settings that apply to ALL games, not just Wine).
 /// Adds mangohud env vars to `env`.
-/// Returns `true` if gamescope is used (indicating standalone overlay mode).
+/// Returns `true` if gamescope is used (indicating external overlay mode).
 pub fn apply_performance(
     command: &mut Vec<String>,
     env: &mut Vec<(String, String)>,
@@ -319,8 +319,10 @@ pub fn apply_performance(
         env_set(env, "MANGOHUD_DLSYM", "1");
     }
 
-    if launch.gamescope.unwrap_or(false) && has_exec("gamescope") {
-        let mut gs_args = vec!["gamescope".to_string()];
+    if launch.gamescope.unwrap_or(false) && !has_exec("gamescope") {
+        eprintln!("launch: gamescope requested but binary not found; launching without it");
+    }
+    if launch.gamescope.unwrap_or(false) && has_exec("gamescope") {        let mut gs_args = vec!["gamescope".to_string()];
 
         let w = launch.gamescope_w.unwrap_or(0);
         let h = launch.gamescope_h.unwrap_or(0);
@@ -412,7 +414,7 @@ pub fn add_overlay_env(
 }
 
 /// Injects overlay components into a game running inside Gamescope while
-/// leaving UI rendering to the standalone overlay process.
+/// leaving UI rendering to the host overlay window.
 pub fn add_overlay_env_without_ui(
     env: &mut Vec<(String, String)>,
     overlay_shm: Option<&str>,
@@ -443,39 +445,22 @@ fn detect_system_font() -> Option<String> {
     }
 }
 
-// ─── Standalone overlay (gamescope mode) ───
+// ─── Host overlay (gamescope mode) ───
 
-/// Finds the standalone overlay binary next to the main executable.
-fn standalone_binary_path() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?;
-
-    let dev_bin = exe_dir.join("ira-overlay-standalone");
-    if dev_bin.is_file() {
-        return Some(dev_bin.to_string_lossy().into());
-    }
-
-    let rel_bin = exe_dir.join("overlay").join("ira-overlay-standalone");
-    if rel_bin.is_file() {
-        return Some(rel_bin.to_string_lossy().into());
-    }
-
-    None
-}
-
-/// Adds environment used by the standalone overlay. Unlike direct mode, this
-/// does not inject a Vulkan layer or preload library into the game.
-pub fn add_overlay_env_standalone(
+/// Adds environment for the gamescope session. Unlike direct mode, this
+/// does not inject a Vulkan layer or preload library into the session —
+/// the GTK host must never load the layer into itself.
+pub fn add_overlay_env_external(
     env: &mut Vec<(String, String)>,
     overlay_shm: Option<&str>,
     font_family: Option<&str>,
 ) {
-    eprintln!("ira-overlay: preparing standalone overlay (SHM, no game injection)");
+    eprintln!("ira-overlay: preparing host overlay (SHM, no session injection)");
 
-    // In standalone mode, the VK layer must NOT be loaded — the standalone
-    // overlay process has its own Vulkan instance. If VK_INSTANCE_LAYERS is
-    // set (e.g. from a previous non-standalone launch in the same session),
-    // the layer would hook the game's Vulkan calls and conflict.
+    // In external mode, the VK layer must NOT be loaded — the host process
+    // creates no Vulkan instance. If VK_INSTANCE_LAYERS is set (e.g. from a
+    // previous non-external launch in the same session), the layer would
+    // hook the host's library handles pointlessly.
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS" && k != "VK_LAYER_PATH");
 
     if let Some(shm) = overlay_shm {
@@ -586,20 +571,19 @@ fn wrap_command_with_input(
     *command = wrapped;
 }
 
-/// Wraps a gamescope command so the standalone overlay runs inside gamescope
-/// alongside the game. The overlay inherits `DISPLAY` from gamescope's
-/// internal XWayland server, allowing it to create an X11 window via XCB.
-///
-/// The overlay window is marked as `GAMESCOPE_EXTERNAL_OVERLAY` so gamescope
-/// composites it on top of the game as a separate plane (like mangoapp).
-/// The overlay runs under the Gamescope WSI layer (inheriting
-/// `GAMESCOPE_WAYLAND_DISPLAY`): the layer intercepts `vkCreateXcbSurfaceKHR`
-/// and presents the overlay's frames to gamescope via Wayland, bypassing
-/// XWayland, with pre-multiplied alpha for transparency.
+/// Wraps a gamescope command so the GTK host runs inside gamescope
+/// alongside the game. The host inherits `DISPLAY` from gamescope's
+/// internal XWayland server and marks its window as
+/// `GAMESCOPE_EXTERNAL_OVERLAY`, so gamescope composites it on top of the
+/// game as a separate plane (like mangoapp) — no Vulkan compositing, no
+/// canvas copy.
 ///
 /// Transforms: `gamescope -- wine ...`
-/// Into:       `gamescope -- sh -c 'ENABLE_GAMESCOPE_WSI=1 ira-overlay-standalone & exec "$@"' -- wine ...`
-/// Splits off the game command so the standalone overlay can re-wrap it.
+/// Into:       `gamescope -- sh -c 'IRA_OVERLAY_GAMESCOPE=1 ira-overlay-ui & exec "$@"' -- wine ...`
+/// The host is forced onto the X11 backend: gamescope's external-overlay
+/// atom is X11-only, and on Wayland the window would appear as a regular
+/// (main-plane) window instead of an overlay.
+/// Splits off the game command so the host can re-wrap it.
 /// Gamescope commands carry the game after the `--` separator (everything
 /// before it is gamescope args); a plain command — a launch under an
 /// already-running gamescope session — is the game itself.
@@ -610,12 +594,12 @@ fn split_game_command(command: &mut Vec<String>) -> Vec<String> {
     }
 }
 
-pub fn wrap_with_standalone_overlay(
+pub fn wrap_with_host_overlay(
     command: &mut Vec<String>,
     capture_env: &[(String, String)],
 ) -> bool {
-    let Some(bin) = standalone_binary_path() else {
-        eprintln!("ira-overlay: standalone binary not found, skipping");
+    let Some(bin) = super::overlay_host::host_binary_path() else {
+        eprintln!("ira-overlay: host binary not found, skipping");
         return false;
     };
 
@@ -637,7 +621,7 @@ pub fn wrap_with_standalone_overlay(
         })
         .collect::<String>();
     let sh_script = format!(
-        "cleanup() {{ status=$?; trap - EXIT INT TERM HUP; if [ -n \"${{overlay_pid:-}}\" ]; then kill \"$overlay_pid\" 2>/dev/null; wait \"$overlay_pid\" 2>/dev/null; fi; exit \"$status\"; }}; trap cleanup EXIT; trap 'exit 143' INT TERM HUP; ENABLE_GAMESCOPE_WSI=1 {quoted_bin} & overlay_pid=$!; {env_prefix}\"$@\""
+        "cleanup() {{ status=$?; trap - EXIT INT TERM HUP; if [ -n \"${{overlay_pid:-}}\" ]; then kill \"$overlay_pid\" 2>/dev/null; wait \"$overlay_pid\" 2>/dev/null; fi; exit \"$status\"; }}; trap cleanup EXIT; trap 'exit 143' INT TERM HUP; IRA_OVERLAY_GAMESCOPE=1 GDK_BACKEND=x11 GSK_RENDERER=cairo {quoted_bin} & overlay_pid=$!; {env_prefix}\"$@\""
     );
 
     command.push("/usr/bin/sh".to_string());
@@ -645,6 +629,7 @@ pub fn wrap_with_standalone_overlay(
     command.push(sh_script);
     command.push("--".to_string());
     command.extend(game_cmd);
+    eprintln!("ira-overlay: gamescope host wrapped ({quoted_bin})");
     true
 }
 
@@ -933,10 +918,10 @@ mod tests {
     }
 
     #[test]
-    fn test_standalone_overlay_does_not_inject_game_libraries() {
+    fn test_external_overlay_does_not_inject_game_libraries() {
         let mut env = Vec::new();
 
-        add_overlay_env_standalone(&mut env, Some("/ira_overlay_1"), Some("Sans"));
+        add_overlay_env_external(&mut env, Some("/ira_overlay_1"), Some("Sans"));
 
         assert!(!env.iter().any(|(key, _)| key == "LD_PRELOAD"));
         assert!(!env.iter().any(|(key, _)| key == "VK_INSTANCE_LAYERS"));

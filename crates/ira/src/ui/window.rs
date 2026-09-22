@@ -74,6 +74,7 @@ pub fn build_ui(
         sidebar_selection,
         sidebar_view,
         sidebar_scroll: gtk4::ScrolledWindow::new(),
+        sidebar_all_games: gtk4::Box::new(gtk4::Orientation::Horizontal, 8),
         content_scroll: gtk4::ScrolledWindow::new(),
         content_box: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
         grid_header: gtk4::Box::new(gtk4::Orientation::Vertical, 0),
@@ -186,7 +187,15 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_view.add_css_class(CSS_NAVIGATION_SIDEBAR);
     sidebar_view.set_show_separators(false);
     sidebar_scroll.set_child(Some(&sidebar_view));
-    sidebar_toolbar.set_content(Some(&sidebar_scroll));
+    // The library root stays pinned above the scrolling list: a
+    // non-scrolling header row with the same contents the first list
+    // row used to have (its store row remains, hidden, at index 0).
+    let sticky_all_games = super::sidebar::build_sticky_all_games(state);
+    let sidebar_column = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    sidebar_column.append(&sticky_all_games);
+    sidebar_column.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
+    sidebar_column.append(&sidebar_scroll);
+    sidebar_toolbar.set_content(Some(&sidebar_column));
 
     let sidebar_page = adw::NavigationPage::new(&sidebar_toolbar, "Games");
     split_view.set_sidebar(Some(&sidebar_page));
@@ -261,6 +270,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         s.sidebar_selection = sidebar_selection.clone();
         s.sidebar_view = sidebar_view.clone();
         s.sidebar_scroll = sidebar_scroll.clone();
+        s.sidebar_all_games = sticky_all_games.clone();
         s.content_scroll = content_scroll.clone();
         s.content_box = content_box.clone();
         s.grid_header = grid_header.clone();
@@ -514,6 +524,7 @@ fn connect_window_signals(
             let selected_ids = model.selected_db_ids();
             drop(s);
             state_clone.borrow_mut().multi_selected_ids = selected_ids;
+            super::sidebar::update_sticky_selection(&state_clone);
             return;
         }
 
@@ -530,12 +541,8 @@ fn connect_window_signals(
         drop(s);
 
         match kind {
-            super::sidebar_item::SidebarItemKind::AllGames => {
-                state_clone.borrow_mut().selected_id.clear();
-                state_clone.borrow_mut().selected_group = GroupSelection::AllGames;
-                state_clone.borrow_mut().multi_selected_ids.clear();
-                show_grid_view(&state_clone);
-            }
+            // No store row carries this kind anymore.
+            super::sidebar_item::SidebarItemKind::AllGames => {}
             super::sidebar_item::SidebarItemKind::CollectionHeader => {
                 state_clone.borrow_mut().selected_id.clear();
                 // A derived category's id is its name's hash; resolve it
@@ -573,6 +580,7 @@ fn connect_window_signals(
                 switch_to_game(&state_clone, db_id, item.variant_id());
             }
         }
+        super::sidebar::update_sticky_selection(&state_clone);
     });
 
     let state_clone = state.clone();

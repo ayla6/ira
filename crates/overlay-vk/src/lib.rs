@@ -1,3 +1,5 @@
+mod canvas;
+mod canvas_res;
 mod device;
 pub mod evdev;
 mod instance;

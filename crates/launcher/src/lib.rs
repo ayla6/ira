@@ -5,6 +5,7 @@ pub mod gpu;
 pub mod input_daemon;
 mod launch;
 pub mod native_launch;
+pub mod overlay_host;
 pub mod steam_watch;
 pub mod wine_detect;
 pub mod wine_dlls;

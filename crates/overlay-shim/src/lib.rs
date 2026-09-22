@@ -1,3 +1,4 @@
+mod cursor;
 mod export;
 mod hooks_sdl;
 mod hooks_x11;

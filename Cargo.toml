@@ -14,9 +14,8 @@ members = [
     "crates/overlay-ipc",
     "crates/overlay-shim",
     "crates/overlay-vk",
-    "crates/overlay-standalone",
     "crates/input",
-    "crates/input-ipc", "crates/input-ipc",
+    "crates/input-ipc", "crates/input-ipc", "crates/overlay-ui",
 ]
 resolver = "2"
 

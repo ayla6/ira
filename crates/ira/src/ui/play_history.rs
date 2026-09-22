@@ -261,6 +261,16 @@ fn delete_session_from_db(
     if let Some((vid, vpt)) = new_variant_playtime {
         ira_db::update_variant_playtime(&db, vid, vpt)?;
     }
+    let new_last_played =
+        ira_db::recompute_last_played(&db, session.game_id, session.variant_id)?;
+    {
+        let mut s = state.borrow_mut();
+        for g in &mut s.games {
+            if g.db_id == session.game_id && g.variant_id == session.variant_id {
+                g.last_played = new_last_played;
+            }
+        }
+    }
     Ok(Some(focus))
 }
 

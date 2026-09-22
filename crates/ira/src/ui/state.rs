@@ -70,6 +70,10 @@ pub struct AppState {
     pub sidebar_selection: GameSelectionModel,
     pub sidebar_view: gtk4::ListView,
     pub sidebar_scroll: gtk4::ScrolledWindow,
+    /// The pinned "All games" header above the sidebar scroll region.
+    /// The store keeps a hidden AllGames row at index 0; this widget is
+    /// its always-visible twin, highlighted via `update_sticky_selection`.
+    pub sidebar_all_games: gtk4::Box,
     pub content_scroll: gtk4::ScrolledWindow,
     pub content_box: gtk4::Box,
     pub grid_header: gtk4::Box,

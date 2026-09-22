@@ -251,8 +251,8 @@ pub(crate) unsafe extern "system" fn destroy_device(
         };
         if let Some(fns) = dd.fns {
             let _ = (fns.device_wait_idle)(device);
-            ira_overlay::ui::capture::destroy(fns, device);
-            ira_overlay::ui::capture::free_deferred(fns, device);
+            ira_overlay::capture::destroy(fns, device);
+            ira_overlay::capture::free_deferred(fns, device);
         }
         dd.destroy_device
     };

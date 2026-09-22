@@ -48,8 +48,10 @@ const XCB_BUTTON_INDEX_5: u8 = 5;
 const XCB_RESPONSE_TYPE: usize = 0;
 const XCB_DETAIL: usize = 1;
 const XCB_STATE: usize = 28;
-const XCB_EVENT_X: usize = 24;
-const XCB_EVENT_Y: usize = 26;
+// Root (screen) coordinates — see read_xy: window-relative event_x/y
+// would misplace the pointer for moved windows.
+const XCB_ROOT_X: usize = 20;
+const XCB_ROOT_Y: usize = 22;
 
 type XcbPollForEventFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
 type XcbWaitForEventFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
@@ -95,8 +97,8 @@ fn xcb_state(ev: *const c_void) -> u16 {
 
 fn xcb_event_xy(ev: *const c_void) -> (i16, i16) {
     unsafe {
-        let x = *((ev as *const u8).add(XCB_EVENT_X) as *const i16);
-        let y = *((ev as *const u8).add(XCB_EVENT_Y) as *const i16);
+        let x = *((ev as *const u8).add(XCB_ROOT_X) as *const i16);
+        let y = *((ev as *const u8).add(XCB_ROOT_Y) as *const i16);
         (x, y)
     }
 }
@@ -133,7 +135,9 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
         let rec_x11 = rec_kc + X11_KEYCODE_OFFSET;
 
         if !state::injected_ui_disabled() && (mods & tog_mods) == tog_mods && keycode == tog_x11 {
-            state::toggle_visible();
+            if state::toggle_edge(keycode) {
+                state::toggle_visible();
+            }
             return true;
         }
         if (mods & ss_mods) == ss_mods && keycode == ss_x11 {
@@ -155,6 +159,17 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
                 keycode: 0,
             });
             return true;
+        }
+    }
+
+    // Desktop-level combos always reach the compositor (checked after the
+    // hotkeys above so a configured Super-based toggle still wins).
+    if event_type == XCB_KEY_PRESS || event_type == XCB_KEY_RELEASE {
+        if state::is_desktop_combo(xcb_detail(ev) as u32, xcb_state(ev) as u32) {
+            return false;
+        }
+        if event_type == XCB_KEY_RELEASE {
+            state::release_edge(xcb_detail(ev) as u32);
         }
     }
 
@@ -275,5 +290,17 @@ pub unsafe extern "C" fn xcb_wait_for_event(c: *mut c_void) -> *mut c_void {
         }
         // Event was consumed — free it and loop to get the next one.
         libc::free(event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_root_coords_match_xcb_layout() {
+        // xcb motion/button events: root_x/root_y at 20/22 (screen),
+        // event_x/event_y at 24/26 (window-relative).
+        assert_eq!((XCB_ROOT_X, XCB_ROOT_Y), (20, 22));
     }
 }

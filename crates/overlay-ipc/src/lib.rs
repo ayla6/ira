@@ -1,12 +1,25 @@
 //! Overlay IPC protocol — shared memory layout, config types, and encoder selection.
 //! Level 0 crate: no deps on other ira crates. Both the Ira app and overlay crates depend on this.
 
+mod canvas;
+mod commands;
 mod config;
 mod hotkey;
 mod protocol;
 mod replay;
 mod shm;
 
+pub use canvas::{
+    canvas_panel_rect, canvas_shm_file_path, canvas_shm_path, fit_panel_size, CanvasHeader,
+    CanvasShm, CANVAS_BPP, CANVAS_MAGIC, CANVAS_MAX_BYTES, CANVAS_MAX_H, CANVAS_MAX_W,
+    CANVAS_SHM_SIZE, CANVAS_VERSION, CURSOR_MAX, CURSOR_MAX_BYTES,
+};
+pub use commands::{
+    command_from_raw, ACT_HIDE_OVERLAY, ACT_SCREENSHOT, ACT_TOGGLE_RECORD, CMD_ACTIVATE, CMD_HIDE,
+    CMD_MOUSE_DOWN, CMD_MOUSE_MOVE, CMD_MOUSE_UP, CMD_NAV_DOWN, CMD_NAV_LEFT, CMD_NAV_RIGHT,
+    CMD_NAV_UP, CMD_SCROLL, CMD_SHOW, CanvasAction, CanvasCommand, MAX_CANVAS_ACTIONS,
+    MAX_CANVAS_COMMANDS,
+};
 pub use config::{
     gamepad_button_mask_from_evdev, parse_gamepad_hotkey, OverlayPosition, OverlaySettings,
     RecordingFormat, RecordingQuality, VideoEncoder, DEFAULT_RECORD_GAMEPAD_HOTKEY,

@@ -44,8 +44,8 @@ fn attach_overlay(
     if super::env_builder::uses_gamescope(cmd) {
         let mut capture_env = Vec::new();
         super::env_builder::add_overlay_env_without_ui(&mut capture_env, overlay_shm, font_family);
-        super::env_builder::add_overlay_env_standalone(env, overlay_shm, font_family);
-        super::env_builder::wrap_with_standalone_overlay(cmd, &capture_env);
+        super::env_builder::add_overlay_env_external(env, overlay_shm, font_family);
+        super::env_builder::wrap_with_host_overlay(cmd, &capture_env);
     } else {
         super::env_builder::add_overlay_env(env, overlay_shm, font_family);
     }
@@ -218,6 +218,18 @@ pub fn launch_game(
     };
 
     let input_profile = launch.input_profile.as_deref();
+    // The GTK host renders the panel out-of-process for injected mode. Under
+    // gamescope it runs inside the session (wrapped above), otherwise it
+    // spawns here as a sibling of the game and is reaped on game exit.
+    let host_child = if ctx.overlay_enabled
+        && !super::env_builder::uses_gamescope(&command)
+    {
+        ctx.overlay_shm
+            .as_deref()
+            .and_then(super::overlay_host::spawn_host)
+    } else {
+        None
+    };
     // Same file ira_input::calibration_store_path writes; the launcher does
     // not depend on that crate, so the name lives here too.
     let calibration = std::path::Path::new(&ctx.save_dir).join("controller_calibration.json");
@@ -255,8 +267,17 @@ pub fn launch_game(
                 command: command.clone(),
                 post_exit: launch.post_exit.clone(),
                 working_dir: game_dir.clone(),
+                // Daemon sessions pump output over IPC; nothing to tail.
+                log_file: String::new(),
             };
             std::thread::spawn(move || super::wrapper::monitor_session(client, mc));
+            if let Some(host) = host_child {
+                super::overlay_host::reap_when_game_exits(
+                    host,
+                    ctx.running_games.clone(),
+                    ctx.game_id,
+                );
+            }
             return Ok(0);
         }
         Err(reason) => {
@@ -317,7 +338,16 @@ pub fn launch_game(
 
     let log_path = super::wrapper::game_log_path(&ctx.save_dir, ctx.game_id);
 
-    let child = super::wrapper::spawn_game(&command, &env, game_dir.as_deref(), Some(&log_path))?;
+    let child = match super::wrapper::spawn_game(&command, &env, game_dir.as_deref(), Some(&log_path)) {
+        Ok(child) => child,
+        Err(e) => {
+            if let Some(mut host) = host_child {
+                let _ = host.kill();
+                let _ = host.wait();
+            }
+            return Err(e);
+        }
+    };
     let child_pid = child.id() as i32;
 
     ctx.running_games
@@ -339,6 +369,7 @@ pub fn launch_game(
         command: command.clone(),
         post_exit: launch.post_exit.clone(),
         working_dir: game_dir.clone(),
+        log_file: log_path.clone(),
     };
     std::thread::spawn(move || {
         // Held until monitoring ends: the pad stays native for exactly as
@@ -346,6 +377,9 @@ pub fn launch_game(
         let _desktop_hold = desktop_hold;
         super::wrapper::monitor_process(child, child_pid, mc);
     });
+    if let Some(host) = host_child {
+        super::overlay_host::reap_when_game_exits(host, ctx.running_games.clone(), ctx.game_id);
+    }
 
     Ok(child_pid)
 }

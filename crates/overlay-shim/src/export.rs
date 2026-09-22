@@ -89,3 +89,11 @@ pub extern "C" fn ira_overlay_ready_for_overlay() -> c_int {
         0
     }
 }
+
+/// Re-asserts cursor visibility (ungrab + unblank). Called by the Vulkan
+/// layer periodically while the overlay is visible — games re-grab every
+/// frame, so a one-shot at toggle time does not stick.
+#[no_mangle]
+pub extern "C" fn ira_overlay_enforce_cursor() {
+    crate::cursor::force_cursor_visible();
+}

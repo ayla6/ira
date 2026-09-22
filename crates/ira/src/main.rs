@@ -45,6 +45,39 @@ fn init_critical_backtrace() {
     );
 }
 
+/// Publishes the display size for overlay processes: the overlay host
+/// sizes its window from this at startup so the first frame is already
+/// right (no flash-then-resize). Largest monitor wins; absent without a
+/// display (headless/tests), in which case the host stays default-sized
+/// and follows the game extent instead. Inherited through spawn.
+fn publish_overlay_screen_size() {
+    use gtk4::gdk::prelude::{DisplayExt, MonitorExt};
+    let size = gtk4::gdk::Display::default().and_then(|d| {
+        let monitors = d.monitors();
+        let mut best: Option<(i32, i32)> = None;
+        for i in 0..monitors.n_items() {
+            let Some(m) = monitors
+                .item(i)
+                .and_then(|o| o.downcast::<gtk4::gdk::Monitor>().ok())
+            else {
+                continue;
+            };
+            let g = m.geometry();
+            let area = i64::from(g.width()) * i64::from(g.height());
+            let best_area =
+                best.map_or(-1, |(bw, bh)| i64::from(bw) * i64::from(bh));
+            if area > best_area {
+                best = Some((g.width(), g.height()));
+            }
+        }
+        best
+    });
+    if let Some((w, h)) = size {
+        std::env::set_var("IRA_OVERLAY_SCREEN_W", w.to_string());
+        std::env::set_var("IRA_OVERLAY_SCREEN_H", h.to_string());
+    }
+}
+
 fn main() {
     // Under Gamescope's nested compositor, run GTK against its XWayland:
     // the Wayland-native path segfaults the compositor on menus (xdg_popup).
@@ -103,6 +136,7 @@ fn main() {
                 restore_content(state);
                 return;
             }
+            publish_overlay_screen_size();
             let state = activate(app);
             *state_holder.borrow_mut() = Some(state);
         }

@@ -60,12 +60,6 @@ glib::wrapper! {
 }
 
 impl SidebarItem {
-    pub fn new_all_games() -> Self {
-        let obj: Self = glib::Object::new();
-        *obj.imp().kind.borrow_mut() = SidebarItemKind::AllGames;
-        obj
-    }
-
     pub fn new_collection_header(group_id: i64, name: &str, count: usize, collapsed: bool) -> Self {
         let obj: Self = glib::Object::new();
         let imp = obj.imp();

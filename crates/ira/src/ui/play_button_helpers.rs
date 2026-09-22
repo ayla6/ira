@@ -48,6 +48,9 @@ pub(super) struct LaunchCtx<'a> {
     pub system_defaults: SystemDefaults,
     pub controller_input_mode: ControllerInputMode,
     pub controller_input_profile: Option<String>,
+    /// The disc the disc-picker chose, winning over the stored default.
+    /// `None` keeps the pre-picker behavior (boot the default disc).
+    pub disc_override: Option<i64>,
 }
 
 pub(super) struct PcControllerProfiles<'a> {
@@ -209,6 +212,7 @@ fn monitor_context(
         command: cmd.to_vec(),
         post_exit: String::new(),
         working_dir: None,
+        log_file: ira_launcher::wrapper::game_log_path(ctx.save_dir, ctx.game_id),
     }
 }
 
@@ -285,7 +289,7 @@ fn build_emulator_env_and_wrap(
                 ctx.overlay_shm.as_deref(),
                 ctx.overlay_font_family.as_deref(),
             );
-            ira_launcher::env_builder::add_overlay_env_standalone(
+            ira_launcher::env_builder::add_overlay_env_external(
                 &mut env,
                 ctx.overlay_shm.as_deref(),
                 ctx.overlay_font_family.as_deref(),
@@ -304,7 +308,7 @@ fn build_emulator_env_and_wrap(
     ira_launcher::env_builder::apply_performance(cmd, &mut env, &launch, &wine);
 
     if overlay_enabled && (ira_launcher::env_builder::uses_gamescope(cmd) || in_gamescope_session) {
-        ira_launcher::env_builder::wrap_with_standalone_overlay(cmd, &capture_env);
+        ira_launcher::env_builder::wrap_with_host_overlay(cmd, &capture_env);
     }
 
     let input_mode = console_input_mode(
@@ -398,7 +402,7 @@ fn inject_flatpak_overlay_env(cmd: &mut Vec<String>, env: &mut Vec<(String, Stri
 /// game has no disc rows.
 fn ordered_disc_paths(
     discs: &[ira_models::GameDisc],
-    default_disc_id: Option<i64>,
+    boot_disc_id: Option<i64>,
     fallback: &str,
     resolve: impl Fn(&str) -> String,
 ) -> Vec<String> {
@@ -409,7 +413,7 @@ fn ordered_disc_paths(
             paths.push(resolved);
         }
     };
-    match discs.iter().find(|d| Some(d.id) == default_disc_id) {
+    match discs.iter().find(|d| Some(d.id) == boot_disc_id) {
         Some(boot) => push(&mut paths, &boot.rom_path),
         None => push(&mut paths, fallback),
     }
@@ -420,6 +424,40 @@ fn ordered_disc_paths(
         push(&mut paths, fallback);
     }
     paths
+}
+
+/// The one path a single-disc-at-a-time emulator boots: the chosen disc,
+/// else the game's own path.
+fn single_boot_path(
+    discs: &[ira_models::GameDisc],
+    boot_disc_id: Option<i64>,
+    fallback: &str,
+    resolve: impl Fn(&str) -> String,
+) -> String {
+    let raw = discs
+        .iter()
+        .find(|d| Some(d.id) == boot_disc_id)
+        .map(|d| d.rom_path.clone())
+        .unwrap_or_else(|| fallback.to_string());
+    resolve(&raw)
+}
+
+/// True when a multi-disc game needs the disc picker: more than one disc
+/// and an emulator that boots one disc at a time. Dolphin (and PrimeHack)
+/// take every disc on the command line for in-game switching, so its games
+/// boot straight through.
+pub(super) fn needs_disc_picker(exe: &str, disc_count: usize) -> bool {
+    disc_count > 1 && !ira_platforms::emulator_detect::is_dolphin(exe)
+}
+
+/// The emulator executable a Retro/Switch game would boot through:
+/// per-game override first, then the console's configured executable.
+pub(super) fn retro_exe<'a>(cfg: &'a Config, platform_id: &str, per_game_emu: &'a str) -> &'a str {
+    if !per_game_emu.is_empty() {
+        per_game_emu
+    } else {
+        cfg.console(platform_id).executable.as_str()
+    }
 }
 
 pub(super) fn launch_retro(
@@ -473,17 +511,15 @@ pub(super) fn launch_retro(
                 .unwrap_or_else(|| raw.to_string())
         }
     };
+    // The disc-picker's choice wins over the stored default; both fall
+    // back to the game's own path.
+    let boot_disc_id = ctx.disc_override.or(default_disc_id);
     // Dolphin takes every disc of a game on its command line and offers
-    // in-game disc switching; boot the default disc and hand it the rest.
+    // in-game disc switching; boot the chosen disc and hand it the rest.
     let rom_paths = if discs.len() > 1 && ira_platforms::emulator_detect::is_dolphin(exe) {
-        ordered_disc_paths(&discs, default_disc_id, game_path, resolve)
+        ordered_disc_paths(&discs, boot_disc_id, game_path, resolve)
     } else {
-        let raw = discs
-            .iter()
-            .find(|d| Some(d.id) == default_disc_id)
-            .map(|d| d.rom_path.clone())
-            .unwrap_or_else(|| game_path.to_string());
-        vec![resolve(&raw)]
+        vec![single_boot_path(&discs, boot_disc_id, game_path, resolve)]
     };
     let rom_path = rom_paths.first().cloned().unwrap_or_default();
     let rom_root = std::path::Path::new(&rom_path).parent();
@@ -1055,7 +1091,7 @@ pub(super) fn update_last_played(
 mod tests {
     use super::{
         apply_emulator_gpu_policy, apply_system_defaults, console_input_mode,
-        ordered_disc_paths, resolved_input_mode, EmulatorExes,
+        needs_disc_picker, ordered_disc_paths, resolved_input_mode, single_boot_path, EmulatorExes,
     };
     use ira_config::{Config, SystemDefaults};
     use ira_models::{ControllerInputMode, GameDisc, GameKind};
@@ -1072,6 +1108,15 @@ mod tests {
 
     fn identity(raw: &str) -> String {
         raw.to_string()
+    }
+
+    #[test]
+    fn test_needs_disc_picker_only_for_multi_disc_without_dolphin() {
+        assert!(!needs_disc_picker("/usr/bin/duckstation-qt", 1));
+        assert!(needs_disc_picker("/usr/bin/duckstation-qt", 2));
+        assert!(!needs_disc_picker("dolphin-emu", 2));
+        assert!(!needs_disc_picker("flatpak:org.DolphinEmu.dolphin-emu", 3));
+        assert!(needs_disc_picker("", 2));
     }
 
     #[test]
@@ -1109,6 +1154,22 @@ mod tests {
         ];
         let paths = ordered_disc_paths(&discs, None, "/games/gc/disc1.iso", identity);
         assert_eq!(paths, vec!["/games/gc/disc1.iso".to_string()]);
+    }
+
+    #[test]
+    fn test_single_boot_path_prefers_the_override_over_the_default() {        let discs = vec![
+            disc(1, 1, "/games/psx/disc1.bin"),
+            disc(2, 2, "/games/psx/disc2.bin"),
+        ];
+        assert_eq!(
+            single_boot_path(&discs, Some(2), "/games/psx/game.bin", identity),
+            "/games/psx/disc2.bin"
+        );
+        // No disc chosen: the game's own path boots.
+        assert_eq!(
+            single_boot_path(&discs, None, "/games/psx/game.bin", identity),
+            "/games/psx/game.bin"
+        );
     }
 
     #[test]

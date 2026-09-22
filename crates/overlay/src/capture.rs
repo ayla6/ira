@@ -10,7 +10,7 @@ use ira_overlay_ipc::MappedShm;
 
 use crate::types::DeviceFns;
 
-use super::capture_ffmpeg::{
+use crate::capture_ffmpeg::{
     prepare_replay_directory, recording_args, recording_settings, replay_args,
     replay_manifest_path, resolve_encoder, screenshot_path, video_path,
 };

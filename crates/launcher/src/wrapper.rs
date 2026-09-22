@@ -7,25 +7,11 @@ use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 const PR_SET_CHILD_SUBREAPER: i32 = 36;
-
-/// Asks the kernel to SIGKILL this child when its direct parent dies.
-/// Without it an input daemon keeps running after Ira exits — stale virtual
-/// pads that hijack bindings and squat udp/26760 are exactly what that
-/// stray produced.
-fn die_with_parent(cmd: &mut Command) {
-    // prctl(PR_SET_PDEATHSIG, SIGKILL): runs between fork and exec, where
-    // the async-signal-safe prctl call is permitted.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-            Ok(())
-        });
-    }
-}
 
 const WINE_BG_PROCESSES: &[&str] = &[
     "wineserver",
@@ -85,22 +71,24 @@ pub fn spawn_game(
     command: &[String],
     env: &[(String, String)],
     cwd: Option<&str>,
-    _log_path: Option<&str>,
+    log_path: Option<&str>,
 ) -> Result<Child, String> {
-    spawn_game_with(command, env, cwd, true)
+    spawn_game_with(command, env, cwd, log_path)
 }
 
 /// The spawn behind both `spawn_game` and `spawn_detached`.
 ///
-/// `kill_with_parent` sets PR_SET_PDEATHSIG, which the kernel delivers when
-/// the *spawning thread* exits — not the app. Callers that spawn from a
-/// short-lived helper thread (the settings-page "Open emulator" row) must
-/// pass false or the child is SIGKILLed the moment the thread returns.
+/// Games must survive Ira: no PR_SET_PDEATHSIG (it fires when the spawning
+/// thread exits, killing the game when Ira quits), own process group (so
+/// terminal Ctrl-C never reaches them), and file-backed stdio — piped
+/// output SIGPIPEs the game the moment our reader threads die with us.
+/// `log_path` truncates and receives stdout+stderr (O_APPEND interleaved);
+/// `None` sends both to null. Callers tail the file for the live log view.
 fn spawn_game_with(
     command: &[String],
     env: &[(String, String)],
     cwd: Option<&str>,
-    kill_with_parent: bool,
+    log_path: Option<&str>,
 ) -> Result<Child, String> {
     if command.is_empty() {
         return Err("Failed to spawn game process: empty command".to_string());
@@ -121,12 +109,9 @@ fn spawn_game_with(
         cmd.env(key, val);
     }
 
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
+    cmd.stdout(game_stdio(log_path));
+    cmd.stderr(game_stdio(log_path));
     cmd.process_group(0);
-    if kill_with_parent {
-        die_with_parent(&mut cmd);
-    }
 
     match cmd.spawn() {
         Ok(child) => Ok(child),
@@ -136,6 +121,25 @@ fn spawn_game_with(
             Err(diagnostic)
         }
     }
+}
+
+/// Stdio for spawned games: append to `log_path`, or null when absent.
+/// Never pipes: our reader threads die with Ira, and a game writing to a
+/// dead pipe eats SIGPIPE the moment we quit (or freezes on a full one).
+fn game_stdio(log_path: Option<&str>) -> Stdio {
+    let Some(path) = log_path else {
+        return Stdio::null();
+    };
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, "");
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)
+        .map(Stdio::from)
+        .unwrap_or_else(|_| Stdio::null())
 }
 
 fn format_spawn_error(
@@ -217,6 +221,65 @@ pub fn game_log_path(save_dir: &str, game_id: i64) -> String {
         .into_owned()
 }
 
+/// Follows a game log FILE into the shared buffer (replaces pipe capture:
+/// pipes SIGPIPE the game when Ira exits, files don't). Stops after `done`
+/// is set and the file goes quiet for ~1s so exit-flushes still land.
+/// Reopens per poll, so truncation/rotation just restarts the offset.
+pub(crate) fn tail_file_to_log(path: String, log: GameLog, done: Arc<AtomicBool>) {
+    use std::io::{Read, Seek, SeekFrom};
+    std::thread::spawn(move || {
+        let mut offset = 0u64;
+        let mut pending = String::new();
+        let mut quiet_polls = 0u32;
+        loop {
+            let mut grown = false;
+            if let Ok(meta) = std::fs::metadata(&path) {
+                if meta.len() < offset {
+                    offset = 0;
+                }
+                if let Ok(mut f) = std::fs::File::open(&path) {
+                    if f.seek(SeekFrom::Start(offset)).is_ok() {
+                        let mut buf = [0u8; 8192];
+                        loop {
+                            match f.read(&mut buf) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    grown = true;
+                                    pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+                                    while let Some(pos) = pending.find('\n') {
+                                        let line =
+                                            pending[..pos].trim_end_matches('\r').to_string();
+                                        log.lock().unwrap().push(line);
+                                        pending = pending[pos + 1..].to_string();
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        if let Ok(pos) = f.stream_position() {
+                            offset = pos;
+                        }
+                    }
+                }
+            }
+            if done.load(std::sync::atomic::Ordering::SeqCst) {
+                if !grown {
+                    quiet_polls += 1;
+                    if quiet_polls >= 4 {
+                        if !pending.is_empty() {
+                            log.lock().unwrap().push(std::mem::take(&mut pending));
+                        }
+                        break;
+                    }
+                } else {
+                    quiet_polls = 0;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    });
+}
+
 /// Drains one piped output stream of a spawned process into the shared game
 /// log buffer, one line at a time. Runs on its own thread so both pipes can
 /// be read live without deadlocking on a full pipe buffer.
@@ -258,19 +321,22 @@ pub fn spawn_detached(
     header: String,
     desktop_hold: Option<DaemonClient>,
 ) -> Result<(), String> {
-    // No PDEATHSIG: these processes are called from short-lived helper
-    // threads and must survive both the thread and Ira itself.
-    let mut child = spawn_game_with(command, env, cwd, false)?;
+    // Detached output lives in temp (no save dir is threaded here) and is
+    // tailed into the buffer; the game must survive Ira either way.
+    let log_path = std::env::temp_dir()
+        .join(format!("ira-detached-{log_key}.log"))
+        .to_string_lossy()
+        .into_owned();
+    let mut child = spawn_game_with(command, env, cwd, Some(&log_path))?;
     clear_game_log(log_key);
     let log = get_game_log(log_key);
     log.lock().unwrap().push(header);
 
-    let stdout_log = log.clone();
-    pipe_lines_to_log(child.stdout.take(), stdout_log);
-    let stderr_log = log.clone();
-    pipe_lines_to_log(child.stderr.take(), stderr_log);
+    let done = Arc::new(AtomicBool::new(false));
+    tail_file_to_log(log_path, log.clone(), done.clone());
 
     let exit_log = log.clone();
+    let tail_done = done.clone();
     std::thread::spawn(move || {
         // Held until the process exits: a detached spawn opened with
         // input remapping disabled must not be remapped underneath by
@@ -288,6 +354,7 @@ pub fn spawn_detached(
                 eprintln!("launch: failed to read detached process status: {error}");
             }
         }
+        tail_done.store(true, std::sync::atomic::Ordering::SeqCst);
     });
     Ok(())
 }
@@ -304,6 +371,9 @@ pub struct MonitorContext {
     pub command: Vec<String>,
     pub post_exit: String,
     pub working_dir: Option<String>,
+    /// Game stdout/stderr file the spawn wrote (tail it; empty when the
+    /// spawn had nowhere to log, e.g. daemon sessions pump over IPC).
+    pub log_file: String,
 }
 
 pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
@@ -315,11 +385,12 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
 
     log_launch_header(&ctx, &log_buf, "Started initial process");
 
-    // Spawn separate threads for stdout and stderr so both are read live.
-    // Reading them sequentially would block stderr until stdout EOFs (i.e. never,
-    // while the game is running), losing all shim/VK-layer diagnostic output.
-    pipe_lines_to_log(child.stdout.take(), log_buf.clone());
-    pipe_lines_to_log(child.stderr.take(), log_buf.clone());
+    // The game writes to a file, never a pipe: our reader threads die with
+    // Ira, and a dead pipe SIGPIPEs the game on its next log write.
+    let tail_done = Arc::new(AtomicBool::new(false));
+    if !ctx.log_file.is_empty() {
+        tail_file_to_log(ctx.log_file.clone(), log_buf.clone(), tail_done.clone());
+    }
 
     loop {
         std::thread::sleep(Duration::from_secs(2));
@@ -340,6 +411,8 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
         }
     }
 
+    // Let the tail thread flush exit output, then stop (~1s).
+    tail_done.store(true, std::sync::atomic::Ordering::SeqCst);
     finalize_game(&ctx, &log_buf, Some(child_pid), None);
 }
 
@@ -783,6 +856,8 @@ fn find_wineserver(wine_exe: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{display_command, format_spawn_error};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
 
     #[test]
     fn test_display_command_quotes_arguments_with_spaces() {
@@ -806,6 +881,35 @@ mod tests {
             ]),
             "flatpak run --filesystem=/games:ro org.azahar_emu.Azahar"
         );
+    }
+
+    #[test]
+    fn test_tail_file_to_log_collects_lines_and_stops() {
+        use std::io::Write as _;
+        let path = std::env::temp_dir().join(format!("ira-tail-test-{}.log", std::process::id()));
+        std::fs::write(&path, "first\n").unwrap();
+        let log = super::get_game_log(-97531);
+        log.lock().unwrap().clear();
+        let done = Arc::new(AtomicBool::new(false));
+        super::tail_file_to_log(
+            path.to_string_lossy().into_owned(),
+            log.clone(),
+            done.clone(),
+        );
+        // Append after the tail starts: it must pick up growth.
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        {
+            let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+            writeln!(f, "second").unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        // Give the tail its ~1s quiet window to flush and stop.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let lines = log.lock().unwrap().clone();
+        assert!(lines.contains(&"first".to_string()), "{lines:?}");
+        assert!(lines.contains(&"second".to_string()), "{lines:?}");
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]

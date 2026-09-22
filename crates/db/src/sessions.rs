@@ -95,6 +95,42 @@ pub fn delete_session(conn: &DbConn, session_id: i64) -> Result<Option<PlaySessi
     }
 }
 
+/// Recompute a game (or variant) `last_played` from its remaining sessions:
+/// the largest `started_at`, or 0 when none remain. Call after deleting a
+/// session so the header never shows a timestamp with no session behind it.
+/// `started_at` matches the launch-time writer and the session ordering.
+pub fn recompute_last_played(
+    conn: &DbConn,
+    game_id: i64,
+    variant_id: Option<i64>,
+) -> Result<i64, String> {
+    let c = crate::lock_db(conn)?;
+    let tx = c.unchecked_transaction().map_err(err)?;
+    let latest: Option<i64> = tx
+        .query_row(
+            &format!("SELECT MAX(started_at) FROM play_sessions WHERE {GAME_VARIANT_WHERE}"),
+            params![game_id, variant_id],
+            |row| row.get(0),
+        )
+        .map_err(err)?;
+    let latest = latest.unwrap_or(0);
+    if let Some(vid) = variant_id {
+        tx.execute(
+            "UPDATE game_variants SET last_played = ?1 WHERE id = ?2",
+            params![latest, vid],
+        )
+        .map_err(err)?;
+    } else {
+        tx.execute(
+            "UPDATE games SET last_played = ?1 WHERE id = ?2",
+            params![latest, game_id],
+        )
+        .map_err(err)?;
+    }
+    tx.commit().map_err(err)?;
+    Ok(latest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::init_db;
@@ -172,5 +208,67 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let removed = delete_session(&conn, 9999).unwrap();
         assert!(removed.is_none());
+    }
+
+    #[test]
+    fn test_recompute_last_played_after_delete_keeps_newest() {
+        use ira_models::{GameKind, TrophySource};
+        let (conn, _tmp) = setup_db();
+        let game = super::super::add_game(&conn, GameKind::Steam, TrophySource::Gse, "1", "", "", "G").unwrap();
+        super::super::set_last_played(&conn, game, 2000).unwrap();
+        let old = record_session(&conn, game, None, 1000, 1100).unwrap();
+        let new = record_session(&conn, game, None, 2000, 2100).unwrap();
+        // Act: delete the newest session, then recompute.
+        delete_session(&conn, new).unwrap();
+        let latest = recompute_last_played(&conn, game, None).unwrap();
+        // Assert: falls back to the remaining session's start.
+        assert_eq!(latest, 1000);
+        let entry = super::super::find_by_db_id(&conn, game).unwrap().unwrap();
+        assert_eq!(entry.last_played, 1000);
+        let _ = old;
+    }
+
+    #[test]
+    fn test_recompute_last_played_clears_when_empty() {
+        use ira_models::{GameKind, TrophySource};
+        let (conn, _tmp) = setup_db();
+        let game = super::super::add_game(&conn, GameKind::Steam, TrophySource::Gse, "1", "", "", "G").unwrap();
+        super::super::set_last_played(&conn, game, 1000).unwrap();
+        let id = record_session(&conn, game, None, 1000, 1100).unwrap();
+        // Act: delete the only session, then recompute.
+        delete_session(&conn, id).unwrap();
+        let latest = recompute_last_played(&conn, game, None).unwrap();
+        // Assert: no sessions left clears the timestamp.
+        assert_eq!(latest, 0);
+        let entry = super::super::find_by_db_id(&conn, game).unwrap().unwrap();
+        assert_eq!(entry.last_played, 0);
+    }
+
+    #[test]
+    fn test_recompute_last_played_variant_scope() {
+        use ira_models::{GameKind, TrophySource};
+        let (conn, _tmp) = setup_db();
+        let game = super::super::add_game(&conn, GameKind::Steam, TrophySource::Gse, "1", "", "", "G").unwrap();
+        let vid = super::super::add_variant(
+            &conn,
+            &ira_models::GameVariant {
+                game_id: game,
+                name: "v".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        super::super::set_variant_last_played(&conn, vid, 2000).unwrap();
+        record_session(&conn, game, Some(vid), 1000, 1100).unwrap();
+        let new = record_session(&conn, game, Some(vid), 2000, 2100).unwrap();
+        // Act: delete the newest variant session, then recompute that scope.
+        delete_session(&conn, new).unwrap();
+        let latest = recompute_last_played(&conn, game, Some(vid)).unwrap();
+        // Assert: variant falls back; the base game row is untouched.
+        assert_eq!(latest, 1000);
+        let variants = super::super::get_variants(&conn, game).unwrap();
+        assert_eq!(variants[0].last_played, 1000);
+        let entry = super::super::find_by_db_id(&conn, game).unwrap().unwrap();
+        assert_eq!(entry.last_played, 0);
     }
 }

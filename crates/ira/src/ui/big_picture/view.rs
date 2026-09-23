@@ -33,6 +33,8 @@ pub struct BigPictureUi {
     pub(super) keyboard: super::keyboard::Keyboard,
     /// The black "game running" screen, over everything while a game runs.
     pub(super) running: super::running::RunningOverlay,
+    /// The centered disc picker, over everything while choosing a disc.
+    pub(super) disc_picker: super::disc_picker::DiscPicker,
 }
 
 /// Build the big-picture window (fullscreen is applied by main.rs) and take over
@@ -153,6 +155,11 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
     let running = super::running::RunningOverlay::new();
     overlay.add_overlay(running.root());
     overlay.set_measure_overlay(running.root(), false);
+    // The disc picker sits over everything but the running screen: a
+    // launch never overlaps a running game.
+    let disc_picker = super::disc_picker::DiscPicker::build();
+    overlay.add_overlay(disc_picker.root());
+    overlay.set_measure_overlay(disc_picker.root(), false);
 
     let ui = BigPictureUi {
         status,
@@ -164,6 +171,7 @@ fn build_root(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, BigPict
         game_menu,
         keyboard,
         running,
+        disc_picker,
     };
     (overlay, ui)
 }
@@ -214,7 +222,7 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
             }
             gdk4::Key::Escape => {
                 // Escape peels overlays first: keyboard, then menu, then
-                // the page.
+                // the disc picker, then the page.
                 let keyboard_open = state
                     .borrow()
                     .big_picture
@@ -225,6 +233,11 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
                     .big_picture
                     .as_ref()
                     .is_some_and(|big| big.game_menu.is_open());
+                let picker_open = state
+                    .borrow()
+                    .big_picture
+                    .as_ref()
+                    .is_some_and(|big| big.disc_picker.is_open());
                 if keyboard_open {
                     if let Some(big) = state.borrow().big_picture.clone() {
                         big.keyboard.close(&state);
@@ -232,6 +245,10 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
                 } else if menu_open {
                     if let Some(big) = state.borrow().big_picture.clone() {
                         big.game_menu.close();
+                    }
+                } else if picker_open {
+                    if let Some(big) = state.borrow().big_picture.clone() {
+                        big.disc_picker.close();
                     }
                 } else {
                     quit_app(&state);
@@ -326,6 +343,27 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
                 NavCommand::Down => big.game_menu.move_selection(state, 1),
                 NavCommand::Confirm => big.game_menu.activate(state),
                 NavCommand::Back | NavCommand::Options => big.game_menu.close(),
+                _ => {}
+            }
+            return;
+        }
+    }
+    // The disc picker swallows navigation while it is open.
+    {
+        let picker_open = state
+            .borrow()
+            .big_picture
+            .as_ref()
+            .is_some_and(|big| big.disc_picker.is_open());
+        if picker_open {
+            let Some(big) = state.borrow().big_picture.clone() else {
+                return;
+            };
+            match command {
+                NavCommand::Left | NavCommand::Up => big.disc_picker.move_selection(-1),
+                NavCommand::Right | NavCommand::Down => big.disc_picker.move_selection(1),
+                NavCommand::Confirm => big.disc_picker.activate(state),
+                NavCommand::Back => big.disc_picker.close(),
                 _ => {}
             }
             return;

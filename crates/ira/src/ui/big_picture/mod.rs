@@ -4,6 +4,7 @@
 //! agreement; the shell's modules live beside it.
 
 mod all_games;
+mod disc_picker;
 mod game_menu;
 mod groups;
 mod keyboard;
@@ -29,8 +30,8 @@ pub fn is_big_picture() -> bool {
     std::env::args().any(|arg| arg == "--big-picture") || running_in_gamescope()
 }
 
-/// Open the big-picture disc picker for a multi-disc game: one row per
-/// disc, gamepad and keyboard navigable like every other menu.
+/// Open the big-picture disc picker for a multi-disc game: a centered
+/// sheet of disc tiles, gamepad and keyboard navigable.
 pub(super) fn show_disc_picker(
     state: &crate::ui::state::SharedState,
     db_id: i64,
@@ -50,15 +51,7 @@ pub(super) fn show_disc_picker(
         return;
     }
     if let Some(big) = state.borrow().big_picture.clone() {
-        big.game_menu.open(
-            state,
-            game_menu::MenuKind::Discs {
-                db_id,
-                variant_id,
-                game_name,
-                discs,
-            },
-        );
+        big.disc_picker.open(state, db_id, variant_id, &game_name, &discs);
     }
 }
 

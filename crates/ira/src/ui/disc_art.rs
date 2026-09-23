@@ -61,6 +61,7 @@ where
     let ready = std::rc::Rc::new(std::cell::RefCell::new(Some(ready)));
     glib::source::idle_add_local(move || match rx.try_recv() {
         Ok(map) => {
+            eprintln!("Disc art: {} tiles for game {db_id}", map.len());
             let textures: HashMap<i32, gdk4::Texture> = map
                 .into_iter()
                 .filter_map(|(disc, png)| {

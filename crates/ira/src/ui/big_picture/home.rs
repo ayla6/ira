@@ -57,6 +57,10 @@ pub(super) struct HomeUi {
     /// the arrows re-acquire here when it is still on screen.
     last_selected: Cell<Option<usize>>,
     scroll_anim: RefCell<Option<gtk4::TickCallbackId>>,
+    /// The glide's latest goal, picked up every frame while it runs (same
+    /// retarget-instead-of-restart as the game grid: repeats outpace one
+    /// glide and restarting starves the camera).
+    scroll_goal: Cell<f64>,
     /// The pending post-scroll settle snap, restarted on every native
     /// scroll event.
     snap_source: RefCell<Option<glib::SourceId>>,
@@ -202,6 +206,7 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
         selected: Cell::new(None),
         last_selected: Cell::new(None),
         scroll_anim: RefCell::new(None),
+        scroll_goal: Cell::new(0.0),
         snap_source: RefCell::new(None),
         square_queued: RefCell::new(HashSet::new()),
     };
@@ -774,8 +779,9 @@ fn update_scroll(big: &Rc<BigPictureUi>) {
     let Some(target) = whole_cover_target(ui, &adj, selected) else {
         return;
     };
-    if let Some(id) = ui.scroll_anim.borrow_mut().take() {
-        id.remove();
+    ui.scroll_goal.set(target);
+    if ui.scroll_anim.borrow().is_some() {
+        return;
     }
     let start = adj.value();
     if (target - start).abs() < 0.5 {
@@ -787,8 +793,10 @@ fn update_scroll(big: &Rc<BigPictureUi>) {
     let id = ui.scrolled.add_tick_callback(move |_, _| {
         let t = (started.elapsed().as_millis() as f64 / SCROLL_MILLIS as f64).min(1.0);
         let eased = 1.0 - (1.0 - t) * (1.0 - t);
-        adj.set_value(start + (target - start) * eased);
+        let g = ticker_big.home.scroll_goal.get();
+        adj.set_value(start + (g - start) * eased);
         if t >= 1.0 {
+            adj.set_value(g);
             *ticker_big.home.scroll_anim.borrow_mut() = None;
             glib::ControlFlow::Break
         } else {

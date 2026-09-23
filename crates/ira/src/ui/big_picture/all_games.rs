@@ -172,8 +172,13 @@ pub(super) struct AllSoftwareUi {
     /// The last selection before the grid lost it (manual scrolling) —
     /// the arrows re-acquire here, keeping the column in view.
     last_selected: Cell<Option<usize>>,
-    /// The running scroll glide, so a new press replaces it mid-flight.
+    /// The running scroll glide, retargeted (never restarted) by new
+    /// presses mid-flight: repeats land faster than one glide, and
+    /// restarting every time starves the camera while the selection
+    /// runs off-screen.
     scroll_anim: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
+    /// The glide's latest goal, picked up every frame while it runs.
+    scroll_goal: Rc<Cell<f64>>,
     /// The "sorted by …" label in the header.
     ordering: gtk4::Label,
     /// The header line and its wings; their margins and spacings are
@@ -428,6 +433,7 @@ pub(super) fn build(
         selected_key,
         last_selected: Cell::new(None),
         scroll_anim: Rc::new(RefCell::new(None)),
+        scroll_goal: Rc::new(Cell::new(0.0)),
         ring,
         overlay: grid_overlay,
         ordering,
@@ -1030,15 +1036,20 @@ impl AllSoftwareUi {
         }
     }
 
-    /// Focus the clicked game without moving the camera. Returns whether
-    /// the game was found.
+    /// Focus the clicked game, bringing it into view when it is not
+    /// fully visible (the scroll target leaves a visible row alone, so
+    /// the camera only moves if the tile was out of view). Returns
+    /// whether the game was found.
     pub(super) fn focus_key(&self, key: GameKey) -> bool {
         let index = self
             .games
             .borrow()
             .iter()
             .position(|g| game_key(g) == key);
-        index.is_some_and(|index| self.apply_selection(index))
+        index.is_some_and(|index| {
+            self.select(index);
+            true
+        })
     }
 
     /// Whether `key` is the highlighted game — a second mouse click on an
@@ -1065,14 +1076,28 @@ impl AllSoftwareUi {
             return adj.value();
         };
         let (cols, _, item_h, sp) = self.grid.current_layout();
-        scroll_target(
+        let target = scroll_target(
             selected,
             cols as usize,
             (item_h + sp) as f64,
             sp as f64,
             adj.value(),
             adj.page_size(),
-        )
+        );
+        // IRA_SCROLL_DEBUG=1 logs every camera decision: selection,
+        // row, current value, page, upper bound and target.
+        if std::env::var_os("IRA_SCROLL_DEBUG").is_some() {
+            eprintln!(
+                "bp-scroll: sel={} row={} val={:.0} page={:.0} upper={:.0} tgt={:.0}",
+                selected,
+                selected / cols.max(1) as usize,
+                adj.value(),
+                adj.page_size(),
+                adj.upper(),
+                target
+            );
+        }
+        target
     }
 
     /// End any scroll glide on the exact snapped target. A tab switch
@@ -1087,13 +1112,14 @@ impl AllSoftwareUi {
     }
 
     /// Glide to `target` like the home carousel does; a press during the
-    /// glide replaces it from wherever it currently is. The glide steps
-    /// on frame-clock ticks — once per displayed frame, in sync with
-    /// vsync — instead of 16ms timers that drift against the frames and
-    /// read as choppy.
+    /// glide retargets it from wherever it currently is instead of
+    /// restarting the clock. The glide steps on frame-clock ticks — once
+    /// per displayed frame, in sync with vsync — instead of 16ms timers
+    /// that drift against the frames and read as choppy.
     fn animate_scroll_to(&self, target: f64) {
-        if let Some(id) = self.scroll_anim.borrow_mut().take() {
-            id.remove();
+        self.scroll_goal.set(target);
+        if self.scroll_anim.borrow().is_some() {
+            return;
         }
         let adj = self.scrolled.vadjustment();
         if (target - adj.value()).abs() < 0.5 {
@@ -1102,11 +1128,14 @@ impl AllSoftwareUi {
         let start = adj.value();
         let started = Instant::now();
         let anim = Rc::clone(&self.scroll_anim);
+        let goal = Rc::clone(&self.scroll_goal);
         let id = self.scrolled.add_tick_callback(move |_, _| {
             let t = (started.elapsed().as_millis() as f64 / SCROLL_MILLIS as f64).min(1.0);
             let eased = 1.0 - (1.0 - t) * (1.0 - t);
-            adj.set_value(start + (target - start) * eased);
+            let g = goal.get();
+            adj.set_value(start + (g - start) * eased);
             if t >= 1.0 {
+                adj.set_value(g);
                 *anim.borrow_mut() = None;
                 glib::ControlFlow::Break
             } else {

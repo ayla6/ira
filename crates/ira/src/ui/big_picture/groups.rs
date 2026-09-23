@@ -413,7 +413,10 @@ impl GroupsGrid {
 
     /// Nudge the scroll so the selected row shows. Rows pitch at the
     /// FlowBoxChild's allocated height (slot plus name label) plus the
-    /// spacing; children are uniform so any child's height serves.
+    /// spacing; children are uniform so any child's height serves. The
+    /// spacing and margin ride the viewport scale exactly like the
+    /// FlowBox's own row spacing does (`ensure_sized`) — unscaled
+    /// constants drift a tile off per few rows below 1080p.
     fn scroll_selection_into_view(&self) {
         let adj = self.scrolled.vadjustment();
         let page = adj.page_size();
@@ -431,13 +434,16 @@ impl GroupsGrid {
         if child_h <= 0.0 {
             return;
         }
+        let s = crate::ui::css::bp_scale();
+        let spacing = (FLOW_SPACING as f64 * s).round();
+        let margin = (FLOW_MARGIN as f64 * s).round();
         let row_top = self.flow.margin_top() as f64
-            + (self.selection.get() / COLS) as f64 * (child_h + FLOW_SPACING as f64);
+            + (self.selection.get() / COLS) as f64 * (child_h + spacing);
         let row_bottom = row_top + child_h;
         let target = if row_top < adj.value() {
-            row_top - FLOW_MARGIN as f64
+            row_top - margin
         } else if row_bottom > adj.value() + page {
-            row_bottom - page + FLOW_MARGIN as f64
+            row_bottom - page + margin
         } else {
             return;
         };

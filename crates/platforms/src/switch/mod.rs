@@ -23,6 +23,7 @@ mod config;
 mod keys;
 mod nacp;
 mod nca;
+mod ncz;
 mod registered;
 mod rom;
 mod xci;
@@ -250,14 +251,17 @@ impl SwitchCaches {
 /// Enumerates the titles of every detected yuzu-family and Ryujinx-family
 /// install — both at once, no matter which emulator the user configured
 /// for launching ROM files.
-pub fn discover_installed_games(executable: &str) -> Vec<SwitchInstalledGame> {
+pub fn discover_installed_games(
+    executable: &str,
+    compressed_switch_roms: bool,
+) -> Vec<SwitchInstalledGame> {
     let caches = SwitchCaches::load(executable);
     let mut games = caches.installed_games();
     let mut seen: std::collections::HashSet<String> = games
         .iter()
         .map(|game| game.title_id.clone())
         .collect();
-    for game in ryujinx::library_games(executable) {
+    for game in ryujinx::library_games(executable, compressed_switch_roms) {
         if seen.insert(game.title_id.clone()) {
             games.push(game);
         }
@@ -275,8 +279,9 @@ pub fn rom_meta(rom: &Path, caches: &SwitchCaches) -> SwitchRomMeta {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    if let Some(title_id) =
-        rom::title_id_from_nsp(rom).or_else(|| rom::title_id_from_filename(&stem))
+    if let Some(title_id) = rom::title_id_from_nsp(rom)
+        .or_else(|| rom::title_id_from_xci(rom))
+        .or_else(|| rom::title_id_from_filename(&stem))
     {
         let mut meta = SwitchRomMeta::empty();
         meta.title_id = title_id.clone();

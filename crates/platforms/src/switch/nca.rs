@@ -254,26 +254,47 @@ fn control_meta_from_entry(
         if size > MAX_CONTROL_SECTION {
             continue;
         }
-        let mut body = vec![0u8; size as usize];
-        let mut file = std::fs::File::open(path).ok()?;
-        std::io::Seek::seek(
-            &mut file,
-            std::io::SeekFrom::Start(nca.offset + section_offset),
-        )
-        .ok()?;
-        std::io::Read::read_exact(&mut file, &mut body).ok()?;
+        // Block-compressed (NCZ) sections inside NSZ/XCZ containers
+        // decompress to plaintext first — the compressor reads through
+        // the section crypto, so unlike the plain path there is nothing
+        // left to decrypt. Plain NCAs read straight from the file.
+        let ncz_body = super::ncz::read_range(
+            path,
+            nca.offset,
+            section_offset,
+            size,
+            MAX_CONTROL_SECTION,
+        );
+        let from_ncz = ncz_body.is_some();
+        let mut body = match ncz_body {
+            Some(decompressed) => decompressed,
+            None => {
+                let mut body = vec![0u8; size as usize];
+                let mut file = std::fs::File::open(path).ok()?;
+                std::io::Seek::seek(
+                    &mut file,
+                    std::io::SeekFrom::Start(nca.offset + section_offset),
+                )
+                .ok()?;
+                std::io::Read::read_exact(&mut file, &mut body).ok()?;
+                body
+            }
+        };
 
         // Counter layout: section_ctr_high BE || section_ctr_low BE ||
-        // (offset into the NCA / 16) BE.
-        let ctr_low = u32::from_le_bytes(fs.get(0x140..0x144)?.try_into().ok()?);
-        let ctr_high = u32::from_le_bytes(fs.get(0x144..0x148)?.try_into().ok()?);
-        let mut counter = [0u8; 16];
-        counter[0..4].copy_from_slice(&ctr_high.to_be_bytes());
-        counter[4..8].copy_from_slice(&ctr_low.to_be_bytes());
-        counter[8..16].copy_from_slice(&(section_offset / 16).to_be_bytes());
-        Ctr128BE::<aes::Aes128>::new_from_slices(&body_key, &counter)
-            .ok()?
-            .apply_keystream(&mut body);
+        // (offset into the NCA / 16) BE. NCZ bytes arrive already
+        // decrypted (see above) and skip this pass.
+        if !from_ncz {
+            let ctr_low = u32::from_le_bytes(fs.get(0x140..0x144)?.try_into().ok()?);
+            let ctr_high = u32::from_le_bytes(fs.get(0x144..0x148)?.try_into().ok()?);
+            let mut counter = [0u8; 16];
+            counter[0..4].copy_from_slice(&ctr_high.to_be_bytes());
+            counter[4..8].copy_from_slice(&ctr_low.to_be_bytes());
+            counter[8..16].copy_from_slice(&(section_offset / 16).to_be_bytes());
+            Ctr128BE::<aes::Aes128>::new_from_slices(&body_key, &counter)
+                .ok()?
+                .apply_keystream(&mut body);
+        }
 
         // No magic to check up front: the IVFC superblock that precedes
         // the RomFS image varies in size, so control_meta_from_romfs
@@ -413,6 +434,86 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("game.nsp");
         std::fs::write(&path, &nsp).unwrap();
+        let keys_path = tmp.path().join("prod.keys");
+        std::fs::write(&keys_path, test_keys_text()).unwrap();
+        let keys = SwitchKeys::from_file(&keys_path).unwrap();
+
+        let meta = extract_control_meta(&path, &keys).expect("control meta extracted");
+        assert_eq!(meta.icon.as_deref(), Some(b"JPEGDATA".as_slice()));
+        assert_eq!(meta.title.as_deref(), Some(SYNTH_TITLE));
+    }
+
+    /// The same control NCA with its tail block-compressed the way NSZ
+    /// stores it: verbatim 0x4000 prefix, one NCZSECTN section, one
+    /// NCZBLOCK map over zstd blocks. Like the reference compressor the
+    /// fixture compresses the decrypted bytes, so metadata must come
+    /// back identical to the plain read.
+    #[test]
+    fn test_extract_control_meta_round_trips_synthetic_nsz() {
+        let nca = synthetic_control_nca(0x0100a9400c9c2000);
+        let (prefix, tail) = nca.split_at(0x4000);
+        // Undo the section CTR (symmetric) the way the compressor reads
+        // through it: what gets compressed is plaintext.
+        let mut plain_tail = tail.to_vec();
+        let mut counter = [0u8; 16];
+        counter[8..16].copy_from_slice(&(0x4000u64 / 16).to_be_bytes());
+        Ctr128BE::<aes::Aes128>::new_from_slices(&TEST_BODY_KEY, &counter)
+            .unwrap()
+            .apply_keystream(&mut plain_tail);
+        let tail = plain_tail;
+
+        const EXPONENT: u8 = 14;
+        const BLOCK: usize = 1 << EXPONENT;
+        let mut entry = Vec::from(prefix);
+        entry.extend_from_slice(b"NCZSECTN");
+        entry.extend_from_slice(&1u64.to_le_bytes());
+        entry.extend_from_slice(&0x4000u64.to_le_bytes()); // offset
+        entry.extend_from_slice(&(tail.len() as u64).to_le_bytes()); // size
+        entry.extend_from_slice(&3u64.to_le_bytes()); // cryptoType
+        entry.extend_from_slice(&[0u8; 8]); // padding
+        entry.extend_from_slice(&[0u8; 16]); // key
+        entry.extend_from_slice(&[0u8; 16]); // counter
+        entry.extend_from_slice(b"NCZBLOCK");
+        entry.extend_from_slice(&[2u8, 1u8, 0u8, EXPONENT]);
+        let blocks = tail.chunks(BLOCK).collect::<Vec<_>>();
+        entry.extend_from_slice(&(blocks.len() as u32).to_le_bytes());
+        entry.extend_from_slice(&(tail.len() as u64).to_le_bytes());
+        let sizes_at = entry.len();
+        entry.extend_from_slice(&vec![0u8; blocks.len() * 4]);
+        let mut sizes = Vec::new();
+        for chunk in &blocks {
+            let compressed = zstd::stream::encode_all(&chunk[..], 3).unwrap();
+            sizes.push(compressed.len() as u32);
+            entry.extend_from_slice(&compressed);
+        }
+        for (i, size) in sizes.iter().enumerate() {
+            entry[sizes_at + i * 4..sizes_at + i * 4 + 4]
+                .copy_from_slice(&size.to_le_bytes());
+        }
+
+        let name = b"9c4f2b099c79dedff9426c2722d09b18.nca";
+        let mut table = Vec::new();
+        let name_offset = table.len() as u32;
+        table.extend_from_slice(name);
+        table.push(0);
+        while table.len() % 16 != 0 {
+            table.push(0);
+        }
+        let mut nsz = Vec::new();
+        nsz.extend_from_slice(b"PFS0");
+        nsz.extend_from_slice(&1u32.to_le_bytes());
+        nsz.extend_from_slice(&(table.len() as u32).to_le_bytes());
+        nsz.extend_from_slice(&0u32.to_le_bytes());
+        nsz.extend_from_slice(&0u64.to_le_bytes()); // entry data offset
+        nsz.extend_from_slice(&(entry.len() as u64).to_le_bytes());
+        nsz.extend_from_slice(&name_offset.to_le_bytes());
+        nsz.extend_from_slice(&0u32.to_le_bytes());
+        nsz.extend_from_slice(&table);
+        nsz.extend_from_slice(&entry);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.nsz");
+        std::fs::write(&path, &nsz).unwrap();
         let keys_path = tmp.path().join("prod.keys");
         std::fs::write(&keys_path, test_keys_text()).unwrap();
         let keys = SwitchKeys::from_file(&keys_path).unwrap();

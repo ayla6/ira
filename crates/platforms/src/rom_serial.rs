@@ -11,9 +11,12 @@ struct DiscInfo {
 /// ROMs are plain cartridges (nes, snes, gba, nds, …) can never yield one,
 /// so spawning the reader for them is pure waste. `gdi` and `cdi` are
 /// Dreamcast GD-ROM dumps, whose serial lives in the IP.BIN boot header.
+/// `wbfs`/`gcz` are the Wii/GameCube disc images (including Dolphin's
+/// compressed container): multi-gigabyte files that must never be
+/// content-hashed, only serial-probed.
 const DISC_EXTENSIONS: &[&str] = &[
-    "bin", "cue", "chd", "pbp", "iso", "ecm", "gcm", "cso", "rvz", "wia", "wud", "wux", "mdf",
-    "img", "gz", "gdi", "cdi",
+    "bin", "cue", "chd", "pbp", "iso", "ecm", "gcm", "cso", "rvz", "gcz", "wbfs", "wia",
+    "wud", "wux", "mdf", "img", "gz", "gdi", "cdi",
 ];
 
 pub(crate) fn is_disc_extension(path: &Path) -> bool {
@@ -127,6 +130,16 @@ mod tests {
         let rom = tempfile::NamedTempFile::with_suffix(".sfc").unwrap();
         std::fs::write(rom.path(), b"cartridge data").unwrap();
         assert!(read_serial_cached(&conn, rom.path()).is_none());
+    }
+
+    #[test]
+    fn test_dolphin_containers_count_as_disc_images() {
+        // Multi-gigabyte Wii/GameCube images: serial-probed, never hashed.
+        for ext in ["wbfs", "gcz", "WBFS"] {
+            let path = std::path::PathBuf::from(format!("game.{ext}"));
+            assert!(is_disc_extension(&path), "{ext}");
+        }
+        assert!(!is_disc_extension(std::path::Path::new("game.nsp")));
     }
 
     #[test]

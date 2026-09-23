@@ -29,7 +29,10 @@ pub use achievement::{AchievementStatus, GogAchievementStatus, MergedAchievement
 pub use app_details::{AppDetails, DlcInfo, UfsPathTransform, UfsRootOverride, UfsSaveFile};
 pub use asset_type::{AssetType, LogoPosition};
 pub use auto_group::{AutoCriterion, AutoDimension, AutoGroup, AutoGroupContext, AutoLogic, AutoNode};
-pub use consoles::{all_consoles, console_has_ra, find_console, ConsoleDef, CONSOLES};
+pub use consoles::{
+    all_consoles, console_has_ra, find_console, is_compressed_switch_extension,
+    ConsoleDef, COMPRESSED_SWITCH_EXTENSIONS, CONSOLES,
+};
 pub use disc::GameDisc;
 pub use fullscreen::fullscreen_args;
 pub use game::parse_db_id;

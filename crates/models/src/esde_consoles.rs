@@ -329,7 +329,7 @@ pub const ESDE_CONSOLES: &[ConsoleDef] = &[
     esde_console!(
         "switch",
         "Nintendo Switch",
-        &["nca", "nro", "nso", "nsp", "xci"],
+        &["nca", "nro", "nso", "nsp", "xci", "nsz", "xcz"],
         &["ryujinx"],
         "Ryujinx"
     ),

@@ -99,24 +99,41 @@ pub(super) fn read_pfs0_entries(path: &Path) -> Option<Vec<PfsEntry>> {
     Some(entries)
 }
 
-/// Reads the title id from an NSP's plaintext file-table names: the
-/// `<rights id>.tik`/`.cert` tickets, or the `<title id>.cnmt.nca` meta
-/// entry repacked NSPs carry. Works without any keys, so every ticketed or
-/// repacked dump gets its real id instead of a filename-based identity.
-pub fn title_id_from_nsp(path: &Path) -> Option<String> {
+/// Reads the title id from a container's plaintext file-table names:
+/// the `<rights id>.tik`/`.cert` tickets, or the `<title id>.cnmt.nca`
+/// meta entry repacked dumps carry. Works without any keys, so every
+/// ticketed or repacked dump gets its real id instead of a
+/// filename-based identity.
+pub fn title_id_from_entries(entries: &[PfsEntry]) -> Option<String> {
     let mut cnmt = None;
-    for entry in read_pfs0_entries(path)? {
+    for entry in entries {
         match id_from_entry_name(&entry.name) {
             EntryId::RightsId(id) => return Some(id),
             EntryId::Cnmt(id) => {
                 // First-come: the table order of meta entries is not
-                // meaningful, but a base-game NSP carries exactly one.
+                // meaningful, but a base-game container carries exactly one.
                 cnmt = cnmt.or(Some(id));
             }
             EntryId::None => {}
         }
     }
     cnmt
+}
+
+/// Reads the title id from an NSP's plaintext file-table names: the
+/// `<rights id>.tik`/`.cert` tickets, or the `<title id>.cnmt.nca` meta
+/// entry repacked NSPs carry. NSZ keeps the PFS0 table intact, so this
+/// reads compressed dumps unchanged.
+pub fn title_id_from_nsp(path: &Path) -> Option<String> {
+    title_id_from_entries(&read_pfs0_entries(path)?)
+}
+
+/// Reads the title id from a gamecard's plaintext partition-table
+/// names, the same ticket/meta scheme as NSP. XCZ keeps the HFS0
+/// tables intact, so this reads compressed dumps unchanged; `None`
+/// for anything without the gamecard `HEAD` magic.
+pub fn title_id_from_xci(path: &Path) -> Option<String> {
+    title_id_from_entries(&super::xci::content_entries(path)?)
 }
 
 /// The title id an entry name carries, if any.
@@ -387,6 +404,99 @@ mod tests {
         let path = tmp.path().join("game.nsp");
         std::fs::write(&path, b"not an nsp at all").unwrap();
         assert_eq!(title_id_from_nsp(&path), None);
+    }
+
+    /// Fixture HFS0 image (XCI partition shape): 0x40-byte entries and a
+    /// name string table, mirroring the gamecard layout.
+    fn hfs0_fixture(names: &[&str]) -> Vec<u8> {
+        let mut table = Vec::new();
+        let mut offsets = Vec::new();
+        for name in names {
+            offsets.push(table.len() as u32);
+            table.extend_from_slice(name.as_bytes());
+            table.push(0);
+        }
+        let mut out = Vec::new();
+        out.extend_from_slice(b"HFS0");
+        out.extend_from_slice(&(names.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(table.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        for (i, _) in names.iter().enumerate() {
+            out.extend_from_slice(&0u64.to_le_bytes()); // offset
+            out.extend_from_slice(&0u64.to_le_bytes()); // size
+            out.extend_from_slice(&0u64.to_le_bytes()); // metatable offset
+            out.extend_from_slice(&0u64.to_le_bytes()); // metatable size
+            out.extend_from_slice(&offsets[i].to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes()); // hashed flag
+            out.extend_from_slice(&[0u8; 0x18]);
+        }
+        out.extend_from_slice(&table);
+        out
+    }
+
+    /// Fixture gamecard: 0x1000-byte HEAD area, root HFS0 with a `secure`
+    /// partition holding the given entry names. XCZ keeps these tables
+    /// intact, so the same shape covers compressed dumps.
+    fn xci_fixture(secure_names: &[&str]) -> Vec<u8> {
+        let secure = hfs0_fixture(secure_names);
+        let root_table = b"secure\0".to_vec();
+        let mut out = vec![0u8; 0x1000];
+        out[0..4].copy_from_slice(b"HEAD");
+        out.extend_from_slice(b"HFS0");
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&(root_table.len() as u32).to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes()); // offset: data follows the tables
+        out.extend_from_slice(&(secure.len() as u64).to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // name offset
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&[0u8; 0x18]);
+        out.extend_from_slice(&root_table);
+        out.extend_from_slice(&secure);
+        out
+    }
+
+    #[test]
+    fn test_title_id_from_xci_ticket_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.xcz");
+        std::fs::write(
+            &path,
+            xci_fixture(&[
+                "01000000000108000000000000000003.tik",
+                "9c4f2b099c79dedff9426c2722d09b18.nca",
+            ]),
+        )
+        .unwrap();
+        assert_eq!(
+            title_id_from_xci(&path),
+            Some("0100000000010000".to_string())
+        );
+    }
+
+    #[test]
+    fn test_title_id_from_xci_cnmt_name_without_ticket() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.xci");
+        std::fs::write(
+            &path,
+            xci_fixture(&["01000ab001234800.cnmt.nca"]),
+        )
+        .unwrap();
+        assert_eq!(
+            title_id_from_xci(&path),
+            Some("01000ab001234000".to_string())
+        );
+    }
+
+    #[test]
+    fn test_title_id_from_xci_rejects_non_gamecard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.xcz");
+        std::fs::write(&path, b"not a gamecard at all").unwrap();
+        assert_eq!(title_id_from_xci(&path), None);
     }
 
     #[test]

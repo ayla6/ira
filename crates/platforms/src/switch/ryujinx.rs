@@ -61,19 +61,28 @@ pub(super) fn title_caches(executable: &str) -> Vec<TitleCache> {
 /// scans are reproducible. Only titles a metadata dir names are reported:
 /// an unnamed file has no identity beyond its file name, which the ROM
 /// library scan handles better.
-pub(super) fn library_games(executable: &str) -> Vec<SwitchInstalledGame> {
-    library_games_in(&base_dirs_for(executable), &title_caches(executable))
+pub(super) fn library_games(executable: &str, compressed_switch_roms: bool) -> Vec<SwitchInstalledGame> {
+    library_games_in(
+        &base_dirs_for(executable),
+        &title_caches(executable),
+        compressed_switch_roms,
+    )
 }
 
-/// The ROM container extensions Ryujinx offers in its file-type filter.
-const ROM_EXTENSIONS: &[&str] = &["nsp", "pfs0", "xci", "nca", "nro", "nso"];
+/// The ROM container extensions Ryujinx offers in its file-type filter,
+/// plus the compressed Switch containers behind their toggle.
+const ROM_EXTENSIONS: &[&str] = &["nsp", "pfs0", "xci", "nca", "nro", "nso", "nsz", "xcz"];
 
-fn library_games_in(base_dirs: &[PathBuf], caches: &[TitleCache]) -> Vec<SwitchInstalledGame> {
+fn library_games_in(
+    base_dirs: &[PathBuf],
+    caches: &[TitleCache],
+    compressed_switch_roms: bool,
+) -> Vec<SwitchInstalledGame> {
     let mut out: Vec<SwitchInstalledGame> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for base in base_dirs {
         for dir in config_game_dirs(base) {
-            for rom in rom_files(&dir) {
+            for rom in rom_files(&dir, compressed_switch_roms) {
                 let stem = rom
                     .file_stem()
                     .map(|s| s.to_string_lossy().into_owned())
@@ -81,6 +90,7 @@ fn library_games_in(base_dirs: &[PathBuf], caches: &[TitleCache]) -> Vec<SwitchI
                 // Update NSPs normalize onto their base title here, exactly
                 // like they do in the ROM file scan.
                 let Some(title_id) = super::rom::title_id_from_nsp(&rom)
+                    .or_else(|| super::rom::title_id_from_xci(&rom))
                     .or_else(|| super::rom::title_id_from_filename(&stem))
                 else {
                     continue;
@@ -134,7 +144,7 @@ struct RyujinxConfig {
 
 /// Every file under `dir` (recursively) whose extension Ryujinx treats as
 /// a game container. Unreadable directories yield nothing.
-fn rom_files(dir: &Path) -> Vec<PathBuf> {
+fn rom_files(dir: &Path, compressed_switch_roms: bool) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -142,11 +152,15 @@ fn rom_files(dir: &Path) -> Vec<PathBuf> {
     for entry in entries.flatten() {
         let path = entry.path();
         if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            out.extend(rom_files(&path));
+            out.extend(rom_files(&path, compressed_switch_roms));
         } else if path
             .extension()
             .and_then(|e| e.to_str())
-            .is_some_and(|e| ROM_EXTENSIONS.iter().any(|known| e.eq_ignore_ascii_case(known)))
+            .is_some_and(|e| {
+                ROM_EXTENSIONS.iter().any(|known| e.eq_ignore_ascii_case(known))
+                    && (compressed_switch_roms
+                        || !ira_models::is_compressed_switch_extension(e))
+            })
         {
             out.push(path);
         }
@@ -321,7 +335,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let base = library_fixture(tmp.path());
 
-        let games = library_games_in(&[base], &title_caches_in(&[tmp.path().join("Ryubing")]));
+        let games =
+            library_games_in(&[base], &title_caches_in(&[tmp.path().join("Ryubing")]), false);
 
         // The base and the update file collapse into one entry, named by
         // the metadata dir; the unnamed file, the nameless id and the
@@ -354,13 +369,21 @@ mod tests {
         std::fs::write(games.join("a.nsp"), b"").unwrap();
         std::fs::write(games.join("b.XCI"), b"").unwrap();
         std::fs::write(games.join("sub").join("c.nro"), b"").unwrap();
+        std::fs::write(games.join("d.nsz"), b"").unwrap();
         std::fs::write(games.join("notes.txt"), b"").unwrap();
 
-        let mut found: Vec<String> = rom_files(&games)
+        let mut found: Vec<String> = rom_files(&games, false)
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         found.sort();
         assert_eq!(found, vec!["a.nsp", "b.XCI", "c.nro"]);
+
+        let mut found: Vec<String> = rom_files(&games, true)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        found.sort();
+        assert_eq!(found, vec!["a.nsp", "b.XCI", "c.nro", "d.nsz"]);
     }
 }

@@ -30,6 +30,7 @@ pub(super) struct ConsoleSettingsWidgets {
     pub(super) cemu_exe_row: Option<adw::EntryRow>,
     pub(super) azahar_enable_row: Option<adw::SwitchRow>,
     pub(super) azahar_exe_row: Option<adw::EntryRow>,
+    pub(super) compressed_switch_roms_row: Option<adw::SwitchRow>,
 }
 
 pub(super) type SharedConsoleSettingsWidgets = Rc<RefCell<ConsoleSettingsWidgets>>;
@@ -124,6 +125,9 @@ pub(super) fn apply_console_settings(cfg: &mut Config, pages: &ConsoleSettingsWi
             .unwrap_or_default();
         }
     }
+    if let Some(ref row) = pages.compressed_switch_roms_row {
+        cfg.compressed_switch_roms = row.is_active();
+    }
     for widget in &pages.console_profile_widgets {
         let console = cfg.console_mut(&widget.console_id);
         console.controller_mode = *widget.mode.borrow();
@@ -160,6 +164,7 @@ pub(super) fn register_console_pages(
         cemu_exe_row: None,
         azahar_enable_row: None,
         azahar_exe_row: None,
+        compressed_switch_roms_row: None,
     };
     let registry = {
         let state = state.borrow();
@@ -263,6 +268,22 @@ fn connect_lazy_console_pages(
             stack.remove(&loading);
         }
         let (page, widgets) = build_console_settings_page(&win, def, cfg.console(def.id));
+        if def.id == "switch" {
+            let formats_group = adw::PreferencesGroup::new();
+            formats_group.set_title(&crate::tr!("ROM formats"));
+            let compressed_row = adw::SwitchRow::new();
+            compressed_row.set_title(&crate::tr!("Compressed Switch ROMs"));
+            compressed_row.set_subtitle(&crate::tr!(
+                "Scan .nsz/.xcz files as Switch games — needs an emulator that plays compressed dumps"
+            ));
+            compressed_row.set_active(cfg.compressed_switch_roms);
+            formats_group.add(&compressed_row);
+            page.append(&formats_group);
+            result
+                .borrow_mut()
+                .compressed_switch_roms_row
+                .replace(compressed_row);
+        }
         let profile = add_console_page_overrides(
             &page,
             &cfg,
@@ -541,6 +562,7 @@ pub(super) fn discovery_settings_changed(before: &Config, after: &Config) -> boo
         || before.azahar_executable != after.azahar_executable
         || before.roms_folder != after.roms_folder
         || before.extra_roms_folders != after.extra_roms_folders
+        || before.compressed_switch_roms != after.compressed_switch_roms
         || ira_models::all_consoles().any(|def| {
             let before_console = before.console(def.id);
             let after_console = after.console(def.id);

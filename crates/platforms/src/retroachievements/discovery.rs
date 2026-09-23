@@ -20,6 +20,14 @@ struct ActiveConsole {
     executable: String,
 }
 
+/// Toggles shaping one console's ROM scan, threaded as one bundle so
+/// the scan entry point stays a readable width.
+struct ScanOptions {
+    ra_enabled: bool,
+    unpack_roms: bool,
+    compressed_switch_roms: bool,
+}
+
 fn active_consoles(cfg: &Config) -> Vec<ActiveConsole> {
     all_consoles()
         .filter_map(|def| {
@@ -94,8 +102,11 @@ pub fn build_ra_games(
                     &db,
                     save_dir,
                     console,
-                    cfg.ra_enabled,
-                    cfg.unpack_roms,
+                    &ScanOptions {
+                        ra_enabled: cfg.ra_enabled,
+                        unpack_roms: cfg.unpack_roms,
+                        compressed_switch_roms: cfg.compressed_switch_roms,
+                    },
                     load_game,
                     progress,
                 )
@@ -144,20 +155,22 @@ fn build_ra_games_for_console(
     db: &ira_db::DbConn,
     save_dir: &str,
     console: &ActiveConsole,
-    ra_enabled: bool,
-    unpack_roms: bool,
+    options: &ScanOptions,
     load_game: &dyn Fn(&ira_models::GameEntry, &str) -> Result<ira_models::Game, String>,
     progress: &dyn Fn(&str),
 ) -> Vec<Game> {
     let mut games = Vec::new();
 
+    let extensions = console
+        .def
+        .scan_extensions(options.compressed_switch_roms);
     let scan_results = {
         let _s = tracing::info_span!("scan_roms").entered();
         progress(&format!("Scanning {} ROMs…", console.def.display_name));
         console
             .folders
             .iter()
-            .map(|folder| scan_roms(&folder.to_string_lossy(), console.def.extensions))
+            .map(|folder| scan_roms(&folder.to_string_lossy(), &extensions))
             .collect::<Vec<_>>()
     };
     let scan_succeeded = scan_results.iter().any(Option::is_some);
@@ -260,7 +273,7 @@ fn build_ra_games_for_console(
 
     // With RA disabled the match index stays empty: ROMs are discovered
     // offline and get matched whenever the integration is turned back on.
-    let needs_ra_cache = ra_enabled
+    let needs_ra_cache = options.ra_enabled
         && (!new_roms.is_empty()
             || existing_by_path
                 .values()
@@ -301,7 +314,7 @@ fn build_ra_games_for_console(
                 continue;
             }
             let mut entry = entry.clone();
-            rehash_archived_rom(db, console, rom_path_str, &mut entry, &ra_index, unpack_roms);
+            rehash_archived_rom(db, console, rom_path_str, &mut entry, &ra_index, options.unpack_roms);
 
             if entry.trophy_source == ira_models::TrophySource::Empty
                 && !entry.manual_unmatch
@@ -368,20 +381,28 @@ fn build_ra_games_for_console(
         let _s = tracing::info_span!("process_new_roms", count = new_roms.len()).entered();
 
         let groups = group_multi_disc_roms(db, new_roms);
-        let nds_infos = precompute_nds_infos(console, unpack_roms, &groups, &to_relative);
+        let nds_infos = precompute_nds_infos(console, options.unpack_roms, &groups, &to_relative);
         let hashed: HashSet<&str> = existing_by_path
             .iter()
             .filter(|(_, entry)| !entry.hashes.md5.is_empty())
             .map(|(path, _)| path.as_str())
             .collect();
-        let rom_hashes = compute_rom_hashes(
-            &nds_infos,
-            &groups,
-            &to_relative,
-            &hashed,
-            console.def.extensions,
-            unpack_roms,
-        );
+        // Switch ROMs are never hashed: multi-gigabyte dumps whose
+        // identity is the container/filename title id (and which no RA
+        // list could match anyway). Hashing them on first sight is the
+        // scan that reads the whole library for nothing.
+        let rom_hashes = if console.def.id == "switch" {
+            HashMap::new()
+        } else {
+            compute_rom_hashes(
+                &nds_infos,
+                &groups,
+                &to_relative,
+                &hashed,
+                &extensions,
+                options.unpack_roms,
+            )
+        };
         for group in &groups {
             let (rom_name, rom_path, _disc_num) = &group.roms[0];
             let rom_path_str = to_relative(rom_path);
@@ -599,14 +620,14 @@ fn build_ra_games_for_console(
         }
     }
 
-    fill_content_hashes(db, console, unpack_roms);
+    fill_content_hashes(db, console, options.unpack_roms);
 
     if console.def.id == "nds" {
         enrich_nds_roms(
             db,
             save_dir,
             &console.folders,
-            unpack_roms,
+            options.unpack_roms,
             &existing_entries,
             &games,
             &hashed_now,
@@ -1246,8 +1267,11 @@ mod tests {
             &db,
             &save_dir,
             &gba_console(&rom_dir),
-            false,
-            false,
+            &super::ScanOptions {
+                ra_enabled: false,
+                unpack_roms: false,
+                compressed_switch_roms: false,
+            },
             &load_entry_stub,
             &|_| {},
         );
@@ -1291,8 +1315,11 @@ mod tests {
             &db,
             &save_dir,
             &gba_console(&rom_dir),
-            false,
-            false,
+            &super::ScanOptions {
+                ra_enabled: false,
+                unpack_roms: false,
+                compressed_switch_roms: false,
+            },
             &load_entry_stub,
             &|_| {},
         );
@@ -1362,8 +1389,11 @@ mod tests {
             &db,
             &save_dir,
             &console,
-            true,
-            true,
+            &super::ScanOptions {
+                ra_enabled: true,
+                unpack_roms: true,
+                compressed_switch_roms: false,
+            },
             &load_entry_stub,
             &|_| {},
         );
@@ -1434,8 +1464,7 @@ mod tests {
     }
 
     #[test]
-    fn test_enrich_switch_roms_keeps_title_ids_and_custom_titles() {
-        let (tmp, db, mut game, exe) = switch_backfill_fixture();
+    fn test_enrich_switch_roms_keeps_title_ids_and_custom_titles() {        let (tmp, db, mut game, exe) = switch_backfill_fixture();
         let save_dir = tmp.path().join("save").to_str().unwrap().to_string();
 
         // A game already carrying a title id and a custom title is untouched.
@@ -1454,5 +1483,60 @@ mod tests {
         assert_eq!(game.name, "My own name");
         let entry = ira_db::find_by_db_id(&db, game.db_id).unwrap().unwrap();
         assert_eq!(entry.native_id, "01007ef00011e000");
+    }
+
+    /// Converting a dump across containers (XCI to NSZ here) keeps the
+    /// single entry: the serial, not the file name, is the identity, and
+    /// the toggle gates the compressed side of the scan.
+    #[test]
+    fn test_switch_container_change_keeps_single_entry_by_title_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let rom_dir = tmp.path().join("roms/switch");
+        std::fs::create_dir_all(&rom_dir).unwrap();
+        std::fs::write(rom_dir.join("Game [0100000000010000].xci"), b"fake xci").unwrap();
+
+        let db = test_db();
+        let save_dir = tmp.path().join("save").to_string_lossy().into_owned();
+        let console = super::ActiveConsole {
+            def: ira_models::find_console("switch").unwrap(),
+            folders: vec![rom_dir.clone()],
+            executable: String::new(),
+        };
+        let scan = |compressed_switch_roms| {
+            super::build_ra_games_for_console(
+                &db,
+                &save_dir,
+                &console,
+                &super::ScanOptions {
+                    ra_enabled: false,
+                    unpack_roms: false,
+                    compressed_switch_roms,
+                },
+                &load_entry_stub,
+                &|_| {},
+            )
+        };
+        let games = scan(true);
+        assert_eq!(games.len(), 1);
+        let db_id = games[0].db_id;
+        let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
+        assert_eq!(entry.native_id, "0100000000010000");
+
+        std::fs::remove_file(rom_dir.join("Game [0100000000010000].xci")).unwrap();
+        std::fs::write(rom_dir.join("Game [0100000000010000].nsz"), b"fake nsz").unwrap();
+        let games = scan(true);
+        assert_eq!(games.len(), 1);
+        assert_eq!(games[0].db_id, db_id);
+        let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
+        assert_eq!(entry.native_id, "0100000000010000");
+        assert!(
+            entry.rom_path.ends_with(".nsz"),
+            "rom_path: {}",
+            entry.rom_path
+        );
+
+        // With the toggle off the compressed dump is not a ROM at all.
+        let games = scan(false);
+        assert!(games.is_empty());
     }
 }

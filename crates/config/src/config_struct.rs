@@ -188,6 +188,11 @@ pub struct Config {
     /// Off by default: unpacking is slower than plain-file reads.
     #[serde(default)]
     pub unpack_roms: bool,
+    /// Recognize the compressed Switch containers (NSZ/XCZ) as ROMs.
+    /// Off by default: only plain dumps are scanned unless the user opts
+    /// in (their emulator must play compressed files, e.g. an eden fork).
+    #[serde(default)]
+    pub compressed_switch_roms: bool,
 
     #[serde(default = "default_save_dir")]
     pub save_dir: String,
@@ -325,6 +330,7 @@ impl Default for Config {
             auto_reload_azahar: true,
             auto_reload_switch: true,
             unpack_roms: true,
+            compressed_switch_roms: false,
 
             save_dir: default_save_dir(),
             default_wine_config: WineConfig::default(),
@@ -534,6 +540,7 @@ mod tests {
         assert!(cfg.auto_reload_azahar);
         assert!(cfg.auto_reload_switch);
         assert!(cfg.unpack_roms);
+        assert!(!cfg.compressed_switch_roms);
     }
 
     #[test]

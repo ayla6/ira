@@ -142,6 +142,8 @@ pub struct GameListOptions {
     pub auto_reload_cemu: bool,
     pub auto_reload_azahar: bool,
     pub auto_reload_switch: bool,
+    /// Whether compressed Switch containers (NSZ/XCZ) scan as ROMs.
+    pub compressed_switch_roms: bool,
     /// Whether the ROM library scan runs: any ROM-folder console is enabled,
     /// and at startup additionally the auto-reload setting. Independent of
     /// the RetroAchievements toggle, which only governs enrichment.
@@ -174,6 +176,7 @@ impl GameListOptions {
             auto_reload_cemu: cfg.auto_reload_cemu,
             auto_reload_azahar: cfg.auto_reload_azahar,
             auto_reload_switch: cfg.auto_reload_switch,
+            compressed_switch_roms: cfg.compressed_switch_roms,
             rom_scan_enabled: cfg.any_console_enabled(),
             sort_mode: cfg.sort_mode,
             sort_descending: cfg.sort_descending,
@@ -386,7 +389,12 @@ pub fn build_game_list(
             &save_dir,
             &reporter,
             move |db, save_dir| {
-                build_switch_installed_games(db, save_dir, &options.switch_executable)
+                build_switch_installed_games(
+                    db,
+                    save_dir,
+                    &options.switch_executable,
+                    options.compressed_switch_roms,
+                )
             },
         );
 
@@ -990,8 +998,13 @@ fn default_azahar_icon(save_dir: &str, title_id: &str, icon: Option<&[u8]>) -> s
 /// game also present as a ROM file keeps its single entry and only gains
 /// the emulator's clean title and icon — or, when the cache has none, the
 /// title and icon decrypted from the installed control NCA.
-fn build_switch_installed_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
-    discover_switch_installed_games(executable)
+fn build_switch_installed_games(
+    db: &db::DbConn,
+    save_dir: &str,
+    executable: &str,
+    compressed_switch_roms: bool,
+) -> Vec<Game> {
+    discover_switch_installed_games(executable, compressed_switch_roms)
         .iter()
         .filter_map(|installed| {
             let meta = find_or_create_console_entry(

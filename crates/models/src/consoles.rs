@@ -46,6 +46,18 @@ impl ConsoleDef {
             GameKind::Retro
         }
     }
+
+    /// Extensions a scan accepts for this console. The compressed Switch
+    /// containers (NSZ/XCZ) stay invisible unless their toggle is on —
+    /// only the Switch lists carry them, so other consoles never see
+    /// the flag.
+    pub fn scan_extensions(&self, compressed_switch_roms: bool) -> Vec<&'static str> {
+        self.extensions
+            .iter()
+            .copied()
+            .filter(|ext| compressed_switch_roms || !is_compressed_switch_extension(ext))
+            .collect()
+    }
 }
 
 pub const CONSOLES: &[ConsoleDef] = &[
@@ -354,6 +366,18 @@ pub fn find_console(id: &str) -> Option<&'static ConsoleDef> {
     all_consoles().find(|c| c.id == id)
 }
 
+/// The compressed Switch containers, gated behind the
+/// `compressed_switch_roms` toggle (off by default).
+pub const COMPRESSED_SWITCH_EXTENSIONS: &[&str] = &["nsz", "xcz"];
+
+/// True for the toggle-gated Switch extensions, matched case-insensitively
+/// like every other extension check.
+pub fn is_compressed_switch_extension(ext: &str) -> bool {
+    COMPRESSED_SWITCH_EXTENSIONS
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(ext))
+}
+
 /// True when the platform has RetroAchievements support at all. Consoles
 /// with an `ra_console_id` of 0 (Nintendo Switch, and other ESDE-sourced
 /// entries without an RA mapping) must never be offered RA matching.
@@ -445,6 +469,34 @@ mod tests {
             GameKind::Switch
         );
         assert_eq!(find_console("saturn").unwrap().game_kind(), GameKind::Retro);
+    }
+
+    #[test]
+    fn test_scan_extensions_hide_compressed_switch_roms_by_default() {
+        let switch = find_console("switch").unwrap();
+        let plain = switch.scan_extensions(false);
+        assert!(plain.contains(&"nsp"));
+        assert!(plain.contains(&"xci"));
+        assert!(!plain.contains(&"nsz"));
+        assert!(!plain.contains(&"xcz"));
+        let full = switch.scan_extensions(true);
+        assert!(full.contains(&"nsz"));
+        assert!(full.contains(&"xcz"));
+    }
+
+    #[test]
+    fn test_scan_extensions_leave_other_consoles_alone() {
+        let gba = find_console("gba").unwrap();
+        assert_eq!(gba.scan_extensions(false), gba.scan_extensions(true));
+        assert_eq!(gba.scan_extensions(false), gba.extensions.to_vec());
+    }
+
+    #[test]
+    fn test_is_compressed_switch_extension_matches_case_insensitively() {
+        assert!(is_compressed_switch_extension("nsz"));
+        assert!(is_compressed_switch_extension("XCZ"));
+        assert!(!is_compressed_switch_extension("xci"));
+        assert!(!is_compressed_switch_extension("nsp"));
     }
 
     #[test]

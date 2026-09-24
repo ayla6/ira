@@ -250,6 +250,51 @@ pub fn screenscraper_matches_by_serial(platform_id: &str) -> bool {
     )
 }
 
+/// The ScreenScraper region a game's own ROM paths point at ("us",
+/// "eu", "jp", "wor"), from disc serial prefixes and GoodTools-style
+/// filename tags. The first path carrying a marker wins; paths with no
+/// marker fall through to the next. `None` means no path says anything
+/// about region, and callers use the default preference order.
+pub fn region_from_rom_paths(paths: &[String]) -> Option<&'static str> {
+    const MARKERS: &[(&str, &str)] = &[
+        ("slus", "us"),
+        ("scus", "us"),
+        ("ulus", "us"),
+        ("ucus", "us"),
+        ("(usa)", "us"),
+        ("(u)", "us"),
+        ("ntsc-u", "us"),
+        ("ntsc/u", "us"),
+        ("sles", "eu"),
+        ("sces", "eu"),
+        ("ules", "eu"),
+        ("uces", "eu"),
+        ("(europe)", "eu"),
+        ("(eu)", "eu"),
+        ("(pal)", "eu"),
+        ("pal-e", "eu"),
+        ("slps", "jp"),
+        ("slpm", "jp"),
+        ("scps", "jp"),
+        ("scpm", "jp"),
+        ("uljm", "jp"),
+        ("ucjs", "jp"),
+        ("(japan)", "jp"),
+        ("(jp)", "jp"),
+        ("(j)", "jp"),
+        ("ntsc-j", "jp"),
+        ("ntsc/j", "jp"),
+        ("(world)", "wor"),
+    ];
+    paths.iter().find_map(|path| {
+        let lower = path.to_lowercase();
+        MARKERS
+            .iter()
+            .find(|(marker, _)| lower.contains(marker))
+            .map(|(_, region)| *region)
+    })
+}
+
 /// Consoles whose images are too big for content hashing to be worth it.
 /// Disc consoles here match by serial instead; Switch and Wii U have no
 /// serials on ScreenScraper at all and match by title.
@@ -854,5 +899,64 @@ mod tests {
         // Cartridge-size dumps still hash.
         assert!(super::screenscraper_hashes_content("gba"));
         assert!(!super::screenscraper_matches_by_serial("gba"));
+    }
+
+    fn rom_paths(paths: &[&str]) -> Vec<String> {
+        paths.iter().map(|p| p.to_string()).collect()
+    }
+
+    #[test]
+    fn test_region_from_rom_paths_reads_serial_prefixes() {
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["/roms/SLUS-01066.chd"])),
+            Some("us")
+        );
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["/roms/SLES-02568.bin"])),
+            Some("eu")
+        );
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["/roms/SLPS-01245.cue"])),
+            Some("jp")
+        );
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["/roms/ULJM-05789.iso"])),
+            Some("jp")
+        );
+    }
+
+    #[test]
+    fn test_region_from_rom_paths_reads_filename_tags() {
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["D2 (USA).gdi"])),
+            Some("us")
+        );
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["Game (Europe).chd"])),
+            Some("eu")
+        );
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["Game (Japan).rvz"])),
+            Some("jp")
+        );
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["Game (World).bin"])),
+            Some("wor")
+        );
+    }
+
+    #[test]
+    fn test_region_from_rom_paths_first_marker_wins() {
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&[
+                "/roms/untagged.cue",
+                "/roms/SLES-00001.bin"
+            ])),
+            Some("eu")
+        );
+        assert_eq!(
+            super::region_from_rom_paths(&rom_paths(&["/roms/Final Fantasy VII.bin"])),
+            None
+        );
     }
 }

@@ -731,6 +731,8 @@ pub struct DiscMedia {
     /// Multi-disc games tag each media node with a `support` attribute
     /// (`<media type="support-2D" region="eu" support="2">`); nodes without
     /// one are disc 1. URLs get the same space-escaping as `media_url`.
+    /// A multi-region list is a preference order (the ROM's own region
+    /// first); a single region pins exactly that region or nothing.
     pub(crate) fn parse_disc_images(
         xml: &str,
         regions: &[String],
@@ -745,11 +747,11 @@ pub struct DiscMedia {
             return Ok(Vec::new());
         };
         let fallback = region_preference();
-        let strict = !regions.is_empty();
-        let regions: Vec<&str> = if strict {
-            regions.iter().map(String::as_str).collect()
-        } else {
+        let strict = regions.len() == 1;
+        let regions: Vec<&str> = if regions.is_empty() {
             fallback
+        } else {
+            regions.iter().map(String::as_str).collect()
         };
         let Some(medias) = jeu.medias.as_ref() else {
             return Ok(Vec::new());
@@ -966,10 +968,10 @@ impl SteamDataClient {
 
     /// The per-disc physical-media art for one game (`support-2D`), PNG
     /// bytes keyed by disc number, for the disc-picker tiles. `regions`
-    /// pins the caller's region choice; empty takes the default
-    /// preference order. The jeuInfos answer is cached like the genre
-    /// table — one request per game, ever. Images are never cached
-    /// here: the caller persists them beside the game's other art.
+    /// is a preference order (the ROM's own region first); empty takes
+    /// the default preference order. The jeuInfos answer is cached like
+    /// the genre table — one request per game, ever. Images are never
+    /// cached here: the caller persists them beside the game's other art.
     /// Discs the service has no art for are simply absent; the picker
     /// falls back to a numbered icon.
     pub fn screenscraper_disc_media(
@@ -1346,6 +1348,31 @@ mod tests {
     fn test_parse_games_without_support_media_has_no_disc_images() {
         let game = parse_games(SEARCH_XML).unwrap().remove(0);
         assert!(game.disc_images.is_empty());
+    }
+
+    #[test]
+    fn test_parse_disc_images_prefers_list_order_then_falls_back() {
+        let xml = r#"<Data><jeux><jeu id="19249">
+            <medias>
+              <media type="support-2D" region="eu" support="1">https://ss.example/ff7_eu1.png</media>
+              <media type="support-2D" region="us" support="1">https://ss.example/ff7_us1.png</media>
+              <media type="support-2D" region="eu" support="2">https://ss.example/ff7_eu2.png</media>
+            </medias>
+        </jeu></jeux></Data>"#;
+        // A multi-region list is a preference order: eu first even
+        // though us exists, and us still serves disc 2 through the
+        // fallback instead of dropping it.
+        let ordered = ["eu".to_string(), "us".to_string(), "wor".to_string()];
+        assert_eq!(
+            parse_disc_images(xml, &ordered).unwrap(),
+            vec![
+                (1, "https://ss.example/ff7_eu1.png".to_string()),
+                (2, "https://ss.example/ff7_eu2.png".to_string()),
+            ]
+        );
+        // A single region pins exactly that region or nothing.
+        let pinned = ["jp".to_string()];
+        assert!(parse_disc_images(xml, &pinned).unwrap().is_empty());
     }
 
     const GENRES_XML: &str = r#"<Data>

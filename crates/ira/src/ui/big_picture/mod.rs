@@ -41,21 +41,15 @@ pub(super) fn show_disc_picker(
     if launch_locked(state) {
         return;
     }
-    let (game_name, discs) = {
+    let discs = {
         let s = state.borrow();
-        let name = s
-            .games
-            .iter()
-            .find(|g| g.db_id == db_id)
-            .map(|g| g.name.clone())
-            .unwrap_or_default();
-        (name, ira_db::get_discs(&s.db, db_id).unwrap_or_default())
+        ira_db::get_discs(&s.db, db_id).unwrap_or_default()
     };
     if discs.len() <= 1 {
         return;
     }
     if let Some(big) = state.borrow().big_picture.clone() {
-        big.disc_picker.open(state, db_id, variant_id, &game_name, &discs);
+        big.disc_picker.open(state, db_id, variant_id, &discs);
     }
 }
 

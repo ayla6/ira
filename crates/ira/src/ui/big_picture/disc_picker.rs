@@ -26,7 +26,6 @@ struct DiscTile {
 
 pub(super) struct DiscPicker {
     root: gtk4::Overlay,
-    title: gtk4::Label,
     row: gtk4::Box,
     ring: SelectionRing,
     pill: super::marquee::Marquee,
@@ -41,23 +40,11 @@ impl DiscPicker {
         let dim = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         dim.add_css_class(CSS_BP_MENU_DIM);
 
-        let sheet = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+        // The row alone, centered: the game stands picked behind the
+        // sheet and the art names the discs, so no text lives here.
+        let sheet = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         sheet.set_halign(gtk4::Align::Center);
         sheet.set_valign(gtk4::Align::Center);
-
-        let title = gtk4::Label::new(None);
-        title.set_xalign(0.5);
-        title.set_wrap(true);
-        title.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-        title.add_css_class(CSS_BP_MENU_TITLE);
-        crate::ui::helpers::crisp_label(&title);
-        sheet.append(&title);
-
-        let subtitle = gtk4::Label::new(Some(&crate::tr!("Select a disc")));
-        subtitle.set_xalign(0.5);
-        subtitle.add_css_class(CSS_DIM_LABEL);
-        crate::ui::helpers::crisp_label(&subtitle);
-        sheet.append(&subtitle);
 
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 16);
         row.set_halign(gtk4::Align::Center);
@@ -78,7 +65,6 @@ impl DiscPicker {
         root.set_visible(false);
         Self {
             root,
-            title,
             row,
             ring,
             pill,
@@ -106,7 +92,6 @@ impl DiscPicker {
         state: &SharedState,
         db_id: i64,
         variant_id: Option<i64>,
-        game_name: &str,
         discs: &[ira_models::GameDisc],
     ) {
         crate::ui::helpers::clear_children(&self.row);
@@ -117,16 +102,25 @@ impl DiscPicker {
             return;
         }
         let scale = crate::ui::css::bp_scale().max(0.5);
-        self.row
-            .set_spacing((28.0 * scale).round() as i32);
-        self.title.set_text(game_name);
+        let spacing = (28.0 * scale).round();
+        self.row.set_spacing(spacing as i32);
         self.db_id.set(db_id);
         self.variant_id.set(variant_id);
-        // Tiles never resize: the row splits a fixed budget across the
-        // disc count, so the fallback icons and the art they become
-        // share one geometry and the ring parks once, correctly.
-        let tile_px = (1100.0 / ordered.len() as f64).clamp(150.0, 300.0);
-        let art_px = (tile_px * scale).round() as i32;
+        // Tiles cap at 35% of the viewport height and shrink together
+        // when the row would overflow its width: every tile one size,
+        // fallback and art alike, so the ring parks once, correctly.
+        let (viewport_w, viewport_h) = self
+            .root
+            .root()
+            .and_downcast::<gtk4::Window>()
+            .map(|window| (window.width() as f64, window.height() as f64))
+            .unwrap_or((1920.0, 1080.0));
+        let count = ordered.len() as f64;
+        let fit_width = (0.92 * viewport_w - spacing * (count - 1.0)) / count;
+        let art_px = (0.35 * viewport_h)
+            .min(fit_width)
+            .clamp(96.0, 4096.0)
+            .round() as i32;
         for disc in &ordered {
             self.row
                 .append(&self.build_tile(state, db_id, variant_id, disc, art_px));
@@ -252,10 +246,11 @@ impl DiscPicker {
         btn.add_css_class(CSS_FLAT);
 
         // The no-art fallback: an optical disc with the number written
-        // on it, swapped out when the texture lands. It fills the same
-        // box the art takes so the row never reflows underneath the ring.
+        // on it, swapped out when the texture lands. The glyph fills the
+        // same box the art takes so the row never reflows underneath
+        // the ring.
         let icon = gtk4::Image::from_icon_name("media-optical-symbolic");
-        icon.set_pixel_size((art_px / 2).max(48));
+        icon.set_pixel_size(art_px);
         let number = gtk4::Label::new(Some(&disc.disc_number.to_string()));
         number.add_css_class(CSS_DISC_NUMBER);
         let disc_face = gtk4::Overlay::new();

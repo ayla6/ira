@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-23 22:39-0300\n"
+"POT-Creation-Date: 2026-09-23 23:36-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -361,7 +361,7 @@ msgstr ""
 #: crates/ira/src/ui/add_game_general.rs:303
 #: crates/ira/src/ui/ra_match_dialog.rs:207
 #: crates/ira/src/ui/sgdb_match_dialog.rs:229
-#: crates/ira/src/ui/ss_match_dialog.rs:267
+#: crates/ira/src/ui/ss_match_dialog.rs:268
 #: crates/ira/src/ui/steam_search.rs:30
 msgid "Game name…"
 msgstr ""
@@ -376,7 +376,7 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_scraper.rs:411
 #: crates/ira/src/ui/ra_match_dialog.rs:149
 #: crates/ira/src/ui/sgdb_match_dialog.rs:252
-#: crates/ira/src/ui/ss_match_dialog.rs:186
+#: crates/ira/src/ui/ss_match_dialog.rs:187
 #: crates/ira/src/ui/steam_search_dialog.rs:291
 #: crates/ira/src/ui/steam_search.rs:70
 msgid "No results found"
@@ -780,12 +780,7 @@ msgstr ""
 msgid "Options"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/disc_picker.rs:56
-#: crates/ira/src/ui/disc_picker.rs:38
-msgid "Select a disc"
-msgstr ""
-
-#: crates/ira/src/ui/big_picture/disc_picker.rs:269
+#: crates/ira/src/ui/big_picture/disc_picker.rs:276
 #: crates/ira/src/ui/disc_picker.rs:132
 #: crates/ira/src/ui/image_manager.rs:797
 #: crates/ira/src/ui/play_button.rs:789
@@ -1094,6 +1089,10 @@ msgstr ""
 msgid "Apply"
 msgstr ""
 
+#: crates/ira/src/ui/disc_picker.rs:38
+msgid "Select a disc"
+msgstr ""
+
 #: crates/ira/src/ui/disc_picker.rs:54
 msgid "Choose which disc to boot"
 msgstr ""
@@ -1204,8 +1203,8 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_dialog.rs:356
 #: crates/ira/src/ui/image_manager.rs:632
-#: crates/ira/src/ui/image_manager.rs:834
-#: crates/ira/src/ui/image_manager.rs:982
+#: crates/ira/src/ui/image_manager.rs:835
+#: crates/ira/src/ui/image_manager.rs:983
 msgid "Images"
 msgstr ""
 
@@ -1752,8 +1751,8 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:977
 #: crates/ira/src/ui/edit_game_scraper.rs:1040
-#: crates/ira/src/ui/ss_match_dialog.rs:274
-#: crates/ira/src/ui/ss_match_dialog.rs:294
+#: crates/ira/src/ui/ss_match_dialog.rs:275
+#: crates/ira/src/ui/ss_match_dialog.rs:295
 msgid "ScreenScraper is disabled in Settings"
 msgstr ""
 
@@ -2121,7 +2120,7 @@ msgid "Reset to base game"
 msgstr ""
 
 #: crates/ira/src/ui/game_logo.rs:213
-#: crates/ira/src/ui/image_manager.rs:1026
+#: crates/ira/src/ui/image_manager.rs:1027
 #: crates/ira/src/ui/input_calibration_settings.rs:164
 msgid "Reset"
 msgstr ""
@@ -2420,8 +2419,8 @@ msgid "No RA icon available"
 msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:629
-#: crates/ira/src/ui/image_manager.rs:831
-#: crates/ira/src/ui/image_manager.rs:979
+#: crates/ira/src/ui/image_manager.rs:832
+#: crates/ira/src/ui/image_manager.rs:980
 msgid "Select image"
 msgstr ""
 
@@ -2429,28 +2428,28 @@ msgstr ""
 msgid "Discs"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:840
+#: crates/ira/src/ui/image_manager.rs:841
 msgid "Select image file"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:858
+#: crates/ira/src/ui/image_manager.rs:859
 msgid "Download missing disc art from ScreenScraper"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:902
+#: crates/ira/src/ui/image_manager.rs:903
 #, rust-format
 msgid "Downloaded {}"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:906
+#: crates/ira/src/ui/image_manager.rs:907
 msgid "Disc art is up to date"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:908
+#: crates/ira/src/ui/image_manager.rs:909
 msgid "No disc art found"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:1049
+#: crates/ira/src/ui/image_manager.rs:1050
 msgid "SGDB"
 msgstr ""
 
@@ -4938,24 +4937,24 @@ msgstr ""
 msgid "RA: matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ss.rs:196
+#: crates/ira/src/ui/mass_match_ss.rs:200
 msgid "Searching SS..."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ss.rs:350
+#: crates/ira/src/ui/mass_match_ss.rs:354
 msgid "Matching games…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ss.rs:351
+#: crates/ira/src/ui/mass_match_ss.rs:355
 msgid "Matching unmatched games…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ss.rs:376
+#: crates/ira/src/ui/mass_match_ss.rs:380
 #, rust-format
 msgid "{} games matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ss.rs:378
+#: crates/ira/src/ui/mass_match_ss.rs:382
 msgid "Matching finished"
 msgstr ""
 
@@ -6087,33 +6086,33 @@ msgstr ""
 msgid "The rules of \"{}\" go away. The games themselves stay."
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:196
+#: crates/ira/src/ui/ss_match_dialog.rs:197
 #, rust-format
 msgid "SS ID: {}"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:251
+#: crates/ira/src/ui/ss_match_dialog.rs:252
 msgid "PC"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:262
+#: crates/ira/src/ui/ss_match_dialog.rs:263
 #, rust-format
 msgid "Match to ScreenScraper · {}"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:314
+#: crates/ira/src/ui/ss_match_dialog.rs:321
 msgid "Searching ScreenScraper…"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:398
+#: crates/ira/src/ui/ss_match_dialog.rs:405
 msgid "Matching in background…"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:424
+#: crates/ira/src/ui/ss_match_dialog.rs:431
 msgid "Search SS"
 msgstr ""
 
-#: crates/ira/src/ui/ss_match_dialog.rs:448
+#: crates/ira/src/ui/ss_match_dialog.rs:455
 msgid "SS: matched"
 msgstr ""
 

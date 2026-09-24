@@ -31,12 +31,16 @@ pub fn is_big_picture() -> bool {
 }
 
 /// Open the big-picture disc picker for a multi-disc game: a centered
-/// sheet of disc tiles, gamepad and keyboard navigable.
+/// sheet of disc tiles, gamepad and keyboard navigable. Refused while a
+/// game runs — picking another disc is starting something else.
 pub(super) fn show_disc_picker(
     state: &crate::ui::state::SharedState,
     db_id: i64,
     variant_id: Option<i64>,
 ) {
+    if launch_locked(state) {
+        return;
+    }
     let (game_name, discs) = {
         let s = state.borrow();
         let name = s
@@ -53,6 +57,19 @@ pub(super) fn show_disc_picker(
     if let Some(big) = state.borrow().big_picture.clone() {
         big.disc_picker.open(state, db_id, variant_id, &game_name, &discs);
     }
+}
+
+/// True while any game runs: after one launch lands, nothing else may
+/// start — not another game, not even the disc picker. The launcher
+/// tracks running games itself, so the lock clears on exit with no
+/// extra state to go stale.
+pub(super) fn launch_locked(state: &crate::ui::state::SharedState) -> bool {
+    state
+        .borrow()
+        .running_games
+        .lock()
+        .map(|running| !running.is_empty())
+        .unwrap_or(false)
 }
 
 /// Fade the big-picture shell into the black "game running" screen.

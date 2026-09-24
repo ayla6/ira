@@ -567,6 +567,9 @@ fn next_selection(
 /// guards against double launches). A no-op when nothing is selected or on
 /// the All Software tile.
 pub(super) fn launch_selected(state: &SharedState) {
+    if super::launch_locked(state) {
+        return;
+    }
     let game = state
         .borrow()
         .big_picture

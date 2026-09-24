@@ -1346,6 +1346,9 @@ fn read_cell_ids(widget: &gtk4::Widget) -> Option<(i64, Option<i64>)> {
 }
 
 fn launch(state: &SharedState, game: &Game) {
+    if super::launch_locked(state) {
+        return;
+    }
     if let Err(error) =
         crate::ui::play_button::launch_game(state, game.db_id, game.variant_id)
     {

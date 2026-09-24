@@ -132,12 +132,26 @@ impl DiscPicker {
         self.track_selection();
         self.root.set_visible(true);
         let tiles = Rc::clone(&self.tiles);
+        let place_tiles = Rc::clone(&self.tiles);
+        let place_selection = Rc::clone(&self.selection);
+        let place_ring = self.ring.downgrade();
+        let place_pill = self.pill.clone();
+        let place_root = self.root.clone();
         crate::ui::disc_art::fetch_disc_art(state, db_id, move |art| {
             for tile in tiles.borrow().iter() {
                 if let Some(texture) = art.get(&tile.disc_number) {
                     tile.picture.set_paintable(Some(texture));
                     tile.stack.set_visible_child_name("art");
                 }
+            }
+            // Tiles grow when the art lands; re-park the ring and the
+            // pill on the new geometry instead of waiting for whatever
+            // repaints the ring next.
+            if let (Some(ring), Some(tile)) = (
+                place_ring.upgrade(),
+                place_tiles.borrow().get(place_selection.get()).cloned(),
+            ) {
+                anchor_tile(place_root.upcast_ref(), &ring, &place_pill, &tile);
             }
         });
     }
@@ -175,6 +189,9 @@ impl DiscPicker {
 
     /// Boot the highlighted disc through the single launch path.
     pub(super) fn activate(&self, state: &SharedState) {
+        if super::launch_locked(state) {
+            return;
+        }
         let tile = self.tiles.borrow().get(self.selection.get()).map(|tile| {
             (
                 tile.disc_id,
@@ -267,6 +284,9 @@ impl DiscPicker {
         let click_picker = self.root.clone();
         let click_disc_id = disc.id;
         btn.connect_clicked(move |_| {
+            if super::launch_locked(&click_state) {
+                return;
+            }
             click_picker.set_visible(false);
             super::super::disc_picker::launch_disc(&click_state, db_id, variant_id, click_disc_id);
         });

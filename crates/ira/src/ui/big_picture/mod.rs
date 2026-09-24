@@ -5,6 +5,7 @@
 
 mod all_games;
 mod disc_picker;
+mod disc_tile;
 mod game_menu;
 mod groups;
 mod keyboard;

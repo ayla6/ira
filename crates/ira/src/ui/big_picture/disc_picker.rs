@@ -20,7 +20,7 @@ struct DiscTile {
     disc_number: i32,
     button: gtk4::Button,
     stack: gtk4::Stack,
-    picture: gtk4::Picture,
+    art: super::disc_tile::DiscArtTile,
     label: String,
 }
 
@@ -141,10 +141,13 @@ impl DiscPicker {
         let place_ring = self.ring.downgrade();
         let place_pill = self.pill.clone();
         let place_root = self.root.clone();
-        crate::ui::disc_art::fetch_disc_art(state, db_id, art_px as u32, move |art| {
+        crate::ui::disc_art::fetch_disc_art(state, db_id, u32::MAX, move |art| {
             for tile in tiles.borrow().iter() {
                 if let Some(texture) = art.get(&tile.disc_number) {
-                    tile.picture.set_paintable(Some(texture));
+                    // Full-res texture, GPU-scaled by the tile: a repaint,
+                    // never a relayout — then re-park on the off chance the
+                    // row moved underneath.
+                    tile.art.set_texture(Some(texture.clone()));
                     tile.stack.set_visible_child_name("art");
                 }
             }
@@ -262,13 +265,11 @@ impl DiscPicker {
         fallback.set_size_request(art_px, art_px);
         fallback.append(&disc_face);
 
-        let picture = gtk4::Picture::new();
-        picture.set_size_request(art_px, art_px);
-        picture.set_content_fit(gtk4::ContentFit::Contain);
+        let art = super::disc_tile::DiscArtTile::with_size(art_px);
 
         let stack = gtk4::Stack::new();
         stack.add_named(&fallback, Some("icon"));
-        stack.add_named(&picture, Some("art"));
+        stack.add_named(&art, Some("art"));
         stack.set_vhomogeneous(false);
         btn.set_child(Some(&stack));
 
@@ -282,7 +283,7 @@ impl DiscPicker {
             disc_number: disc.disc_number,
             button: btn.clone(),
             stack: stack.clone(),
-            picture,
+            art,
             label,
         });
 

@@ -79,17 +79,33 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
         }
         // The SS title is authoritative for consoles whose own names came
         // from file stems or shortened ROM headers; trusted sources (official
-        // console headers, RA, the user's own edits) keep theirs.
+        // console headers, RA, the user's own edits) keep theirs. The
+        // title comes from the ROMs' own region first: a European dump
+        // of a game whose US and EU titles differ takes the EU one.
         let replace_title = entry_title_trusted(state, db_id)
             .map(|trusted| !trusted)
             .unwrap_or(false);
-        if replace_title && !picked.name.is_empty() {
-            if let Err(e) = ira_db::update_game_title(&s.db, db_id, &picked.name) {
+        let mut rom_paths: Vec<String> = ira_db::get_discs(&s.db, db_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|disc| disc.rom_path)
+            .collect();
+        if let Some(game) = s.games.iter().find(|g| g.db_id == db_id) {
+            if !game.rom_path.is_empty() {
+                rom_paths.push(game.rom_path.clone());
+            }
+        }
+        let title = ira_models::region_from_rom_paths(&rom_paths)
+            .and_then(|region| ira_models::title_for_region(&picked.names, region))
+            .filter(|title| !title.is_empty())
+            .unwrap_or_else(|| picked.name.clone());
+        if replace_title && !title.is_empty() {
+            if let Err(e) = ira_db::update_game_title(&s.db, db_id, &title) {
                 eprintln!("Failed to store the ScreenScraper title: {e}");
             } else if let Err(e) = ira_db::set_title_trusted(&s.db, db_id, true) {
                 eprintln!("Failed to mark the title trusted: {e}");
             } else {
-                new_title = Some(picked.name.clone());
+                new_title = Some(title);
             }
         }
     }

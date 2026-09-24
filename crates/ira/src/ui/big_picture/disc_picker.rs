@@ -122,8 +122,14 @@ impl DiscPicker {
         self.title.set_text(game_name);
         self.db_id.set(db_id);
         self.variant_id.set(variant_id);
+        // Tiles never resize: the row splits a fixed budget across the
+        // disc count, so the fallback icons and the art they become
+        // share one geometry and the ring parks once, correctly.
+        let tile_px = (1100.0 / ordered.len() as f64).clamp(150.0, 300.0);
+        let art_px = (tile_px * scale).round() as i32;
         for disc in &ordered {
-            self.row.append(&self.build_tile(state, db_id, variant_id, disc));
+            self.row
+                .append(&self.build_tile(state, db_id, variant_id, disc, art_px));
         }
         self.selection.set(0);
         self.pill.set_text(&self.tile_name(0));
@@ -131,6 +137,10 @@ impl DiscPicker {
             .set_max_width(480.0 * scale.max(0.5));
         self.track_selection();
         self.root.set_visible(true);
+        // Park on the fallback geometry right away so the name pill
+        // shows before the art arrives; the fetch re-parks on landing.
+        self.place_selection();
+        self.ring.queue_draw();
         let tiles = Rc::clone(&self.tiles);
         let place_tiles = Rc::clone(&self.tiles);
         let place_selection = Rc::clone(&self.selection);
@@ -236,15 +246,16 @@ impl DiscPicker {
         db_id: i64,
         variant_id: Option<i64>,
         disc: &ira_models::GameDisc,
+        art_px: i32,
     ) -> gtk4::Widget {
-        let scale = crate::ui::css::bp_scale().max(0.5);
         let btn = gtk4::Button::new();
         btn.add_css_class(CSS_FLAT);
 
         // The no-art fallback: an optical disc with the number written
-        // on it, swapped out when the texture lands.
+        // on it, swapped out when the texture lands. It fills the same
+        // box the art takes so the row never reflows underneath the ring.
         let icon = gtk4::Image::from_icon_name("media-optical-symbolic");
-        icon.set_pixel_size((96.0 * scale).round() as i32);
+        icon.set_pixel_size((art_px / 2).max(48));
         let number = gtk4::Label::new(Some(&disc.disc_number.to_string()));
         number.add_css_class(CSS_DISC_NUMBER);
         let disc_face = gtk4::Overlay::new();
@@ -252,10 +263,11 @@ impl DiscPicker {
         disc_face.add_overlay(&number);
         let fallback = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         fallback.set_valign(gtk4::Align::Center);
+        fallback.set_halign(gtk4::Align::Center);
+        fallback.set_size_request(art_px, art_px);
         fallback.append(&disc_face);
 
         let picture = gtk4::Picture::new();
-        let art_px = (192.0 * scale).round() as i32;
         picture.set_size_request(art_px, art_px);
         picture.set_content_fit(gtk4::ContentFit::Contain);
 

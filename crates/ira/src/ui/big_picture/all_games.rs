@@ -32,7 +32,14 @@ fn game_key(game: &Game) -> GameKey {
 /// `count` items; None when the grid is empty or the press is a no-op.
 /// Horizontal moves stay on the row, vertical moves keep the column, and
 /// overshoot into a short last row slides onto its last item.
-pub(super) fn grid_move(current: usize, count: usize, cols: usize, dx: i32, dy: i32) -> Option<usize> {
+pub(super) fn grid_move(
+    current: usize,
+    count: usize,
+    cols: usize,
+    dx: i32,
+    dy: i32,
+    wrap: bool,
+) -> Option<usize> {
     if count == 0 {
         return None;
     }
@@ -42,12 +49,18 @@ pub(super) fn grid_move(current: usize, count: usize, cols: usize, dx: i32, dy: 
     let row = (current as i64) / cols;
     let last_row = (count - 1) / cols;
     let next_row = (row + dy as i64).clamp(0, last_row);
-    // Horizontal moves wrap within the row: the row's right edge comes
-    // around to its own left edge. A short last row wraps within the
-    // cells it actually has.
+    // Horizontal moves wrap within the row on fresh presses only; held
+    // repeats stop at the row's edge instead of cycling forever.
+    // A short last row wraps within the cells it actually has.
     let row_len = (count - row * cols).min(cols);
     let next_col = if dx != 0 {
-        (col + dx as i64).rem_euclid(row_len)
+        if wrap {
+            (col + dx as i64).rem_euclid(row_len)
+        } else if (col + dx as i64) < 0 || (col + dx as i64) >= row_len {
+            return None;
+        } else {
+            col + dx as i64
+        }
     } else {
         col
     };
@@ -699,8 +712,8 @@ impl AllSoftwareUi {
     }
 
     /// Move the groups tile selection (arrows on the Groups tab).
-    pub(super) fn groups_move(&self, state: &SharedState, dx: i32, dy: i32) {
-        self.groups_grid.move_selection(state, dx, dy);
+    pub(super) fn groups_move(&self, state: &SharedState, dx: i32, dy: i32, engage: bool) {
+        self.groups_grid.move_selection(state, dx, dy, engage);
     }
 
     /// Pull the shared groups list back from the database.
@@ -893,8 +906,11 @@ impl AllSoftwareUi {
     /// The arrows moved the selection. With nothing focused yet — the user
     /// scrolled the grid by hand, which deselects — the selection comes
     /// back on the first fully visible tile before the move applies, so
-    /// navigation never resumes from somewhere off screen.
-    pub(super) fn move_selection(&self, dx: i32, dy: i32) {
+    /// navigation never resumes from somewhere off screen. Horizontal
+    /// moves wrap within the row on fresh presses only, like the home
+    /// carousel: held repeats hit the row's wall instead of cycling
+    /// forever.
+    pub(super) fn move_selection(&self, dx: i32, dy: i32, engage: bool) {
         let (cols, _, item_h, sp) = self.grid.current_layout();
         let count = self.games.borrow().len();
         if count == 0 {
@@ -921,7 +937,7 @@ impl AllSoftwareUi {
             self.select(index);
         }
         let selected = self.selected.get().unwrap_or(0);
-        if let Some(next) = grid_move(selected, count, cols as usize, dx, dy) {
+        if let Some(next) = grid_move(selected, count, cols as usize, dx, dy, engage) {
             self.select(next);
         }
     }
@@ -1076,28 +1092,14 @@ impl AllSoftwareUi {
             return adj.value();
         };
         let (cols, _, item_h, sp) = self.grid.current_layout();
-        let target = scroll_target(
+        scroll_target(
             selected,
             cols as usize,
             (item_h + sp) as f64,
             sp as f64,
             adj.value(),
             adj.page_size(),
-        );
-        // IRA_SCROLL_DEBUG=1 logs every camera decision: selection,
-        // row, current value, page, upper bound and target.
-        if std::env::var_os("IRA_SCROLL_DEBUG").is_some() {
-            eprintln!(
-                "bp-scroll: sel={} row={} val={:.0} page={:.0} upper={:.0} tgt={:.0}",
-                selected,
-                selected / cols.max(1) as usize,
-                adj.value(),
-                adj.page_size(),
-                adj.upper(),
-                target
-            );
-        }
-        target
+        )
     }
 
     /// End any scroll glide on the exact snapped target. A tab switch
@@ -1435,17 +1437,25 @@ mod tests {
 
     #[test]
     fn test_grid_move_wraps_within_the_row() {
-        assert_eq!(grid_move(0, 10, COLS, 1, 0), Some(1));
-        assert_eq!(grid_move(4, 10, COLS, 1, 0), Some(0), "row edge wraps left");
-        assert_eq!(grid_move(5, 10, COLS, -1, 0), Some(9), "row start wraps right");
-        assert_eq!(grid_move(5, 10, COLS, 1, 0), Some(6));
+        assert_eq!(grid_move(0, 10, COLS, 1, 0, true), Some(1));
+        assert_eq!(grid_move(4, 10, COLS, 1, 0, true), Some(0), "row edge wraps left");
+        assert_eq!(grid_move(5, 10, COLS, -1, 0, true), Some(9), "row start wraps right");
+        assert_eq!(grid_move(5, 10, COLS, 1, 0, true), Some(6));
+    }
+
+    #[test]
+    fn test_grid_move_repeats_stop_at_row_edges() {
+        assert_eq!(grid_move(0, 10, COLS, 1, 0, false), Some(1));
+        assert_eq!(grid_move(4, 10, COLS, 1, 0, false), None, "held repeat hits the wall");
+        assert_eq!(grid_move(5, 10, COLS, -1, 0, false), None, "held repeat hits the wall");
+        assert_eq!(grid_move(2, 12, COLS, 0, 1, false), Some(7), "vertical moves ignore wrap");
     }
 
     #[test]
     fn test_grid_move_keeps_column() {
-        assert_eq!(grid_move(2, 12, COLS, 0, 1), Some(7));
-        assert_eq!(grid_move(7, 12, COLS, 0, -1), Some(2));
-        assert_eq!(grid_move(2, 12, COLS, 0, -1), None, "top edge stays put");
+        assert_eq!(grid_move(2, 12, COLS, 0, 1, true), Some(7));
+        assert_eq!(grid_move(7, 12, COLS, 0, -1, true), Some(2));
+        assert_eq!(grid_move(2, 12, COLS, 0, -1, true), None, "top edge stays put");
     }
 
     #[test]
@@ -1453,24 +1463,24 @@ mod tests {
         // 7 items: row 1 holds indexes 5 and 6. Down from a column the
         // short row does not have stays put instead of dragging the
         // selection onto the row's only remaining cell.
-        assert_eq!(grid_move(0, 7, COLS, 0, 1), Some(5));
-        assert_eq!(grid_move(3, 7, COLS, 0, 1), None);
-        assert_eq!(grid_move(4, 7, COLS, 0, 1), None);
-        assert_eq!(grid_move(6, 7, COLS, 0, 1), None);
+        assert_eq!(grid_move(0, 7, COLS, 0, 1, true), Some(5));
+        assert_eq!(grid_move(3, 7, COLS, 0, 1, true), None);
+        assert_eq!(grid_move(4, 7, COLS, 0, 1, true), None);
+        assert_eq!(grid_move(6, 7, COLS, 0, 1, true), None);
         // The short row wraps within its own two cells.
-        assert_eq!(grid_move(6, 7, COLS, 1, 0), Some(5));
-        assert_eq!(grid_move(5, 7, COLS, -1, 0), Some(6));
+        assert_eq!(grid_move(6, 7, COLS, 1, 0, true), Some(5));
+        assert_eq!(grid_move(5, 7, COLS, -1, 0, true), Some(6));
     }
 
     #[test]
     fn test_grid_move_stays_put_on_last_row() {
-        assert_eq!(grid_move(7, 12, COLS, 0, 1), None);
-        assert_eq!(grid_move(11, 12, COLS, 0, 1), None);
+        assert_eq!(grid_move(7, 12, COLS, 0, 1, true), None);
+        assert_eq!(grid_move(11, 12, COLS, 0, 1, true), None);
     }
 
     #[test]
     fn test_grid_move_empty_grid() {
-        assert_eq!(grid_move(0, 0, COLS, 1, 0), None);
+        assert_eq!(grid_move(0, 0, COLS, 1, 0, true), None);
     }
 
     #[test]

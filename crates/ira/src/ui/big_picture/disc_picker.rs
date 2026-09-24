@@ -2,29 +2,36 @@
 //! showing one tile per disc in disc-number order — the ScreenScraper
 //! disc art when it exists, a numbered optical-disc icon otherwise.
 //! The gamepad and keyboard walk the row; confirming boots the disc,
-//! a click boots it straight away.
+//! a click boots it straight away. The highlight is the same accent
+//! ring (circled, discs are round) and floating name pill the game
+//! grid wears, re-derived every frame from the live tile geometry.
 
 use super::super::state::SharedState;
 use crate::ui::css::*;
+use crate::ui::selection_ring::SelectionRing;
 use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// One tile's widgets, kept so the art can land after the sheet is up.
+#[derive(Clone)]
 struct DiscTile {
     disc_id: i64,
     disc_number: i32,
     button: gtk4::Button,
     stack: gtk4::Stack,
     picture: gtk4::Picture,
+    label: String,
 }
 
 pub(super) struct DiscPicker {
     root: gtk4::Overlay,
     title: gtk4::Label,
     row: gtk4::Box,
+    ring: SelectionRing,
+    pill: super::marquee::Marquee,
     tiles: Rc<RefCell<Vec<DiscTile>>>,
-    selection: Cell<usize>,
+    selection: Rc<Cell<usize>>,
     db_id: Cell<i64>,
     variant_id: Cell<Option<i64>>,
 }
@@ -56,17 +63,27 @@ impl DiscPicker {
         row.set_halign(gtk4::Align::Center);
         sheet.append(&row);
 
+        let ring = SelectionRing::new();
+        let pill = super::marquee::Marquee::new(0, 480.0);
+
         let root = gtk4::Overlay::new();
         root.add_css_class(CSS_BP_ROOT);
         root.set_child(Some(&dim));
         root.add_overlay(&sheet);
+        root.add_overlay(&ring);
+        root.add_overlay(pill.widget());
+        root.set_measure_overlay(&ring, false);
+        root.set_measure_overlay(pill.widget(), false);
+        root.set_clip_overlay(&ring, true);
         root.set_visible(false);
         Self {
             root,
             title,
             row,
+            ring,
+            pill,
             tiles: Rc::new(RefCell::new(Vec::new())),
-            selection: Cell::new(0),
+            selection: Rc::new(Cell::new(0)),
             db_id: Cell::new(0),
             variant_id: Cell::new(None),
         }
@@ -81,7 +98,9 @@ impl DiscPicker {
     }
 
     /// Show the sheet for one game's discs, oldest first, and start the
-    /// disc-art fetch; tiles swap in their art as it arrives.
+    /// disc-art fetch; tiles swap in their art as it arrives. The ring
+    /// and the name pill re-derive from the live tile geometry on every
+    /// frame, so no event ordering can park them stale.
     pub(super) fn open(
         &self,
         state: &SharedState,
@@ -94,6 +113,12 @@ impl DiscPicker {
         self.tiles.borrow_mut().clear();
         let mut ordered = discs.to_vec();
         ordered.sort_by_key(|disc| disc.disc_number);
+        if ordered.is_empty() {
+            return;
+        }
+        let scale = crate::ui::css::bp_scale().max(0.5);
+        self.row
+            .set_spacing((28.0 * scale).round() as i32);
         self.title.set_text(game_name);
         self.db_id.set(db_id);
         self.variant_id.set(variant_id);
@@ -101,7 +126,10 @@ impl DiscPicker {
             self.row.append(&self.build_tile(state, db_id, variant_id, disc));
         }
         self.selection.set(0);
-        self.mark_selected();
+        self.pill.set_text(&self.tile_name(0));
+        self.pill
+            .set_max_width(480.0 * scale.max(0.5));
+        self.track_selection();
         self.root.set_visible(true);
         let tiles = Rc::clone(&self.tiles);
         crate::ui::disc_art::fetch_disc_art(state, db_id, move |art| {
@@ -118,7 +146,9 @@ impl DiscPicker {
         self.root.set_visible(false);
     }
 
-    /// Step the highlight, clamped to the row ends.
+    /// Step the highlight, clamped to the row ends; the pill text follows
+    /// and the rect lands synchronously, with the per-frame repositioner
+    /// covering resizes and art swaps underneath.
     pub(super) fn move_selection(&self, delta: i32) {
         let count = self.tiles.borrow().len();
         if count == 0 {
@@ -127,8 +157,20 @@ impl DiscPicker {
         let next = (self.selection.get() as i32 + delta).clamp(0, count as i32 - 1) as usize;
         if next != self.selection.get() {
             self.selection.set(next);
-            self.mark_selected();
+            self.pill.set_text(&self.tile_name(next));
+            self.place_selection();
         }
+    }
+
+    /// Park the ring and the pill anchor on the selected tile right now,
+    /// from live geometry. Returns false when there is nothing real to
+    /// draw yet (unmapped tiles on the opening frame).
+    fn place_selection(&self) -> bool {
+        let tiles = self.tiles.borrow();
+        let Some(tile) = tiles.get(self.selection.get()) else {
+            return false;
+        };
+        anchor_tile(self.root.upcast_ref(), &self.ring, &self.pill, tile)
     }
 
     /// Boot the highlighted disc through the single launch path.
@@ -147,14 +189,28 @@ impl DiscPicker {
         super::super::disc_picker::launch_disc(state, db_id, variant_id, disc_id);
     }
 
-    fn mark_selected(&self) {
-        for (index, tile) in self.tiles.borrow().iter().enumerate() {
-            if index == self.selection.get() {
-                tile.button.add_css_class(CSS_BP_MENU_ROW_SELECTED);
-            } else {
-                tile.button.remove_css_class(CSS_BP_MENU_ROW_SELECTED);
-            }
-        }
+    fn tile_name(&self, index: usize) -> String {
+        self.tiles.borrow().get(index).map_or_else(String::new, |tile| {
+            tile.label.clone()
+        })
+    }
+
+    /// Re-derive the ring rect and the pill anchor from the selected
+    /// tile's live position every frame, like the group tiles do.
+    fn track_selection(&self) {
+        let tiles = Rc::clone(&self.tiles);
+        let selection = Rc::clone(&self.selection);
+        let ring = self.ring.downgrade();
+        let pill = self.pill.clone();
+        let root = self.root.clone();
+        self.ring.set_repositioner(Some(Box::new(move || {
+            let (Some(ring), Some(tile)) =
+                (ring.upgrade(), tiles.borrow().get(selection.get()).cloned())
+            else {
+                return false;
+            };
+            anchor_tile(root.upcast_ref(), &ring, &pill, &tile)
+        })));
     }
 
     fn build_tile(
@@ -166,9 +222,7 @@ impl DiscPicker {
     ) -> gtk4::Widget {
         let scale = crate::ui::css::bp_scale().max(0.5);
         let btn = gtk4::Button::new();
-        btn.add_css_class(CSS_DISC_TILE);
-
-        let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+        btn.add_css_class(CSS_FLAT);
 
         // The no-art fallback: an optical disc with the number written
         // on it, swapped out when the texture lands.
@@ -192,24 +246,20 @@ impl DiscPicker {
         stack.add_named(&fallback, Some("icon"));
         stack.add_named(&picture, Some("art"));
         stack.set_vhomogeneous(false);
-        vbox.append(&stack);
+        btn.set_child(Some(&stack));
 
-        let caption = if disc.label.is_empty() {
+        let label = if disc.label.is_empty() {
             crate::tr!("Disc {}").replacen("{}", &disc.disc_number.to_string(), 1)
         } else {
             disc.label.clone()
         };
-        let caption_label = gtk4::Label::new(Some(&caption));
-        caption_label.add_css_class(CSS_DISC_TILE_CAPTION);
-        vbox.append(&caption_label);
-
-        btn.set_child(Some(&vbox));
         self.tiles.borrow_mut().push(DiscTile {
             disc_id: disc.id,
             disc_number: disc.disc_number,
             button: btn.clone(),
             stack: stack.clone(),
             picture,
+            label,
         });
 
         // A click boots straight away, like the desktop picker.
@@ -218,13 +268,41 @@ impl DiscPicker {
         let click_disc_id = disc.id;
         btn.connect_clicked(move |_| {
             click_picker.set_visible(false);
-            super::super::disc_picker::launch_disc(
-                &click_state,
-                db_id,
-                variant_id,
-                click_disc_id,
-            );
+            super::super::disc_picker::launch_disc(&click_state, db_id, variant_id, click_disc_id);
         });
         btn.upcast()
     }
+}
+
+/// Park `ring` circled round the tile and anchor `pill` above it, both
+/// from live geometry in `root` coordinates. False when there is
+/// nothing real to draw yet.
+fn anchor_tile(
+    root: &gtk4::Widget,
+    ring: &crate::ui::selection_ring::SelectionRing,
+    pill: &super::marquee::Marquee,
+    tile: &DiscTile,
+) -> bool {
+    if !tile.button.is_mapped() {
+        return false;
+    }
+    let Some(point) = tile
+        .button
+        .compute_point(root, &gtk4::graphene::Point::zero())
+    else {
+        return false;
+    };
+    let (w, h) = (tile.button.width() as f64, tile.button.height() as f64);
+    if w < 8.0 || h < 8.0 {
+        return false;
+    }
+    let scale = root.width() as f64 / 1920.0;
+    ring.set_rect(point.x() as f64, point.y() as f64, w, h, scale, true);
+    pill.set_position(
+        point.x() as f64 + w / 2.0,
+        root.width() as f64,
+        point.y() as f64 - crate::ui::css::bp_ring_outset(),
+        false,
+    );
+    true
 }

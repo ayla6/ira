@@ -363,9 +363,9 @@ impl GroupsGrid {
         state.borrow().groups.get(index - 1).map(|g| g.id)
     }
 
-    pub(super) fn move_selection(&self, state: &SharedState, dx: i32, dy: i32) {
+    pub(super) fn move_selection(&self, state: &SharedState, dx: i32, dy: i32, engage: bool) {
         let count = self.tile_count(state);
-        let next = super::all_games::grid_move(self.selection.get(), count, COLS, dx, dy);
+        let next = super::all_games::grid_move(self.selection.get(), count, COLS, dx, dy, engage);
         if let Some(next) = next {
             self.selection.set(next);
             self.repaint_selection();

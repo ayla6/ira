@@ -71,6 +71,11 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
+            // An unmapped widget has no frame: a snapshot forced
+            // before the first allocation warns and paints garbage.
+            if !self.obj().is_mapped() {
+                return;
+            }
             // The repositioner runs first: whatever it derives is what
             // this very frame paints. False means the geometry isn't
             // real yet (page hidden, tile unallocated) — draw nothing.

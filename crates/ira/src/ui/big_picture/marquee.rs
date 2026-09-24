@@ -1,11 +1,11 @@
 //! A floating tooltip bubble for the big-picture screens, drawn as one shape in
 //! a single `snapshot()` pass: a rounded pill joined with a tail that
-//! reaches the selected tile (Cairo), with the title repeating after a
-//! gap — "name    name" — always drifting right and wrapping around when
-//! it overflows. The bubble and its tail are one Cairo sub-path union
-//! (same winding, single fill), so they cannot come apart or
-//! double-composite. The widget spans its rail and positions the bubble
-//! internally; moving it only queues a redraw.
+//! reaches the selected tile (Cairo), with titles wrapping to the bubble
+//! instead of stretching it single-line across the page — only novels
+//! drift, pausing readable at each loop restart. The bubble and its tail
+//! are one Cairo sub-path union (same winding, single fill), so they
+//! cannot come apart or double-composite. The widget spans its rail and
+//! positions the bubble internally; moving it only queues a redraw.
 
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -16,6 +16,9 @@ use std::time::Duration;
 /// Drift speed of the wrapping title, and how often it moves.
 const SPEED: f64 = 42.0;
 const TICK_MS: u64 = 16;
+/// Ticks spent parked at the start of every loop: the name reads whole
+/// before it moves again instead of spinning forever.
+const DWELL_TICKS: u32 = 75;
 /// Silence between one copy of the name and the next.
 const GAP: f64 = 56.0;
 /// The bubble's padding, corner rounding and tail shape. The tail is two
@@ -61,6 +64,22 @@ fn advance_slide(slide: f64, period: f64, dt_ms: f64) -> f64 {
     (slide + s(SPEED) * dt_ms / 1000.0) % period
 }
 
+/// One drift tick with a start-of-loop dwell: while `dwell` ticks remain
+/// the text holds still; when the advance wraps past the period the dwell
+/// reloads, so every loop opens with the name parked readable. Returns
+/// the new slide and the remaining dwell.
+fn advance_with_dwell(slide: f64, period: f64, dt_ms: f64, dwell: u32) -> (f64, u32) {
+    if dwell > 0 {
+        return (slide, dwell - 1);
+    }
+    let next = advance_slide(slide, period, dt_ms);
+    if next < slide {
+        (next, DWELL_TICKS)
+    } else {
+        (next, 0)
+    }
+}
+
 /// A clipping window for the drifting title. Two copies of the label ride
 /// inside it, one period apart. A plain `GtkBox` cannot serve: its own
 /// layout re-allocates children on every allocation pass, overwriting the
@@ -76,10 +95,12 @@ mod clip {
         /// Where copy A sits; copy B trails one `period` to the left.
         pub base_x: Cell<i32>,
         pub period: Cell<i32>,
-        /// How far the copies have drifted left; applied at paint time, so
-        /// a tick costs a redraw — never a relayout that re-measures the
-        /// text through Pango 60 times a second.
+        /// How far the drift has moved the copies (paint-time offset).
         pub drift: Cell<i32>,
+        /// Width the copies may use: unbounded while drifting (the full
+        /// unwrapped line slides through), the bubble's content width
+        /// otherwise so long names wrap instead of stretching the pill.
+        pub wrap_width: Cell<i32>,
     }
 
     #[glib::object_subclass]
@@ -143,18 +164,27 @@ mod clip {
             let Some(child) = guard.as_ref() else {
                 return;
             };
+            // Wrapped to the bubble's content width when settled;
+            // unwrapped while drifting, when the full line slides.
+            // Non-positive means unbounded (before the first layout).
+            let wrap_w = match self.wrap_width.get() {
+                w if w > 0 => w,
+                _ => i32::MAX,
+            };
             let (_, natural_w, _, _) = child.measure(gtk4::Orientation::Horizontal, -1);
-            let (_, natural_h, _, _) = child.measure(gtk4::Orientation::Vertical, -1);
+            let alloc_w = natural_w.min(wrap_w).max(1);
+            let (_, natural_h, _, _) =
+                child.measure(gtk4::Orientation::Vertical, alloc_w);
             let y = ((height - natural_h) / 2).max(0) as f32;
             let x = self.base_x.get() as f32;
             let transform = |px: f32| {
                 gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(px, y))
             };
-            child.allocate(natural_w.max(1), natural_h.max(1), height, Some(transform(x)));
+            child.allocate(alloc_w, natural_h.max(1), height, Some(transform(x)));
             drop(guard);
             if let Some(copy) = self.b.borrow().as_ref() {
                 copy.allocate(
-                    natural_w.max(1),
+                    alloc_w,
                     natural_h.max(1),
                     height,
                     Some(transform(x + self.period.get() as f32)),
@@ -264,6 +294,8 @@ mod imp {
         /// Slide phase of copy A within [0, period); 0 keeps the name
         /// readable at the bubble's left padding.
         pub(super) slide: Cell<f64>,
+        /// Ticks left parked at the loop start before drifting again.
+        pub(super) dwell: Cell<u32>,
         /// One name plus the gap — how far a copy travels per loop.
         pub(super) period: Cell<f64>,
         /// True while the text overflows and the drift ticker runs.
@@ -286,6 +318,7 @@ mod imp {
                 tip_y: Cell::new(0.0),
                 tail_up: Cell::new(false),
                 slide: Cell::new(0.0),
+                dwell: Cell::new(0),
                 period: Cell::new(0.0),
                 sliding: Cell::new(false),
                 rail_height: Cell::new(56),
@@ -330,6 +363,11 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
+            // An unmapped widget has no frame: a snapshot forced
+            // before the first allocation warns and paints garbage.
+            if !self.obj().is_mapped() {
+                return;
+            }
             // No text, no pill: before the library loads the marquee would
             // otherwise spawn as an empty bubble floating over nothing.
             let has_text = self
@@ -394,7 +432,15 @@ mod imp {
 
             // The drift can only engage once the label carries its final
             // style — measuring at set_text time races the CSS font size.
-            let overflowing = natural_w + 2.0 * s(PAD_X as f64) > max_width;
+            // Text that wraps to two lines sits still; only novels drift.
+            let single_h =
+                label.measure(gtk4::Orientation::Vertical, -1).1 as f64;
+            let bubble_w = (natural_w + 2.0 * s(PAD_X as f64)).min(max_width);
+            let content_w = (bubble_w - 2.0 * s(PAD_X as f64)).max(1.0);
+            let wrapped_h =
+                label.measure(gtk4::Orientation::Vertical, content_w as i32).1 as f64;
+            let lines = (wrapped_h / single_h.max(1.0)).round().max(1.0);
+            let overflowing = lines > 2.0;
             if overflowing && !self.sliding.get() {
                 self.sliding.set(true);
                 self.slide.set(0.0);
@@ -407,11 +453,22 @@ mod imp {
             // The bubble hugs its text and only caps at max_width when the
             // text overflows (that cap is the drift's clip window). It
             // centers on the tile, clamped to stay on screen.
-            let bubble_w = (natural_w + 2.0 * s(PAD_X as f64)).min(max_width);
             let bubble_x = (center - bubble_w / 2.0)
                 .clamp(margin, (viewport - bubble_w - margin).max(margin));
-            let bubble_h = label.measure(gtk4::Orientation::Vertical, -1).1 as f64
-                + 2.0 * s(PAD_Y as f64)
+            // Settled text wraps to the content width; drifting text
+            // stays single-line and slides.
+            if let Some(clip) = self.clip.borrow().as_ref() {
+                clip.imp().wrap_width.set(if self.sliding.get() {
+                    0
+                } else {
+                    content_w as i32
+                });
+            }
+            let bubble_h = if self.sliding.get() {
+                single_h
+            } else {
+                wrapped_h
+            } + 2.0 * s(PAD_Y as f64)
                 + s(4.0);
             // The TIP is the anchor: it is pinned to the tile edge by the
             // caller, and the bubble hangs off it — its own measured
@@ -484,7 +541,14 @@ mod imp {
                 }
                 let period = imp.period.get();
                 if period > 1.0 {
-                    imp.slide.set(advance_slide(imp.slide.get(), period, TICK_MS as f64));
+                    let (next, dwell) = super::advance_with_dwell(
+                        imp.slide.get(),
+                        period,
+                        TICK_MS as f64,
+                        imp.dwell.get(),
+                    );
+                    imp.slide.set(next);
+                    imp.dwell.set(dwell);
                     if let Some(clip) = imp.clip.borrow().as_ref() {
                         // Only the copies drift: push the new offset into
                         // the clip and repaint it — a relayout here would
@@ -524,6 +588,11 @@ impl Marquee {
         for slot in [&imp.label, &imp.label2] {
             let label = gtk4::Label::new(None);
             label.add_css_class(crate::ui::css::CSS_BP_TITLE);
+            // Long names wrap to the bubble instead of stretching it
+            // single-line across the page; the drift below only engages
+            // when even the wrapped text overflows.
+            label.set_wrap(true);
+            label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
             crate::ui::helpers::crisp_label(&label);
             label.set_parent(&clip);
             *slot.borrow_mut() = Some(label);
@@ -573,13 +642,15 @@ impl Marquee {
     }
 
     /// The bubble's rendered height, for callers that float it above a tile.
+    /// Measured at the width cap so wrapped text reserves its real rows.
     pub(super) fn pill_height(&self) -> i32 {
+        let max_width = self.imp().max_width.get() as i32;
         self.imp()
             .label
             .borrow()
             .as_ref()
             .map(|label| {
-                (label.measure(gtk4::Orientation::Vertical, -1).1 as f64
+                (label.measure(gtk4::Orientation::Vertical, max_width).1 as f64
                     + 2.0 * s(PAD_Y as f64)
                     + s(4.0)) as i32
             })
@@ -605,6 +676,7 @@ impl Marquee {
         drop(label);
         drop(label2);
         imp.slide.set(0.0);
+        imp.dwell.set(DWELL_TICKS);
         self.queue_allocate();
         // One post-layout nudge: the first allocation can land before the
         // label's style settles, measuring the text too narrow and never
@@ -660,7 +732,7 @@ impl Marquee {
 
 #[cfg(test)]
 mod tests {
-    use super::{advance_slide, Bubble, SPEED};
+    use super::{advance_slide, advance_with_dwell, Bubble, SPEED, DWELL_TICKS};
 
     #[test]
     fn test_advance_slide_advances_and_wraps() {
@@ -677,6 +749,20 @@ mod tests {
     fn test_advance_slide_zero_period_never_moves() {
         assert_eq!(advance_slide(10.0, 0.0, 1000.0), 0.0);
         assert_eq!(advance_slide(10.0, -5.0, 1000.0), 0.0);
+    }
+
+    #[test]
+    fn test_advance_with_dwell_holds_then_reloads_on_wrap() {
+        // Held ticks keep the start readable.
+        assert_eq!(advance_with_dwell(0.0, 100.0, 16.0, 3), (0.0, 2));
+        // A fresh advance that wraps reloads the dwell.
+        let (next, dwell) = advance_with_dwell(99.0, 100.0, 1000.0, 0);
+        assert!(next < 99.0);
+        assert_eq!(dwell, DWELL_TICKS);
+        // A fresh advance without wrapping keeps running free.
+        let (next, dwell) = advance_with_dwell(10.0, 100.0, 16.0, 0);
+        assert!(next > 10.0);
+        assert_eq!(dwell, 0);
     }
 
     #[test]

@@ -425,10 +425,10 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
         _ if big.all.in_groups_tiles() => match command {
             NavCommand::Secondary => big.all.groups_delete_selected(state),
             NavCommand::Options => big.all.groups_rename_selected(state),
-            NavCommand::Left => big.all.groups_move(state, -1, 0),
-            NavCommand::Right => big.all.groups_move(state, 1, 0),
-            NavCommand::Up => big.all.groups_move(state, 0, -1),
-            NavCommand::Down => big.all.groups_move(state, 0, 1),
+            NavCommand::Left => big.all.groups_move(state, -1, 0, engage),
+            NavCommand::Right => big.all.groups_move(state, 1, 0, engage),
+            NavCommand::Up => big.all.groups_move(state, 0, -1, engage),
+            NavCommand::Down => big.all.groups_move(state, 0, 1, engage),
             NavCommand::Confirm => big.all.groups_open_selected(state),
             _ => {}
         }
@@ -443,10 +443,10 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
                 None => big.game_menu.open(state, super::game_menu::MenuKind::Sort),
             }
         }
-        NavCommand::Left => big.all.move_selection(-1, 0),
-        NavCommand::Right => big.all.move_selection(1, 0),
-        NavCommand::Up => big.all.move_selection(0, -1),
-        NavCommand::Down => big.all.move_selection(0, 1),
+        NavCommand::Left => big.all.move_selection(-1, 0, engage),
+        NavCommand::Right => big.all.move_selection(1, 0, engage),
+        NavCommand::Up => big.all.move_selection(0, -1, engage),
+        NavCommand::Down => big.all.move_selection(0, 1, engage),
         NavCommand::Confirm => {
             let game = big.all.selected_game();
             if let Some(game) = game {

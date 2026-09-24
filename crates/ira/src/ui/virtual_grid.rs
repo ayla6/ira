@@ -224,7 +224,18 @@ mod imp {
         /// 0 when there is none yet (the first measure) — and it feeds
         /// the row-visibility clamp: without it the tiles grow to the
         /// width's maximum step even in a window that fits two rows.
-        fn build_plan(&self, width: i32, viewport_h: i32, header_h: i32) -> Vec<Slot> {
+        /// `store` decides whether the layout is published: measure
+        /// runs on speculative widths (a stale or floored fallback when
+        /// no width is known yet) and must never overwrite the live
+        /// layout every scroll computation reads — only allocation,
+        /// which always knows the real width, publishes.
+        fn build_plan(
+            &self,
+            width: i32,
+            viewport_h: i32,
+            header_h: i32,
+            store: bool,
+        ) -> Vec<Slot> {
             let sections = self.sections.borrow().clone();
             let (n_cols, item_w, item_h, sp) = compute_grid_layout(
                 width,
@@ -234,11 +245,15 @@ mod imp {
                 self.square_aspect(),
                 self.fixed_cols.get(),
             );
-            self.last_layout.set((n_cols, item_w, item_h, sp));
+            if store {
+                self.last_layout.set((n_cols, item_w, item_h, sp));
+            }
             let content_w = n_cols as i32 * item_w + (n_cols as i32 - 1) * sp;
             let edge = ((width - content_w) / 2).max(0);
-            self.last_edge.set(edge);
-            self.last_col_spacing.set(sp);
+            if store {
+                self.last_edge.set(edge);
+                self.last_col_spacing.set(sp);
+            }
             let row_h = item_h + sp;
             let n_cols = n_cols as usize;
 
@@ -394,7 +409,7 @@ mod imp {
                 } else {
                     self.prev_width.get().max(1).max(800)
                 };
-                let plan = self.build_plan(width, 0, header_h);
+                let plan = self.build_plan(width, 0, header_h, false);
                 let h = plan
                     .last()
                     .map(|slot| slot.y + slot.h)
@@ -442,7 +457,8 @@ mod imp {
             // ys are absolute; the visible window compares in the same
             // coordinates. The allocated height rides along so the tile
             // step keeps enough rows on screen.
-            let plan = self.build_plan(width, height, header_h);
+            self.prev_width.set(width);
+            let plan = self.build_plan(width, height, header_h, true);
             let (_, item_w, item_h, sp) = self.last_layout.get();
             let row_h = item_h + sp;
 

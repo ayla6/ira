@@ -945,7 +945,7 @@ impl SteamDataClient {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
-        let preferred = ira_models::region_from_rom_paths(&[rom_nom.to_string()]);
+        let preferred = region_from_rom_paths(&[rom_nom.to_string()]);
         self.screenscraper_get(
             &game_info_url(creds, rom_nom, platform_id, md5),
             preferred,
@@ -964,7 +964,7 @@ impl SteamDataClient {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
-        let preferred = ira_models::region_from_rom_paths(&[serial.to_string()]);
+        let preferred = region_from_rom_paths(&[serial.to_string()]);
         self.screenscraper_get(
             &serial_lookup_url(creds, serial, platform_id),
             preferred,

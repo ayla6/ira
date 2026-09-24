@@ -135,35 +135,21 @@ mod tests {
     }
 }
 
-/// Downscale an image to preview size for tiles that show it at a fixed
-/// few hundred pixels: decoding full-res photos on the main loop stalls
-/// a picker open for seconds in debug builds, and a size request is a
-/// minimum — a bigger texture's natural size would grow the tile past
-/// it. Images already within `max_px` pass through byte-identical;
-/// anything undecodable passes through untouched. Callers persist the
-/// original separately.
-pub fn preview_bytes(png: &[u8], max_px: u32) -> Vec<u8> {
-    let img = match image::load_from_memory(png) {
-        Ok(img) => img,
-        Err(_) => return png.to_vec(),
+/// Decode an image to capped RGBA8 pixels for tile textures: the decode
+/// and downscale happen on the fetch thread, so the main loop only
+/// uploads pixels instead of decoding files a second time. Images
+/// already within `max_px` decode at natural size; undecodable input
+/// yields `None` and the caller keeps its fallback.
+pub fn decode_rgba_preview(png: &[u8], max_px: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let img = image::load_from_memory(png).ok()?;
+    let img = if img.width() > max_px || img.height() > max_px {
+        img.thumbnail(max_px, max_px)
+    } else {
+        img
     };
-    if img.width() <= max_px && img.height() <= max_px {
-        return png.to_vec();
-    }
-    let small = img.thumbnail(max_px, max_px).to_rgba8();
-    let mut out = Vec::new();
-    if image::codecs::png::PngEncoder::new(&mut out)
-        .write_image(
-            small.as_raw(),
-            small.width(),
-            small.height(),
-            image::ExtendedColorType::Rgba8,
-        )
-        .is_err()
-    {
-        return png.to_vec();
-    }
-    out
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Some((width, height, rgba.into_raw()))
 }
 
 /// Crops transparent margins off an image: the bounding box of pixels
@@ -256,20 +242,20 @@ mod trim_tests {
     }
 
     #[test]
-    fn test_preview_bytes_passes_small_images_through() {
-        let mut img = image::RgbaImage::new(64, 64);
-        for pixel in img.pixels_mut() {
-            *pixel = image::Rgba([10, 200, 30, 255]);
-        }
+    fn test_decode_rgba_preview_passes_small_images_through() {
+        let img = image::RgbaImage::from_pixel(64, 64, image::Rgba([10, 200, 30, 255]));
         let mut out = Vec::new();
         image::codecs::png::PngEncoder::new(&mut out)
             .write_image(img.as_raw(), 64, 64, image::ExtendedColorType::Rgba8)
             .unwrap();
-        assert_eq!(preview_bytes(&out, 512), out);
+        let (width, height, pixels) = decode_rgba_preview(&out, 512).expect("decodes");
+        assert_eq!((width, height), (64, 64));
+        assert_eq!(pixels.len(), 64 * 64 * 4);
+        assert_eq!(&pixels[0..4], &[10, 200, 30, 255]);
     }
 
     #[test]
-    fn test_preview_bytes_caps_large_images() {
+    fn test_decode_rgba_preview_caps_large_images() {
         let img = image::RgbaImage::from_pixel(1024, 768, image::Rgba([10, 200, 30, 255]));
         let mut out = Vec::new();
         image::codecs::png::PngEncoder::new(&mut out)
@@ -280,10 +266,14 @@ mod trim_tests {
                 image::ExtendedColorType::Rgba8,
             )
             .unwrap();
-        let small = preview_bytes(&out, 256);
-        assert!(small.len() < out.len());
-        let back = image::load_from_memory(&small).unwrap();
-        assert!(back.width() <= 256 && back.height() <= 256);
+        let (width, height, _) = decode_rgba_preview(&out, 256).expect("decodes");
+        assert!(width <= 256 && height <= 256);
+        assert_eq!((width, height), (256, 192));
+    }
+
+    #[test]
+    fn test_decode_rgba_preview_rejects_garbage() {
+        assert!(decode_rgba_preview(b"not an image", 256).is_none());
     }
 
     #[test]

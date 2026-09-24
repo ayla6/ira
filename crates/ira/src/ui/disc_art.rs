@@ -132,23 +132,23 @@ fn persist_disc_art(dir: &std::path::Path, disc_number: i32, png: &[u8]) {
 }
 
 /// Fetch the disc art of one game and hand the decoded textures to
-/// `ready` on the main loop, keyed by disc number. Everything blocking
+/// `ready` on the main loop, keyed by disc number. Everything heavy
 /// (disk reads, the network, the photo decode and downscale) runs on a
-/// background thread; the main loop only textures small preview bytes.
-/// Textures cap at `max_px` a side: a size request is a minimum, so a
-/// bigger texture's natural size would grow the tile past it. Art
-/// already on disk is read straight away; only missing discs hit the
-/// network (with the default region order), and what arrives is
-/// persisted before decoding. Without a ScreenScraper match or
-/// credentials the map holds whatever the disk had, and the callback
-/// still fires.
+/// background thread, which hands over raw pixels; the main loop only
+/// uploads them into textures — no second decode. Textures cap at
+/// `max_px` a side: a size request is a minimum, so a bigger texture's
+/// natural size would grow the tile past it. Art already on disk is
+/// read straight away; only missing discs hit the network (with the
+/// default region order), and what arrives is persisted before
+/// decoding. Without a ScreenScraper match or credentials the map
+/// holds whatever the disk had, and the callback still fires.
 pub(super) fn fetch_disc_art<F>(state: &SharedState, db_id: i64, max_px: u32, ready: F)
 where
     F: FnOnce(HashMap<i32, gdk4::Texture>) + 'static,
 {
     let ctx = fetch_context(state, db_id);
 
-    let (tx, rx) = mpsc::channel::<HashMap<i32, Vec<u8>>>();
+    let (tx, rx) = mpsc::channel::<HashMap<i32, (u32, u32, Vec<u8>)>>();
     std::thread::spawn(move || {
         let mut map = present_art(&ctx.data_dir, &ctx.discs);
         let missing: Vec<i32> = ctx
@@ -176,23 +176,34 @@ where
                 Err(e) => eprintln!("Disc art fetch failed: {e}"),
             }
         }
-        for bytes in map.values_mut() {
-            *bytes = ira_parser::preview_bytes(bytes, max_px);
+        let mut pixels = HashMap::new();
+        for (disc, bytes) in map {
+            if let Some((width, height, rgba)) =
+                ira_parser::decode_rgba_preview(&bytes, max_px)
+            {
+                pixels.insert(disc, (width, height, rgba));
+            }
         }
-        let _ = tx.send(map);
+        let _ = tx.send(pixels);
     });
-    // Textures stay on the main loop; the bytes arriving here are
-    // already downscaled previews.
+    // Pixel uploads stay on the main loop; undecodable files simply
+    // never arrive and their tiles keep the fallback icon.
     let ready = std::rc::Rc::new(std::cell::RefCell::new(Some(ready)));
     glib::source::idle_add_local(move || match rx.try_recv() {
         Ok(map) => {
             let textures: HashMap<i32, gdk4::Texture> = map
                 .into_iter()
-                .filter_map(|(disc, png)| {
-                    let bytes = glib::Bytes::from_owned(png);
-                    gdk4::Texture::from_bytes(&bytes)
-                        .map(|texture| (disc, texture))
-                        .ok()
+                .map(|(disc, (width, height, rgba))| {
+                    let pixbuf = gdk_pixbuf::Pixbuf::from_bytes(
+                        &glib::Bytes::from_owned(rgba),
+                        gdk_pixbuf::Colorspace::Rgb,
+                        true,
+                        8,
+                        width as i32,
+                        height as i32,
+                        width as i32 * 4,
+                    );
+                    (disc, gdk4::Texture::for_pixbuf(&pixbuf))
                 })
                 .collect();
             if let Some(ready) = ready.borrow_mut().take() {

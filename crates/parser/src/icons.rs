@@ -135,6 +135,37 @@ mod tests {
     }
 }
 
+/// Downscale an image to preview size for tiles that show it at a few
+/// hundred pixels: decoding full-res photos on the main loop stalls a
+/// picker open for seconds in debug builds. Images already within
+/// `PREVIEW_MAX` pass through byte-identical; anything undecodable
+/// passes through untouched. Callers persist the original separately.
+pub const PREVIEW_MAX: u32 = 512;
+
+pub fn preview_bytes(png: &[u8]) -> Vec<u8> {
+    let img = match image::load_from_memory(png) {
+        Ok(img) => img,
+        Err(_) => return png.to_vec(),
+    };
+    if img.width() <= PREVIEW_MAX && img.height() <= PREVIEW_MAX {
+        return png.to_vec();
+    }
+    let small = img.thumbnail(PREVIEW_MAX, PREVIEW_MAX).to_rgba8();
+    let mut out = Vec::new();
+    if image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(
+            small.as_raw(),
+            small.width(),
+            small.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .is_err()
+    {
+        return png.to_vec();
+    }
+    out
+}
+
 /// Crops transparent margins off an image: the bounding box of pixels
 /// with alpha above [`TRIM_ALPHA_CUTOFF`], re-encoded as PNG. Anything
 /// at or below the cutoff counts as transparent because service art
@@ -222,6 +253,37 @@ mod trim_tests {
     #[test]
     fn test_trim_transparent_margins_rejects_garbage() {
         assert!(trim_transparent_margins(b"not an image").is_none());
+    }
+
+    #[test]
+    fn test_preview_bytes_passes_small_images_through() {
+        let mut img = image::RgbaImage::new(64, 64);
+        for pixel in img.pixels_mut() {
+            *pixel = image::Rgba([10, 200, 30, 255]);
+        }
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(img.as_raw(), 64, 64, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        assert_eq!(preview_bytes(&out), out);
+    }
+
+    #[test]
+    fn test_preview_bytes_caps_large_images() {
+        let img = image::RgbaImage::from_pixel(1024, 768, image::Rgba([10, 200, 30, 255]));
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(
+                img.as_raw(),
+                1024,
+                768,
+                image::ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        let small = preview_bytes(&out);
+        assert!(small.len() < out.len());
+        let back = image::load_from_memory(&small).unwrap();
+        assert!(back.width() <= PREVIEW_MAX && back.height() <= PREVIEW_MAX);
     }
 
     #[test]

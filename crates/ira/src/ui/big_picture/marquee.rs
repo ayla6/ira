@@ -159,7 +159,10 @@ mod clip {
             }
         }
 
-        fn size_allocate(&self, _width: i32, height: i32, _baseline: i32) {
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            // The parent call clears the needs-allocation flag —
+            // skipping it warns on every snapshot.
+            self.parent_size_allocate(width, height, baseline);
             let guard = self.a.borrow();
             let Some(child) = guard.as_ref() else {
                 return;
@@ -411,7 +414,10 @@ mod imp {
             }
         }
 
-        fn size_allocate(&self, width: i32, _height: i32, _baseline: i32) {
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            // The parent call clears the needs-allocation flag —
+            // skipping it warns on every snapshot.
+            self.parent_size_allocate(width, height, baseline);
             let label_guard = self.label.borrow();
             let Some(label) = label_guard.as_ref() else {
                 return;

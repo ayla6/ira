@@ -147,7 +147,7 @@ impl DiscPicker {
         let place_ring = self.ring.downgrade();
         let place_pill = self.pill.clone();
         let place_root = self.root.clone();
-        crate::ui::disc_art::fetch_disc_art(state, db_id, move |art| {
+        crate::ui::disc_art::fetch_disc_art(state, db_id, art_px as u32, move |art| {
             for tile in tiles.borrow().iter() {
                 if let Some(texture) = art.get(&tile.disc_number) {
                     tile.picture.set_paintable(Some(texture));

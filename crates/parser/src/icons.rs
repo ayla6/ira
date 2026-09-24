@@ -135,22 +135,22 @@ mod tests {
     }
 }
 
-/// Downscale an image to preview size for tiles that show it at a few
-/// hundred pixels: decoding full-res photos on the main loop stalls a
-/// picker open for seconds in debug builds. Images already within
-/// `PREVIEW_MAX` pass through byte-identical; anything undecodable
-/// passes through untouched. Callers persist the original separately.
-pub const PREVIEW_MAX: u32 = 512;
-
-pub fn preview_bytes(png: &[u8]) -> Vec<u8> {
+/// Downscale an image to preview size for tiles that show it at a fixed
+/// few hundred pixels: decoding full-res photos on the main loop stalls
+/// a picker open for seconds in debug builds, and a size request is a
+/// minimum — a bigger texture's natural size would grow the tile past
+/// it. Images already within `max_px` pass through byte-identical;
+/// anything undecodable passes through untouched. Callers persist the
+/// original separately.
+pub fn preview_bytes(png: &[u8], max_px: u32) -> Vec<u8> {
     let img = match image::load_from_memory(png) {
         Ok(img) => img,
         Err(_) => return png.to_vec(),
     };
-    if img.width() <= PREVIEW_MAX && img.height() <= PREVIEW_MAX {
+    if img.width() <= max_px && img.height() <= max_px {
         return png.to_vec();
     }
-    let small = img.thumbnail(PREVIEW_MAX, PREVIEW_MAX).to_rgba8();
+    let small = img.thumbnail(max_px, max_px).to_rgba8();
     let mut out = Vec::new();
     if image::codecs::png::PngEncoder::new(&mut out)
         .write_image(
@@ -265,7 +265,7 @@ mod trim_tests {
         image::codecs::png::PngEncoder::new(&mut out)
             .write_image(img.as_raw(), 64, 64, image::ExtendedColorType::Rgba8)
             .unwrap();
-        assert_eq!(preview_bytes(&out), out);
+        assert_eq!(preview_bytes(&out, 512), out);
     }
 
     #[test]
@@ -280,10 +280,10 @@ mod trim_tests {
                 image::ExtendedColorType::Rgba8,
             )
             .unwrap();
-        let small = preview_bytes(&out);
+        let small = preview_bytes(&out, 256);
         assert!(small.len() < out.len());
         let back = image::load_from_memory(&small).unwrap();
-        assert!(back.width() <= PREVIEW_MAX && back.height() <= PREVIEW_MAX);
+        assert!(back.width() <= 256 && back.height() <= 256);
     }
 
     #[test]

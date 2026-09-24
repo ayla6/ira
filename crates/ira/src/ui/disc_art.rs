@@ -23,6 +23,22 @@ pub(super) fn is_disc_draft_key(key: &str) -> bool {
     })
 }
 
+/// The ScreenScraper region the game's own ROMs point at, for ordering
+/// names and art: disc serial prefixes and filename tags, `None` when
+/// no path says anything about region.
+pub(crate) fn rom_region(db: &ira_db::DbConn, db_id: i64) -> Option<&'static str> {
+    let entry = ira_db::find_by_db_id(db, db_id).ok().flatten()?;
+    let mut paths: Vec<String> = ira_db::get_discs(db, db_id)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|disc| disc.rom_path)
+        .collect();
+    if !entry.rom_path.is_empty() {
+        paths.push(entry.rom_path);
+    }
+    ira_models::region_from_rom_paths(&paths)
+}
+
 /// Everything a disc-art fetch needs, read off the main loop up front
 /// so the network thread never borrows state.
 struct DiscFetchCtx {
@@ -35,7 +51,7 @@ struct DiscFetchCtx {
 }
 
 fn fetch_context(state: &SharedState, db_id: i64) -> DiscFetchCtx {
-    let (steam, creds, ss_id, save_dir, game, db, rom_paths) = {
+    let (steam, creds, ss_id, save_dir, game, db) = {
         let s = state.borrow();
         let ss_id = ira_db::scraper_metadata_for_game(&s.db, db_id)
             .ok()
@@ -43,16 +59,6 @@ fn fetch_context(state: &SharedState, db_id: i64) -> DiscFetchCtx {
             .map(|metadata| metadata.ss_id)
             .unwrap_or_default();
         let game = s.games.iter().find(|g| g.db_id == db_id).cloned();
-        let mut rom_paths: Vec<String> = ira_db::get_discs(&s.db, db_id)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|disc| disc.rom_path)
-            .collect();
-        if let Some(game) = game.as_ref() {
-            if !game.rom_path.is_empty() {
-                rom_paths.push(game.rom_path.clone());
-            }
-        }
         (
             s.steam.clone(),
             ScraperCreds::from_account(
@@ -63,7 +69,6 @@ fn fetch_context(state: &SharedState, db_id: i64) -> DiscFetchCtx {
             s.save_dir.clone(),
             game,
             s.db.clone(),
-            rom_paths,
         )
     };
     let discs = ira_db::get_discs(&db, db_id)
@@ -77,7 +82,7 @@ fn fetch_context(state: &SharedState, db_id: i64) -> DiscFetchCtx {
     // The region the game's own ROMs come from orders the download:
     // its art is tried first, the service default fills the rest.
     let mut regions = Vec::new();
-    if let Some(region) = ira_models::region_from_rom_paths(&rom_paths) {
+    if let Some(region) = rom_region(&db, db_id) {
         regions.push(region.to_string());
     }
     for fallback in ["us", "wor", "ss", "eu", "jp"] {
@@ -130,12 +135,14 @@ fn persist_disc_art(dir: &std::path::Path, disc_number: i32, png: &[u8]) {
 /// `ready` on the main loop, keyed by disc number. Everything blocking
 /// (disk reads, the network, the photo decode and downscale) runs on a
 /// background thread; the main loop only textures small preview bytes.
-/// Art already on disk is read straight away; only missing discs hit
-/// the network (with the default region order), and what arrives is
+/// Textures cap at `max_px` a side: a size request is a minimum, so a
+/// bigger texture's natural size would grow the tile past it. Art
+/// already on disk is read straight away; only missing discs hit the
+/// network (with the default region order), and what arrives is
 /// persisted before decoding. Without a ScreenScraper match or
 /// credentials the map holds whatever the disk had, and the callback
 /// still fires.
-pub(super) fn fetch_disc_art<F>(state: &SharedState, db_id: i64, ready: F)
+pub(super) fn fetch_disc_art<F>(state: &SharedState, db_id: i64, max_px: u32, ready: F)
 where
     F: FnOnce(HashMap<i32, gdk4::Texture>) + 'static,
 {
@@ -170,7 +177,7 @@ where
             }
         }
         for bytes in map.values_mut() {
-            *bytes = ira_parser::preview_bytes(bytes);
+            *bytes = ira_parser::preview_bytes(bytes, max_px);
         }
         let _ = tx.send(map);
     });

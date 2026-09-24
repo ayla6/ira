@@ -81,7 +81,7 @@ pub(super) fn present(
     // as its texture arrives. The idle closure holds the tiles (and, via
     // their click handlers, the dialog) only until the art is delivered.
     let tiles_for_art = tiles;
-    super::disc_art::fetch_disc_art(state, db_id, move |art| {
+    super::disc_art::fetch_disc_art(state, db_id, 512, move |art| {
         for tile in tiles_for_art.borrow().iter() {
             if let Some(texture) = art.get(&tile.disc) {
                 tile.picture.set_paintable(Some(texture));

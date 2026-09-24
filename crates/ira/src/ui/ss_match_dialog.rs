@@ -104,6 +104,9 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
             g.set_name(title);
         }
     }
+    // A fresh match is when missing disc art wants fetching: multidisc
+    // games with nothing on disk yet pull it in the background.
+    super::disc_art::autodownload_disc_art(state, db_id);
 }
 
 /// The search dialog starts from the game's own title when the row's

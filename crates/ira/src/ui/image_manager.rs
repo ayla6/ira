@@ -50,6 +50,10 @@ pub fn build_image_manager_content_with_drafts(
         content.append(&section);
     }
 
+    if let Some(discs) = build_discs_section(state, game, parent_win, &pending_copies) {
+        content.append(&discs);
+    }
+
     {
         let btn_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         btn_box.set_halign(gtk4::Align::Center);
@@ -699,6 +703,177 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     row.append(&btns);
     section.append(&row);
     section
+}
+
+/// The Discs section: one thumbnail per disc of a multi-disc game, a
+/// file picker per disc for manual art, a region choice plus an SS
+/// button that stages missing art as drafts, saved with the dialog
+/// like every other image. Single-disc games get no section.
+fn build_discs_section(
+    state: &SharedState,
+    game: &Game,
+    parent_win: &adw::Window,
+    pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+) -> Option<gtk4::Box> {
+    const REGIONS: &[&str] = &["us", "eu", "jp", "wor", "ss"];
+
+    let db = state.borrow().db.clone();
+    let discs = ira_db::get_discs(&db, game.db_id).unwrap_or_default();
+    if discs.len() <= 1 {
+        return None;
+    }
+    let save_dir = state.borrow().save_dir.clone();
+    let data_dir = ira_parser::game_data_dir(&save_dir, game);
+
+    let section = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    let lbl = gtk4::Label::new(Some(&crate::tr!("Discs")));
+    lbl.set_halign(gtk4::Align::Start);
+    lbl.add_css_class(CSS_HEADING);
+    section.append(&lbl);
+
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    row.set_hexpand(true);
+    row.set_valign(gtk4::Align::Center);
+
+    let thumbs = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    thumbs.set_hexpand(true);
+    for disc in &discs {
+        let cell = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+        let key = super::disc_art::disc_file_base(disc.disc_number);
+        // Settings drafts win over what is already on disk.
+        let draft = pending_copies.as_ref().and_then(|pc| {
+            pc.borrow().get(&key).and_then(|img| match img {
+                PendingImage::Path(p)
+                    if !p.is_empty() && std::path::Path::new(p).is_file() =>
+                {
+                    Some(PendingImage::Path(p.clone()))
+                }
+                PendingImage::Bytes(b) if !b.is_empty() => Some(PendingImage::Bytes(b.clone())),
+                _ => None,
+            })
+        });
+        let source = draft.or_else(|| {
+            ira_parser::find_image_file(&data_dir, &key)
+                .map(|path| path.to_string_lossy().into_owned())
+                .filter(|path| !path.is_empty())
+                .map(PendingImage::Path)
+        });
+        cell.append(&build_image_preview(source.as_ref(), 96));
+        let caption = if disc.label.is_empty() {
+            crate::tr!("Disc {}").replacen("{}", &disc.disc_number.to_string(), 1)
+        } else {
+            disc.label.clone()
+        };
+        let caption_label = gtk4::Label::new(Some(&caption));
+        caption_label.add_css_class(CSS_DIM_LABEL);
+        caption_label.set_halign(gtk4::Align::Center);
+        cell.append(&caption_label);
+
+        let browse_key = key.clone();
+        let browse_pc = pending_copies.clone();
+        let browse_sc = state.clone();
+        let browse_did = game.db_id;
+        let on_pick = move |path: &std::path::Path| {
+            if let Some(ref pc_inner) = browse_pc {
+                // Hand-picked files trim like downloads do, so the
+                // tile stays regular; untrimmed bytes pass through.
+                    let staged = std::fs::read(path)
+                    .ok()
+                    .and_then(|bytes| ira_parser::trim_transparent_margins(&bytes))
+                    .map(glib::Bytes::from_owned)
+                    .map(PendingImage::Bytes)
+                    .unwrap_or_else(|| {
+                        PendingImage::Path(path.to_string_lossy().into_owned())
+                    });
+                pc_inner.borrow_mut().insert(browse_key.clone(), staged);
+                refresh_settings_images_page(&browse_sc, browse_did, |s, game, win, pc, scache| {
+                    build_image_manager_content_with_drafts(s, game, win, pc, scache).upcast()
+                });
+            }
+        };
+        let browse_btn = make_browse_button(
+            Some(parent_win),
+            &crate::tr!("Select image"),
+            false,
+            Some((
+                &crate::tr!("Images"),
+                &["image/png", "image/jpeg", "image/webp", "image/x-icon"],
+            )),
+            || None,
+            on_pick,
+        );
+        browse_btn.set_halign(gtk4::Align::Center);
+        cell.append(&browse_btn);
+        thumbs.append(&cell);
+    }
+    row.append(&thumbs);
+
+    let controls = gtk4::Box::new(gtk4::Orientation::Vertical, 6);
+    controls.set_halign(gtk4::Align::End);
+    controls.set_valign(gtk4::Align::Center);
+
+    let region_names: Vec<String> =
+        std::iter::once(crate::tr!("Auto"))
+            .chain(REGIONS.iter().map(|r| r.to_string()))
+            .collect();
+    let region_row = adw::ComboRow::new();
+    region_row.set_title(&crate::tr!("Region"));
+    region_row.set_model(Some(&gtk4::StringList::new(
+        &region_names.iter().map(String::as_str).collect::<Vec<_>>(),
+    )));
+    controls.append(&region_row);
+
+    let ss_btn = gtk4::Button::with_label("SS");
+    ss_btn.set_tooltip_text(Some(
+        &crate::tr!("Download missing disc art from ScreenScraper"),
+    ));
+    ss_btn.set_halign(gtk4::Align::End);
+    {
+        let sc = state.clone();
+        let did = game.db_id;
+        let pc = pending_copies.clone();
+        let btn = ss_btn.downgrade();
+        let region_row = region_row.clone();
+        ss_btn.connect_clicked(move |_| {
+            if let Some(btn) = btn.upgrade() {
+                btn.set_sensitive(false);
+            }
+            let regions = region_row
+                .selected()
+                .checked_sub(1)
+                .and_then(|idx| REGIONS.get(idx as usize))
+                .map(|region| vec![region.to_string()])
+                .unwrap_or_default();
+            let sc2 = sc.clone();
+            let pc2 = pc.clone();
+            super::disc_art::fetch_disc_art_staged(&sc, did, regions, move |bytes| {
+                if let Some(ref pc_inner) = pc2 {
+                    let mut pc_inner = pc_inner.borrow_mut();
+                    for (disc, png) in bytes {
+                        if png.is_empty() {
+                            continue;
+                        }
+                        // Trimmed like persisted art so staged tiles
+                        // already sit at their regular size.
+                        let png = ira_parser::trim_transparent_margins(&png)
+                            .unwrap_or(png);
+                        pc_inner.insert(
+                            super::disc_art::disc_file_base(disc),
+                            PendingImage::Bytes(glib::Bytes::from_owned(png)),
+                        );
+                    }
+                }
+                refresh_settings_images_page(&sc2, did, |s, game, win, pc, scache| {
+                    build_image_manager_content_with_drafts(s, game, win, pc, scache).upcast()
+                });
+            });
+        });
+    }
+    controls.append(&ss_btn);
+    row.append(&controls);
+
+    section.append(&row);
+    Some(section)
 }
 
 pub struct VariantImageSectionParams<'a> {

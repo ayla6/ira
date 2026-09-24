@@ -589,12 +589,16 @@ fn spawn_image_copy_thread(
         let total = images.len();
         let mut converted = Vec::new();
         for (index, (asset, img)) in images.iter().enumerate() {
-            let Some(at) = AssetType::from_string(asset) else {
-                continue;
+            // Disc art rides the same drafts under `disc{n}` keys: same
+            // pipeline, tile-sized bounds.
+            let (base_name, (max_w, max_h)) = match AssetType::from_string(asset) {
+                Some(at) => (at.file_base().to_string(), at.thumb_dims()),
+                None if super::disc_art::is_disc_draft_key(asset) => {
+                    (asset.clone(), (192, 192))
+                }
+                None => continue,
             };
-            let base_name = at.file_base();
-            let (max_w, max_h) = at.thumb_dims();
-            ira_parser::remove_image_variants(&cloud_dir, base_name);
+            ira_parser::remove_image_variants(&cloud_dir, &base_name);
 
             let dest = match img {
                 PendingImage::Path(src_path) => {
@@ -648,11 +652,11 @@ fn spawn_image_copy_thread(
                 if ext != "webp" && ext != "jpg" {
                     ira_parser::convert_to_lossless_webp(&dest);
                 }
-                ira_parser::ensure_small_image(&cloud_dir, base_name, max_w, max_h);
-                converted.push(base_name.to_string());
+                ira_parser::ensure_small_image(&cloud_dir, &base_name, max_w, max_h);
+                converted.push(base_name.clone());
             }
             if let Some(progress) = &progress {
-                progress.update(index + 1, total, base_name);
+                progress.update(index + 1, total, &base_name);
             }
         }
 

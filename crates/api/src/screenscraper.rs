@@ -521,14 +521,17 @@ pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
 }
 
 fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
-    let regions = region_preference();
+    scraped_game_with(jeu, &region_preference())
+}
+
+fn scraped_game_with(jeu: &SsJeu, regions: &[&str]) -> ScrapedGame {
     let languages = language_preference();
     let name = jeu
         .noms
         .as_ref()
         .and_then(|n| {
             let items: Vec<_> = n.nom.iter().map(|n| (n.region.clone(), n.text.clone())).collect();
-            pick(&regions, &items).map(str::to_string)
+            pick(regions, &items).map(str::to_string)
         })
         .unwrap_or_default()
         .replace("&nbsp;", " ")
@@ -549,7 +552,7 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
                 .collect()
         })
         .unwrap_or_default();
-    let release_date = pick(&regions, &release_dates)
+    let release_date = pick(regions, &release_dates)
         .unwrap_or_default()
         .to_string();
     // English genres, primary first.
@@ -640,11 +643,11 @@ fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
             .unwrap_or(languages.len())
     });
     let medias = jeu.medias.as_ref();
-    let screenshot = medias.and_then(|m| media_url(&m.media, "ss", &regions));
-    let box2d = medias.and_then(|m| media_url(&m.media, "box-2D", &regions));
-    let title_screen = medias.and_then(|m| media_url(&m.media, "sstitle", &regions));
+    let screenshot = medias.and_then(|m| media_url(&m.media, "ss", regions));
+    let box2d = medias.and_then(|m| media_url(&m.media, "box-2D", regions));
+    let title_screen = medias.and_then(|m| media_url(&m.media, "sstitle", regions));
     let disc_images = medias
-        .map(|m| disc_media_urls(&m.media, &regions))
+        .map(|m| disc_media_urls(&m.media, regions, false))
         .unwrap_or_default();
     // Every region's name, entities decoded so comparisons see real
     // characters, deduplicated.
@@ -724,11 +727,43 @@ pub struct DiscMedia {
     pub png: Vec<u8>,
 }
 
+    /// The region-picked `support-2D` URL for every disc the answer carries.
+    /// Multi-disc games tag each media node with a `support` attribute
+    /// (`<media type="support-2D" region="eu" support="2">`); nodes without
+    /// one are disc 1. URLs get the same space-escaping as `media_url`.
+    pub(crate) fn parse_disc_images(
+        xml: &str,
+        regions: &[String],
+    ) -> Result<Vec<(i32, String)>, String> {
+        let data: SsData = quick_xml::de::from_str(xml)
+            .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
+        let jeux: Vec<SsJeu> = match data.jeux {
+            Some(jeux) => jeux.games,
+            None => data.jeu.into_iter().collect(),
+        };
+        let Some(jeu) = jeux.into_iter().next() else {
+            return Ok(Vec::new());
+        };
+        let fallback = region_preference();
+        let strict = !regions.is_empty();
+        let regions: Vec<&str> = if strict {
+            regions.iter().map(String::as_str).collect()
+        } else {
+            fallback
+        };
+        let Some(medias) = jeu.medias.as_ref() else {
+            return Ok(Vec::new());
+        };
+        Ok(disc_media_urls(&medias.media, &regions, strict))
+}
+
 /// The region-picked `support-2D` URL for every disc the answer carries.
 /// Multi-disc games tag each media node with a `support` attribute
 /// (`<media type="support-2D" region="eu" support="2">`); nodes without
 /// one are disc 1. URLs get the same space-escaping as `media_url`.
-fn disc_media_urls(medias: &[SsMedia], regions: &[&str]) -> Vec<(i32, String)> {
+/// Strict mode skips the usual preferred-region fallback: an explicit
+/// region choice returns exactly that region or nothing.
+fn disc_media_urls(medias: &[SsMedia], regions: &[&str], strict: bool) -> Vec<(i32, String)> {
     let mut per_disc: std::collections::HashMap<i32, Vec<(String, String)>> = Default::default();
     for media in medias.iter().filter(|m| m.kind == "support-2D") {
         let disc = media.support.parse::<i32>().unwrap_or(1);
@@ -739,7 +774,17 @@ fn disc_media_urls(medias: &[SsMedia], regions: &[&str]) -> Vec<(i32, String)> {
     }
     let mut out: Vec<(i32, String)> = per_disc
         .into_iter()
-        .filter_map(|(disc, urls)| pick(regions, &urls).map(|url| (disc, url.replace(' ', "%20"))))
+        .filter_map(|(disc, urls)| {
+                let url = if strict {
+                    urls.iter().find_map(|(region, url)| {
+                        (regions.contains(&region.as_str()) && !url.is_empty())
+                            .then_some(url.as_str())
+                    })
+                } else {
+                    pick(regions, &urls)
+                };
+            url.map(|url| (disc, url.replace(' ', "%20")))
+        })
         .collect();
     out.sort_by_key(|(disc, _)| *disc);
     out
@@ -920,15 +965,18 @@ impl SteamDataClient {
     }
 
     /// The per-disc physical-media art for one game (`support-2D`), PNG
-    /// bytes keyed by disc number, for the disc-picker tiles. The jeuInfos
-    /// answer is cached like the genre table — one request per game, ever
-    /// — and each downloaded image lands next to it, so repeat pickers
-    /// never touch the network. Discs the service has no art for are
-    /// simply absent; the picker falls back to a numbered icon.
+    /// bytes keyed by disc number, for the disc-picker tiles. `regions`
+    /// pins the caller's region choice; empty takes the default
+    /// preference order. The jeuInfos answer is cached like the genre
+    /// table — one request per game, ever. Images are never cached
+    /// here: the caller persists them beside the game's other art.
+    /// Discs the service has no art for are simply absent; the picker
+    /// falls back to a numbered icon.
     pub fn screenscraper_disc_media(
         &self,
         creds: &ScraperCreds,
         ss_id: &str,
+        regions: &[String],
     ) -> Result<Vec<DiscMedia>, String> {
         if !creds.is_configured() || ss_id.is_empty() {
             return Ok(Vec::new());
@@ -939,26 +987,13 @@ impl SteamDataClient {
             &format!("jeu_{ss_id}.xml"),
             &game_info_by_id_url(creds, ss_id),
         )?;
-        let Some(game) = parse_games(&xml)?.into_iter().next() else {
-            return Ok(Vec::new());
-        };
-        let discs_dir = scrapers.join("discs");
-        let mut out = Vec::with_capacity(game.disc_images.len());
-        for (disc, url) in game.disc_images {
-            let path = discs_dir.join(format!("{ss_id}_{disc}.png"));
-            let png = match std::fs::read(&path) {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    let bytes = self.screenscraper_media(&url)?;
-                    if let Err(err) = std::fs::create_dir_all(&discs_dir)
-                        .and_then(|_| std::fs::write(&path, &bytes))
-                    {
-                        eprintln!("Failed to cache disc image {}: {err}", path.display());
-                    }
-                    bytes
-                }
-            };
-            out.push(DiscMedia { disc, png });
+        let mut out = Vec::new();
+        for (disc, url) in parse_disc_images(&xml, regions)? {
+            // One missing image must not sink the discs that did arrive.
+            match self.screenscraper_media(&url) {
+                Ok(png) => out.push(DiscMedia { disc, png }),
+                Err(e) => eprintln!("Disc art download failed (disc {disc}): {e}"),
+            }
         }
         Ok(out)
     }

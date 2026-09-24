@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use image::ImageEncoder;
+
 /// Encodes little-endian RGB565 pixel data as a PNG file.
 pub fn save_rgb565_png(path: &Path, width: u32, height: u32, rgb565: &[u8]) -> Result<(), String> {
     let expected = (width as usize) * (height as usize) * 2;
@@ -130,6 +132,120 @@ mod tests {
     fn test_save_rgb565_png_rejects_short_buffer() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(save_rgb565_png(&tmp.path().join("i.png"), 48, 48, &[0, 0]).is_err());
+    }
+}
+
+/// Crops transparent margins off an image: the bounding box of pixels
+/// with alpha above [`TRIM_ALPHA_CUTOFF`], re-encoded as PNG. Anything
+/// at or below the cutoff counts as transparent because service art
+/// carries near-transparent noise at the canvas edge, and a single such
+/// pixel spanning the frame defeats exact-zero logic (the crop then
+/// returns the whole image untouched). Returns `None` for images with
+/// no transparent pixels, fully transparent images, or anything that
+/// fails to decode — callers keep their original bytes. Disc photos
+/// carry wildly different transparent canvases; trimming them at save
+/// time is what keeps the picker tiles a regular size.
+pub const TRIM_ALPHA_CUTOFF: u8 = 8;
+
+pub fn trim_transparent_margins(png: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(png).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    let mut left = w;
+    let mut top = h;
+    let mut right = 0u32;
+    let mut bottom = 0u32;
+    for (x, y, pixel) in img.enumerate_pixels() {
+        if pixel.0[3] > TRIM_ALPHA_CUTOFF {
+            left = left.min(x);
+            top = top.min(y);
+            right = right.max(x + 1);
+            bottom = bottom.max(y + 1);
+        }
+    }
+    if right <= left || bottom <= top || (left == 0 && top == 0 && right == w && bottom == h) {
+        return None;
+    }
+    let cropped =
+        image::imageops::crop_imm(&img, left, top, right - left, bottom - top).to_image();
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(
+            cropped.as_raw(),
+            cropped.width(),
+            cropped.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+    Some(out)
+}
+
+#[cfg(test)]
+mod trim_tests {
+    use super::*;
+
+    fn rgba_fixture() -> Vec<u8> {
+        // 6x4 with a 2x2 opaque block centered in transparency.
+        let mut img = image::RgbaImage::new(6, 4);
+        for (x, y, pixel) in img.enumerate_pixels_mut() {
+            if (2..4).contains(&x) && (1..3).contains(&y) {
+                *pixel = image::Rgba([200, 100, 50, 255]);
+            }
+        }
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(img.as_raw(), 6, 4, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn test_trim_transparent_margins_crops_to_content() {
+        let trimmed = trim_transparent_margins(&rgba_fixture()).expect("trims");
+        let back = image::load_from_memory(&trimmed).unwrap().into_rgba8();
+        assert_eq!(back.dimensions(), (2, 2));
+        assert!(back.pixels().all(|pixel| pixel.0[3] != 0));
+    }
+
+    #[test]
+    fn test_trim_transparent_margins_ignores_opaque_images() {
+        let mut img = image::RgbaImage::new(4, 4);
+        for pixel in img.pixels_mut() {
+            *pixel = image::Rgba([10, 20, 30, 255]);
+        }
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(img.as_raw(), 4, 4, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        assert!(trim_transparent_margins(&out).is_none());
+    }
+
+    #[test]
+    fn test_trim_transparent_margins_rejects_garbage() {
+        assert!(trim_transparent_margins(b"not an image").is_none());
+    }
+
+    #[test]
+    fn test_trim_transparent_margins_ignores_near_transparent_noise() {
+        // 8x8 with an opaque 4x4 center, fully transparent margins, and
+        // a 1px ring of near-transparent (alpha 5) noise at the canvas
+        // edge like lossy service art carries. The noise spans the full
+        // canvas, so exact-zero logic keeps the whole image; the crop
+        // must still land on the opaque content.
+        let mut img = image::RgbaImage::new(8, 8);
+        for (x, y, pixel) in img.enumerate_pixels_mut() {
+            if (2..6).contains(&x) && (2..6).contains(&y) {
+                *pixel = image::Rgba([200, 100, 50, 255]);
+            } else if x == 0 || y == 0 || x == 7 || y == 7 {
+                *pixel = image::Rgba([10, 10, 10, 5]);
+            }
+        }
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(img.as_raw(), 8, 8, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        let trimmed = trim_transparent_margins(&out).expect("trims");
+        let back = image::load_from_memory(&trimmed).unwrap().into_rgba8();
+        assert_eq!(back.dimensions(), (4, 4));
     }
 }
 

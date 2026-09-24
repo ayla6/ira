@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-23 01:19-0300\n"
+"POT-Creation-Date: 2026-09-23 22:39-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -734,7 +734,7 @@ msgid "Recent"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/all_games.rs:280
-#: crates/ira/src/ui/big_picture/home.rs:636
+#: crates/ira/src/ui/big_picture/home.rs:639
 msgid "Everything"
 msgstr ""
 
@@ -785,9 +785,9 @@ msgstr ""
 msgid "Select a disc"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/disc_picker.rs:252
+#: crates/ira/src/ui/big_picture/disc_picker.rs:269
 #: crates/ira/src/ui/disc_picker.rs:132
-#: crates/ira/src/ui/image_manager.rs:763
+#: crates/ira/src/ui/image_manager.rs:797
 #: crates/ira/src/ui/play_button.rs:789
 #, rust-format
 msgid "Disc {}"
@@ -1204,8 +1204,8 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_dialog.rs:356
 #: crates/ira/src/ui/image_manager.rs:632
-#: crates/ira/src/ui/image_manager.rs:799
-#: crates/ira/src/ui/image_manager.rs:940
+#: crates/ira/src/ui/image_manager.rs:834
+#: crates/ira/src/ui/image_manager.rs:982
 msgid "Images"
 msgstr ""
 
@@ -1468,7 +1468,6 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:39
 #: crates/ira/src/ui/edit_game_system.rs:153
-#: crates/ira/src/ui/image_manager.rs:816
 #: crates/ira/src/ui/profile_dialog.rs:381
 #: crates/ira/src/ui/settings_pages.rs:418
 #: crates/ira/src/ui/settings_pages.rs:861
@@ -2122,7 +2121,7 @@ msgid "Reset to base game"
 msgstr ""
 
 #: crates/ira/src/ui/game_logo.rs:213
-#: crates/ira/src/ui/image_manager.rs:984
+#: crates/ira/src/ui/image_manager.rs:1026
 #: crates/ira/src/ui/input_calibration_settings.rs:164
 msgid "Reset"
 msgstr ""
@@ -2421,24 +2420,37 @@ msgid "No RA icon available"
 msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:629
-#: crates/ira/src/ui/image_manager.rs:796
-#: crates/ira/src/ui/image_manager.rs:937
+#: crates/ira/src/ui/image_manager.rs:831
+#: crates/ira/src/ui/image_manager.rs:979
 msgid "Select image"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:729
+#: crates/ira/src/ui/image_manager.rs:755
 msgid "Discs"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:820
-msgid "Region"
+#: crates/ira/src/ui/image_manager.rs:840
+msgid "Select image file"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:828
+#: crates/ira/src/ui/image_manager.rs:858
 msgid "Download missing disc art from ScreenScraper"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:1007
+#: crates/ira/src/ui/image_manager.rs:902
+#, rust-format
+msgid "Downloaded {}"
+msgstr ""
+
+#: crates/ira/src/ui/image_manager.rs:906
+msgid "Disc art is up to date"
+msgstr ""
+
+#: crates/ira/src/ui/image_manager.rs:908
+msgid "No disc art found"
+msgstr ""
+
+#: crates/ira/src/ui/image_manager.rs:1049
 msgid "SGDB"
 msgstr ""
 

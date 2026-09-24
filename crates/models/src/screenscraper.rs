@@ -250,28 +250,6 @@ pub fn screenscraper_matches_by_serial(platform_id: &str) -> bool {
     )
 }
 
-/// The display title for a ScreenScraper match on the caller's ROMs:
-/// the name from the ROMs' own region first, then the service default
-/// order, then whatever the answer carries. A European dump of a game
-/// whose US and EU titles differ takes the EU one.
-pub fn title_for_region(names: &[(String, String)], preferred: &str) -> Option<String> {
-    let mut order = vec![preferred];
-    for fallback in ["us", "wor", "ss", "eu", "jp"] {
-        if !order.contains(&fallback) {
-            order.push(fallback);
-        }
-    }
-    order
-        .iter()
-        .find_map(|wanted| {
-            names
-                .iter()
-                .find(|(region, _)| region == wanted)
-                .map(|(_, name)| name.clone())
-        })
-        .or_else(|| names.first().map(|(_, name)| name.clone()))
-}
-
 /// The ScreenScraper region a game's own ROM paths point at ("us",
 /// "eu", "jp", "wor"), from disc serial prefixes and GoodTools-style
 /// filename tags. The first path carrying a marker wins; paths with no
@@ -965,29 +943,6 @@ mod tests {
             super::region_from_rom_paths(&rom_paths(&["Game (World).bin"])),
             Some("wor")
         );
-    }
-
-    #[test]
-    fn test_title_for_region_prefers_the_rom_region() {
-        let names = vec![
-            ("us".to_string(), "Cool Game".to_string()),
-            ("eu".to_string(), "Cool Game: European Title".to_string()),
-        ];
-        assert_eq!(
-            super::title_for_region(&names, "eu").as_deref(),
-            Some("Cool Game: European Title")
-        );
-        assert_eq!(
-            super::title_for_region(&names, "us").as_deref(),
-            Some("Cool Game")
-        );
-        // No name in any ordered region: whatever the answer carries.
-        let odd = vec![("kr".to_string(), "Only Name".to_string())];
-        assert_eq!(
-            super::title_for_region(&odd, "eu").as_deref(),
-            Some("Only Name")
-        );
-        assert!(super::title_for_region(&[], "eu").is_none());
     }
 
     #[test]

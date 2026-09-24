@@ -146,7 +146,11 @@ pub(crate) fn refetch_one(
         Ok(Some(entry)) => entry,
         _ => return RefetchOutcome::Failed("game not found".to_string()),
     };
-    let games = match steam.screenscraper_game(creds, &entry.screenscraper_id) {
+    let games = match steam.screenscraper_game(
+        creds,
+        &entry.screenscraper_id,
+        super::disc_art::rom_region(db, db_id),
+    ) {
         Ok(games) => games,
         Err(e) => return RefetchOutcome::Failed(e),
     };
@@ -486,6 +490,11 @@ fn resolve(
     )
 }
 
+/// The dump's own region for ordering an answer's names, from its path.
+fn rom_region_for(path: &std::path::Path) -> Option<&'static str> {
+    ira_models::region_from_rom_paths(&[path.to_string_lossy().into_owned()])
+}
+
 /// ── Stage 1: content hash — the exact-match search on consoles where
 /// file digests are the matching key. A hit or a failed request ends the
 /// pass; no hashing at all, no usable digest, and no answer all fall
@@ -670,7 +679,7 @@ fn title_search(
         eprintln!("SS batch: [{platform_id}] no usable search term");
         return SsOutcome::Failed("no usable search term".to_string());
     }
-    match steam.screenscraper_search(creds, &term, platform_id) {
+    match steam.screenscraper_search(creds, &term, platform_id, rom_region_for(abs)) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [{platform_id}] search failed: {e}");
             SsOutcome::Failed(e)
@@ -682,7 +691,12 @@ fn title_search(
             // name's other side gets one widened try before the miss.
             let candidates = if candidates.is_empty() {
                 match alt_search_term(&full) {
-                    Some(alt) => match steam.screenscraper_search(creds, &alt, platform_id) {
+                    Some(alt) => match steam.screenscraper_search(
+                        creds,
+                        &alt,
+                        platform_id,
+                        rom_region_for(abs),
+                    ) {
                         Err(e) => {
                             eprintln!("SS batch: '{alt}' [{platform_id}] search failed: {e}");
                             return SsOutcome::Failed(e);
@@ -820,7 +834,8 @@ pub(super) fn run_pc_matching(
     };
 
     // The game's own system first — a hit there is simply the game.
-    match steam.screenscraper_search_in(creds, &term, Some(system)) {
+    // PC titles come from Steam, so no region orders these names.
+    match steam.screenscraper_search_in(creds, &term, Some(system), None) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [pc] search failed: {e}");
             return SsOutcome::Failed(e);
@@ -839,7 +854,7 @@ pub(super) fn run_pc_matching(
     }
 
     // Widening: every system at once.
-    let candidates = match steam.screenscraper_search_in(creds, &term, None) {
+    let candidates = match steam.screenscraper_search_in(creds, &term, None, None) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [pc] wide search failed: {e}");
             return SsOutcome::Failed(e);
@@ -877,7 +892,7 @@ pub(super) fn run_pc_matching(
     // Literature Club" among every other game with doki doki in the
     // name) and the source's answer table caps at thirty.
     if term != full {
-        match steam.screenscraper_search_in(creds, &full, None) {
+        match steam.screenscraper_search_in(creds, &full, None, None) {
             Err(e) => {
                 eprintln!("SS batch: '{full}' [pc] wide search failed: {e}");
                 return SsOutcome::Failed(e);

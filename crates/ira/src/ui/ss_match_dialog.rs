@@ -79,33 +79,18 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
         }
         // The SS title is authoritative for consoles whose own names came
         // from file stems or shortened ROM headers; trusted sources (official
-        // console headers, RA, the user's own edits) keep theirs. The
-        // title comes from the ROMs' own region first: a European dump
-        // of a game whose US and EU titles differ takes the EU one.
+        // console headers, RA, the user's own edits) keep theirs. The name
+        // already arrives in the ROMs' region order from the search.
         let replace_title = entry_title_trusted(state, db_id)
             .map(|trusted| !trusted)
             .unwrap_or(false);
-        let mut rom_paths: Vec<String> = ira_db::get_discs(&s.db, db_id)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|disc| disc.rom_path)
-            .collect();
-        if let Some(game) = s.games.iter().find(|g| g.db_id == db_id) {
-            if !game.rom_path.is_empty() {
-                rom_paths.push(game.rom_path.clone());
-            }
-        }
-        let title = ira_models::region_from_rom_paths(&rom_paths)
-            .and_then(|region| ira_models::title_for_region(&picked.names, region))
-            .filter(|title| !title.is_empty())
-            .unwrap_or_else(|| picked.name.clone());
-        if replace_title && !title.is_empty() {
-            if let Err(e) = ira_db::update_game_title(&s.db, db_id, &title) {
+        if replace_title && !picked.name.is_empty() {
+            if let Err(e) = ira_db::update_game_title(&s.db, db_id, &picked.name) {
                 eprintln!("Failed to store the ScreenScraper title: {e}");
             } else if let Err(e) = ira_db::set_title_trusted(&s.db, db_id, true) {
                 eprintln!("Failed to mark the title trusted: {e}");
             } else {
-                new_title = Some(title);
+                new_title = Some(picked.name.clone());
             }
         }
     }
@@ -321,6 +306,12 @@ pub fn show_ss_search_dialog(
                 ),
             )
         };
+        // The game's own ROMs order the candidates' names, so a European
+        // dump lists its EU title first.
+        let preferred = {
+            let s = state_c.borrow();
+            super::disc_art::rom_region(&s.db, db_id)
+        };
         // "system:n64 ..." overrides the console the search scopes to.
         let (system_override, term) = split_system_prefix(&term);
         let system = system_override.or_else(|| ira_models::screenscraper_system_id(&platform_id));
@@ -333,7 +324,7 @@ pub fn show_ss_search_dialog(
         let (tx, rx) = mpsc::channel::<Result<Vec<ScrapedGame>, String>>();
         std::thread::spawn(move || {
             let outcome = steam
-                .screenscraper_search_in(&creds, &term, system)
+                .screenscraper_search_in(&creds, &term, system, preferred)
                 .map(|mut games| {
                     ira_api::screenscraper::sort_by_similarity(&mut games, &term);
                     games

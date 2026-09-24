@@ -8,6 +8,7 @@
 use crate::screenscraper_creds::{ScraperCreds, SOFT_NAME};
 use crate::SteamDataClient;
 use ira_models::screenscraper_system_id;
+use ira_models::region_from_rom_paths;
 use serde::Deserialize;
 use std::collections::HashSet;
 use unicode_normalization::UnicodeNormalization;
@@ -481,6 +482,16 @@ pub fn game_page_url(ss_id: &str) -> String {
 }
 
 pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
+    parse_games_with(xml, None)
+}
+
+/// Parse a search answer, picking names, dates and media with the
+/// caller's region first: a European dump of a game whose US and EU
+/// titles differ takes the EU one. `None` keeps the default order.
+pub fn parse_games_with(
+    xml: &str,
+    preferred_region: Option<&str>,
+) -> Result<Vec<ScrapedGame>, String> {
     // Plain French text answers, not XML. A rom miss is an empty result;
     // anything else — rejected credentials above all — is a real error
     // the caller must see instead of "no match".
@@ -508,7 +519,7 @@ pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
     };
     let mut games: Vec<ScrapedGame> = source_games
         .iter()
-        .map(scraped_game)
+        .map(|jeu| scraped_game_with(jeu, &ordered_regions(preferred_region)))
         .filter(|g| {
             !g.name
                 .to_uppercase()
@@ -520,8 +531,19 @@ pub fn parse_games(xml: &str) -> Result<Vec<ScrapedGame>, String> {
     Ok(games)
 }
 
-fn scraped_game(jeu: &SsJeu) -> ScrapedGame {
-    scraped_game_with(jeu, &region_preference())
+/// The region order for one answer: the ROM's own region first, then
+/// the default preference.
+fn ordered_regions(preferred: Option<&str>) -> Vec<&str> {
+    let mut order: Vec<&str> = Vec::new();
+    if let Some(region) = preferred {
+        order.push(region);
+    }
+    for fallback in region_preference() {
+        if !order.contains(&fallback) {
+            order.push(fallback);
+        }
+    }
+    order
 }
 
 fn scraped_game_with(jeu: &SsJeu, regions: &[&str]) -> ScrapedGame {
@@ -856,18 +878,20 @@ pub fn parse_genres_list(xml: &str) -> Result<Vec<GenreListEntry>, String> {
 
 impl SteamDataClient {
     /// Run a ScreenScraper wide search. Empty when credentials are not
-    /// configured; errors surface for the dialog to show.
+    /// configured; errors surface for the dialog to show. The ROM's own
+    /// region orders the answer's names; None keeps the default order.
     pub fn screenscraper_search(
         &self,
         creds: &ScraperCreds,
         term: &str,
         platform_id: &str,
+        preferred_region: Option<&str>,
     ) -> Result<Vec<ScrapedGame>, String> {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
         let system = screenscraper_system_id(platform_id);
-        self.screenscraper_search_in(creds, term, system)
+        self.screenscraper_search_in(creds, term, system, preferred_region)
     }
 
     /// Run a ScreenScraper wide search narrowed to one system, or across
@@ -878,11 +902,15 @@ impl SteamDataClient {
         creds: &ScraperCreds,
         term: &str,
         system: Option<u32>,
+        preferred_region: Option<&str>,
     ) -> Result<Vec<ScrapedGame>, String> {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
-        self.screenscraper_get(&search_url_scoped(creds, term, system))
+        self.screenscraper_get(
+            &search_url_scoped(creds, term, system),
+            preferred_region,
+        )
     }
 
     /// Fetch the whole genre table. The service has no per-name genre
@@ -904,7 +932,9 @@ impl SteamDataClient {
         parse_genres_list(&xml)
     }
 
-    /// Run a ScreenScraper exact ROM lookup (name + optional hash).
+    /// Run a ScreenScraper exact ROM lookup (name + optional hash). The
+    /// lookup name is the dump's file name, so the answer's names order
+    /// themselves by the dump's own region.
     pub fn screenscraper_rom_lookup(
         &self,
         creds: &ScraperCreds,
@@ -915,11 +945,16 @@ impl SteamDataClient {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
-        self.screenscraper_get(&game_info_url(creds, rom_nom, platform_id, md5))
+        let preferred = ira_models::region_from_rom_paths(&[rom_nom.to_string()]);
+        self.screenscraper_get(
+            &game_info_url(creds, rom_nom, platform_id, md5),
+            preferred,
+        )
     }
 
     /// Exact lookup by disc serial — the identity that survives chd/rvz
-    /// repacks, where file digests do not.
+    /// repacks, where file digests do not. The serial's own prefix
+    /// (SLES, SLUS, …) orders the answer's names by its region.
     pub fn screenscraper_serial_lookup(
         &self,
         creds: &ScraperCreds,
@@ -929,7 +964,11 @@ impl SteamDataClient {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
-        self.screenscraper_get(&serial_lookup_url(creds, serial, platform_id))
+        let preferred = ira_models::region_from_rom_paths(&[serial.to_string()]);
+        self.screenscraper_get(
+            &serial_lookup_url(creds, serial, platform_id),
+            preferred,
+        )
     }
 
     /// The account's quota counters. Best-effort: callers log failures.
@@ -943,11 +982,12 @@ impl SteamDataClient {
         &self,
         creds: &ScraperCreds,
         ss_id: &str,
+        preferred_region: Option<&str>,
     ) -> Result<Vec<ScrapedGame>, String> {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
-        self.screenscraper_get(&game_info_by_id_url(creds, ss_id))
+        self.screenscraper_get(&game_info_by_id_url(creds, ss_id), preferred_region)
     }
 
     /// Download one ScreenScraper media URL (screenshot, box) — the media
@@ -1025,7 +1065,11 @@ impl SteamDataClient {
         Ok(body)
     }
 
-    fn screenscraper_get(&self, url: &str) -> Result<Vec<ScrapedGame>, String> {
+    fn screenscraper_get(
+        &self,
+        url: &str,
+        preferred_region: Option<&str>,
+    ) -> Result<Vec<ScrapedGame>, String> {
         let _s = tracing::info_span!("screenscraper_get", url = redact_url(url)).entered();
         // The service drops connections under load; one retry a moment
         // later saves the batch pass from a spurious failure. Status-level
@@ -1064,7 +1108,7 @@ impl SteamDataClient {
         if !status.is_success() {
             return Err(status_hint(status.as_u16(), &body));
         }
-        parse_games(&body)
+        parse_games_with(&body, preferred_region)
     }
 }
 
@@ -1348,6 +1392,21 @@ mod tests {
     fn test_parse_games_without_support_media_has_no_disc_images() {
         let game = parse_games(SEARCH_XML).unwrap().remove(0);
         assert!(game.disc_images.is_empty());
+    }
+
+    #[test]
+    fn test_parse_games_with_prefers_the_rom_region_name() {
+        let xml = r#"<Data><jeux><jeu id="1">
+            <noms><nom region="us">Cool Game</nom><nom region="eu">Cool Game: European Title</nom></noms>
+        </jeu></jeux></Data>"#;
+        assert_eq!(
+            parse_games(xml).unwrap().remove(0).name,
+            "Cool Game"
+        );
+        assert_eq!(
+            parse_games_with(xml, Some("eu")).unwrap().remove(0).name,
+            "Cool Game: European Title"
+        );
     }
 
     #[test]

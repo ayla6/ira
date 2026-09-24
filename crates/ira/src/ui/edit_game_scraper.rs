@@ -1180,9 +1180,13 @@ fn run_refetch_missing(
         )
     };
     let (tx, rx) = std::sync::mpsc::channel::<Result<ScrapedGame, String>>();
+    let preferred = {
+        let s = state.borrow();
+        super::disc_art::rom_region(&s.db, db_id)
+    };
     std::thread::spawn(move || {
         let outcome = steam
-            .screenscraper_game(&creds, &ss_id)
+            .screenscraper_game(&creds, &ss_id, preferred)
             .and_then(|games| {
                 games
                     .into_iter()

@@ -28,13 +28,27 @@ pub fn match_game_to_steam(
         )
     };
     std::thread::spawn(move || {
+        // The platform stays the kind's system — a store match repoints
+        // the Steam identity, never the system scope. Retro rows have no
+        // store match path, but keep their console either way.
+        let platform_id = ira_db::find_by_db_id(&db, db_id)
+            .ok()
+            .flatten()
+            .map(|entry| {
+                if entry.kind == ira_models::GameKind::Retro {
+                    entry.platform_id
+                } else {
+                    entry.kind.as_str().to_string()
+                }
+            })
+            .unwrap_or_default();
         if let Err(e) = ira_db::update_game_ids(
             &db,
             db_id,
             &steam_app_id,
             "",
             ira_models::TrophySource::Gse,
-            &steam_app_id,
+            &platform_id,
         ) {
             if let Err(e2) = ira_db::update_native_id(&db, db_id, &steam_app_id) {
                 eprintln!("native id update failed too: {e2}");
@@ -49,8 +63,19 @@ pub fn match_game_to_steam(
             eprintln!("match_game_to_steam: generate_steam_settings failed: {}", e);
         }
         match ira_db::find_by_db_id(&db, db_id) {
-            Ok(Some(entry)) => match crate::game_loader::load_game(&entry, &save_dir) {
-                Ok(mut game) => {
+            Ok(Some(mut entry)) => {
+                // A store match on a row with no platform id yet adopts
+                // the match as the native id too, so the loader's
+                // platform-native `app_id` never goes empty behind it.
+                if entry.native_id.is_empty() {
+                    if let Err(e) = ira_db::update_native_id(&db, db_id, &steam_app_id) {
+                        eprintln!("match_game_to_steam: update_native_id failed: {e}");
+                    } else {
+                        entry.native_id = steam_app_id.clone();
+                    }
+                }
+                match crate::game_loader::load_game(&entry, &save_dir) {
+                    Ok(mut game) => {
                     if game.name.is_empty() || game.name.starts_with("App ID:") {
                         game.set_name(&game_name);
                     }
@@ -74,7 +99,8 @@ pub fn match_game_to_steam(
                     });
                 }
                 Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
-            },
+                }
+            }
             Ok(None) => eprintln!(
                 "match_game_to_steam: find_by_db_id returned None for db_id={}",
                 db_id
@@ -113,7 +139,9 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
         };
         let switch_exe = cfg.console("switch").executable.clone();
         let (icon, hero, grid, logo, header, square) = match &game {
-            Some(g) => super::fetch_images::ensure_game_assets(&steam, &dir, &cfg, g, &switch_exe),
+            Some(g) => super::fetch_images::ensure_game_assets(
+                &steam, &dir, &save_dir, &db, &cfg, g, &switch_exe,
+            ),
             None => steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), &[]),
         };
         let Some(mut game) = game else {
@@ -125,6 +153,8 @@ pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
         game.logo_path = logo;
         game.header_path = header;
         game.square_path = square;
+        // A fresh SGDB match can also unlock the disc art.
+        super::disc_art::ensure_game_discs(&steam, &db, &cfg, &save_dir, &game);
         let _ = sender.send(AppMessage::NewGame(game));
     });
 }
@@ -165,15 +195,28 @@ pub(crate) fn persist_sgdb_match(
 /// keep their square native), and announce the resulting paths to the UI.
 /// Purely blocking work — call from a spawned thread; each caller keeps its
 /// own tracing span and any stagger sleep.
-pub(crate) fn fetch_and_report_sgdb_assets(
-    steam: &Arc<SteamDataClient>,
-    sender: &AppSender,
-    save_dir: &str,
-    cfg: &ira_config::Config,
-    game_for_dir: Option<&Game>,
-    db_id: i64,
-    sgdb_id: String,
-) {
+pub(crate) struct SgdAssetsRequest<'a> {
+    pub steam: &'a Arc<SteamDataClient>,
+    pub sender: &'a AppSender,
+    pub save_dir: &'a str,
+    pub cfg: &'a ira_config::Config,
+    pub db: &'a ira_db::DbConn,
+    pub game_for_dir: Option<&'a Game>,
+    pub db_id: i64,
+    pub sgdb_id: String,
+}
+
+pub(crate) fn fetch_and_report_sgdb_assets(request: SgdAssetsRequest<'_>) {
+    let SgdAssetsRequest {
+        steam,
+        sender,
+        save_dir,
+        cfg,
+        db,
+        game_for_dir,
+        db_id,
+        sgdb_id,
+    } = request;
     let dir = match game_for_dir {
         Some(g) => ira_parser::game_data_dir(save_dir, g),
         None => ira_parser::local_data_dir(save_dir, db_id),
@@ -181,7 +224,12 @@ pub(crate) fn fetch_and_report_sgdb_assets(
     let (icon, hero, grid, logo, header, square) = match game_for_dir {
         Some(g) => {
             let switch_exe = cfg.console("switch").executable.clone();
-            super::fetch_images::ensure_game_assets(steam, &dir, cfg, g, &switch_exe)
+            let assets = super::fetch_images::ensure_game_assets(
+                steam, &dir, save_dir, db, cfg, g, &switch_exe,
+            );
+            // A fresh SGDB match can also unlock the disc art.
+            super::disc_art::ensure_game_discs(steam, db, cfg, save_dir, g);
+            assets
         }
         None => steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), &[]),
     };
@@ -201,14 +249,14 @@ pub fn confirm_mark_unlocked(
     state: &SharedState,
     trophy_source: ira_models::TrophySource,
     app_id: &str,
-    platform_id: &str,
+    native_id: &str,
     ach: &MergedAchievement,
     reload: impl Fn() + 'static,
 ) {
     let window = state.borrow().window.clone();
     let ach_name = ach.name.clone();
     let app_id = app_id.to_string();
-    let platform_id = platform_id.to_string();
+    let native_id = native_id.to_string();
     let save_dir = state.borrow().save_dir.clone();
     confirm_dialog(
         &window,
@@ -224,7 +272,7 @@ pub fn confirm_mark_unlocked(
                 &save_dir,
                 trophy_source,
                 &app_id,
-                &platform_id,
+                &native_id,
                 &ach_name,
                 true,
             ) {

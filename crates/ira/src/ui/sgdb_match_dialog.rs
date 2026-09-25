@@ -9,7 +9,7 @@ use super::helpers::{
     clear_children, poll_channel, refresh_settings_images_page, replace_row_actions, status_row,
 };
 use super::image_manager::build_image_manager_content_with_drafts;
-use super::matching::{fetch_and_report_sgdb_assets, persist_sgdb_match};
+use super::matching::{fetch_and_report_sgdb_assets, persist_sgdb_match, SgdAssetsRequest};
 use super::state::SharedState;
 use super::steam_search_dialog::{
     build_search_dialog, match_result_row, status_label, MatchCallback, SearchDialogWidgets,
@@ -77,28 +77,30 @@ pub(super) fn handle_unified_sgdb_result(
         {
             g.sgdb_id = sgdb_id.clone();
         }
-        let (steam_dl, sender, save_dir, cfg_dl, game_for_dir) = {
+        let (steam_dl, sender, save_dir, cfg_dl, db_dl, game_for_dir) = {
             let s = state.borrow();
             (
                 s.steam.clone(),
                 s.sender.clone(),
                 s.save_dir.clone(),
                 s.cfg.clone(),
+                s.db.clone(),
                 s.games.iter().find(|g| g.db_id == db_id).cloned(),
             )
         };
         std::thread::spawn(move || {
             let _s = tracing::info_span!("handle_unified_sgdb_result", db_id = db_id, sgdb_id = %sgdb_id).entered();
             std::thread::sleep(std::time::Duration::from_millis(100));
-            fetch_and_report_sgdb_assets(
-                &steam_dl,
-                &sender,
-                &save_dir,
-                &cfg_dl,
-                game_for_dir.as_ref(),
+            fetch_and_report_sgdb_assets(SgdAssetsRequest {
+                steam: &steam_dl,
+                sender: &sender,
+                save_dir: &save_dir,
+                cfg: &cfg_dl,
+                db: &db_dl,
+                game_for_dir: game_for_dir.as_ref(),
                 db_id,
                 sgdb_id,
-            );
+            });
         });
 
         let text = crate::tr!("SGDB: {}").replacen("{}", &matched_name, 1);
@@ -323,13 +325,14 @@ fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
         build_image_manager_content_with_drafts(s, game, win, pc, scache).upcast()
     });
 
-    let (steam, sender, save_dir, cfg, game_for_dir) = {
+    let (steam, sender, save_dir, cfg, db, game_for_dir) = {
         let s = state.borrow();
         (
             s.steam.clone(),
             s.sender.clone(),
             s.save_dir.clone(),
             s.cfg.clone(),
+            s.db.clone(),
             s.games.iter().find(|g| g.db_id == db_id).cloned(),
         )
     };
@@ -338,15 +341,16 @@ fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
         let _s =
             tracing::info_span!("sgdb_search_result_match", db_id = db_id, sgdb_id = %sgdb_id_d)
                 .entered();
-        fetch_and_report_sgdb_assets(
-            &steam,
-            &sender,
-            &save_dir,
-            &cfg,
-            game_for_dir.as_ref(),
+        fetch_and_report_sgdb_assets(SgdAssetsRequest {
+            steam: &steam,
+            sender: &sender,
+            save_dir: &save_dir,
+            cfg: &cfg,
+            db: &db,
+            game_for_dir: game_for_dir.as_ref(),
             db_id,
-            sgdb_id_d,
-        );
+            sgdb_id: sgdb_id_d,
+        });
     });
 }
 

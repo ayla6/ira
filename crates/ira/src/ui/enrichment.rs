@@ -113,12 +113,19 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
             });
 
         if trophy_source.has_steam_enrichment() {
+            // Achievement files and Steam settings key on the store id,
+            // not the platform-native one.
+            let store_id = if !entry.steam_id.is_empty() {
+                entry.steam_id.as_str()
+            } else {
+                app_id.as_str()
+            };
             let meta_path =
-                ira_parser::achievements_dir(&save_dir, &app_id).join("achievements.json");
+                ira_parser::achievements_dir(&save_dir, store_id).join("achievements.json");
             if !meta_path.exists() {
                 phases.enter(0, &crate::tr!("Fetching achievements…"));
-                if let Err(e) = steam.generate_steam_settings(&app_id) {
-                    eprintln!("Could not generate achievements for {}: {}", app_id, e);
+                if let Err(e) = steam.generate_steam_settings(store_id) {
+                    eprintln!("Could not generate achievements for {store_id}: {e}");
                     if let Some(parent) = meta_path.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
@@ -142,11 +149,12 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
         if !game_provided && trophy_source.has_steam_enrichment() {
             let has_missing_icons = game.achievements.iter().any(|a| a.icon_path.is_empty());
             if has_missing_icons {
-                let _s = tracing::info_span!("enrich_redownload_icons", app_id = %app_id).entered();
-                if let Err(e) = steam.generate_steam_settings(&app_id) {
+                let store_id = game.steam_api_id().to_string();
+                let _s =
+                    tracing::info_span!("enrich_redownload_icons", app_id = %store_id).entered();
+                if let Err(e) = steam.generate_steam_settings(&store_id) {
                     eprintln!(
-                        "Could not re-download achievement icons for {}: {}",
-                        app_id, e
+                        "Could not re-download achievement icons for {store_id}: {e}"
                     );
                 } else if let Ok(reloaded) = load_game(&entry, &save_dir) {
                     game.achievements = reloaded.achievements;
@@ -158,7 +166,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
 
     if trophy_source.has_steam_enrichment() {
         phases.enter(1, &crate::tr!("Downloading images…"));
-        enrich_steam_assets(&mut game, &steam, &save_dir, &app_id);
+        enrich_steam_assets(&mut game, &steam, &save_dir);
 
         if let Err(e) = ira_db::store_game_metadata(
             &db,
@@ -190,7 +198,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
         let switch_exe = cfg.console("switch").executable.clone();
         let dir = ira_parser::game_data_dir(&save_dir, &game);
         let (icon, hero, grid, logo, header, square) =
-            super::fetch_images::ensure_game_assets(&steam, &dir, &cfg, &game, &switch_exe);
+            super::fetch_images::ensure_game_assets(&steam, &dir, &save_dir, &db, &cfg, &game, &switch_exe);
         if game.icon_path.is_empty() {
             game.icon_path = icon;
         }
@@ -209,6 +217,9 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
         if game.square_path.is_empty() {
             game.square_path = square;
         }
+        // Multi-disc art rides the same pass — the ensure self-gates on
+        // disc count, presence, and the ScreenScraper match.
+        super::disc_art::ensure_game_discs(&steam, &db, &cfg, &save_dir, &game);
     }
 
     // PC games: even with no ScreenScraper match, the store synopsis and
@@ -224,12 +235,11 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
 }
 
 /// The Steam-driven enrichment block, extracted from `enrich_game_blocking`.
-fn enrich_steam_assets(
-    game: &mut Game,
-    steam: &Arc<SteamDataClient>,
-    save_dir: &str,
-    app_id: &str,
-) {
+/// Store calls go through the match id — the platform-native `app_id` is
+/// only a Steam id for some sources.
+fn enrich_steam_assets(game: &mut Game, steam: &Arc<SteamDataClient>, save_dir: &str) {
+    let app_id = game.steam_api_id().to_string();
+    let app_id = app_id.as_str();
     let _s = tracing::info_span!("enrich_steam_assets", app_id = %app_id).entered();
     if game.name.starts_with("App ID:") || !ira_parser::data_dir(save_dir, app_id).join("appdetails.json").exists() {
         if let Some(details) = steam.fetch_app_details(app_id) {
@@ -344,7 +354,7 @@ fn ensure_default_icon(
     let sgdb_matchable = game.sgdb_id.is_empty()
         && !game.manual_unmatch
         && !game.name.is_empty()
-        && (game.app_id.is_empty()
+        && (game.steam_id.is_empty()
             || game.kind == ira_models::GameKind::Retro
             || game.kind.is_console_emulator());
     if !sgdb_matchable || !steam.has_sgdb_key() {

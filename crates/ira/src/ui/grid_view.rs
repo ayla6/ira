@@ -325,8 +325,11 @@ fn make_bind(
         pic.set_size_request(cover_width, cover_height);
 
         // Square capsules show square.webp when the game has one, keeping
-        // the vertical capsule as the fallback art.
-        let art = if square && !game.square_path.is_empty() {
+        // the vertical capsule as the fallback art — and vice versa, so
+        // neither slot blanks for want of the other.
+        let art = if !square && !game.grid_path.is_empty() {
+            &game.grid_path
+        } else if !game.square_path.is_empty() {
             &game.square_path
         } else {
             &game.grid_path

@@ -69,8 +69,11 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
                         ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
                     )
                     // Steam games have no Steam-CDN square; the SGDB steam
-                    // endpoints serve it through the app id.
-                    || (g.trophy_source.has_steam_enrichment() && !g.app_id.is_empty())
+                    // endpoints serve it through the store id.
+                    || (g.trophy_source.has_steam_enrichment() && !g.steam_api_id().is_empty())
+                    // ScreenScraper-matched games without any of the above:
+                    // the SS fallbacks below are their only source.
+                    || !g.screenscraper_id.is_empty()
             })
             .cloned()
             .collect()
@@ -113,10 +116,12 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
             // Matched and steam-enriched games get the full SGDB ensure
             // (console games with their square kept native); unmatched PS4
             // and Switch titles get their ROM's native icon imported into
-            // the square slot.
+            // the square slot. ScreenScraper-matched games with neither
+            // join the same pass so their SS fallbacks can land.
             let mut changed = false;
             if !game.sgdb_id.is_empty()
-                || (game.trophy_source.has_steam_enrichment() && !game.app_id.is_empty())
+                || (game.trophy_source.has_steam_enrichment() && !game.steam_api_id().is_empty())
+                || !game.screenscraper_id.is_empty()
             {
                 let entry = match ira_db::find_by_db_id(&db, game.db_id) {
                     Ok(Some(entry)) => entry,
@@ -124,9 +129,26 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
                 };
                 let dir = ira_parser::entry_data_dir(&save_dir, &entry);
                 let had = count_present(&dir);
-                let (icon, hero, grid, logo, header, square) =
-                    ensure_game_assets(&steam, &dir, &cfg, game, &switch_exe);
+                let (icon, hero, grid, logo, header, mut square) =
+                    ensure_game_assets(&steam, &dir, &save_dir, &db, &cfg, game, &switch_exe);
+                if square.is_empty()
+                    && !matches!(
+                        game.kind,
+                        ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+                    )
+                {
+                    // ensure_game_assets leaves squares to the native/SGDB
+                    // paths it knows; the ScreenScraper box fills the rest.
+                    // PS4/Switch squares are fully covered above (native,
+                    // then SGDB), so they skip the second pass entirely.
+                    square = ensure_game_square(&steam, &save_dir, &db, &cfg, game);
+                }
                 changed = count_present(&dir) > had;
+                // Multi-disc art rides the same pass — the ensure
+                // self-gates on disc count, presence, and match.
+                if super::disc_art::ensure_game_discs(&steam, &db, &cfg, &save_dir, game) {
+                    changed = true;
+                }
                 if changed {
                     let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
                         db_id: game.db_id,
@@ -282,9 +304,90 @@ impl StripJob {
 }
 
 
+/// Which ScreenScraper media feeds an Ira slot.
+#[derive(Clone, Copy)]
+pub(super) enum MediaKind {
+    Box2d,
+    Wheel,
+    SteamGrid,
+}
+
+impl MediaKind {
+    pub(super) fn url(self, game: &ira_api::screenscraper::ScrapedGame) -> Option<String> {
+        match self {
+            MediaKind::Box2d => game.box2d.clone(),
+            MediaKind::Wheel => game.wheel.clone(),
+            MediaKind::SteamGrid => game.steamgrid.clone(),
+        }
+    }
+}
+
+/// Download a PS1 game's ScreenScraper 2D box as image bytes — the
+/// square source for rare games with no SGDB square.
+pub(super) fn fetch_ss_square_bytes(
+    steam: &ira_api::SteamDataClient,
+    cfg: &ira_config::Config,
+    db: &ira_db::DbConn,
+    game: &Game,
+) -> Option<Vec<u8>> {
+    if !game.is_ps1() {
+        return None;
+    }
+    fetch_ss_media_bytes(steam, cfg, db, game, MediaKind::Box2d)
+}
+
+/// One ScreenScraper media download by SS match id, decoded to lossless
+/// WebP. `None` without a match, without credentials, without that art
+/// on the entry, or when the bytes do not decode.
+fn fetch_ss_media_bytes(
+    steam: &ira_api::SteamDataClient,
+    cfg: &ira_config::Config,
+    db: &ira_db::DbConn,
+    game: &Game,
+    kind: MediaKind,
+) -> Option<Vec<u8>> {
+    if game.screenscraper_id.is_empty() {
+        return None;
+    }
+    let creds = ira_api::ScraperCreds::from_account(
+        cfg.screenscraper_id.clone(),
+        cfg.screenscraper_password.clone(),
+    );
+    let region = super::disc_art::rom_region(db, game.db_id);
+    let games = steam
+        .screenscraper_game(&creds, &game.screenscraper_id, region)
+        .ok()?;
+    let url = games.iter().find_map(|game| kind.url(game))?;
+    let bytes = steam.screenscraper_media(&url).ok()?;
+    ira_parser::convert_bytes_to_lossless_webp(&bytes)
+}
+
+/// Persist ScreenScraper bytes into the game's data dir under the
+/// asset's own file base, next to whatever the other sources landed.
+/// Returns the path when a file landed on disk.
+fn persist_ss_media(
+    dir: &std::path::Path,
+    bytes: &[u8],
+    asset: ira_models::AssetType,
+) -> String {
+    let webp = match ira_parser::convert_bytes_to_lossless_webp(bytes) {
+        Some(webp) => webp,
+        None => return String::new(),
+    };
+    let _ = std::fs::create_dir_all(dir);
+    ira_parser::remove_image_variants(dir, asset.file_base());
+    let dest = dir.join(format!("{}.webp", asset.file_base()));
+    if std::fs::write(&dest, &webp).is_ok() {
+        dest.to_string_lossy().into_owned()
+    } else {
+        String::new()
+    }
+}
+
 /// Fill one game's square slot: the ROM's native icon for PS4/Switch games
-/// (never SGDB art), the SGDB square for other matched games. Returns the
-/// square path when a file landed on disk.
+/// (never SGDB art), the SGDB square for other matched games, and the
+/// ScreenScraper 2D box for PS1 games the SGDB pass left empty. Returns
+/// the square path when a file landed on disk.
 pub(super) fn ensure_game_square(
     steam: &ira_api::SteamDataClient,
     save_dir: &str,
@@ -306,20 +409,83 @@ pub(super) fn ensure_game_square(
             square
         }
     } else if !game.sgdb_id.is_empty() {
-        fetch_sgdb_square(steam, save_dir, db, game.db_id, &game.sgdb_id)
+        let square = fetch_sgdb_square(steam, save_dir, db, game.db_id, &game.sgdb_id);
+        if square.is_empty() {
+            fetch_ss_square_persisted(steam, save_dir, db, cfg, game)
+        } else {
+            square
+        }
     } else {
-        String::new()
+        fetch_ss_square_persisted(steam, save_dir, db, cfg, game)
     }
+}
+
+/// ScreenScraper square for games with no SGDB square (or no SGDB match
+/// at all): PS1 games with an SS match only, into an empty slot.
+fn fetch_ss_square_persisted(
+    steam: &ira_api::SteamDataClient,
+    save_dir: &str,
+    db: &ira_db::DbConn,
+    cfg: &ira_config::Config,
+    game: &Game,
+) -> String {
+    if !game.square_path.is_empty() {
+        return String::new();
+    }
+    let Ok(Some(entry)) = ira_db::find_by_db_id(db, game.db_id) else {
+        return String::new();
+    };
+    let dir = ira_parser::entry_data_dir(save_dir, &entry);
+    if ira_parser::find_image_file(&dir, ira_models::AssetType::Square.file_base()).is_some() {
+        return String::new();
+    }
+    let Some(bytes) = fetch_ss_square_bytes(steam, cfg, db, game) else {
+        return String::new();
+    };
+    persist_ss_media(&dir, &bytes, ira_models::AssetType::Square)
+}
+
+/// ScreenScraper wheel logo / steam-grid header for games whose SGDB
+/// left that slot empty, into an empty slot. `asset` selects both the
+/// media kind and the file base.
+fn fetch_ss_slot_persisted(
+    steam: &ira_api::SteamDataClient,
+    save_dir: &str,
+    db: &ira_db::DbConn,
+    cfg: &ira_config::Config,
+    game: &Game,
+    asset: ira_models::AssetType,
+    kind: MediaKind,
+) -> String {
+    let slot_path = game.asset_path(asset);
+    if !slot_path.is_empty() {
+        return String::new();
+    }
+    let Ok(Some(entry)) = ira_db::find_by_db_id(db, game.db_id) else {
+        return String::new();
+    };
+    let dir = ira_parser::entry_data_dir(save_dir, &entry);
+    if ira_parser::find_image_file(&dir, asset.file_base()).is_some() {
+        return String::new();
+    }
+    let Some(bytes) = fetch_ss_media_bytes(steam, cfg, db, game, kind) else {
+        return String::new();
+    };
+    persist_ss_media(&dir, &bytes, asset)
 }
 
 /// Full SGDB asset ensure for one game. Matched games use their SGDB id;
 /// steam-enriched games without a match are served by the SGDB steam
 /// endpoints through their app id. PS4 and Switch titles never take SGDB
 /// squares — that slot is the ROM's native icon — so SGDB fills the other
-/// five slots and the native import fills the square.
+/// five slots and the native import fills the square. Empty logo and
+/// header slots fall back to ScreenScraper's wheel and steam-grid art,
+/// last in the order after every SGDB source misses.
 pub(super) fn ensure_game_assets(
     steam: &ira_api::SteamDataClient,
     dir: &std::path::Path,
+    save_dir: &str,
+    db: &ira_db::DbConn,
     cfg: &ira_config::Config,
     game: &Game,
     switch_exe: &str,
@@ -330,40 +496,81 @@ pub(super) fn ensure_game_assets(
     );
     let steam_only = game.sgdb_id.is_empty()
         && game.trophy_source.has_steam_enrichment()
-        && !game.app_id.is_empty();
-    let id = if game.sgdb_id.is_empty() {
-        if !steam_only {
-            return (
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-            );
-        }
-        ira_api::types::SgdbId::Steam(&game.app_id)
+        && !game.steam_api_id().is_empty();
+    // SGDB's Steam endpoints need the store id, never the platform one.
+    let store_id = game.steam_api_id().to_string();
+    // No SGDB identity at all still leaves the ScreenScraper fallbacks
+    // below something to do — an SS-matched game with neither (Saikai)
+    // gets its wheel, steam-grid and box art here instead of being
+    // skipped.
+    let sgdb_id = if !game.sgdb_id.is_empty() {
+        Some(ira_api::types::SgdbId::Game(game.sgdb_id.as_str()))
+    } else if steam_only {
+        Some(ira_api::types::SgdbId::Steam(store_id.as_str()))
     } else {
-        ira_api::types::SgdbId::Game(&game.sgdb_id)
+        None
     };
     let skip: &[ira_models::AssetType] = if console {
         &[ira_models::AssetType::Square]
     } else {
         &[]
     };
-    let (icon, hero, grid, logo, header, square) = steam.ensure_sgdb_assets_in_dir(dir, id, skip);
+    let (icon, hero, grid, logo, header, square) = match sgdb_id {
+        Some(id) => steam.ensure_sgdb_assets_in_dir(dir, id, skip),
+        // Nothing SGDB can serve: the SS fallbacks below still run.
+        None => (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ),
+    };
     let square = if console {
         let native = native_square(dir, game, cfg, switch_exe);
         if native.is_empty() {
             // ROM icon extraction is not bulletproof (some NSP dumps yield
             // nothing) — SGDB square art beats a missing capsule.
-            let (_, _, _, _, _, sgdb_square) = steam.ensure_sgdb_assets_in_dir(dir, id, &[]);
-            sgdb_square
+            match sgdb_id {
+                Some(id) => {
+                    let (_, _, _, _, _, sgdb_square) =
+                        steam.ensure_sgdb_assets_in_dir(dir, id, &[]);
+                    sgdb_square
+                }
+                None => String::new(),
+            }
         } else {
             native
         }
     } else {
         square
+    };
+    let logo = if logo.is_empty() {
+        fetch_ss_slot_persisted(
+            steam,
+            save_dir,
+            db,
+            cfg,
+            game,
+            ira_models::AssetType::Logo,
+            MediaKind::Wheel,
+        )
+    } else {
+        logo
+    };
+    let header = if header.is_empty() {
+        fetch_ss_slot_persisted(
+            steam,
+            save_dir,
+            db,
+            cfg,
+            game,
+            ira_models::AssetType::Header,
+            MediaKind::SteamGrid,
+        )
+    } else {
+        header
     };
     (icon, hero, grid, logo, header, square)
 }

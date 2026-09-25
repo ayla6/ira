@@ -110,7 +110,7 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
             .iter()
             .find(|g| g.db_id == game_id)
             .filter(|g| g.kind == ira_models::GameKind::Steam)
-            .map(|g| g.app_id.clone())
+            .map(|g| g.steam_api_id().to_string())
     };
     let pid = state
         .borrow()
@@ -290,7 +290,7 @@ fn launch_game_with_disc(
                     g.name.clone(),
                     g.shadps4_version.clone(),
                     g.db_id,
-                    g.app_id.clone(),
+                    g.steam_api_id().to_string(),
                     g.platform_id.clone(),
                     g.ra_core.clone(),
                     g.emulator_override.clone(),

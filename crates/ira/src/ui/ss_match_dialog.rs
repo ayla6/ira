@@ -74,7 +74,7 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
             eprintln!("Failed to store ScreenScraper metadata: {e}");
             return;
         }
-        if let Err(e) = ira_db::clear_scraper_miss(&s.db, db_id) {
+        if let Err(e) = ira_db::clear_match_miss(&s.db, db_id, ira_db::miss_source::SS) {
             eprintln!("Failed to clear the ScreenScraper miss marker: {e}");
         }
         // The SS title is authoritative for consoles whose own names came

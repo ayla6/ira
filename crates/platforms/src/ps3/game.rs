@@ -49,8 +49,9 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
 
     let mut out = Game {
         app_id: npwr_id.clone(),
+        native_id: serial.clone(),
         kind: ira_models::GameKind::Ps3,
-        platform_id: serial.clone(),
+        platform_id: ira_models::GameKind::Ps3.as_str().to_string(),
         db_id,
         name: if meta.title.is_empty() {
             game.title.clone()

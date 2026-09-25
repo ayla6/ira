@@ -75,12 +75,12 @@ pub fn set_achievement_earned(
     save_dir: &str,
     trophy_source: ira_models::TrophySource,
     app_id: &str,
-    platform_id: &str,
+    native_id: &str,
     ach_name: &str,
     earned: bool,
 ) -> Result<(), String> {
     let status_path =
-        super::paths::unlock_status_path(save_dir, trophy_source, app_id, platform_id);
+        super::paths::unlock_status_path(save_dir, trophy_source, app_id, native_id);
     // A failed read or a corrupt file must refuse the write — otherwise
     // the map starts empty and the write below erases every recorded
     // unlock the moment one new achievement is recorded.

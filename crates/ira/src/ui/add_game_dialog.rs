@@ -325,7 +325,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         } else {
             ira_models::GameKind::Linux
         };
-        let platform_id = if !steam_app_id.is_empty() {
+        let typed_id = if !steam_app_id.is_empty() {
             steam_app_id
         } else if !gog_product_id.is_empty() {
             gog_product_id
@@ -361,7 +361,7 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
         let db_c = db.clone();
         let sender_c = sender.clone();
         let name_c = name;
-        let app_id_c = platform_id.clone();
+        let app_id_c = typed_id.clone();
         let sgdb_id_c = sgdb_id.clone();
         let game_folder_c = game_folder;
         let kind_c = kind;
@@ -379,7 +379,6 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
                 kind: kind_c,
                 trophy_source: ts_c,
                 app_id: &app_id_c,
-                platform_id: &platform_id,
                 game_folder: &game_folder_c,
                 launch_config: &launch_config,
                 wine_config: &wine_config,

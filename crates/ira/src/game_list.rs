@@ -659,24 +659,26 @@ impl ConsoleDbMeta {
 }
 
 /// Look up or create a DB entry for a discovered console game.
-/// Resolution goes through `find_by_game_id(npwr_id, serial)` only; the
-/// historical kind/platform fallback served rows predating npwr_id storage
+/// Resolution goes through `find_by_native_id(native, platform)` only; the
+/// historical kind/platform fallback served rows predating native storage
 /// and was removed pre-release — upgraded installs may see one-time
 /// duplicate library entries for such rows, which the user-level
 /// duplicate-game merge tooling reconciles. Logs DB errors instead of
-/// silently swallowing them.
+/// silently swallowing them. `trophy_id` carries the achievement identity
+/// (NPWR on Sony consoles, empty elsewhere); `native_id` the product id.
 fn find_or_create_console_entry(
     db: &db::DbConn,
     kind: GameKind,
-    npwr_id: &str,
-    serial: &str,
+    trophy_id: &str,
+    native_id: &str,
     title: &str,
     include_version: bool,
 ) -> Option<ConsoleDbMeta> {
-    let entry = match db::find_by_native_id(db, npwr_id, serial) {
+    let platform_id = kind.as_str();
+    let entry = match db::find_by_native_id(db, native_id, platform_id) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("DB error looking up {kind} game {serial}: {e}");
+            eprintln!("DB error looking up {kind} game {native_id}: {e}");
             None
         }
     };
@@ -686,16 +688,19 @@ fn find_or_create_console_entry(
         None => {
             match db::add_game(
                 db,
-                kind,
-                ira_models::TrophySource::Empty,
-                "",
-                npwr_id,
-                serial,
-                title,
+                db::NewGame {
+                    kind,
+                    trophy_source: ira_models::TrophySource::Empty,
+                    steam_id: "",
+                    trophy_id,
+                    native_id,
+                    platform_id: kind.as_str(),
+                    title,
+                },
             ) {
                 Ok(id) => Some(ConsoleDbMeta::new_db_entry(id, title.to_string())),
                 Err(e) => {
-                    eprintln!("{kind}: failed to add {serial} to DB: {e}");
+                    eprintln!("{kind}: failed to add {native_id} to DB: {e}");
                     None
                 }
             }
@@ -756,11 +761,17 @@ fn scan_console_games<D>(
     let games = discovered
         .iter()
         .filter_map(|item| {
-            let (npwr_id, serial, title, game_path) = identity(item);
-            let meta =
-                find_or_create_console_entry(db, kind, npwr_id, serial, title, include_version)?;
+            let (trophy_id, native_id, title, game_path) = identity(item);
+            let meta = find_or_create_console_entry(
+                db,
+                kind,
+                trophy_id,
+                native_id,
+                title,
+                include_version,
+            )?;
             remember_console_location(db, kind, &meta, game_path);
-            seen.push((npwr_id.to_string(), serial.to_string()));
+            seen.push((native_id.to_string(), kind.as_str().to_string()));
             Some(into_game(item, meta))
         })
         .collect();
@@ -805,7 +816,9 @@ fn reconcile_console_presence(db: &db::DbConn, kind: GameKind, seen: &[(String, 
     for entry in entries.iter().filter(|entry| entry.kind == kind) {
         let present = seen
             .iter()
-            .any(|(game_id, platform_id)| entry.external_id() == *game_id && entry.platform_id == *platform_id);
+            .any(|(native_id, platform_id)| {
+                entry.native_id == *native_id && entry.platform_id == *platform_id
+            });
         if present == entry.vanished {
             if let Err(error) = db::set_game_vanished(db, entry.id, !present) {
                 eprintln!("Failed to mark {kind} game {}: {error}", entry.id);
@@ -861,7 +874,7 @@ fn load_special_game(
     game_path: &std::path::Path,
     icon_path: &std::path::Path,
 ) -> Option<Game> {
-    let meta = find_or_create_console_entry(db, kind, game_id, game_id, title, false)?;
+    let meta = find_or_create_console_entry(db, kind, "", game_id, title, false)?;
     let entry = db::find_by_db_id(db, meta.db_id)
         .unwrap_or_else(|e| {
             eprintln!("Failed to read game {}: {e}", meta.db_id);
@@ -1010,8 +1023,8 @@ fn build_switch_installed_games(
             let meta = find_or_create_console_entry(
                 db,
                 GameKind::Switch,
+                "",
                 &installed.title_id,
-                "switch",
                 &installed.title,
                 false,
             )?;
@@ -1163,7 +1176,7 @@ fn build_steam_games(
             continue;
         }
 
-        let entry = match db::find_by_steam_id(db, &sg.app_id) {
+        let entry = match db::find_by_steam_id(db, &sg.app_id, GameKind::Steam.as_str()) {
             Ok(e) => e,
             Err(e) => {
                 eprintln!("DB error looking up Steam app {}: {e}", sg.app_id);
@@ -1176,17 +1189,20 @@ fn build_steam_games(
             None => {
                 if let Err(e) = db::add_game(
                     db,
-                    GameKind::Steam,
-                    ira_models::TrophySource::SteamNative,
-                    &sg.app_id,
-                    "",
-                    &sg.app_id,
-                    &sg.name,
+                    db::NewGame {
+                        kind: GameKind::Steam,
+                        trophy_source: ira_models::TrophySource::SteamNative,
+                        steam_id: &sg.app_id,
+                        trophy_id: "",
+                        native_id: &sg.app_id,
+                        platform_id: "steam",
+                        title: &sg.name,
+                    },
                 ) {
                     eprintln!("Steam: failed to add {} to DB: {e}", sg.app_id);
                     continue;
                 }
-                match db::find_by_steam_id(db, &sg.app_id) {
+                match db::find_by_steam_id(db, &sg.app_id, GameKind::Steam.as_str()) {
                     Ok(e) => match e {
                         Some(e) => e,
                         None => {
@@ -1439,12 +1455,15 @@ mod tests {
         let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
         let game_id = db::add_game(
             &db,
-            GameKind::Retro,
-            ira_models::TrophySource::Empty,
-            "",
-            "stale-game",
-            "saturn",
-            "Stale game",
+            db::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "stale-game",
+                platform_id: "saturn",
+                title: "Stale game",
+            },
         )
         .unwrap();
         db::set_rom_path(&db, game_id, "missing.rom").unwrap();
@@ -1471,12 +1490,15 @@ mod tests {
         let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
         let game_id = db::add_game(
             &db,
-            GameKind::Retro,
-            ira_models::TrophySource::Empty,
-            "",
-            "stale-game",
-            "saturn",
-            "Stale game",
+            db::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "stale-game",
+                platform_id: "saturn",
+                title: "Stale game",
+            },
         )
         .unwrap();
         db::set_rom_path(&db, game_id, "missing.rom").unwrap();
@@ -1505,39 +1527,48 @@ mod tests {
         let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
         let seen_id = db::add_game(
             &db,
-            GameKind::Ps4,
-            ira_models::TrophySource::Empty,
-            "",
-            "NPWR0001",
-            "CUSA00001",
-            "Present game",
+            db::NewGame {
+                kind: GameKind::Ps4,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "NPWR0001",
+                native_id: "CUSA00001",
+                platform_id: "ps4",
+                title: "Present game",
+            },
         )
         .unwrap();
         let gone_id = db::add_game(
             &db,
-            GameKind::Ps4,
-            ira_models::TrophySource::Empty,
-            "",
-            "NPWR0002",
-            "CUSA00002",
-            "Deleted game",
+            db::NewGame {
+                kind: GameKind::Ps4,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "NPWR0002",
+                native_id: "CUSA00002",
+                platform_id: "ps4",
+                title: "Deleted game",
+            },
         )
         .unwrap();
         let other_kind_id = db::add_game(
             &db,
-            GameKind::WiiU,
-            ira_models::TrophySource::Empty,
-            "",
-            "00050000",
-            "00050000",
-            "Other kind",
+            db::NewGame {
+                kind: GameKind::WiiU,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "00050000",
+                platform_id: "wiiu",
+                title: "Other kind",
+            },
         )
         .unwrap();
 
         reconcile_console_presence(
             &db,
             GameKind::Ps4,
-            &[("NPWR0001".to_string(), "CUSA00001".to_string())],
+            &[("CUSA00001".to_string(), "ps4".to_string())],
         );
 
         assert!(
@@ -1562,8 +1593,8 @@ mod tests {
             &db,
             GameKind::Ps4,
             &[
-                ("NPWR0001".to_string(), "CUSA00001".to_string()),
-                ("NPWR0002".to_string(), "CUSA00002".to_string()),
+                ("CUSA00001".to_string(), "ps4".to_string()),
+                ("CUSA00002".to_string(), "ps4".to_string()),
             ],
         );
         assert!(!db::find_by_db_id(&db, gone_id).unwrap().unwrap().vanished);
@@ -1577,12 +1608,15 @@ mod tests {
         let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
         let game_id = db::add_game(
             &db,
-            GameKind::Ps4,
-            ira_models::TrophySource::Empty,
-            "",
-            "NPWR0003",
-            "CUSA00003",
-            "Untitled install",
+            db::NewGame {
+                kind: GameKind::Ps4,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "NPWR0003",
+                native_id: "CUSA00003",
+                platform_id: "ps4",
+                title: "Untitled install",
+            },
         )
         .unwrap();
 
@@ -1599,12 +1633,15 @@ mod tests {
         // presence reconcile: never shows.
         let swept = db::add_game(
             &db,
-            GameKind::Ps4,
-            ira_models::TrophySource::Empty,
-            "",
-            "NPWR0004",
-            "CUSA00004",
-            "Catherine Full Body",
+            db::NewGame {
+                kind: GameKind::Ps4,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "NPWR0004",
+                native_id: "CUSA00004",
+                platform_id: "ps4",
+                title: "Catherine Full Body",
+            },
         )
         .unwrap();
         db::set_game_vanished(&db, swept, true).unwrap();
@@ -1612,12 +1649,15 @@ mod tests {
         // enough, even without a reconcile verdict yet.
         let missing_path = db::add_game(
             &db,
-            GameKind::WiiU,
-            ira_models::TrophySource::Empty,
-            "",
-            "000500001010cd00",
-            "000500001010cd00",
-            "Bayonetta",
+            db::NewGame {
+                kind: GameKind::WiiU,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "000500001010cd00",
+                platform_id: "wiiu",
+                title: "Bayonetta",
+            },
         )
         .unwrap();
         db::set_rom_path(
@@ -1631,12 +1671,15 @@ mod tests {
         std::fs::create_dir_all(&live_dir).unwrap();
         let live = db::add_game(
             &db,
-            GameKind::WiiU,
-            ira_models::TrophySource::Empty,
-            "",
-            "000500001011e800",
-            "000500001011e800",
-            "Live game",
+            db::NewGame {
+                kind: GameKind::WiiU,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "000500001011e800",
+                platform_id: "wiiu",
+                title: "Live game",
+            },
         )
         .unwrap();
         db::set_rom_path(&db, live, live_dir.to_string_lossy().as_ref()).unwrap();
@@ -1653,12 +1696,15 @@ mod tests {
         let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
         let game_id = db::add_game(
             &db,
-            GameKind::Retro,
-            ira_models::TrophySource::Empty,
-            "",
-            "saved-game",
-            "saturn",
-            "Saved game",
+            db::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "saved-game",
+                platform_id: "saturn",
+                title: "Saved game",
+            },
         )
         .unwrap();
         db::set_rom_path(&db, game_id, "saved.rom").unwrap();
@@ -1704,12 +1750,15 @@ mod tests {
         let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
         let rom_id = db::add_game(
             &db,
-            GameKind::Retro,
-            ira_models::TrophySource::Empty,
-            "",
-            "saved-rom",
-            "saturn",
-            "Saved rom",
+            db::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "saved-rom",
+                platform_id: "saturn",
+                title: "Saved rom",
+            },
         )
         .unwrap();
         db::set_rom_path(&db, rom_id, "saved.iso").unwrap();
@@ -1718,12 +1767,15 @@ mod tests {
         std::fs::write(rom_root.join("saved.iso"), b"rom").unwrap();
         db::add_game(
             &db,
-            GameKind::Wine,
-            ira_models::TrophySource::Nge,
-            "570",
-            "",
-            "gog",
-            "Saved gog game",
+            db::NewGame {
+                kind: GameKind::Wine,
+                trophy_source: ira_models::TrophySource::Nge,
+                steam_id: "570",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "gog",
+                title: "Saved gog game",
+            },
         )
         .unwrap();
 

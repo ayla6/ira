@@ -218,7 +218,7 @@ pub(super) fn start_ss_batch_matching(
     dialog: &gtk4::Widget,
     vis: super::mass_match_dialog::RowVis,
 ) {
-    let missed: HashSet<i64> = match ira_db::scraper_missed_ids(&state.borrow().db) {
+    let missed: HashSet<i64> = match ira_db::match_missed_ids(&state.borrow().db, ira_db::miss_source::SS) {
         Ok(ids) => ids.into_iter().collect(),
         Err(e) => {
             eprintln!("ScreenScraper batch: could not read misses: {e}");
@@ -257,6 +257,9 @@ pub(super) fn start_ss_batch_matching(
                 continue;
             }
             show_background_match(&ss_box, state, g.db_id, &g.name, &g.platform_id, dialog);
+            // The background job owns the answer from here: the row is
+            // done as far as this dialog is concerned.
+            vis.pass_done(i);
         }
         return;
     }
@@ -455,9 +458,14 @@ fn resolve(
     // PC games search ScreenScraper's own Windows/Linux systems and fall
     // back to a cross-platform lookup diffed against their Steam data.
     if entry.kind.is_pc() {
+        let store_id = if !entry.steam_id.is_empty() {
+            entry.steam_id.as_str()
+        } else {
+            entry.native_id.as_str()
+        };
         let target = PcMatchTarget {
             kind: entry.kind,
-            platform_id: &platform_id,
+            store_id,
             title: &entry.title,
             display: &item.name,
             db_id: item.db_id,
@@ -776,7 +784,9 @@ fn candidate_names(candidates: &[ScrapedGame]) -> String {
 /// The game identity the PC matching runs against.
 pub(super) struct PcMatchTarget<'a> {
     pub kind: ira_models::GameKind,
-    pub platform_id: &'a str,
+    /// The Steam id when matched, else the platform-native id — the only
+    /// values the Steam diff can query. Never the system scope.
+    pub store_id: &'a str,
     pub title: &'a str,
     pub display: &'a str,
     pub db_id: i64,
@@ -804,7 +814,7 @@ pub(super) fn run_pc_matching(
     }
     let normalized = normalized_for_match(&full);
     let verbose = verbose_logging();
-    let app_id = target.platform_id.parse::<u32>().ok();
+    let app_id = target.store_id.parse::<u32>().ok();
     // The Steam diff. Companies decide identity — dates and titles are
     // shared by ports and remakes, but the developer is the studio.
     let steam_info = app_id
@@ -1336,7 +1346,7 @@ fn apply_hit(
             vis.pass_done(hit.row_idx);
         }
         Some(SsOutcome::Miss) => {
-            if let Err(e) = ira_db::tombstone_scraper_miss(&state.borrow().db, hit.db_id) {
+            if let Err(e) = ira_db::tombstone_match_miss(&state.borrow().db, hit.db_id, ira_db::miss_source::SS) {
                 eprintln!("ScreenScraper batch: failed to record the miss: {e}");
             }
             if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {

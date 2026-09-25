@@ -179,7 +179,7 @@ fn apply_hit(
     match hit.matched {
         Some((id, title)) => {
             match id.parse::<u32>() {
-                Ok(ra_id) => persist_ra_match(state, hit.db_id, &platform_id, ra_id, &title),
+                Ok(trophy_id) => persist_ra_match(state, hit.db_id, &platform_id, trophy_id, &title),
                 Err(e) => eprintln!("RA batch: bad game id {id:?}: {e}"),
             }
             show_matched(&ra_box);

@@ -100,10 +100,14 @@ fn load_selected_games(
 }
 
 fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
-    let app_id = if !entry.steam_id.is_empty() {
+    // The operational id is always the platform-native one; the Steam
+    // match id lives in `steam_id` and never lands here. Store-API
+    // callers resolve both through `Game::steam_api_id`.
+    let app_id = entry.external_id();
+    let store_id = if !entry.steam_id.is_empty() {
         &entry.steam_id
     } else {
-        entry.external_id()
+        app_id
     };
 
     let mut game = entry.to_game();
@@ -131,7 +135,9 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     }
 
     if entry.title.is_empty() {
-        if let Some(name) = ira_parser::read_app_name(save_dir, app_id) {
+        // App-name sidecars live beside the store-keyed data dir, which
+        // prefers the Steam id — resolve it the same way.
+        if let Some(name) = ira_parser::read_app_name(save_dir, store_id) {
             game.name = name;
         }
     }
@@ -208,7 +214,6 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     } else {
         entry.external_id()
     };
-    let platform_id = &entry.platform_id;
     let _s = tracing::info_span!("load_game", app_id).entered();
 
     let mut game = build_game_base(entry, save_dir);
@@ -273,8 +278,12 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         }
         map
     } else {
-        let status_path =
-            ira_parser::unlock_status_path(save_dir, entry.trophy_source, app_id, platform_id);
+        let status_path = ira_parser::unlock_status_path(
+            save_dir,
+            entry.trophy_source,
+            app_id,
+            &entry.native_id,
+        );
         ira_parser::load_status_map(&status_path)
     };
 
@@ -476,8 +485,8 @@ pub fn achievement_watch_file(game: &Game, save_dir: &str) -> Option<PathBuf> {
             Some(ira_parser::unlock_status_path(
                 save_dir,
                 game.trophy_source,
-                &game.app_id,
-                &game.platform_id,
+                game.steam_api_id(),
+                &game.native_id,
             ))
         }
         _ if game.kind == ira_models::GameKind::Ps3 => {

@@ -226,8 +226,8 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 locked[first_n..].iter().map(|a| (*a).clone()).collect();
             let group = locked_group;
             let trophy_source = game.trophy_source;
-            let app_id = game.app_id.clone();
-            let platform_id = game.platform_id.clone();
+            let app_id = game.steam_api_id().to_string();
+            let native_id = game.native_id.clone();
             let state = state.clone();
             let mut expander = hidden_expander.clone();
             let mut i = 0;
@@ -243,14 +243,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                         let reload_clone = reload.clone();
                         let trophy_source_clone = trophy_source;
                         let app_id_clone = app_id.clone();
-                        let platform_id_clone = platform_id.clone();
+                        let native_id_clone = native_id.clone();
                         let state_clone = state.clone();
                         Some(Box::new(move || {
                             super::matching::confirm_mark_unlocked(
                                 &state_clone,
                                 trophy_source_clone,
                                 &app_id_clone,
-                                &platform_id_clone,
+                                &native_id_clone,
                                 &ach_clone,
                                 reload_clone.clone(),
                             );

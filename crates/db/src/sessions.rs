@@ -214,7 +214,7 @@ mod tests {
     fn test_recompute_last_played_after_delete_keeps_newest() {
         use ira_models::{GameKind, TrophySource};
         let (conn, _tmp) = setup_db();
-        let game = super::super::add_game(&conn, GameKind::Steam, TrophySource::Gse, "1", "", "", "G").unwrap();
+        let game = super::super::add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "1", trophy_id: "", native_id: "", platform_id: "", title: "G" }).unwrap();
         super::super::set_last_played(&conn, game, 2000).unwrap();
         let old = record_session(&conn, game, None, 1000, 1100).unwrap();
         let new = record_session(&conn, game, None, 2000, 2100).unwrap();
@@ -232,7 +232,7 @@ mod tests {
     fn test_recompute_last_played_clears_when_empty() {
         use ira_models::{GameKind, TrophySource};
         let (conn, _tmp) = setup_db();
-        let game = super::super::add_game(&conn, GameKind::Steam, TrophySource::Gse, "1", "", "", "G").unwrap();
+        let game = super::super::add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "1", trophy_id: "", native_id: "", platform_id: "", title: "G" }).unwrap();
         super::super::set_last_played(&conn, game, 1000).unwrap();
         let id = record_session(&conn, game, None, 1000, 1100).unwrap();
         // Act: delete the only session, then recompute.
@@ -248,7 +248,7 @@ mod tests {
     fn test_recompute_last_played_variant_scope() {
         use ira_models::{GameKind, TrophySource};
         let (conn, _tmp) = setup_db();
-        let game = super::super::add_game(&conn, GameKind::Steam, TrophySource::Gse, "1", "", "", "G").unwrap();
+        let game = super::super::add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "1", trophy_id: "", native_id: "", platform_id: "", title: "G" }).unwrap();
         let vid = super::super::add_variant(
             &conn,
             &ira_models::GameVariant {

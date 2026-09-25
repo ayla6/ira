@@ -31,19 +31,31 @@ fn find_game_by(
         .next())
 }
 
-pub fn find_by_steam_id(conn: &DbConn, steam_id: &str) -> Result<Option<GameEntry>, String> {
-    find_game_by(conn, "steam_id = ?1", params![steam_id])
-}
-
-pub fn find_by_ra_id(
+/// The row carrying a Steam id on one platform: several platforms may
+/// point at the same store entry (one Steam port, many console
+/// releases), so the platform scopes the lookup — like the trophy and
+/// native id lookups, never global.
+pub fn find_by_steam_id(
     conn: &DbConn,
-    ra_id: &str,
+    steam_id: &str,
     platform_id: &str,
 ) -> Result<Option<GameEntry>, String> {
     find_game_by(
         conn,
-        "ra_id = ?1 AND platform_id = ?2",
-        params![ra_id, platform_id],
+        "steam_id = ?1 AND platform_id = ?2",
+        params![steam_id, platform_id],
+    )
+}
+
+pub fn find_by_trophy_id(
+    conn: &DbConn,
+    trophy_id: &str,
+    platform_id: &str,
+) -> Result<Option<GameEntry>, String> {
+    find_game_by(
+        conn,
+        "trophy_id = ?1 AND platform_id = ?2",
+        params![trophy_id, platform_id],
     )
 }
 
@@ -133,32 +145,41 @@ mod tests {
         let (conn, _tmp) = setup_db();
         add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "1",
-            "",
-            "",
-            "Game 1",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "1",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Game 1",
+            },
         )
         .unwrap();
         add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "2",
-            "",
-            "",
-            "Game 2",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "2",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Game 2",
+            },
         )
         .unwrap();
         add_game(
             &conn,
-            GameKind::Retro,
-            TrophySource::Ra,
-            "",
-            "r1",
-            "nes",
-            "Game 3",
+            crate::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Ra,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "r1",
+                platform_id: "nes",
+                title: "Game 3",
+            },
         )
         .unwrap();
         let games = load_all_games(&conn).unwrap();
@@ -170,32 +191,41 @@ mod tests {
         let (conn, _tmp) = setup_db();
         add_game(
             &conn,
-            GameKind::Switch,
-            TrophySource::Empty,
-            "",
-            "010051f0207b2000",
-            "switch",
-            "Switch game",
+            crate::NewGame {
+                kind: GameKind::Switch,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "010051f0207b2000",
+                platform_id: "switch",
+                title: "Switch game",
+            },
         )
         .unwrap();
         add_game(
             &conn,
-            GameKind::Retro,
-            TrophySource::Empty,
-            "",
-            "legacy",
-            "switch",
-            "Legacy switch rom",
+            crate::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "legacy",
+                platform_id: "switch",
+                title: "Legacy switch rom",
+            },
         )
         .unwrap();
         add_game(
             &conn,
-            GameKind::Switch,
-            TrophySource::Empty,
-            "",
-            "0100000000010000",
-            "not-a-rom-console",
-            "Other platform",
+            crate::NewGame {
+                kind: GameKind::Switch,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "0100000000010000",
+                platform_id: "not-a-rom-console",
+                title: "Other platform",
+            },
         )
         .unwrap();
 
@@ -210,22 +240,28 @@ mod tests {
         let (conn, _tmp) = setup_db();
         add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "1",
-            "",
-            "",
-            "Game 1",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "1",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Game 1",
+            },
         )
         .unwrap();
         let id2 = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "2",
-            "",
-            "",
-            "Game 2",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "2",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Game 2",
+            },
         )
         .unwrap();
         let game = find_by_db_id(&conn, id2).unwrap().unwrap();
@@ -234,31 +270,63 @@ mod tests {
     }
 
     #[test]
-    fn test_find_by_steam_id_returns_correct_game() {
-        let (conn, _tmp) = setup_db();
+    fn test_find_by_steam_id_returns_correct_game() {        let (conn, _tmp) = setup_db();
         add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "100",
-            "",
-            "",
-            "Steam Game",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "100",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Steam Game",
+            },
         )
         .unwrap();
         add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "200",
-            "",
-            "",
-            "Other Game",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "200",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Other Game",
+            },
         )
         .unwrap();
-        let game = find_by_steam_id(&conn, "100").unwrap().unwrap();
+        let game = find_by_steam_id(&conn, "100", "").unwrap().unwrap();
         assert_eq!(game.steam_id, "100");
         assert_eq!(game.title, "Steam Game");
+    }
+
+    #[test]
+    fn test_find_by_steam_id_scopes_per_platform() {
+        // One Steam port, two console releases: both rows share the
+        // store id and the platform tells them apart.
+        let (conn, _tmp) = setup_db();
+        for (platform, title) in [("psx", "Chrono Trigger"), ("nds", "Chrono Trigger")] {
+            add_game(
+                &conn,
+                crate::NewGame {
+                    kind: GameKind::Retro,
+                    trophy_source: TrophySource::Empty,
+                    steam_id: "398850",
+                    trophy_id: "",
+                    native_id: "",
+                    platform_id: platform,
+                    title,
+                },
+            )
+            .unwrap();
+        }
+        let psx = find_by_steam_id(&conn, "398850", "psx").unwrap().unwrap();
+        assert_eq!(psx.platform_id, "psx");
+        let nds = find_by_steam_id(&conn, "398850", "nds").unwrap().unwrap();
+        assert_eq!(nds.platform_id, "nds");
+        assert!(find_by_steam_id(&conn, "398850", "steam").unwrap().is_none());
     }
 
     #[test]
@@ -273,12 +341,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Wine,
-            TrophySource::Gse,
-            "555",
-            "",
-            "",
-            "Folder Game",
+            crate::NewGame {
+                kind: GameKind::Wine,
+                trophy_source: TrophySource::Gse,
+                steam_id: "555",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Folder Game",
+            },
         )
         .unwrap();
         super::super::update_game_folder(&conn, id, "/games/MyGame").unwrap();
@@ -294,12 +365,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Linux,
-            TrophySource::Empty,
-            "",
-            "",
-            "",
-            "No Folder",
+            crate::NewGame {
+                kind: GameKind::Linux,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "No Folder",
+            },
         )
         .unwrap();
         // game_folder defaults to "" — must NOT match an empty-string query

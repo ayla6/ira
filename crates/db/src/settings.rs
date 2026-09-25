@@ -102,9 +102,14 @@ pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<()
     tx.commit().map_err(err)
 }
 
-/// The Steam app id a console game was matched to by title — metadata
-/// only. Separate from `steam_id` (the trophy id) so linking a console
-/// game to Steam never turns it into a Steam game.
-pub fn set_steam_link_id(conn: &DbConn, id: i64, link_id: &str) -> Result<(), String> {
-    update_field(conn, id, "steam_link_id", &link_id)
+/// Sets the Steam id alone, without touching the achievement keys: the
+/// manual link row for console games and any future single-field edit.
+/// Unlike `update_game_ids`, this never repoints RA, trophy source, or
+/// platform — a console game linked to Steam keeps its own identity.
+pub fn set_steam_id(conn: &DbConn, id: i64, steam_id: &str) -> Result<(), String> {
+    update_field(conn, id, "steam_id", &steam_id)?;
+    // Same invalidation as `update_game_ids`: the consult answered for
+    // whatever id was there before.
+    crate::clear_steam_garnish(conn, id)?;
+    Ok(())
 }

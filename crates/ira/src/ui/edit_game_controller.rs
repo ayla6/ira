@@ -240,6 +240,13 @@ fn show_editor(
     registry: &Arc<ira_input::ControllerRegistry>,
     on_saved: std::rc::Rc<dyn Fn(&Path)>,
 ) {
+    // New profiles scope to the game's own id (native product id, else
+    // the system scope) — the same values past versions stored.
+    let scope_id = if !game.native_id.is_empty() {
+        game.native_id.clone()
+    } else {
+        game.platform_id.clone()
+    };
     super::input_profile_editor::show_input_profile_editor(
         window,
         super::input_profile_editor::InputProfileEditorParams {
@@ -247,7 +254,7 @@ fn show_editor(
             profile_path: profile_path.map(Path::to_path_buf),
             seed_from: seed_from.map(Path::to_path_buf),
             game_id: Some(game.db_id),
-            platform_id: Some(game.platform_id.clone()).filter(|id| !id.is_empty()),
+            platform_id: Some(scope_id).filter(|id| !id.is_empty()),
             layout_name: Some(game.name.clone()),
             registry: registry.clone(),
             device: None,
@@ -372,10 +379,18 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     }
     input_group.add(&pause_row);
 
-    let platform_id = params.game.platform_id.clone();
+    // Profiles scope to the game's own id: the native product id when the
+    // row has one, else the system scope. Either matches what past
+    // versions stored, since those values agreed wherever both existed.
+    let profile_game = params.game.clone();
+    let profile_scope_id = if !profile_game.native_id.is_empty() {
+        profile_game.native_id.clone()
+    } else {
+        profile_game.platform_id.clone()
+    };
     let current_path = params.launch.input_profile.as_deref().map(PathBuf::from);
     let (labels, paths, selected) =
-        profile_choices(params.save_dir, params.game.db_id, &platform_id, current_path);
+        profile_choices(params.save_dir, &profile_game, current_path);
     let input_profile_row = adw::ComboRow::new();
     input_profile_row.set_title(&crate::tr!("Current layout"));
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
@@ -388,8 +403,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let mode_row_for_notify = input_profile_row.clone();
     let mode_paths_for_notify = input_profile_paths.clone();
     let mode_save_dir = params.save_dir.to_string();
-    let mode_game_id = params.game.db_id;
-    let mode_platform_id = platform_id.clone();
+    let mode_game = profile_game.clone();
     let last_real_for_mode = last_real.clone();
     input_mode_row.connect_selected_notify(move |row| {
         let mode = input_mode_from_index(row.selected());
@@ -399,8 +413,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             &mode_row_for_notify,
             &mode_paths_for_notify,
             &mode_save_dir,
-            mode_game_id,
-            &mode_platform_id,
+            &mode_game,
             current.as_deref(),
             &last_real_for_mode,
         );
@@ -416,8 +429,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         let row = Downgrade::downgrade(&input_profile_row);
         let paths = input_profile_paths.clone();
         let save_dir = params.save_dir.to_string();
-        let game_id = params.game.db_id;
-        let platform_id = platform_id.clone();
+        let delete_game = profile_game.clone();
         let last_real = last_real.clone();
         let edit_button_for_click = edit_button.clone();
         let delete_button_for_click = delete_button.clone();
@@ -438,7 +450,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             let row_c = row.clone();
             let paths_c = paths.clone();
             let save_dir_c = save_dir.clone();
-            let platform_id_c = platform_id.clone();
+            let delete_game_c = delete_game.clone();
             let last_real_c = last_real.clone();
             let edit_button_c = edit_button_for_click.clone();
             let delete_button_c = delete_button_for_click.clone();
@@ -456,7 +468,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                         eprintln!("ira: {error}");
                         return;
                     }
-                    refresh_profile_choices(&row_c, &paths_c, &save_dir_c, game_id, &platform_id_c, None, &last_real_c);
+                    refresh_profile_choices(&row_c, &paths_c, &save_dir_c, &delete_game_c, None, &last_real_c);
                     let has_profile = selected_path(&row_c, &paths_c).is_some();
                     edit_button_c.set_sensitive(has_profile);
                     delete_button_c.set_sensitive(has_profile);
@@ -470,8 +482,8 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let profile_row_for_edit = Downgrade::downgrade(&input_profile_row);
     let profile_paths_for_edit = input_profile_paths.clone();
     let save_dir_for_edit = params.save_dir.to_string();
-    let game_id_for_edit = params.game.db_id;
-    let platform_for_edit = platform_id.clone();
+    let edit_game = profile_game.clone();
+    let platform_for_edit = profile_scope_id.clone();
     let game_name_for_edit = params.game.name.clone();
     let registry_for_edit = params.registry.clone();
     let last_real_for_edit = last_real.clone();
@@ -497,7 +509,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                 save_dir: save_dir_for_edit.clone(),
                 profile_path: Some(path),
                 seed_from: None,
-                game_id: Some(game_id_for_edit),
+                game_id: Some(edit_game.db_id),
                 platform_id: Some(platform_for_edit.clone()).filter(|id| !id.is_empty()),
                 layout_name: Some(game_name_for_edit.clone()),
                 registry: registry_for_edit.clone(),
@@ -507,15 +519,14 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                 let row = profile_row_for_edit.clone();
                 let paths = profile_paths_for_edit.clone();
                 let save_dir = save_dir_for_edit.clone();
-                let platform_id = platform_for_edit.clone();
+                let edit_game_c = edit_game.clone();
                 let last_real = last_real_for_edit.clone();
                 move |saved| {
                     refresh_profile_choices(
                         &row,
                         &paths,
                         &save_dir,
-                        game_id_for_edit,
-                        &platform_id,
+                        &edit_game_c,
                         Some(&saved),
                         &last_real,
                     )
@@ -525,7 +536,8 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     });
 
     let last_real_for_new = last_real.clone();
-    let platform_for_new_source = platform_id.clone();
+    let new_game = profile_game.clone();
+    let platform_for_new_source = profile_scope_id.clone();
     let new_profile_cb: Rc<dyn Fn()> = {
         let stack = Downgrade::downgrade(params.stack);
         let row = Downgrade::downgrade(&input_profile_row);
@@ -552,6 +564,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
             let save_dir = save_dir.clone();
             let callback_save_dir = save_dir.clone();
             let platform_for_new = platform_for_new_source.clone();
+            let new_game_c = new_game.clone();
             let last_real = last_real_for_new.clone();
             super::input_profile_editor::show_input_profile_editor(
                 &window,
@@ -570,8 +583,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                         &row,
                         &paths,
                         &callback_save_dir,
-                        game_id,
-                        &platform_for_new.clone(),
+                        &new_game_c,
                         Some(&saved),
                         &last_real,
                     )
@@ -610,19 +622,16 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     });
     input_group.add(&input_profile_row);
 
-    // Community layouts: Steam workshop controller configs, searched by this
-    // game's app id when it has one and by free text otherwise. Imports land
-    // in the managed profile pool attached to this game. The steam id comes
-    // straight from the in-memory game: trophy sources with Steam enrichment
-    // (Goldberg, Nemirtingas, native Steam) carry the app id in `app_id`,
-    // even when the db's steam_id column is empty and the id lives in
-    // game_id instead.
+    // Community layouts: Steam workshop controller configs, searched by
+    // this game's Steam id when it has one and by free text otherwise.
+    // Imports land in the managed profile pool attached to this game.
     let steam_client = params.state.borrow().steam.clone();
     let steam_app_id = {
         let game = params.game;
-        let numeric = !game.app_id.is_empty() && game.app_id.bytes().all(|b| b.is_ascii_digit());
+        let store_id = game.steam_api_id();
+        let numeric = !store_id.is_empty() && store_id.bytes().all(|b| b.is_ascii_digit());
         if game.trophy_source.has_steam_enrichment() && numeric {
-            game.app_id.clone()
+            store_id.to_string()
         } else {
             String::new()
         }
@@ -639,8 +648,9 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let profile_row_for_search = Downgrade::downgrade(&input_profile_row);
     let paths_for_search = input_profile_paths.clone();
     let save_dir_for_search = params.save_dir.to_string();
+    let search_game = profile_game.clone();
     let game_id_for_search = params.game.db_id;
-    let platform_for_search = platform_id.clone();
+    let platform_for_search = profile_scope_id.clone();
     let game_name_for_search = params.game.name.clone();
     let last_real_for_search = last_real.clone();
     {
@@ -669,7 +679,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                     let paths = paths_for_search.clone();
                     let save_dir = save_dir_for_search.clone();
                     let last_real = last_real_for_search.clone();
-                    let platform_for_search = platform_for_search.clone();
+                    let search_game_c = search_game.clone();
                     Rc::new(move |saved| {
                         let Some(row) = profile_row_for_search.upgrade() else {
                             return;
@@ -678,8 +688,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
                             &row,
                             &paths,
                             &save_dir,
-                            game_id_for_search,
-                            &platform_for_search.clone(),
+                            &search_game_c,
                             Some(&saved),
                             &last_real,
                         )
@@ -724,8 +733,7 @@ fn selected_path(
 
 fn profile_choices(
     save_dir: &str,
-    game_id: i64,
-    platform_id: &str,
+    game: &crate::Game,
     current_path: Option<PathBuf>,
 ) -> (Vec<String>, Vec<Option<PathBuf>>, u32) {
     let profiles = list_profiles(save_dir).unwrap_or_else(|error| {
@@ -737,8 +745,8 @@ fn profile_choices(
     for stored in profiles {
         // Profiles scoped to other platforms stay hidden: a Wii layout has
         // no business offering itself to a PS1 game.
-        if profile_matches_game(&stored.profile, game_id)
-            && profile_matches_platform(&stored.profile, platform_id)
+        if profile_matches_game(&stored.profile, game.db_id)
+            && profile_matches_platform(&stored.profile, game)
         {
             labels.push(profile_label(&stored));
             paths.push(Some(stored.path));
@@ -772,15 +780,13 @@ fn refresh_profile_choices(
     row: &adw::ComboRow,
     paths: &Rc<RefCell<Vec<Option<PathBuf>>>>,
     save_dir: &str,
-    game_id: i64,
-    platform_id: &str,
+    game: &crate::Game,
     selected_path: Option<&Path>,
     last_real: &Rc<RefCell<u32>>,
 ) {
     let (labels, profile_paths, selected) = profile_choices(
         save_dir,
-        game_id,
-        platform_id,
+        game,
         selected_path.map(Path::to_path_buf),
     );
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();

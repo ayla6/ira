@@ -135,13 +135,14 @@ fn fallback_game(
 ) -> Game {
     let app_id = if !entry.steam_id.is_empty() {
         entry.steam_id.clone()
-    } else if !entry.ra_id.is_empty() {
-        entry.ra_id.clone()
+    } else if !entry.trophy_id.is_empty() {
+        entry.trophy_id.clone()
     } else {
         entry.native_id.clone()
     };
     Game {
         app_id,
+        native_id: entry.native_id.clone(),
         kind: console.def.game_kind(),
         trophy_source: entry.trophy_source,
         platform_id: entry.platform_id.clone(),
@@ -325,10 +326,10 @@ fn build_ra_games_for_console(
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let rom_norm = normalize_name(&rom_name);
-                if let Some(ra_id) = ra_index.find(entry.hashes.ra_key(), &rom_norm) {
-                    let new_game_id = ra_id.to_string();
+                if let Some(trophy_id) = ra_index.find(entry.hashes.ra_key(), &rom_norm) {
+                    let new_game_id = trophy_id.to_string();
                     let already_matched =
-                        ira_db::find_by_ra_id(db, &new_game_id, console.def.id)
+                        ira_db::find_by_trophy_id(db, &new_game_id, console.def.id)
                             .unwrap_or_else(|e| {
                                 eprintln!(
                                     "Failed to look up game_id {new_game_id}: {e}"
@@ -337,7 +338,7 @@ fn build_ra_games_for_console(
                             });
                     if already_matched.is_none() {
                         let ra_title = ra_index
-                            .title_of(ra_id)
+                            .title_of(trophy_id)
                             .map(str::to_string)
                             .unwrap_or_else(|| rom_display_title(&rom_name));
                         if let Err(e) = ira_db::update_game_ids(
@@ -350,7 +351,7 @@ fn build_ra_games_for_console(
                         ) {
                             eprintln!("Failed to update game IDs for RA match: {}", e);
                         }
-                        entry.ra_id = new_game_id;
+                        entry.trophy_id = new_game_id;
                         entry.trophy_source = ira_models::TrophySource::Ra;
                         if entry.title.is_empty() {
                             entry.title = ra_title;
@@ -545,12 +546,15 @@ fn build_ra_games_for_console(
                 None => {
                     match ira_db::add_game(
                         db,
-                        console.def.game_kind(),
-                        trophy_source,
-                        "",
-                        &app_id,
-                        console.def.id,
-                        &title,
+                        ira_db::NewGame {
+                            kind: console.def.game_kind(),
+                            trophy_source,
+                            steam_id: "",
+                            trophy_id: "",
+                            native_id: &app_id,
+                            platform_id: console.def.id,
+                            title: &title,
+                        },
                     ) {
                         Ok(id) => {
                             if let Err(e) = ira_db::set_rom_path(db, id, &rom_path_str) {
@@ -558,6 +562,7 @@ fn build_ra_games_for_console(
                             }
                             Game {
                                 app_id: app_id.clone(),
+                                native_id: app_id.clone(),
                                 kind: console.def.game_kind(),
                                 trophy_source,
                                 platform_id: console.def.id.to_string(),
@@ -1218,12 +1223,15 @@ mod tests {
         let db = test_db();
         let db_id = ira_db::add_game(
             &db,
-            ira_models::GameKind::Retro,
-            ira_models::TrophySource::Ra,
-            "",
-            "",
-            "gba",
-            "Filled",
+            ira_db::NewGame {
+                kind: ira_models::GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Ra,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "gba",
+                title: "Filled",
+            },
         )
         .unwrap();
         ira_db::set_rom_path(&db, db_id, "Filled (USA).gba").unwrap();
@@ -1251,12 +1259,15 @@ mod tests {
         // A row whose file vanished: no path, but its content hash stayed.
         let db_id = ira_db::add_game(
             &db,
-            ira_models::GameKind::Retro,
-            ira_models::TrophySource::Empty,
-            "",
-            "",
-            "gba",
-            "Old title",
+            ira_db::NewGame {
+                kind: ira_models::GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "gba",
+                title: "Old title",
+            },
         )
         .unwrap();
         let hash = crate::rom_hash::file_md5(&rom).unwrap();
@@ -1300,12 +1311,15 @@ mod tests {
         let db = test_db();
         let db_id = ira_db::add_game(
             &db,
-            ira_models::GameKind::Retro,
-            ira_models::TrophySource::Empty,
-            "",
-            "42",
-            "gba",
-            "Gone game",
+            ira_db::NewGame {
+                kind: ira_models::GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "42",
+                platform_id: "gba",
+                title: "Gone game",
+            },
         )
         .unwrap();
         ira_db::set_rom_path(&db, db_id, "Gone.gba").unwrap();
@@ -1375,12 +1389,15 @@ mod tests {
         // never matched: it carries no hash at all.
         let db_id = ira_db::add_game(
             &db,
-            ira_models::GameKind::Retro,
-            ira_models::TrophySource::Empty,
-            "",
-            "",
-            "gba",
-            "Some Game",
+            ira_db::NewGame {
+                kind: ira_models::GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "gba",
+                title: "Some Game",
+            },
         )
         .unwrap();
         ira_db::set_rom_path(&db, db_id, "Some Game (USA).zip").unwrap();
@@ -1401,7 +1418,7 @@ mod tests {
         assert_eq!(games.len(), 1);
         let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
         assert_eq!(entry.hashes.md5, content_hash);
-        assert_eq!(entry.ra_id, "77");
+        assert_eq!(entry.trophy_id, "77");
         assert_eq!(entry.trophy_source, ira_models::TrophySource::Ra);
     }
 
@@ -1440,12 +1457,15 @@ mod tests {
         let db = test_db();
         let db_id = ira_db::add_game(
             &db,
-            ira_models::GameKind::Switch,
-            ira_models::TrophySource::Empty,
-            "",
-            "The Legend of Zelda [01007EF00011E000]",
-            "switch",
-            "The Legend of Zelda [01007EF00011E000]",
+            ira_db::NewGame {
+                kind: ira_models::GameKind::Switch,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "The Legend of Zelda [01007EF00011E000]",
+                platform_id: "switch",
+                title: "The Legend of Zelda [01007EF00011E000]",
+            },
         )
         .unwrap();
         ira_db::set_rom_path(&db, db_id, "The Legend of Zelda [01007EF00011E000].xci").unwrap();

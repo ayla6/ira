@@ -6,7 +6,6 @@ pub(super) struct AddGameToDbParams<'a> {
     pub(super) kind: ira_models::GameKind,
     pub(super) trophy_source: ira_models::TrophySource,
     pub(super) app_id: &'a str,
-    pub(super) platform_id: &'a str,
     pub(super) game_folder: &'a str,
     pub(super) launch_config: &'a GameLaunchConfig,
     pub(super) wine_config: &'a WineConfig,
@@ -22,7 +21,6 @@ pub(super) fn add_game_to_db(params: AddGameToDbParams) -> Result<i64, String> {
         kind,
         trophy_source,
         app_id,
-        platform_id,
         game_folder,
         launch_config,
         wine_config,
@@ -30,19 +28,25 @@ pub(super) fn add_game_to_db(params: AddGameToDbParams) -> Result<i64, String> {
         steam,
         save_dir,
     } = params;
-    let (steam_id, game_id) = if trophy_source.has_steam_enrichment() {
-        (app_id, "")
-    } else {
-        ("", app_id)
+    // The platform is the kind's system, never the typed id. The typed id
+    // lands by source: a Steam app id is both match and native id, a GOG
+    // product id is native only (its Steam id, if known, arrives through
+    // matching), anything else is a native marker.
+    let (steam_id, native_id) = match trophy_source {
+        ira_models::TrophySource::Gse | ira_models::TrophySource::SteamNative => (app_id, app_id),
+        _ => ("", app_id),
     };
     let game_id = ira_db::add_game(
         db,
-        kind,
-        trophy_source,
-        steam_id,
-        game_id,
-        platform_id,
-        name,
+        ira_db::NewGame {
+            kind,
+            trophy_source,
+            steam_id,
+            trophy_id: "",
+            native_id,
+            platform_id: kind.as_str(),
+            title: name,
+        },
     )?;
     ira_db::save_game_config(db, game_id, launch_config, wine_config, profile_id)?;
     if !game_folder.is_empty() {

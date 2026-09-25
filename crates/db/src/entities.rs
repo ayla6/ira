@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn test_rename_latches_against_store_freshening() {
         let (conn, _tmp) = setup_db();
-        let game = add_game(&conn, GameKind::Steam, TrophySource::Gse, "", "", "", "Game").unwrap();
+        let game = add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "", trophy_id: "", native_id: "", platform_id: "", title: "Game" }).unwrap();
         put_entity(&conn, GENRES, 2620, "Role Playing Game");
         rename_entity(&conn, KIND_GENRE, 2620, "RPG").unwrap();
         // The source's next spelling loses to the user's rename.
@@ -629,8 +629,8 @@ mod tests {
     #[test]
     fn test_merge_moves_references_and_leaves_an_alias() {
         let (conn, _tmp) = setup_db();
-        let a = add_game(&conn, GameKind::Steam, TrophySource::Gse, "", "", "", "One").unwrap();
-        let b = add_game(&conn, GameKind::Steam, TrophySource::Gse, "", "", "", "Two").unwrap();
+        let a = add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "", trophy_id: "", native_id: "", platform_id: "", title: "One" }).unwrap();
+        let b = add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "", trophy_id: "", native_id: "", platform_id: "", title: "Two" }).unwrap();
         crate::store_scraper_metadata(
             &conn,
             a,

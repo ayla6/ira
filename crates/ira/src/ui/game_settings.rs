@@ -394,7 +394,7 @@ fn add_steam_link_row(
     let db_id = game.db_id;
     let row = adw::EntryRow::new();
     row.set_title(&crate::tr!("Steam"));
-    row.set_text(&game.steam_link_id);
+    row.set_text(&game.steam_id);
     row.set_tooltip_text(Some(&crate::tr!(
         "Links this game to a Steam entry for metadata only"
     )));
@@ -409,12 +409,12 @@ fn add_steam_link_row(
                 return;
             }
             row.remove_css_class(CSS_ERROR);
-            if let Err(e) = ira_db::set_steam_link_id(&state.borrow().db, db_id, &link) {
+            if let Err(e) = ira_db::set_steam_id(&state.borrow().db, db_id, &link) {
                 eprintln!("Failed to store the Steam link: {e}");
                 return;
             }
             if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-                g.steam_link_id = link;
+                g.steam_id = link;
             }
         })
     };

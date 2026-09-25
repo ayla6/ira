@@ -29,7 +29,7 @@ pub fn update_field(
         "rom_path",
         "screenscraper_id",
         "title_trusted",
-        "steam_link_id",
+        "steam_id",
     ];
     if !UPDATABLE_COLUMNS.contains(&column) {
         return Err(format!("update_field: unknown column {column}"));
@@ -59,7 +59,7 @@ pub fn init_db(db_path: &str) -> DbConn {
                 kind TEXT NOT NULL,
                 trophy_source TEXT NOT NULL DEFAULT '',
                 steam_id TEXT NOT NULL DEFAULT '',
-                ra_id TEXT NOT NULL DEFAULT '',
+                trophy_id TEXT NOT NULL DEFAULT '',
                 native_id TEXT NOT NULL DEFAULT '',
                 platform_id TEXT NOT NULL,
                 title TEXT NOT NULL DEFAULT '',
@@ -88,7 +88,6 @@ pub fn init_db(db_path: &str) -> DbConn {
                 saves_centralized INTEGER NOT NULL DEFAULT 0,
                 hashes TEXT NOT NULL DEFAULT '',
                 title_trusted INTEGER NOT NULL DEFAULT 0,
-                steam_link_id TEXT NOT NULL DEFAULT '',
                 vanished INTEGER NOT NULL DEFAULT 0,
                 developer TEXT NOT NULL DEFAULT '',
                 publisher TEXT NOT NULL DEFAULT '',
@@ -99,8 +98,8 @@ pub fn init_db(db_path: &str) -> DbConn {
                 screenscraper_rating REAL NOT NULL DEFAULT -1,
                 release_dates TEXT NOT NULL DEFAULT ''
             );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id ON games(steam_id) WHERE steam_id != '';
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ra_id_platform ON games(ra_id, platform_id) WHERE ra_id != '';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id_platform ON games(steam_id, platform_id) WHERE steam_id != '';
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_trophy_id_platform ON games(trophy_id, platform_id) WHERE trophy_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_native_id_platform ON games(native_id, platform_id) WHERE native_id != '';
             CREATE TABLE IF NOT EXISTS game_configs (
                 game_id INTEGER NOT NULL UNIQUE,
@@ -201,7 +200,13 @@ pub fn init_db(db_path: &str) -> DbConn {
             );
             CREATE INDEX IF NOT EXISTS idx_scraper_game_families_family
                 ON scraper_game_families(family_id);
-            CREATE TABLE IF NOT EXISTS scraper_misses (
+            CREATE TABLE IF NOT EXISTS match_misses (
+                game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                source TEXT NOT NULL,
+                checked_at INTEGER NOT NULL,
+                PRIMARY KEY (game_id, source)
+            );
+            CREATE TABLE IF NOT EXISTS steam_garnish (
                 game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
                 checked_at INTEGER NOT NULL
             );
@@ -248,9 +253,11 @@ pub fn init_db(db_path: &str) -> DbConn {
         ).expect("failed to create tables");
         // Serial-number indexes keyed by the models' kind strings — raw
         // literals here would silently diverge from GameKind's serialized form.
+        // Serials live in native_id (platform_id is the system scope, one
+        // value per kind, so it can no longer disambiguate installs).
         conn.execute_batch(&format!(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, platform_id) WHERE kind = '{}';
-             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps3_serial ON games(kind, platform_id) WHERE kind = '{}';",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, native_id) WHERE kind = '{}';
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps3_serial ON games(kind, native_id) WHERE kind = '{}';",
             ira_models::GameKind::Ps4.as_str(),
             ira_models::GameKind::Ps3.as_str(),
         ))

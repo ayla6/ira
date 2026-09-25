@@ -1221,7 +1221,6 @@ fn add_game_record(params: AddGameRecordParams<'_>) -> Result<i64, String> {
         kind: setup.kind,
         trophy_source: TrophySource::Gse,
         app_id,
-        platform_id: app_id,
         game_folder: &game_folder,
         launch_config: &setup.launch_config,
         wine_config: &setup.wine_config,
@@ -1324,7 +1323,7 @@ fn auto_match_screenscraper(
     );
     let target = super::mass_match_ss::PcMatchTarget {
         kind: game.kind,
-        platform_id: &game.platform_id,
+        store_id: game.steam_api_id(),
         title: &game.name,
         display,
         db_id,

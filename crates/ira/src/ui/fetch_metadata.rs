@@ -156,8 +156,8 @@ fn steam_refetch_queue(state: &SharedState, force: bool) -> Vec<i64> {
     s.games
         .iter()
         .filter(|g| {
-            !g.steam_link_id.is_empty()
-                || (g.kind.is_pc() && g.platform_id.parse::<u32>().is_ok())
+            !g.steam_id.is_empty()
+                || (g.kind.is_pc() && g.native_id.parse::<u32>().is_ok())
         })
         .filter(|g| {
             if force {
@@ -260,13 +260,13 @@ pub(crate) fn steam_refetch_one(
     let Some(entry) = ira_db::find_by_db_id(db, db_id).ok().flatten() else {
         return RefetchOutcome::Failed("game not found".to_string());
     };
-    // The match is metadata only — no app id, no Steam enrichment ever
-    // lands on the game.
-    let app_id = if !entry.steam_link_id.is_empty() {
-        Some(entry.steam_link_id.clone())
+    // A console game linked to Steam reads like any Steam-identified
+    // game here; enrichment itself still never runs off the link.
+    let app_id = if !entry.steam_id.is_empty() {
+        Some(entry.steam_id.clone())
     } else {
         entry
-            .platform_id
+            .native_id
             .parse::<u32>()
             .ok()
             .map(|id| id.to_string())

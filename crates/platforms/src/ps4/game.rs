@@ -55,8 +55,9 @@ pub fn load_shadps4_game(
     // Build game
     let mut game = Game {
         app_id: npwr_id.clone(),
+        native_id: serial.clone(),
         kind: ira_models::GameKind::Ps4,
-        platform_id: serial.clone(),
+        platform_id: ira_models::GameKind::Ps4.as_str().to_string(),
         db_id,
         name: if meta.title.is_empty() {
             shad.title.clone()

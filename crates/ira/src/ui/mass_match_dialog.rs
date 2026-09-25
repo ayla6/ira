@@ -96,7 +96,7 @@ fn needs_ss_match(g: &Game) -> bool {
 fn needs_steam_title_match(state: &SharedState, g: &Game) -> bool {
     if g.manual_unmatch
         || g.name.trim().is_empty()
-        || !g.steam_link_id.is_empty()
+        || !g.steam_id.is_empty()
         || !(g.kind.is_console_emulator() || g.kind == ira_models::GameKind::Retro)
     {
         return false;
@@ -547,7 +547,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     let (scrolled, list) = super::helpers::clamped_boxed_list(600);
     scrolled.set_vexpand(true);
-    let ss_missed: HashSet<i64> = match ira_db::scraper_missed_ids(&state.borrow().db) {
+    let ss_missed: HashSet<i64> = match ira_db::match_missed_ids(&state.borrow().db, ira_db::miss_source::SS) {
         Ok(ids) => ids.into_iter().collect(),
         Err(e) => {
             eprintln!("Mass matcher: could not read ScreenScraper misses: {e}");

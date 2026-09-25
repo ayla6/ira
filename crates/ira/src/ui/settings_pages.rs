@@ -522,12 +522,15 @@ pub(super) fn build_lutris_settings_page(
                                 for lg in &lutris_games {
                                     match ira_db::add_game(
                                         &db,
-                                        ira_models::GameKind::Wine,
-                                        ira_models::TrophySource::Empty,
-                                        "",
-                                        "",
-                                        "",
-                                        &lg.name,
+                                        ira_db::NewGame {
+                                            kind: ira_models::GameKind::Wine,
+                                            trophy_source: ira_models::TrophySource::Empty,
+                                            steam_id: "",
+                                            trophy_id: "",
+                                            native_id: "",
+                                            platform_id: "wine",
+                                            title: &lg.name,
+                                        },
                                     ) {
                                         Ok(db_id) => {
                                             match super::edit_game_pages::convert_lutris_to_managed(

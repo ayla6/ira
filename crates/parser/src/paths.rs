@@ -473,18 +473,22 @@ pub fn achievements_dir(save_dir: &str, app_id: &str) -> PathBuf {
     data_dir(save_dir, app_id).join("achievements")
 }
 
+/// Where a game's unlock state lives: Steam-native achievements read
+/// from the client, everything else from a JSON status map. GOG games
+/// key on their product id, Goldberg games on the emulator app id —
+/// both are the platform-native id, never the store match.
 pub fn unlock_status_path(
     save_dir: &str,
     trophy_source: ira_models::TrophySource,
     app_id: &str,
-    platform_id: &str,
+    native_id: &str,
 ) -> PathBuf {
     match trophy_source {
         ira_models::TrophySource::Nge => Path::new(save_dir)
             .join("emulator_saves")
             .join("nge")
             .join(GALAXY_ID)
-            .join(platform_id)
+            .join(native_id)
             .join("achievements.json"),
         _ => Path::new(save_dir)
             .join("emulator_saves")

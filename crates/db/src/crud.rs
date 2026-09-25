@@ -2,29 +2,42 @@ use crate::{err, DbConn};
 use ira_models::{GameEntry, GameKind, TrophySource};
 use rusqlite::params;
 
-pub fn add_game(
-    conn: &DbConn,
-    kind: GameKind,
-    trophy_source: TrophySource,
-    steam_id: &str,
-    native_id: &str,
-    platform_id: &str,
-    title: &str,
-) -> Result<i64, String> {
+/// One row insert: match ids (`steam_id`, `trophy_id`), the
+/// platform-native product id, and the system scope. Bundled so the
+/// parameter list stays readable as id columns come and go.
+pub struct NewGame<'a> {
+    pub kind: GameKind,
+    pub trophy_source: TrophySource,
+    pub steam_id: &'a str,
+    pub trophy_id: &'a str,
+    pub native_id: &'a str,
+    pub platform_id: &'a str,
+    pub title: &'a str,
+}
+
+pub fn add_game(conn: &DbConn, game: NewGame<'_>) -> Result<i64, String> {
     let c = crate::lock_db(conn)?;
-    let kind = kind.as_str();
-    let trophy_source = trophy_source.as_str();
+    let kind = game.kind.as_str();
+    let trophy_source = game.trophy_source.as_str();
+    let NewGame {
+        steam_id,
+        trophy_id,
+        native_id,
+        platform_id,
+        title,
+        ..
+    } = game;
     if !steam_id.is_empty() {
         c.execute(
-            "INSERT INTO games (kind, trophy_source, steam_id, native_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(steam_id) WHERE steam_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
-            params![kind, trophy_source, steam_id, native_id, platform_id, title],
+            "INSERT INTO games (kind, trophy_source, steam_id, trophy_id, native_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(steam_id, platform_id) WHERE steam_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
+            params![kind, trophy_source, steam_id, trophy_id, native_id, platform_id, title],
         ).map_err(err)?;
     } else {
         c.execute(
-            "INSERT INTO games (kind, trophy_source, steam_id, native_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO games (kind, trophy_source, steam_id, trophy_id, native_id, platform_id, title) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(native_id, platform_id) WHERE native_id != '' DO UPDATE SET title = excluded.title WHERE games.title = '' AND excluded.title != ''",
-            params![kind, trophy_source, steam_id, native_id, platform_id, title],
+            params![kind, trophy_source, steam_id, trophy_id, native_id, platform_id, title],
         ).map_err(err)?;
     }
     Ok(c.last_insert_rowid())
@@ -44,15 +57,18 @@ pub fn update_game_ids(
     conn: &DbConn,
     id: i64,
     steam_id: &str,
-    ra_id: &str,
+    trophy_id: &str,
     trophy_source: TrophySource,
     platform_id: &str,
 ) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(
-        "UPDATE games SET steam_id = ?1, ra_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
-        params![steam_id, ra_id, trophy_source.as_str(), platform_id, id],
+        "UPDATE games SET steam_id = ?1, trophy_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
+        params![steam_id, trophy_id, trophy_source.as_str(), platform_id, id],
     ).map_err(err)?;
+    // The Steam identity may have moved: any earlier garnish consult
+    // answered for a different store entry.
+    crate::clear_steam_garnish(conn, id)?;
     Ok(())
 }
 
@@ -302,12 +318,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "12345",
-            "",
-            "",
-            "Test Game",
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "12345",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Test Game",
+            },
         )
         .unwrap();
         assert!(id > 0);
@@ -322,12 +341,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "12345",
-            "",
-            "",
-            "Test Game",
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "12345",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Test Game",
+            },
         )
         .unwrap();
         add_playtime(&conn, id, 12.5).unwrap();
@@ -341,22 +363,28 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id1 = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "12345",
-            "",
-            "",
-            "",
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "12345",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "",
+            },
         )
         .unwrap();
         let id2 = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "12345",
-            "",
-            "",
-            "Updated Title",
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "12345",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Updated Title",
+            },
         )
         .unwrap();
         assert_eq!(id1, id2);
@@ -369,22 +397,28 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let canonical = add_game(
             &conn,
-            GameKind::Retro,
-            TrophySource::Empty,
-            "",
-            "canonical",
-            "saturn",
-            "Canonical",
+            NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "canonical",
+                platform_id: "saturn",
+                title: "Canonical",
+            },
         )
         .unwrap();
         let duplicate = add_game(
             &conn,
-            GameKind::Retro,
-            TrophySource::Empty,
-            "",
-            "duplicate",
-            "saturn",
-            "Duplicate",
+            NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "duplicate",
+                platform_id: "saturn",
+                title: "Duplicate",
+            },
         )
         .unwrap();
         let group = create_group(&conn, "Favorites").unwrap();
@@ -420,12 +454,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "12345",
-            "",
-            "",
-            "Test Game",
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "12345",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Test Game",
+            },
         )
         .unwrap();
         update_game_title(&conn, id, "New Title").unwrap();
@@ -438,12 +475,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Wine,
-            TrophySource::Gse,
-            "12345",
-            "",
-            "",
-            "Test Game",
+            NewGame {
+                kind: GameKind::Wine,
+                trophy_source: TrophySource::Gse,
+                steam_id: "12345",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Test Game",
+            },
         )
         .unwrap();
         update_game_folder(&conn, id, "/games/test").unwrap();
@@ -474,12 +514,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "12345",
-            "",
-            "",
-            "Test Game",
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "12345",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Test Game",
+            },
         )
         .unwrap();
         update_game_ids(&conn, id, "67890", "game123", TrophySource::Ra, "ps4").unwrap();
@@ -487,7 +530,7 @@ mod tests {
         assert_eq!(game.steam_id, "67890");
         // The RA key lands in its own column; the platform-native id is
         // preserved untouched.
-        assert_eq!(game.ra_id, "game123");
+        assert_eq!(game.trophy_id, "game123");
         assert_eq!(game.native_id, "");
         assert_eq!(game.trophy_source, TrophySource::Ra);
         assert_eq!(game.platform_id, "ps4");
@@ -498,12 +541,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "12345",
-            "",
-            "",
-            "Test Game",
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "12345",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Test Game",
+            },
         )
         .unwrap();
         remove_game(&conn, id).unwrap();
@@ -516,12 +562,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Wine,
-            TrophySource::Gse,
-            "",
-            "g1",
-            "g1",
-            "Cached Game",
+            NewGame {
+                kind: GameKind::Wine,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "g1",
+                platform_id: "g1",
+                title: "Cached Game",
+            },
         )
         .unwrap();
         assert_eq!(super::super::get_api_dll_folder(&conn, id).unwrap(), "");
@@ -532,12 +581,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Wine,
-            TrophySource::Gse,
-            "",
-            "g1",
-            "g1",
-            "Cached Game",
+            NewGame {
+                kind: GameKind::Wine,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "g1",
+                platform_id: "g1",
+                title: "Cached Game",
+            },
         )
         .unwrap();
         set_api_dll_folder(&conn, id, "/games/Game/bin/win64").unwrap();
@@ -554,12 +606,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Wine,
-            TrophySource::Gse,
-            "",
-            "g1",
-            "g1",
-            "Cached Game",
+            NewGame {
+                kind: GameKind::Wine,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "g1",
+                platform_id: "g1",
+                title: "Cached Game",
+            },
         )
         .unwrap();
         assert!(!super::super::get_saves_centralized(&conn, id).unwrap());

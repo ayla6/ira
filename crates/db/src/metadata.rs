@@ -372,13 +372,63 @@ pub fn merge_missing_scraper_metadata(
     Ok(true)
 }
 
-/// Remember that a game's ScreenScraper search came up empty, so the mass
-/// matcher stops re-asking for a ROM the source does not know. Manual
-/// picks and later matches clear it again.
-pub fn tombstone_scraper_miss(conn: &DbConn, game_id: i64) -> Result<(), String> {
+/// Miss sources for the failure tombstones below: one row per game
+/// per source, so a dead ScreenScraper search never blocks a Steam one
+/// and no per-source columns pile up on the games table.
+pub mod miss_source {
+    /// ScreenScraper title/hash matching.
+    pub const SS: &str = "ss";
+    /// The console→Steam exact-title pass.
+    pub const STEAM: &str = "steam";
+}
+
+/// Remember that a game's automatic match for one source came up
+/// empty, so the mass matcher stops re-asking every time it opens.
+/// Manual picks and later matches clear it again.
+pub fn tombstone_match_miss(conn: &DbConn, game_id: i64, source: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     c.execute(
-        "INSERT INTO scraper_misses (game_id, checked_at) VALUES (?1, ?2)
+        "INSERT INTO match_misses (game_id, source, checked_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(game_id, source) DO UPDATE SET checked_at = excluded.checked_at",
+        params![game_id, source, chrono::Utc::now().timestamp()],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+/// The games whose automatic match for one source already came up empty.
+pub fn match_missed_ids(conn: &DbConn, source: &str) -> Result<Vec<i64>, String> {
+    let c = crate::lock_db(conn)?;
+    let mut stmt = c
+        .prepare("SELECT game_id FROM match_misses WHERE source = ?1")
+        .map_err(err)?;
+    let ids = stmt
+        .query_map([source], |row| row.get(0))
+        .map_err(err)?
+        .collect::<Result<Vec<i64>, _>>()
+        .map_err(err)?;
+    Ok(ids)
+}
+
+/// Forget a game's miss for one source — something matched it after all.
+pub fn clear_match_miss(conn: &DbConn, game_id: i64, source: &str) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "DELETE FROM match_misses WHERE game_id = ?1 AND source = ?2",
+        params![game_id, source],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+/// Remember that Steam's rich sources (store page, steamcmd) were
+/// consulted for a game, so later refetches stop re-asking a question
+/// already answered. Marked on a good store-page answer; transport
+/// failures stay unmarked and retry.
+pub fn mark_steam_garnished(conn: &DbConn, game_id: i64) -> Result<(), String> {
+    let c = crate::lock_db(conn)?;
+    c.execute(
+        "INSERT INTO steam_garnish (game_id, checked_at) VALUES (?1, ?2)
          ON CONFLICT(game_id) DO UPDATE SET checked_at = excluded.checked_at",
         params![game_id, chrono::Utc::now().timestamp()],
     )
@@ -386,10 +436,11 @@ pub fn tombstone_scraper_miss(conn: &DbConn, game_id: i64) -> Result<(), String>
     Ok(())
 }
 
-/// The games whose ScreenScraper search already came up empty.
-pub fn scraper_missed_ids(conn: &DbConn) -> Result<Vec<i64>, String> {
+/// The games Steam already answered for: consulted, even when there
+/// was nothing new to merge.
+pub fn steam_garnished_ids(conn: &DbConn) -> Result<Vec<i64>, String> {
     let c = crate::lock_db(conn)?;
-    let mut stmt = c.prepare("SELECT game_id FROM scraper_misses").map_err(err)?;
+    let mut stmt = c.prepare("SELECT game_id FROM steam_garnish").map_err(err)?;
     let ids = stmt
         .query_map([], |row| row.get(0))
         .map_err(err)?
@@ -398,14 +449,13 @@ pub fn scraper_missed_ids(conn: &DbConn) -> Result<Vec<i64>, String> {
     Ok(ids)
 }
 
-/// Forget a game's miss — something matched it after all.
-pub fn clear_scraper_miss(conn: &DbConn, game_id: i64) -> Result<(), String> {
+/// A game's Steam identity moved: any earlier consult answered for a
+/// different store entry, so forget it. Called wherever `steam_id` is
+/// written — the marker is only valid for the current id.
+pub fn clear_steam_garnish(conn: &DbConn, game_id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute(
-        "DELETE FROM scraper_misses WHERE game_id = ?1",
-        params![game_id],
-    )
-    .map_err(err)?;
+    c.execute("DELETE FROM steam_garnish WHERE game_id = ?1", params![game_id])
+        .map_err(err)?;
     Ok(())
 }
 
@@ -711,12 +761,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "",
-            "",
-            "",
-            "Dragon Quest I & II",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Dragon Quest I & II",
+            },
         )
         .unwrap();
 
@@ -811,24 +864,59 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Retro,
-            TrophySource::Empty,
-            "",
-            "",
-            "",
-            "Obscure Rom",
+            crate::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Obscure Rom",
+            },
         )
         .unwrap();
 
-        assert!(scraper_missed_ids(&conn).unwrap().is_empty());
-        tombstone_scraper_miss(&conn, id).unwrap();
-        assert_eq!(scraper_missed_ids(&conn).unwrap(), vec![id]);
+        assert!(match_missed_ids(&conn, miss_source::SS).unwrap().is_empty());
+        tombstone_match_miss(&conn, id, miss_source::SS).unwrap();
+        assert_eq!(match_missed_ids(&conn, miss_source::SS).unwrap(), vec![id]);
         // Re-missing the same game stays one row, refreshed.
-        tombstone_scraper_miss(&conn, id).unwrap();
-        assert_eq!(scraper_missed_ids(&conn).unwrap(), vec![id]);
+        tombstone_match_miss(&conn, id, miss_source::SS).unwrap();
+        assert_eq!(match_missed_ids(&conn, miss_source::SS).unwrap(), vec![id]);
+        // Sources stay separate: an SS miss is no Steam miss.
+        assert!(match_missed_ids(&conn, miss_source::STEAM).unwrap().is_empty());
+        tombstone_match_miss(&conn, id, miss_source::STEAM).unwrap();
+        assert_eq!(match_missed_ids(&conn, miss_source::STEAM).unwrap(), vec![id]);
         // A later match clears it and the game re-enters the pool.
-        clear_scraper_miss(&conn, id).unwrap();
-        assert!(scraper_missed_ids(&conn).unwrap().is_empty());
+        clear_match_miss(&conn, id, miss_source::SS).unwrap();
+        assert!(match_missed_ids(&conn, miss_source::SS).unwrap().is_empty());
+        assert_eq!(match_missed_ids(&conn, miss_source::STEAM).unwrap(), vec![id]);
+    }
+
+    #[test]
+    fn test_steam_garnish_marks_and_clears() {
+        let (conn, _tmp) = setup_db();
+        let id = add_game(
+            &conn,
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "100",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "steam",
+                title: "G",
+            },
+        )
+        .unwrap();
+        assert!(steam_garnished_ids(&conn).unwrap().is_empty());
+        mark_steam_garnished(&conn, id).unwrap();
+        assert_eq!(steam_garnished_ids(&conn).unwrap(), vec![id]);
+        // Re-marking stays one row, refreshed.
+        mark_steam_garnished(&conn, id).unwrap();
+        assert_eq!(steam_garnished_ids(&conn).unwrap(), vec![id]);
+        // A Steam identity move forgets the consult.
+        clear_steam_garnish(&conn, id).unwrap();
+        assert!(steam_garnished_ids(&conn).unwrap().is_empty());
     }
 
     #[test]
@@ -836,12 +924,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Retro,
-            TrophySource::Empty,
-            "",
-            "",
-            "",
-            "Round Trip",
+            crate::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Round Trip",
+            },
         )
         .unwrap();
 
@@ -900,12 +991,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "",
-            "",
-            "",
-            "Matched",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Matched",
+            },
         )
         .unwrap();
         let company = || ira_models::ScraperEntity {
@@ -944,12 +1038,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "1",
-            "",
-            "",
-            "Dated",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "1",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Dated",
+            },
         )
         .unwrap();
         store_game_metadata(&conn, id, "15 Sep, 2014", 1410000000, 90, 8, 1000).unwrap();
@@ -1058,12 +1155,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let game_id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "",
-            "",
-            "",
-            "Twice Rated",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Twice Rated",
+            },
         )
         .unwrap();
         // The same board arriving under two spellings — ScreenScraper's
@@ -1103,12 +1203,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let game_id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "",
-            "",
-            "",
-            "Poisoned Game",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Poisoned Game",
+            },
         )
         .unwrap();
         // The old diff bug stored the epoch string while the timestamp
@@ -1148,12 +1251,15 @@ mod tests {
         let (conn, _tmp) = setup_db();
         let game_id = add_game(
             &conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "",
-            "",
-            "",
-            "Whoever's Game",
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Whoever's Game",
+            },
         )
         .unwrap();
         let local = steam_company_entity(&conn, "Whoever Studios").unwrap();

@@ -49,8 +49,10 @@ pub(crate) struct ScraperSlot {
     match_parent: adw::PreferencesGroup,
     rows: Rc<RefCell<Vec<gtk4::Widget>>>,
     match_row: Rc<RefCell<Option<adw::ActionRow>>>,
-    pub(super) draft: Rc<RefCell<ScraperMetadata>>,
-    pub(super) link: Rc<RefCell<String>>,
+    pub(super)     draft: Rc<RefCell<ScraperMetadata>>,
+    /// The staged Steam id (the Service match row): saved to `steam_id`
+    /// at Save time, alongside the metadata draft.
+    pub(super) steam_id: Rc<RefCell<String>>,
     pub(super) pending: Rc<RefCell<SsPending>>,
     /// The draft as it stood before a match was staged this session —
     /// what the revert buttons put back: the Steam garnish, the hand
@@ -99,8 +101,8 @@ pub(super) fn build_scraper_section(
         rows: Rc::new(RefCell::new(Vec::new())),
         match_row: Rc::new(RefCell::new(None)),
         draft: Rc::new(RefCell::new(metadata.clone().unwrap_or_default())),
-        link: Rc::new(RefCell::new(
-            game.steam_link_id.clone(),
+        steam_id: Rc::new(RefCell::new(
+            game.steam_id.clone(),
         )),
         pending: Rc::new(RefCell::new(SsPending::None)),
         pre_match: Rc::new(RefCell::new(None)),
@@ -131,7 +133,7 @@ pub(super) fn refresh_scraper_section(state: &SharedState, db_id: i64) -> bool {
     let pending = slot.pending.borrow().clone();
     *slot.pre_match.borrow_mut() = None;
     *slot.draft.borrow_mut() = stored_metadata(state, db_id).unwrap_or_default();
-    *slot.link.borrow_mut() = game.steam_link_id.clone();
+    *slot.steam_id.borrow_mut() = game.steam_id.clone();
     if let SsPending::Match(picked) = &pending {
         fold_match(state, &mut slot.draft.borrow_mut(), picked);
     }
@@ -146,19 +148,27 @@ pub(super) fn apply_scraper_draft(state: &SharedState, db_id: i64) -> bool {
         return false;
     };
     let draft = slot.draft.borrow().clone();
-    let link = slot.link.borrow().clone();
+    let staged_steam_id = slot.steam_id.borrow().clone();
     let stored = ira_db::store_scraper_metadata(&state.borrow().db, db_id, &draft)
         .map_err(|e| eprintln!("Failed to store the edited metadata: {e}"))
         .is_ok();
-    if ira_db::set_steam_link_id(&state.borrow().db, db_id, &link).is_err() {
-        eprintln!("Failed to store the Steam link");
+    if ira_db::set_steam_id(&state.borrow().db, db_id, &staged_steam_id).is_err() {
+        eprintln!("Failed to store the Steam id");
+    }
+    if let Some(g) = state
+        .borrow_mut()
+        .games
+        .iter_mut()
+        .find(|g| g.db_id == db_id)
+    {
+        g.steam_id = staged_steam_id;
     }
     match slot.pending.borrow().clone() {
         SsPending::None => {}
         // The draft carried the picked id into the store above; what is
         // left is the miss marker and the in-memory copy of the game.
         SsPending::Match(_) => {
-            if let Err(e) = ira_db::clear_scraper_miss(&state.borrow().db, db_id) {
+            if let Err(e) = ira_db::clear_match_miss(&state.borrow().db, db_id, ira_db::miss_source::SS) {
                 eprintln!("Failed to clear the ScreenScraper miss marker: {e}");
             }
             if let Some(g) = state
@@ -1099,7 +1109,7 @@ fn run_auto_match(state: &SharedState, game: &Game, slot: &ScraperSlot) {
         )
     };
     let kind = game.kind;
-    let platform_id = game.platform_id.clone();
+    let store_id = game.steam_api_id().to_string();
     let title = game.name.clone();
     let display = game.name.clone();
     let db_id = game.db_id;
@@ -1107,7 +1117,7 @@ fn run_auto_match(state: &SharedState, game: &Game, slot: &ScraperSlot) {
     std::thread::spawn(move || {
         let target = PcMatchTarget {
             kind,
-            platform_id: &platform_id,
+            store_id: &store_id,
             title: &title,
             display: &display,
             db_id,

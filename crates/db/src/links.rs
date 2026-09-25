@@ -124,12 +124,15 @@ mod tests {
     fn game(conn: &DbConn, title: &str) -> i64 {
         add_game(
             conn,
-            GameKind::Steam,
-            TrophySource::Gse,
-            "",
-            "",
-            "",
-            title,
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title,
+            },
         )
         .unwrap()
     }

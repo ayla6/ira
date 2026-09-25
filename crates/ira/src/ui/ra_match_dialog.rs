@@ -16,10 +16,10 @@ pub(super) fn persist_ra_match(
     sc: &SharedState,
     db_id: i64,
     platform_id: &str,
-    ra_id: u32,
+    trophy_id: u32,
     ra_title: &str,
 ) {
-    let app_id = ra_id.to_string();
+    let app_id = trophy_id.to_string();
     if let Err(e) = ira_db::update_game_ids(
         &sc.borrow().db,
         db_id,
@@ -108,12 +108,12 @@ fn apply_ra_match(
     sc: &SharedState,
     db_id: i64,
     platform_id: &str,
-    ra_id: u32,
+    trophy_id: u32,
     ra_title: &str,
     on_match: &Option<Rc<dyn Fn()>>,
     dialog: &adw::Dialog,
 ) {
-    persist_ra_match(sc, db_id, platform_id, ra_id, ra_title);
+    persist_ra_match(sc, db_id, platform_id, trophy_id, ra_title);
     if let Some(ref cb) = on_match {
         cb();
     }
@@ -159,14 +159,14 @@ fn populate_results(
         };
         let sc = state.clone();
         let dc = dialog.clone();
-        let ra_id = game.id;
+        let trophy_id = game.id;
         let ra_title = game.title.clone();
         let on_match_c = on_match.clone();
         let pid = platform_id.to_string();
         let row = match_result_row(
             &game.title,
             &format!("RA ID: {} · {}", game.id, tag),
-            move || apply_ra_match(&sc, db_id, &pid, ra_id, &ra_title, &on_match_c, &dc),
+            move || apply_ra_match(&sc, db_id, &pid, trophy_id, &ra_title, &on_match_c, &dc),
         );
         list.append(&row);
     }

@@ -71,15 +71,20 @@ pub fn add_game_from_folder(
     // Generate achievement definitions
     steam.generate_steam_settings(app_id)?;
 
-    // Add to DB (title will be filled from appdetails.json during enrichment)
+    // Add to DB (title will be filled from appdetails.json during enrichment).
+    // The app id is both the store match and the platform-native id here;
+    // the platform is the kind's system.
     ira_db::add_game(
         db,
-        kind,
-        ira_models::TrophySource::Gse,
-        app_id,
-        "",
-        app_id,
-        "",
+        ira_db::NewGame {
+            kind,
+            trophy_source: ira_models::TrophySource::Gse,
+            steam_id: app_id,
+            trophy_id: "",
+            native_id: app_id,
+            platform_id: kind.as_str(),
+            title: "",
+        },
     )?;
 
     Ok(saves_game_dir.to_string_lossy().into_owned())

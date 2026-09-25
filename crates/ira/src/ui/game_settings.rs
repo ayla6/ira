@@ -19,6 +19,7 @@ type GameGeneralPageResult = (
     adw::EntryRow,
     PendingCell,
     Option<adw::EntryRow>,
+    Option<adw::EntryRow>,
     Option<adw::ComboRow>,
     PendingCell,
     PendingCell,
@@ -333,14 +334,15 @@ fn build_retro_emulator_and_ra(
     (pending_ra_core, pending_emulator, ra_container)
 }
 
-/// Builds the Service group's identification rows. Returns whether any row
-/// was added plus the editable app-ID entry for API-emulator games.
+/// Builds the Service group's identification rows. Returns whether any
+/// row was added, the editable app-ID entry for API-emulator games, and
+/// the Steam-link entry for console games (whose Save owns its write).
 fn build_service_ids_section(
     parent: &adw::PreferencesGroup,
     game: &Game,
     state: &SharedState,
     win: &adw::Window,
-) -> (bool, Option<adw::EntryRow>) {
+) -> (bool, Option<adw::EntryRow>, Option<adw::EntryRow>) {
     let add_id_row = |title: &str, value: &str| {
         let row = adw::ActionRow::new();
         row.set_title(title);
@@ -370,28 +372,30 @@ fn build_service_ids_section(
         if let Some(hash) = rom_hash_for(state, game.db_id) {
             add_id_row(&crate::tr!("ROM hash"), &hash);
         }
-        add_steam_link_row(parent, state, win, game);
-        return (true, None);
+        let steam_id_entry = add_steam_id_row(parent, state, win, game);
+        return (true, None, Some(steam_id_entry));
     }
 
-    // PS4/PS3 keep their shipped identifiers read-only too.
+    // PS4/PS3 keep their shipped identifiers read-only too: the trophy
+    // id and the product serial live in their own columns.
     if game.kind.is_trophy_console() {
         add_id_row(&crate::tr!("NPWR code"), &game.app_id);
-        add_id_row(&crate::tr!("Game serial"), &game.platform_id);
-        add_steam_link_row(parent, state, win, game);
-        return (true, None);
+        add_id_row(&crate::tr!("Game serial"), &game.native_id);
+        let steam_id_entry = add_steam_id_row(parent, state, win, game);
+        return (true, None, Some(steam_id_entry));
     }
 
-/// The editable Steam link row for console games: the app id a title
+/// The editable Steam id row for console games: the app id a title
 /// match (or the user) tied this game to for metadata garnish. Editing
-/// it here re-points the link; clearing it unlinks.
-fn add_steam_link_row(
+/// it here re-points the id; clearing it unlinks. Like every other row
+/// in this dialog, typing only fills the entry — the dialog's Save owns
+/// the write, so a typed id is never lost to a missed Enter press.
+fn add_steam_id_row(
     parent: &adw::PreferencesGroup,
     state: &SharedState,
     win: &adw::Window,
     game: &Game,
-) {
-    let db_id = game.db_id;
+) -> adw::EntryRow {
     let row = adw::EntryRow::new();
     row.set_title(&crate::tr!("Steam"));
     row.set_text(&game.steam_id);
@@ -399,9 +403,8 @@ fn add_steam_link_row(
         "Links this game to a Steam entry for metadata only"
     )));
 
-    let apply_link: Rc<dyn Fn(&str)> = {
+    let fill_link: Rc<dyn Fn(&str)> = {
         let row = row.clone();
-        let state = std::rc::Rc::clone(state);
         Rc::new(move |link: &str| {
             let link = link.trim().to_string();
             if !link.is_empty() && link.parse::<u32>().is_err() {
@@ -409,21 +412,17 @@ fn add_steam_link_row(
                 return;
             }
             row.remove_css_class(CSS_ERROR);
-            if let Err(e) = ira_db::set_steam_id(&state.borrow().db, db_id, &link) {
-                eprintln!("Failed to store the Steam link: {e}");
-                return;
-            }
-            if let Some(g) = state.borrow_mut().games.iter_mut().find(|g| g.db_id == db_id) {
-                g.steam_id = link;
+            if row.text() != link {
+                row.set_text(&link);
             }
         })
     };
     {
-        let apply_link = apply_link.clone();
-        row.connect_apply(move |row| apply_link(&row.text()));
+        let fill_link = fill_link.clone();
+        row.connect_apply(move |row| fill_link(&row.text()));
     }
 
-    // The store search that fills the link without leaving the page.
+    // The store search that fills the id without leaving the page.
     let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
     search_btn.set_valign(gtk4::Align::Center);
     search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
@@ -432,13 +431,13 @@ fn add_steam_link_row(
         let row = row.clone();
         let win = win.clone();
         let game_name = game.name.clone();
-        let apply_link = apply_link.clone();
+        let fill_link = fill_link.clone();
         let state = std::rc::Rc::clone(state);
         search_btn.connect_clicked(move |_| {
             let row = row.clone();
             let win = win.clone();
             let game_name = game_name.clone();
-            let apply_link = apply_link.clone();
+            let fill_link = fill_link.clone();
             let state = std::rc::Rc::clone(&state);
             super::steam_search::show_steam_id_search_popup(
                 &state,
@@ -447,13 +446,14 @@ fn add_steam_link_row(
                 &row,
                 &crate::tr!("Link"),
                 Rc::new(move |app_id: &str, _name: &str| {
-                    apply_link(app_id);
+                    fill_link(app_id);
                 }),
             );
         });
     }
     row.add_suffix(&search_btn);
     parent.add(&row);
+    row
 }
 
     // Every remaining kind is a PC game: its store id is always shown. It is
@@ -466,7 +466,7 @@ fn add_steam_link_row(
         || game.trophy_source == ira_models::TrophySource::SteamNative
     {
         add_id_row(&crate::tr!("Steam app ID"), &game.app_id);
-        return (true, None);
+        return (true, None, None);
     }
 
     if game.trophy_source == ira_models::TrophySource::Nge {
@@ -474,7 +474,7 @@ fn add_steam_link_row(
         row.set_title(&crate::tr!("GOG product ID"));
         row.set_text(&game.app_id);
         parent.add(&row);
-        return (true, Some(row));
+        return (true, Some(row), None);
     }
 
     let row = build_steam_app_id_row(
@@ -486,7 +486,7 @@ fn add_steam_link_row(
     parent.add(&row);
     let app_id_entry = Some(row);
 
-    (app_id_entry.is_some(), app_id_entry)
+    (app_id_entry.is_some(), app_id_entry, None)
 }
 
 /// An editable "Steam app ID" entry with a store-search suffix. When
@@ -619,12 +619,12 @@ fn build_save_migration_section(
     state: &SharedState,
     game: &Game,
 ) -> Option<gtk4::Button> {
-    if !game.trophy_source.has_steam_enrichment() || game.app_id.is_empty() {
+    if !game.trophy_source.has_steam_enrichment() || game.steam_api_id().is_empty() {
         return None;
     }
 
     let save_dir = state.borrow().save_dir.clone();
-    let details = crate::game_loader::read_app_details(&save_dir, &game.app_id)?;
+    let details = crate::game_loader::read_app_details(&save_dir, game.steam_api_id())?;
     if details.ufs_savefiles.is_empty() {
         return None;
     }
@@ -715,7 +715,7 @@ pub(super) fn build_game_general_page(
     let (pending_ra_core, pending_emulator, ra_container) =
         build_retro_emulator_and_ra(&general_page, state, game, win, pending_copies);
 
-    let (has_service_ids, app_id_entry) =
+    let (has_service_ids, app_id_entry, steam_id_entry) =
         build_service_ids_section(&service_group, game, state, win);
     let language_row = build_language_section(&service_group, state, game, languages);
     let migrate_btn = build_save_migration_section(&service_group, state, game);
@@ -735,6 +735,7 @@ pub(super) fn build_game_general_page(
         sort_entry,
         pending_version,
         app_id_entry,
+        steam_id_entry,
         language_row,
         pending_ra_core,
         pending_emulator,

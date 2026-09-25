@@ -1,4 +1,5 @@
 use super::add_game_dialog::collect_env_vars;
+use super::css::*;
 use super::edit_game_controller::ControllerWidgets;
 use super::edit_game_launch::LaunchConfigWidgets;
 use super::edit_game_overlay::OverlayWidgets;
@@ -22,6 +23,11 @@ pub(super) struct SaveGameSettingsParams {
     pub win: adw::Window,
     pub db_id: i64,
     pub app_id: String,
+    /// Steam-keyed file/API id, resolved at dialog build (the match id
+    /// when set, else the native id) — the DLC, language, and appdetails
+    /// paths below all key on it. Stays fixed for the dialog's lifetime
+    /// even when the id edit above moves the columns.
+    pub store_id: String,
     pub trophy_source: TrophySource,
     pub game_kind: ira_models::GameKind,
     pub var_widgets: Rc<RefCell<Vec<VarW>>>,
@@ -46,6 +52,9 @@ pub(super) struct SaveGameSettingsParams {
     pub sort_entry: adw::EntryRow,
     pub pending_version: Rc<RefCell<Option<String>>>,
     pub app_id_entry: Option<adw::EntryRow>,
+    /// The console Steam-link entry: Save owns its write (the row only
+    /// fills and validates), unlike the app-id entry above.
+    pub steam_id_entry: Option<adw::EntryRow>,
     pub pending_ra_core: Rc<RefCell<Option<String>>>,
     pub pending_emulator: Rc<RefCell<Option<String>>>,
     pub launch_config_widgets: Option<LaunchConfigWidgets>,
@@ -99,28 +108,22 @@ fn save_app_id(db: &ira_db::DbConn, params: &SaveGameSettingsParams) -> AppIdRes
             } else {
                 params.trophy_source
             };
-            let pid = if matches!(
-                params.game_kind,
-                ira_models::GameKind::Ps4
-                    | ira_models::GameKind::Ps3
-                    | ira_models::GameKind::Retro
-                    | ira_models::GameKind::Switch
-            ) {
-                &params.saved_platform_id
-            } else if new_id.is_empty() {
-                ""
-            } else {
-                &new_id
-            };
+            // The platform is the kind's system scope and never moves
+            // with an id edit: an app-id change repoints the Steam and
+            // native columns only.
+            let pid = &params.saved_platform_id;
             // The edited id lands in the column it belongs to: steam
             // appids for steam-enriched rows, the RA id for RA matches,
-            // the platform-native id (title id, serial) otherwise.
+            // the platform-native id (title id, serial) otherwise. A
+            // steam-enriched edit dual-writes the native column too, so
+            // the loader's platform-native `app_id` never goes empty
+            // behind a match.
             if params.trophy_source.has_steam_enrichment() {
                 if let Err(e) = ira_db::update_game_ids(db, params.db_id, &new_id, "", ts, pid) {
                     eprintln!("Failed to update app ID: {}", e);
                 }
-                if let Err(e) = ira_db::update_native_id(db, params.db_id, "") {
-                    eprintln!("Failed to clear native id: {}", e);
+                if let Err(e) = ira_db::update_native_id(db, params.db_id, &new_id) {
+                    eprintln!("Failed to update native id: {}", e);
                 }
             } else if ts == ira_models::TrophySource::Ra {
                 if let Err(e) = ira_db::update_game_ids(db, params.db_id, "", &new_id, ts, pid) {
@@ -137,8 +140,57 @@ fn save_app_id(db: &ira_db::DbConn, params: &SaveGameSettingsParams) -> AppIdRes
     }
 }
 
-fn save_version_and_overrides(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
-    if let Some(ver) = params.pending_version.borrow().as_ref() {
+/// The console Steam-link entry: validated like the row's own apply,
+/// written when it moved, and a fresh link kicks off a Steam metadata
+/// garnish on a thread — linking must fetch, not just store.
+fn save_steam_link(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
+    let Some(ref row) = params.steam_id_entry else {
+        return;
+    };
+    let link = row.text().trim().to_string();
+    if !link.is_empty() && link.parse::<u32>().is_err() {
+        row.add_css_class(CSS_ERROR);
+        eprintln!("game settings: not saving a non-numeric Steam id");
+        return;
+    }
+    row.remove_css_class(CSS_ERROR);
+    let current = params
+        .state
+        .borrow()
+        .games
+        .iter()
+        .find(|g| g.db_id == params.db_id)
+        .map(|g| g.steam_id.clone())
+        .unwrap_or_default();
+    if link == current {
+        return;
+    }
+    if let Err(e) = ira_db::set_steam_id(db, params.db_id, &link) {
+        eprintln!("Failed to store the Steam id: {e}");
+        return;
+    }
+    // A fresh link heals a Steam miss: the game re-enters the pool.
+    let _ = ira_db::clear_match_miss(db, params.db_id, ira_db::miss_source::STEAM);
+    if let Some(g) = params
+        .state
+        .borrow_mut()
+        .games
+        .iter_mut()
+        .find(|g| g.db_id == params.db_id)
+    {
+        g.steam_id = link.clone();
+    }
+    if link.is_empty() {
+        return;
+    }
+    let (steam, save_dir, sender) = {
+        let s = params.state.borrow();
+        (s.steam.clone(), params.save_dir.clone(), s.sender.clone())
+    };
+    super::fetch_metadata::garnish_steam_link(&steam, db, &save_dir, &sender, params.db_id);
+}
+
+fn save_version_and_overrides(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {    if let Some(ver) = params.pending_version.borrow().as_ref() {
         if let Err(e) = ira_db::set_shadps4_version(db, params.db_id, ver) {
             eprintln!("Failed to set shadps4 version: {}", e);
         }
@@ -436,7 +488,7 @@ fn save_logo_settings(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
 }
 
 fn save_dlc_config(params: &SaveGameSettingsParams) {
-    let details = crate::game_loader::read_app_details(&params.save_dir, &params.app_id);
+    let details = crate::game_loader::read_app_details(&params.save_dir, &params.store_id);
     let Some(ref details) = details else { return };
     if params.dlc_switches.is_empty() {
         return;
@@ -448,7 +500,7 @@ fn save_dlc_config(params: &SaveGameSettingsParams) {
             dlc.enabled = params.dlc_switches[i].is_active();
         }
     }
-    let path = ira_parser::data_dir(&params.save_dir, &params.app_id).join("dlc_config.json");
+    let path = ira_parser::data_dir(&params.save_dir, &params.store_id).join("dlc_config.json");
     match serde_json::to_vec(&details) {
         Ok(b) => {
             if let Err(e) = std::fs::write(&path, b) {
@@ -461,7 +513,7 @@ fn save_dlc_config(params: &SaveGameSettingsParams) {
         params.trophy_source,
         &params.game_exe,
         &params.save_dir,
-        &params.app_id,
+        &params.store_id,
         &details,
     );
 }
@@ -474,7 +526,7 @@ fn save_language_config(params: &SaveGameSettingsParams) {
                 params.trophy_source,
                 &params.game_exe,
                 &params.save_dir,
-                &params.app_id,
+                &params.store_id,
                 lang,
             );
         }
@@ -854,6 +906,7 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     }
 
     let app_id_result = save_app_id(&db, &params);
+    save_steam_link(&db, &params);
 
     save_version_and_overrides(&db, &params);
 

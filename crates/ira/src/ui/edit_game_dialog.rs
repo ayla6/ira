@@ -301,6 +301,7 @@ fn build_dialog_contents(
         sort_entry,
         pending_version,
         app_id_entry,
+        steam_id_entry,
         language_row,
         pending_ra_core,
         pending_emulator,
@@ -363,11 +364,13 @@ fn build_dialog_contents(
     }
 
     let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> = {
-        let steam_reset = if game.trophy_source.has_steam_enrichment() && !game.app_id.is_empty() {
+        let steam_reset = if game.trophy_source.has_steam_enrichment()
+            && !game.steam_api_id().is_empty()
+        {
             let s = state.borrow();
             Some(super::game_logo::SteamLogoReset {
                 steam: s.steam.clone(),
-                app_id: game.app_id.clone(),
+                app_id: game.steam_api_id().to_string(),
                 db: s.db.clone(),
                 db_id: game.db_id,
             })
@@ -405,7 +408,7 @@ fn build_dialog_contents(
             emu_game_folder: &game.game_folder,
             emu_db_id: game.db_id,
             emu_trophy_source: game.trophy_source,
-            emu_app_id: &game.app_id,
+            emu_app_id: &game.native_id,
             save_dir: &emu_save_dir,
             win: &win,
             emu_pending_uninstall: None,
@@ -425,7 +428,7 @@ fn build_dialog_contents(
 
     if let Some(btn) = &migrate_btn {
         let state_w = Rc::downgrade(&state);
-        let game_app_id = game.app_id.clone();
+        let game_app_id = game.steam_api_id().to_string();
         let game_db_id = game.db_id;
         let game_kind = game.kind;
         let save_dir_m = save_dir.clone();
@@ -500,6 +503,7 @@ fn build_dialog_contents(
     let state_w = Rc::downgrade(&state);
     let win_w = Downgrade::downgrade(&win);
     let game_app_id = game.app_id.clone();
+    let game_store_id = game.steam_api_id().to_string();
     let game_folder = game.game_folder.clone();
     let trophy_source = game.trophy_source;
     let game_kind = game.kind;
@@ -524,6 +528,7 @@ fn build_dialog_contents(
     let lwa_c = lwa_rc.clone();
     let pending_version_c = pending_version.clone();
     let app_id_entry_w = app_id_entry.as_ref().map(Downgrade::downgrade);
+    let steam_id_entry_w = steam_id_entry.as_ref().map(Downgrade::downgrade);
     let pending_ra_core_c = pending_ra_core.clone();
     let pending_emulator_c = pending_emulator.clone();
     let game_folder_entry_w = game_folder_entry.as_ref().map(Downgrade::downgrade);
@@ -557,6 +562,7 @@ fn build_dialog_contents(
         let save_btn = take!(save_btn_w, "save button");
         let language_row = language_row_w.as_ref().and_then(|w| w.upgrade());
         let app_id_entry = app_id_entry_w.as_ref().and_then(|w| w.upgrade());
+        let steam_id_entry = steam_id_entry_w.as_ref().and_then(|w| w.upgrade());
         let game_folder_entry = game_folder_entry_w.as_ref().and_then(|w| w.upgrade());
         let runtime_row = runtime_row_w.as_ref().and_then(|w| w.upgrade());
         let pending_emu_uninstall = pending_emu_uninstall_w.as_ref().and_then(|w| w.upgrade());
@@ -566,6 +572,7 @@ fn build_dialog_contents(
             win,
             db_id,
             app_id: game_app_id.clone(),
+            store_id: game_store_id.clone(),
             trophy_source,
             game_kind,
             var_widgets,
@@ -588,6 +595,7 @@ fn build_dialog_contents(
             sort_entry,
             pending_version,
             app_id_entry,
+            steam_id_entry,
             pending_ra_core,
             pending_emulator,
             launch_config_widgets: lwa.launch_config_widgets.clone(),

@@ -350,10 +350,16 @@ fn build_sgdb_picker_button(
     id: &str,
     ctx: &SgdbPickerCtx,
 ) -> Option<gtk4::Button> {
+    // The picker queries SGDB by id, never by name: without a real SGDB
+    // or Steam id there is nothing behind the button but junk. `id` is
+    // the platform id for console games (title id, serial) — never SGDB
+    // material on its own, so it only counts when it is a Steam app id.
     let sgdb_id_for_picker = if !game.sgdb_id.is_empty() {
         game.sgdb_id.clone()
-    } else {
+    } else if is_steam {
         id.to_string()
+    } else {
+        String::new()
     };
     let sgdb_is_steam_id = is_steam && game.sgdb_id.is_empty();
     let pending_copies_btn = ctx.pending_copies.clone();
@@ -566,6 +572,224 @@ fn build_ra_icon_button(
     Some(btn)
 }
 
+/// ScreenScraper 2D box staged into the square slot, for PS1 games whose
+/// SGDB has no square: same draft flow as the RA button (staged, saved
+/// with the dialog, never written behind it). Only offered with an SS
+/// match on record, which is where the box art is fetched from.
+fn build_ss_square_button(
+    asset_type: &str,
+    game: &Game,
+    state: &SharedState,
+    refresh_images: &Rc<dyn Fn()>,
+    pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+) -> Option<gtk4::Button> {
+    if AssetType::from_string(asset_type) != Some(AssetType::Square)
+        || !game.is_ps1()
+        || game.screenscraper_id.is_empty()
+    {
+        return None;
+    }
+    let btn = gtk4::Button::with_label("SS");
+    btn.set_tooltip_text(Some(&crate::tr!(
+        "Download square box art from ScreenScraper"
+    )));
+    let db_id = game.db_id;
+    let steam = state.borrow().steam.clone();
+    let cfg = state.borrow().cfg.clone();
+    let db = state.borrow().db.clone();
+    let save_dir = state.borrow().save_dir.clone();
+    let refresh = Rc::clone(refresh_images);
+    let pending_copies_ss = pending_copies.clone();
+    let asset_ss = asset_type.to_string();
+    let btn_clone = btn.downgrade();
+    btn.connect_clicked(move |_| {
+        let Some(btn_clone) = btn_clone.upgrade() else {
+            return;
+        };
+        btn_clone.set_sensitive(false);
+        btn_clone.set_label(&crate::tr!("Downloading…"));
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<u8>, String>>();
+        let rx = std::cell::RefCell::new(rx);
+        let steam = steam.clone();
+        let cfg = cfg.clone();
+        let db = db.clone();
+        std::thread::spawn({
+            let save_dir = save_dir.clone();
+            move || {
+                let _s =
+                    tracing::info_span!("ss_square_download", db_id = db_id).entered();
+                let result = (|| {
+                    let entry = ira_db::find_by_db_id(&db, db_id)
+                        .ok()
+                        .flatten()
+                        .ok_or_else(|| "Game not found".to_string())?;
+                    let game = crate::game_loader::load_game(&entry, &save_dir)
+                        .map_err(|e| e.to_string())?;
+                    super::fetch_images::fetch_ss_square_bytes(&steam, &cfg, &db, &game)
+                        .ok_or_else(|| "No ScreenScraper box art found".to_string())
+                })();
+                let _ = tx.send(result);
+            }
+        });
+        let btn_weak = btn_clone.downgrade();
+        let refresh = refresh.clone();
+        let pc = pending_copies_ss.clone();
+        let asset = asset_ss.clone();
+        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+            if let Ok(result) = rx.borrow_mut().try_recv() {
+                if let Some(btn) = btn_weak.upgrade() {
+                    btn.set_sensitive(true);
+                    btn.set_label("SS");
+                }
+                match result {
+                    Ok(bytes) => {
+                        if let Some(ref pc) = pc {
+                            pc.borrow_mut().insert(
+                                asset.clone(),
+                                PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
+                            );
+                        }
+                        refresh();
+                    }
+                    Err(err) => {
+                        if let Some(btn) = btn_weak.upgrade() {
+                            let short: String = err.chars().take(40).collect();
+                            btn.set_label(&short);
+                            let btn_weak = btn.downgrade();
+                            glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
+                                if let Some(btn) = btn_weak.upgrade() {
+                                    btn.set_label("SS");
+                                }
+                                glib::ControlFlow::Break
+                            });
+                        }
+                    }
+                }
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    });
+    Some(btn)
+}
+
+/// ScreenScraper wheel logo / steam-grid header staged into the logo
+/// and header slots, for entries whose SGDB has none. Same draft flow
+/// as the RA button (staged, saved with the dialog, never written
+/// behind it). Only offered with an SS match on record, which is where
+/// the art is fetched from.
+fn build_ss_slot_button(
+    asset_type: &str,
+    game: &Game,
+    state: &SharedState,
+    refresh_images: &Rc<dyn Fn()>,
+    pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+) -> Option<gtk4::Button> {
+    let kind = match AssetType::from_string(asset_type) {        Some(AssetType::Logo) => super::fetch_images::MediaKind::Wheel,
+        Some(AssetType::Header) => super::fetch_images::MediaKind::SteamGrid,
+        _ => return None,
+    };
+    if game.screenscraper_id.is_empty() {
+        return None;
+    }
+    let btn = gtk4::Button::with_label("SS");
+    btn.set_tooltip_text(Some(&match kind {
+        super::fetch_images::MediaKind::Wheel => {
+            crate::tr!("Download logo from ScreenScraper")
+        }
+        _ => crate::tr!("Download header from ScreenScraper"),
+    }));
+    let db_id = game.db_id;
+    let ss_id = game.screenscraper_id.clone();
+    let steam = state.borrow().steam.clone();
+    let cfg = state.borrow().cfg.clone();
+    let db = state.borrow().db.clone();
+    let refresh = Rc::clone(refresh_images);
+    let pending_copies_ss = pending_copies.clone();
+    let asset_ss = asset_type.to_string();
+    let btn_clone = btn.downgrade();
+    btn.connect_clicked(move |_| {
+        let Some(btn_clone) = btn_clone.upgrade() else {
+            return;
+        };
+        btn_clone.set_sensitive(false);
+        btn_clone.set_label(&crate::tr!("Downloading…"));
+        let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<u8>, String>>();
+        let rx = std::cell::RefCell::new(rx);
+        let steam = steam.clone();
+        let cfg = cfg.clone();
+        let db = db.clone();
+        std::thread::spawn({
+            let ss_id = ss_id.clone();
+            move || {
+                let _s =
+                    tracing::info_span!("ss_slot_download", db_id = db_id).entered();
+                let result = (|| {
+                    let creds = ira_api::ScraperCreds::from_account(
+                        cfg.screenscraper_id.clone(),
+                        cfg.screenscraper_password.clone(),
+                    );
+                    let region = super::disc_art::rom_region(&db, db_id);
+                    let games = steam
+                        .screenscraper_game(&creds, &ss_id, region)
+                        .map_err(|e| e.to_string())?;
+                    let url = games
+                        .iter()
+                        .find_map(|game| kind.url(game))
+                        .ok_or_else(|| "No ScreenScraper art found".to_string())?;
+                    let bytes = steam
+                        .screenscraper_media(&url)
+                        .map_err(|e| e.to_string())?;
+                    ira_parser::convert_bytes_to_lossless_webp(&bytes)
+                        .ok_or_else(|| "No ScreenScraper art found".to_string())
+                })();
+                let _ = tx.send(result);
+            }
+        });
+        let btn_weak = btn_clone.downgrade();
+        let refresh = refresh.clone();
+        let pc = pending_copies_ss.clone();
+        let asset = asset_ss.clone();
+        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+            if let Ok(result) = rx.borrow_mut().try_recv() {
+                if let Some(btn) = btn_weak.upgrade() {
+                    btn.set_sensitive(true);
+                    btn.set_label("SS");
+                }
+                match result {
+                    Ok(bytes) => {
+                        if let Some(ref pc) = pc {
+                            pc.borrow_mut().insert(
+                                asset.clone(),
+                                PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
+                            );
+                        }
+                        refresh();
+                    }
+                    Err(err) => {
+                        if let Some(btn) = btn_weak.upgrade() {
+                            let short: String = err.chars().take(40).collect();
+                            btn.set_label(&short);
+                            let btn_weak = btn.downgrade();
+                            glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
+                                if let Some(btn) = btn_weak.upgrade() {
+                                    btn.set_label("SS");
+                                }
+                                glib::ControlFlow::Break
+                            });
+                        }
+                    }
+                }
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    });
+    Some(btn)
+}
+
 fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     let BuildImageSectionParams {
         label,
@@ -580,12 +804,14 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         pending_copies,
         sgdb_cache,
     } = params;
-    // The Steam fetch buttons need a Steam app id: app_id holds one for
-    // Goldberg and native Steam games, but a retro, Switch or Lutris id is
-    // not a Steam id, and neither is a GOG product id (Nge) — those keep
-    // the buttons off.
-    let is_steam = game.trophy_source.has_steam_app_id() && !game.app_id.is_empty();
-    let id = game.app_id.clone();
+    // The Steam fetch buttons need a Steam app id: the match id when
+    // matched, else the platform id sources whose id already is one
+    // carry (Goldberg, native Steam) — resolved in one place. A retro,
+    // Switch or Lutris id is not a Steam id, and neither is a GOG
+    // product id (Nge) — those keep the buttons off.
+    let is_steam =
+        game.trophy_source.has_steam_app_id() && !game.steam_api_id().is_empty();
+    let id = game.steam_api_id().to_string();
     let save_dir = state.borrow().save_dir.clone();
 
     let cloud_dir = ira_parser::game_data_dir(&save_dir, game);
@@ -681,6 +907,18 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
 
     if let Some(btn) =
         build_ra_icon_button(asset_type, game, state, &refresh_images, &pending_copies)
+    {
+        btns.append(&btn);
+    }
+
+    if let Some(btn) =
+        build_ss_slot_button(asset_type, game, state, &refresh_images, &pending_copies)
+    {
+        btns.append(&btn);
+    }
+
+    if let Some(btn) =
+        build_ss_square_button(asset_type, game, state, &refresh_images, &pending_copies)
     {
         btns.append(&btn);
     }
@@ -1039,12 +1277,13 @@ fn build_dir_buttons(
 
     let sgdb_id = entry.sgdb_id.clone().unwrap_or_default();
     let is_steam = entry.trophy_source.has_steam_enrichment();
+    // Same rule as the per-slot picker above: the platform id (title
+    // id, serial) is not SGDB material, so no SGDB-or-Steam id means
+    // no button instead of a junk query.
     let sgdb_id_for_picker = if !sgdb_id.is_empty() {
         sgdb_id.clone()
-    } else if !entry.steam_id.is_empty() {
-        entry.steam_id.clone()
     } else {
-        entry.external_id().to_string()
+        entry.steam_id.clone()
     };
     if !sgdb_id_for_picker.is_empty() {
         let btn = gtk4::Button::with_label(&crate::tr!("SGDB"));

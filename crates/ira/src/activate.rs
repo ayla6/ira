@@ -119,6 +119,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
             .collect::<Vec<_>>(),
     );
     steam.set_sgdb_filtered_styles(&cfg.sgdb_filtered_styles);
+    steam.set_sgdb_show_filtered(cfg.sgdb_show_filtered);
 
     let state = {
         let _s = tracing::info_span!("build_ui_wrap").entered();

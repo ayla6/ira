@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::{PhysicalGamepad, PhysicalRumble, SwitchHidrawPad};
+use crate::physical::{ButtonLayout, button_layout};
+use crate::{DeviceInfo, PhysicalGamepad, PhysicalRumble, SwitchHidrawPad};
 
 use super::super::session::{
     apply_controller_layout, open_sensor, probe_sensor, reconnect_gamepad, resolved_layout_for,
@@ -126,6 +127,7 @@ impl PhysicalPad {
             self.switch_hidraw = self
                 .gamepad
                 .as_ref()
+                .filter(|gamepad| switch_probe_allowed(gamepad.info()))
                 .and_then(|gamepad| SwitchHidrawPad::open(gamepad.info()));
             if let (Some(driver), Some(gamepad)) =
                 (self.switch_hidraw.as_mut(), self.gamepad.as_ref())
@@ -170,6 +172,7 @@ impl PhysicalPad {
         let switch = self
             .gamepad
             .as_ref()
+            .filter(|gamepad| switch_probe_allowed(gamepad.info()))
             .and_then(|gamepad| SwitchHidrawPad::open(gamepad.info()));
         if let Some(mut driver) = switch {
             if let Some(gamepad) = self.gamepad.as_ref() {
@@ -282,11 +285,25 @@ fn next_retry_delay(delay: Duration) -> Duration {
     (delay * 2).min(MOTION_RETRY_MAX)
 }
 
+/// Whether the Switch-protocol hidraw probe may run for this pad. The
+/// handshake blocks the hub thread for up to ~2s on pads that never
+/// answer — and the motion retry repeats it for as long as the pad is
+/// motion-less — so running it against anything but Switch-speaking
+/// hardware wedges input for seconds at a time. The gate is the same
+/// Nintendo-layout notion the button mapper uses: real Nintendo pads
+/// and Switch-mode dongles (Nintendo vendor id) qualify; DInput/XInput
+/// pads get their motion from SDL or nowhere, never from this wire.
+fn switch_probe_allowed(device: &DeviceInfo) -> bool {
+    button_layout(device.vendor, device.product, &device.name) == ButtonLayout::Nintendo
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{next_retry_delay, MOTION_RETRY_MAX, MOTION_RETRY_START};
+    use super::{next_retry_delay, switch_probe_allowed, MOTION_RETRY_MAX, MOTION_RETRY_START};
+    use crate::DeviceInfo;
 
     #[test]
     fn test_retry_delay_doubles_then_caps() {
@@ -299,5 +316,51 @@ mod tests {
             delay = next_retry_delay(delay);
         }
         assert_eq!(delay, MOTION_RETRY_MAX, "backoff must stop at the cap");
+    }
+
+    fn probe_device(vendor: u16, product: u16, name: &str) -> DeviceInfo {
+        DeviceInfo {
+            path: PathBuf::from("/dev/input/event0"),
+            name: name.to_string(),
+            vendor,
+            product,
+            version: 0,
+            has_evdev_gyro: false,
+            supported_buttons: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_switch_probe_runs_only_for_nintendo_layout_pads() {
+        // Real Nintendo pads and Switch-mode dongles (Nintendo vendor id)
+        // may speak the protocol; everything else must never pay the
+        // blocking handshake, or the hub stalls input for seconds.
+        assert!(switch_probe_allowed(&probe_device(
+            0x057e,
+            0x2009,
+            "Nintendo Switch Pro Controller"
+        )));
+        assert!(switch_probe_allowed(&probe_device(
+            0x057e,
+            0x2009,
+            "8BitDo Ultimate 2 Wireless Controller"
+        )));
+        // The same hardware in DInput mode speaks 8BitDo's protocol.
+        assert!(!switch_probe_allowed(&probe_device(
+            0x2dc8,
+            0x6012,
+            "8BitDo Ultimate 2 Wireless"
+        )));
+        // XInput-mode dongle identities and unrelated families.
+        assert!(!switch_probe_allowed(&probe_device(
+            0x2dc8,
+            0x310b,
+            "8BitDo Ultimate 2 Wireless Controller"
+        )));
+        assert!(!switch_probe_allowed(&probe_device(
+            0x045e,
+            0x028e,
+            "Xbox 360 Controller"
+        )));
     }
 }

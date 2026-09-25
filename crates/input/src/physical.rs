@@ -113,19 +113,33 @@ impl DeviceInfo {
 }
 
 pub fn discover_gamepads() -> Vec<DeviceInfo> {
+    enumerate_gamepads(true)
+}
+
+/// Every gamepad evdev node, including Ira's own virtual outputs.
+/// Big-picture navigation reads these so it keeps working while the
+/// daemon holds the physical pad grabbed: the remapped stream arrives
+/// on the virtual pad instead. Nothing else may use this — the hub
+/// routing a virtual pad as physical input would feed its own output
+/// back into the mapping engine.
+pub fn discover_gamepads_including_virtual() -> Vec<DeviceInfo> {
+    enumerate_gamepads(false)
+}
+
+fn enumerate_gamepads(skip_virtual: bool) -> Vec<DeviceInfo> {
     let mut devices: Vec<_> = evdev::enumerate()
-        .filter_map(|(path, device)| device_info(path, &device))
+        .filter_map(|(path, device)| device_info(path, &device, skip_virtual))
         .collect();
     devices.sort_by(|left, right| left.path.cmp(&right.path));
     devices
 }
 
-fn device_info(path: PathBuf, device: &Device) -> Option<DeviceInfo> {
+fn device_info(path: PathBuf, device: &Device, skip_virtual: bool) -> Option<DeviceInfo> {
     let keys = device.supported_keys()?;
     if !keys.contains(KeyCode::BTN_SOUTH) {
         return None;
     }
-    if device.name().is_some_and(is_ira_virtual_device) {
+    if skip_virtual && device.name().is_some_and(is_ira_virtual_device) {
         return None;
     }
     let id = device.input_id();
@@ -220,9 +234,24 @@ pub struct PhysicalGamepad {
 
 impl PhysicalGamepad {
     pub fn open(path: impl AsRef<Path>, grab: bool) -> Result<Self, String> {
+        Self::open_filtered(path, grab, true)
+    }
+
+    /// Opens any gamepad node, including Ira's own virtual outputs.
+    /// Big-picture navigation reads these while the daemon holds the
+    /// physical pad; nothing else may use this.
+    pub fn open_including_virtual(path: impl AsRef<Path>, grab: bool) -> Result<Self, String> {
+        Self::open_filtered(path, grab, false)
+    }
+
+    fn open_filtered(
+        path: impl AsRef<Path>,
+        grab: bool,
+        skip_virtual: bool,
+    ) -> Result<Self, String> {
         let path = path.as_ref().to_path_buf();
         let mut device = Device::open(&path).map_err(|error| format_open_error(&path, error))?;
-        let info = device_info(path.clone(), &device)
+        let info = device_info(path.clone(), &device, skip_virtual)
             .ok_or_else(|| format!("{} is not a supported gamepad", path.display()))?;
         let axis_ranges = read_axis_ranges(&device);
         let z_axes_are_right_stick = device.supported_absolute_axes().is_none_or(|axes| {
@@ -650,8 +679,9 @@ pub enum ButtonLayout {
 
 /// Picks the layout from device identity: the Ultimate 2's DInput dongle
 /// gets its paddle table, Nintendo-family pads get theirs, everything else
-/// the positional standard.
-fn button_layout(vendor: u16, product: u16, name: &str) -> ButtonLayout {
+/// the positional standard. The hub's Switch-protocol probe keys on the
+/// Nintendo arm — same pads, same notion.
+pub(crate) fn button_layout(vendor: u16, product: u16, name: &str) -> ButtonLayout {
     if is_ultimate_2(vendor, product, name) {
         ButtonLayout::Ultimate2DInput
     } else if is_nintendo(vendor, name) {

@@ -142,9 +142,9 @@ pub fn start_genre_warm(state: &SharedState) -> bool {
 }
 
 /// Games whose stored metadata misses something Steam can give, and
-/// which the pass can actually read: a stored Steam link (a console
-/// game linked to the store before) or a PC game whose platform id is
-/// the store app id. Everything else would only get a hopeful title
+/// which the pass can actually read: a stored Steam id (a console game
+/// linked to the store before) or a PC game whose platform id is the
+/// store app id. Everything else would only get a hopeful title
 /// search whose exact-hit policy almost never lands — the strip would
 /// cycle the whole library naming games nothing ever happens to.
 /// Includes games with no record at all, and the epoch dates an old
@@ -153,33 +153,23 @@ pub fn start_genre_warm(state: &SharedState) -> bool {
 /// only the store page provides.
 fn steam_refetch_queue(state: &SharedState, force: bool) -> Vec<i64> {
     let s = state.borrow();
+    // Games Steam already answered for converge out: only a force
+    // re-asks them. Everything else with a Steam identity gets its
+    // consult — the refetch itself no-ops when there is nothing new.
+    let garnished: std::collections::HashSet<i64> = if force {
+        std::collections::HashSet::new()
+    } else {
+        ira_db::steam_garnished_ids(&s.db).unwrap_or_default().into_iter().collect()
+    };
     s.games
         .iter()
         .filter(|g| {
             !g.steam_id.is_empty()
                 || (g.kind.is_pc() && g.native_id.parse::<u32>().is_ok())
         })
-        .filter(|g| {
-            if force {
-                return true;
-            }
-            match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
-                Ok(None) => true,
-                Ok(Some(meta)) => steam_gaps(&meta),
-                Err(_) => false,
-            }
-        })
+        .filter(|g| force || !garnished.contains(&g.db_id))
         .map(|g| g.db_id)
         .collect()
-}
-
-/// The holes Steam's own sources can fill: the release date, the
-/// studios, the synopsis, the age boards.
-fn steam_gaps(meta: &ira_models::ScraperMetadata) -> bool {
-    super::mass_match_ss::release_date_is_broken(&meta.release_date)
-        || (meta.developers.is_empty() && meta.publishers.is_empty())
-        || meta.synopses.is_empty()
-        || meta.classifications.is_empty()
 }
 
 /// Fetch the genre table whole, upsert it into the lookup cache under
@@ -246,14 +236,47 @@ fn spawn_steam_refetch_worker(
     rx
 }
 
+/// Garnish a fresh Steam link off-thread: refetch the store metadata
+/// and reload the game into the views when anything filled.
+/// Fire-and-forget for the settings save and the mass-match confirm.
+pub(crate) fn garnish_steam_link(
+    steam: &Arc<ira_api::SteamDataClient>,
+    db: &ira_db::DbConn,
+    save_dir: &str,
+    sender: &crate::AppSender,
+    db_id: i64,
+) {
+    let steam = Arc::clone(steam);
+    let db = db.clone();
+    let save_dir = save_dir.to_string();
+    let sender = sender.clone();
+    std::thread::spawn(move || {
+        if !matches!(
+            steam_refetch_one(&steam, &db, db_id),
+            RefetchOutcome::Filled
+        ) {
+            return;
+        }
+        match ira_db::find_by_db_id(&db, db_id) {
+            Ok(Some(entry)) => match crate::game_loader::load_game(&entry, &save_dir) {
+                Ok(game) => {
+                    let _ = sender.send(crate::AppMessage::NewGame(game));
+                }
+                Err(e) => eprintln!("Steam link: reload failed: {e}"),
+            },
+            Ok(None) => eprintln!("Steam link: game {db_id} vanished"),
+            Err(e) => eprintln!("Steam link: reload failed: {e}"),
+        }
+    });
+}
+
 /// One game's Steam re-read, merged over what's stored. The app id is
 /// the stored Steam link, or the platform id for a PC game whose
 /// platform is the store. SteamCMD's timestamp wins for the release
 /// date, the store page's parsed date fills in when it has none — and
 /// an epoch date an old bug wrote counts as missing, so refetches
 /// repair it.
-pub(crate) fn steam_refetch_one(
-    steam: &ira_api::SteamDataClient,
+pub(crate) fn steam_refetch_one(    steam: &ira_api::SteamDataClient,
     db: &ira_db::DbConn,
     db_id: i64,
 ) -> RefetchOutcome {
@@ -276,6 +299,11 @@ pub(crate) fn steam_refetch_one(
     };
     let info = steam.fetch_steamcmd_info(&app_id);
     let extras = steam.fetch_store_extras(&app_id);
+    // A good store-page answer marks the game consulted, even when it
+    // contributes nothing new — later refetches stop re-asking.
+    if extras.is_some() {
+        let _ = ira_db::mark_steam_garnished(db, db_id);
+    }
     if info.is_none() && extras.is_none() {
         // Most often a stored id Steam does not know — a link typed or
         // picked by hand, or a platform id that is not a store app id
@@ -325,14 +353,33 @@ pub(crate) fn steam_refetch_one(
             meta.synopses.push(("en".to_string(), extras.synopsis.clone()));
             changed = true;
         }
-        if meta.classifications.is_empty() && !extras.ratings.is_empty() {
-            meta.classifications.extend(extras.ratings.iter().map(|(kind, value)| {
-                ira_models::ScraperClassification {
-                    kind: kind.clone(),
-                    value: value.clone(),
-                }
-            }));
-            changed = true;
+        // Age boards and genres merge additively beside ScreenScraper's
+        // own: the store's say on a board the match never rated lands
+        // next to it instead of losing to it. merge_match already folds
+        // both lists this way — the fresh record carries only those two
+        // (plus the stored ss_id, which self-assigns back).
+        if !extras.ratings.is_empty() || !extras.genres.is_empty() {
+            let before = meta.clone();
+            let fresh = ira_models::ScraperMetadata {
+                ss_id: meta.ss_id.clone(),
+                classifications: extras
+                    .ratings
+                    .iter()
+                    .map(|(board, value)| ira_models::ScraperClassification {
+                        kind: board.clone(),
+                        value: value.clone(),
+                    })
+                    .collect(),
+                genres: extras
+                    .genres
+                    .iter()
+                    .filter_map(|name| ira_db::local_genre_entity(db, name))
+                    .collect(),
+                ..ira_models::ScraperMetadata::default()
+            };
+            meta.merge_match(&fresh);
+            changed |= meta.genres != before.genres
+                || meta.classifications != before.classifications;
         }
     }
     if !changed {

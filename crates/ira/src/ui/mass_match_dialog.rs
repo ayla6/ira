@@ -1,5 +1,6 @@
 use crate::Game;
 use adw::prelude::*;
+use glib::clone::Downgrade;
 use ira_models::GameKind;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
@@ -8,12 +9,11 @@ use std::rc::Rc;
 use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchItem, RowActions, BATCH_FINISHED};
-use super::mass_match_ss::RefetchOutcome;
 use super::mass_match_ra::{attach_ra_actions, ra_pass_available, start_ra_batch_matching};
 use super::mass_match_ss::{attach_ss_actions, start_ss_batch_matching};
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::state::SharedState;
-use super::steam_search_dialog::{handle_steam_search_result, status_label};
+use super::steam_search_dialog::{handle_steam_search_result, matched_text, status_label};
 
 pub fn normalize_title(s: &str) -> String {
     let lower = s.to_lowercase();
@@ -39,12 +39,22 @@ pub fn normalize_title(s: &str) -> String {
     words[..end].join(" ")
 }
 
-/// Games with no store or SGDB id at all: candidates for a Steam store
+/// Games with nothing a name search can use: empty names and the
+/// synthesized "App ID: …" placeholders for rows whose real title was
+/// never learned. SGDB, SS and Steam-title passes all search by name —
+/// firing them off for these rows returns noise, never matches.
+fn has_searchable_name(name: &str) -> bool {
+    !name.trim().is_empty() && !crate::game_loader::is_placeholder_name(name)
+}
+
+/// Games with no store or SGDB match at all: candidates for a Steam store
 /// match. Console-emulator games and Retro ROMs are excluded — their names
 /// come from title ids/ROM files, so Steam search is noise; they are
-/// enriched through SGDB (and RA) instead.
+/// enriched through SGDB (and RA) instead. Gates on the match id, not
+/// `app_id`: platform-linked games (Goldberg appids, title ids) carry an
+/// `app_id` with no match behind it and must still qualify.
 fn needs_steam_match(g: &Game) -> bool {
-    g.app_id.is_empty()
+    g.steam_id.is_empty()
         && g.sgdb_id.is_empty()
         && !g.manual_unmatch
         && !g.kind.is_console_emulator()
@@ -53,11 +63,15 @@ fn needs_steam_match(g: &Game) -> bool {
 
 /// Games an SGDB match can enrich: everything without an SGDB id that has
 /// no Steam-driven enrichment path (console-emulator games, Retro ROMs, and
-/// games with no ids at all).
+/// games with no matches at all). A Steam match wins over SGDB, but a bare
+/// platform linkage (Goldberg appid, title id) is not a match: those games
+/// still qualify. Rows without a searchable name sit out — an SGDB name
+/// search for "App ID: …" can only return junk.
 fn needs_sgdb_match(g: &Game) -> bool {
     g.sgdb_id.is_empty()
         && !g.manual_unmatch
-        && (g.app_id.is_empty()
+        && has_searchable_name(&g.name)
+        && (g.steam_id.is_empty()
             || g.kind == ira_models::GameKind::Retro
             || g.kind.is_console_emulator())
 }
@@ -75,9 +89,10 @@ fn needs_ra_match(g: &Game) -> bool {
 /// ScreenScraper covers, until metadata from one is on record, plus PC
 /// games — which search ScreenScraper's Windows/Linux systems and then
 /// diff the whole source against their Steam data. Purely additive —
-/// stored pieces only ever fill blanks.
+/// stored pieces only ever fill blanks. Unsearchable names sit out, same
+/// as the SGDB pass.
 fn needs_ss_match(g: &Game) -> bool {
-    if g.manual_unmatch || !g.screenscraper_id.is_empty() {
+    if g.manual_unmatch || !g.screenscraper_id.is_empty() || !has_searchable_name(&g.name) {
         return false;
     }
     let console = ira_models::scraper_console_id(g.kind, &g.platform_id);
@@ -90,28 +105,16 @@ fn needs_ss_match(g: &Game) -> bool {
     }
 }
 
-/// Console games whose metadata misses something Steam can give: the
-/// exact-title Steam garnish serves them without ever touching their
-/// console identity.
-fn needs_steam_title_match(state: &SharedState, g: &Game) -> bool {
-    if g.manual_unmatch
-        || g.name.trim().is_empty()
-        || !g.steam_id.is_empty()
-        || !(g.kind.is_console_emulator() || g.kind == ira_models::GameKind::Retro)
-    {
-        return false;
-    }
-    let s = state.borrow();
-    match ira_db::scraper_metadata_for_game(&s.db, g.db_id) {
-        Ok(None) => true,
-        Ok(Some(meta)) => {
-            super::mass_match_ss::release_date_is_broken(&meta.release_date)
-                || (meta.developers.is_empty() && meta.publishers.is_empty())
-                || meta.synopses.is_empty()
-                || meta.classifications.is_empty()
-        }
-        Err(_) => false,
-    }
+/// Console games with no Steam link yet: the exact-title Steam pass
+/// links their Steam identity and garnishes them, without ever
+/// touching their console identity. Completeness of the ScreenScraper
+/// record is no gate — a fully scraped game still wants its Steam
+/// version found.
+fn needs_steam_title_match(g: &Game) -> bool {
+    !g.manual_unmatch
+        && has_searchable_name(&g.name)
+        && g.steam_id.is_empty()
+        && (g.kind.is_console_emulator() || g.kind == ira_models::GameKind::Retro)
 }
 
 /// Per-dialog visibility for the match list: rows whose game has
@@ -120,25 +123,25 @@ fn needs_steam_title_match(state: &SharedState, g: &Game) -> bool {
 /// so the list only shows games still in play.
 #[derive(Clone)]
 pub(super) struct RowVis {
-    state: SharedState,
     rows: RefCell<Vec<gtk4::ListBoxRow>>,
     games: Vec<Game>,
     show_finished: Rc<Cell<bool>>,
     attempted: Rc<RefCell<HashSet<i64>>>,
+    scrolled: glib::WeakRef<gtk4::ScrolledWindow>,
 }
 
 impl RowVis {
     pub(super) fn new(
-        state: &SharedState,
         games: Vec<Game>,
         show_finished: Rc<Cell<bool>>,
+        scrolled: &gtk4::ScrolledWindow,
     ) -> Self {
         Self {
-            state: std::rc::Rc::clone(state),
             rows: RefCell::new(Vec::new()),
             games,
             show_finished,
             attempted: Rc::new(RefCell::new(HashSet::new())),
+            scrolled: Downgrade::downgrade(scrolled),
         }
     }
 
@@ -170,8 +173,8 @@ impl RowVis {
         let (Some(row), Some(game)) = (rows.get(row_idx), self.games.get(row_idx)) else {
             return;
         };
-        if game_concluded(&self.state, game, &self.attempted.borrow()) {
-            row.set_visible(false);
+        if game_concluded(game, &self.attempted.borrow()) {
+            hide_row_stable(&self.scrolled, std::slice::from_ref(&row));
         }
     }
 
@@ -182,17 +185,62 @@ impl RowVis {
             return;
         }
         let rows = self.rows.borrow();
-        for (idx, row) in rows.iter().enumerate() {
-            if let Some(game) = self.games.get(idx) {
-                row.set_visible(!game_concluded(&self.state, game, &self.attempted.borrow()));
-            }
+        let attempted = self.attempted.borrow();
+        let hiding: Vec<&gtk4::ListBoxRow> = rows
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| {
+                self.games
+                    .get(*idx)
+                    .is_some_and(|game| game_concluded(game, &attempted))
+            })
+            .map(|(_, row)| row)
+            .collect();
+        hide_row_stable(&self.scrolled, &hiding);
+    }
+}
+
+/// Hide concluded rows without yanking the viewport: every collapsed
+/// row above the fold would otherwise pull everything below it upward
+/// by its height. Positions are captured before anything hides (the
+/// layout goes stale as rows collapse), then the scroll offset moves
+/// up by exactly the hidden-above total.
+fn hide_row_stable(
+    scrolled: &glib::WeakRef<gtk4::ScrolledWindow>,
+    hiding: &[&gtk4::ListBoxRow],
+) {
+    if hiding.is_empty() {
+        return;
+    }
+    let below_fold = |value: f32| {
+        hiding
+            .iter()
+            .filter_map(|row| {
+                let list = row.parent()?.downcast::<gtk4::ListBox>().ok()?;
+                let point = row.compute_point(&list, &gtk4::graphene::Point::new(0.0, 0.0))?;
+                let height = row.height() as f32;
+                (point.y() + height <= value).then_some(height)
+            })
+            .sum::<f32>()
+    };
+    let shift = scrolled
+        .upgrade()
+        .map(|scrolled| below_fold(scrolled.vadjustment().value() as f32))
+        .unwrap_or(0.0);
+    for row in hiding {
+        row.set_visible(false);
+    }
+    if shift > 0.0 {
+        if let Some(scrolled) = scrolled.upgrade() {
+            let vadj = scrolled.vadjustment();
+            vadj.set_value((vadj.value() - f64::from(shift)).max(vadj.lower()));
         }
     }
 }
 
 /// Whether the game has nothing left to try automatically: every pass
 /// that applies either matched, or gave its negative word this session.
-fn game_concluded(state: &SharedState, g: &Game, attempted: &HashSet<i64>) -> bool {
+fn game_concluded(g: &Game, attempted: &HashSet<i64>) -> bool {
     if needs_steam_match(g) && !attempted.contains(&g.db_id) {
         return false;
     }
@@ -205,19 +253,45 @@ fn game_concluded(state: &SharedState, g: &Game, attempted: &HashSet<i64>) -> bo
     if needs_ss_match(g) && !attempted.contains(&g.db_id) {
         return false;
     }
-    if needs_steam_title_match(state, g) && !attempted.contains(&g.db_id) {
+    if needs_steam_title_match(g) && !attempted.contains(&g.db_id) {
         return false;
     }
     true
 }
 
+/// The games the console→Steam pass already failed: terminal, never
+/// re-searched. A Steam miss blocks only the Steam pass — every other
+/// pass still applies.
+fn steam_missed_ids(state: &SharedState) -> HashSet<i64> {
+    ira_db::match_missed_ids(&state.borrow().db, ira_db::miss_source::STEAM)
+        .unwrap_or_default()
+        .into_iter()
+        .collect()
+}
+
 fn collect_unmatched_games(state: &SharedState) -> (Vec<Game>, Vec<(String, String, String)>) {
     let s = state.borrow();
     let games = s.games.clone();
+    let steam_missed = steam_missed_ids(state);
     let needs_matching: Vec<Game> = games
         .into_iter()
         .filter(|g| {
-            needs_steam_match(g) || needs_ra_match(g) || needs_sgdb_match(g) || needs_ss_match(g)
+            // A Steam miss blocks only the Steam pass: every other
+            // pass still applies to the game.
+            if steam_missed.contains(&g.db_id) {
+                needs_steam_match(g)
+                    || needs_ra_match(g)
+                    || needs_sgdb_match(g)
+                    || needs_ss_match(g)
+            } else {
+                needs_steam_match(g)
+                    || needs_ra_match(g)
+                    || needs_sgdb_match(g)
+                    || needs_ss_match(g)
+                    // A console game with every other match done still
+                    // wants its Steam version found.
+                    || needs_steam_title_match(g)
+            }
         })
         .collect();
     let save_dir = &s.save_dir;
@@ -246,6 +320,7 @@ fn populate_match_list(
     vis: &RowVis,
 ) -> Vec<RowActions> {
     let ra_available = ra_pass_available(state);
+    let steam_missed = steam_missed_ids(state);
     needs_matching
         .iter()
         .map(|game| {
@@ -256,7 +331,12 @@ fn populate_match_list(
             } else {
                 String::new()
             };
-            let (row, main) = create_match_row(list, &game.name, &searching_text);
+            let (row, main) = create_match_row(
+                list,
+                &game.name,
+                &ira_models::platform_display_name(&game.platform_id),
+                &searching_text,
+            );
             let ra = needs_ra_match(game).then(|| {
                 attach_ra_actions(&row, state, game, dialog, ra_available, vis)
             });
@@ -270,11 +350,27 @@ fn populate_match_list(
                     vis,
                 )
             });
-            let steam = needs_steam_title_match(state, game)
+            let steam = (needs_steam_title_match(game) && !steam_missed.contains(&game.db_id))
                 .then(|| attach_steam_title_actions(&row));
+            if needs_steam_title_match(game) && steam_missed.contains(&game.db_id) {
+                // Steam already failed this one and no box runs for it:
+                // terminal from the start, like the SS misses.
+                vis.mark_attempted(game.db_id);
+            }
             RowActions { row: row.upcast(), main, ra, ss, steam }
         })
         .collect()
+}
+
+/// The exact normalized-title hit in a Steam store answer, if any —
+/// the shared precision gate behind the PC batch pass and the
+/// console-title pass, so punctuation variants ("X: Y" vs "X - Y")
+/// never split a match.
+fn exact_title_hit(results: &[(String, String)], norm: &str) -> Option<(String, String)> {
+    results
+        .iter()
+        .find(|(_, name)| normalize_title(name) == norm)
+        .map(|(id, name)| (id.clone(), name.clone()))
 }
 
 fn start_steam_batch_matching(
@@ -321,10 +417,7 @@ fn start_steam_batch_matching(
                     return matched;
                 }
                 let results = steam.search_steam_store(&item.name);
-                results
-                    .iter()
-                    .find(|(_, name)| normalize_title(name) == norm)
-                    .map(|(id, name)| (id.clone(), name.clone()))
+                exact_title_hit(&results, &norm)
             }
         },
         {
@@ -422,20 +515,26 @@ fn attach_steam_title_actions(row: &adw::ActionRow) -> gtk4::Box {
 }
 
 /// The console→Steam pass: every row with a Steam box gets an exact
-/// title search over the store, and whatever matches is garnished
-/// metadata-only — the game's console identity is never touched.
+/// title search over the store, and every candidate waits on its
+/// Link/Skip confirm — nothing applies itself, so remasters never sneak
+/// onto originals. A store answer with no exact hit tombstones the game
+/// for this source so later opens stop re-asking; a failed request
+/// records nothing and retries next time. Progress shows on the
+/// sidebar strip like every other pass.
 fn start_steam_title_matching(
     state: &SharedState,
     needs_matching: &[Game],
     rows: &[RowActions],
     vis: RowVis,
 ) {
+    let missed = steam_missed_ids(state);
     let queue: Vec<BatchItem> = needs_matching
         .iter()
         .enumerate()
         .filter(|(i, g)| {
             rows.get(*i).is_some_and(|r| r.steam.is_some())
-                && needs_steam_title_match(state, g)
+                && needs_steam_title_match(g)
+                && !missed.contains(&g.db_id)
         })
         .map(|(row_idx, g)| BatchItem {
             name: g.name.clone(),
@@ -448,42 +547,197 @@ fn start_steam_title_matching(
     }
     eprintln!("Steam title pass: {} game(s)", queue.len());
 
-    let steam = state.borrow().steam.clone();
-    let db = state.borrow().db.clone();
+    let (steam, db, sender, save_dir) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.db.clone(), s.sender.clone(), s.save_dir.clone())
+    };
+    // The strip shows the pass and carries its cancel button; when
+    // another job owns the strip the pass simply runs without visible
+    // progress.
+    let (job, cancel) = match super::fetch_images::begin_strip_job(
+        state,
+        &crate::tr!("Matching games…"),
+        &crate::tr!("Matching unmatched games…"),
+    ) {
+        Some(job) => {
+            let cancel = job.cancel_flag();
+            (Some(job), Some(cancel))
+        }
+        None => (None, None),
+    };
+    let total = queue.len();
+    let done = Cell::new(0usize);
+    let candidates = Cell::new(0usize);
     let rows = rows.to_vec();
+    // The applier outlives this call: it needs its own state, like
+    // every other pass.
+    let state = std::rc::Rc::clone(state);
+    // The Link/Skip clicks run on the main loop: they need the same
+    // handles as the worker.
+    let db_main = db.clone();
+    let steam_main = steam.clone();
+    let sender_main = sender.clone();
+    let save_dir_main = save_dir.clone();
     run_batch(
         queue,
-        400, // a title search plus up to two metadata reads per game
-        None,
+        400, // one title search per game; the garnish runs after Link
+        cancel,
         {
             let steam = steam.clone();
             let db = db.clone();
             move |item| {
-                match super::fetch_metadata::steam_refetch_one(&steam, &db, item.db_id) {
-                    RefetchOutcome::Filled => Some(true),
-                    _ => Some(false),
+                // Re-check the link live: the user may have linked the
+                // game from its settings while the pass runs.
+                let unlinked = ira_db::find_by_db_id(&db, item.db_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|entry| entry.steam_id.is_empty());
+                if !unlinked {
+                    return None;
+                }
+                let norm = normalize_title(&item.name);
+                if norm.is_empty() {
+                    return None;
+                }
+                match steam.search_steam_store_result(&item.name) {
+                    Ok(results) => match exact_title_hit(&results, &norm) {
+                        Some(hit) => Some(hit),
+                        // The store answered and nothing matched
+                        // exactly: not matchable, stop re-asking.
+                        None => {
+                            if let Err(e) = ira_db::tombstone_match_miss(
+                                &db,
+                                item.db_id,
+                                ira_db::miss_source::STEAM,
+                            ) {
+                                eprintln!(
+                                    "Steam title pass: '{}': miss record failed: {e}",
+                                    item.name
+                                );
+                            }
+                            None
+                        }
+                    },
+                    // No answer at all — quota and network heal, so this
+                    // retries next open instead of tombstoning.
+                    Err(e) => {
+                        eprintln!("Steam title pass: '{0}': search failed, will retry: {e}", item.name);
+                        None
+                    }
                 }
             }
         },
         move |hit| {
             if hit.row_idx == BATCH_FINISHED {
+                if let Some(job) = &job {
+                    job.finish(
+                        &state,
+                        &crate::tr!("{} Steam candidates")
+                            .replacen("{}", &candidates.get().to_string(), 1),
+                        &crate::tr!("Matching finished"),
+                    );
+                }
                 return;
             }
             let Some(steam_box) = rows.get(hit.row_idx).and_then(|r| r.steam.clone()) else {
                 return;
             };
             let vis = vis.clone();
-            replace_row_actions(&steam_box, |ab| match hit.matched {
-                Some(true) => ab.append(&status_label(
-                    &crate::tr!("Steam: matched"),
-                    CSS_SUCCESS_LABEL,
-                )),
-                _ => ab.append(&status_label(
-                    &crate::tr!("No Steam match"),
-                    CSS_DIM_LABEL,
-                )),
+            let row_idx = hit.row_idx;
+            let db_id = hit.db_id;
+            let name = hit.name.clone();
+            let done_tick = |vis: &RowVis| {
+                vis.pass_done(row_idx);
+                let finished = done.get() + 1;
+                done.set(finished);
+                if let Some(job) = &job {
+                    job.progress(&state, finished, total, &name);
+                }
+            };
+            let Some((id, candidate)) = hit.matched else {
+                replace_row_actions(&steam_box, |ab| {
+                    ab.append(&status_label(
+                        &crate::tr!("No Steam match"),
+                        CSS_DIM_LABEL,
+                    ));
+                });
+                done_tick(&vis);
+                return;
+            };
+            candidates.set(candidates.get() + 1);
+            replace_row_actions(&steam_box, |ab| {
+                ab.append(&status_label(&matched_text(&id, &candidate), CSS_DIM_LABEL));
+                let link_btn = gtk4::Button::with_label(&crate::tr!("Link"));
+                link_btn.add_css_class(CSS_SUGGESTED_ACTION);
+                let skip_btn = gtk4::Button::with_label(&crate::tr!("Skip"));
+                skip_btn.add_css_class(CSS_FLAT);
+                ab.append(&link_btn);
+                ab.append(&skip_btn);
+                {
+                    let db = db_main.clone();
+                    let state = state.clone();
+                    let steam = steam_main.clone();
+                    let sender = sender_main.clone();
+                    let save_dir = save_dir_main.clone();
+                    let vis = vis.clone();
+                    let steam_box = steam_box.clone();
+                    link_btn.connect_clicked(move |_| {
+                        match ira_db::set_steam_id(&db, db_id, &id) {
+                            Ok(()) => {
+                                let _ = ira_db::clear_match_miss(
+                                    &db,
+                                    db_id,
+                                    ira_db::miss_source::STEAM,
+                                );
+                                if let Some(g) = state
+                                    .borrow_mut()
+                                    .games
+                                    .iter_mut()
+                                    .find(|g| g.db_id == db_id)
+                                {
+                                    g.steam_id = id.clone();
+                                }
+                                replace_row_actions(&steam_box, |ab| {
+                                    ab.append(&status_label(
+                                        &crate::tr!("Steam: matched"),
+                                        CSS_SUCCESS_LABEL,
+                                    ));
+                                });
+                                vis.pass_done(row_idx);
+                                super::fetch_metadata::garnish_steam_link(
+                                    &steam, &db, &save_dir, &sender, db_id,
+                                );
+                            }
+                            Err(e) => eprintln!(
+                                "Steam title pass: link for '{}' failed: {e}",
+                                candidate
+                            ),
+                        }
+                    });
+                }
+                {
+                    let db = db_main.clone();
+                    let vis = vis.clone();
+                    let steam_box = steam_box.clone();
+                    skip_btn.connect_clicked(move |_| {
+                        if let Err(e) = ira_db::tombstone_match_miss(
+                            &db,
+                            db_id,
+                            ira_db::miss_source::STEAM,
+                        ) {
+                            eprintln!("Steam title pass: miss record failed: {e}");
+                        }
+                        replace_row_actions(&steam_box, |ab| {
+                            ab.append(&status_label(
+                                &crate::tr!("Skipped"),
+                                CSS_DIM_LABEL,
+                            ));
+                        });
+                        vis.pass_done(row_idx);
+                    });
+                }
             });
-            vis.pass_done(hit.row_idx);
+            done_tick(&vis);
         },
     );
 }
@@ -557,7 +811,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     // show_finished mirrors the switch below, inverted: with the switch
     // off, nothing hides and every row plays its pass out in the open.
     let show_finished = Rc::new(Cell::new(true));
-    let vis = RowVis::new(state, needs_matching.to_vec(), show_finished.clone());
+    let vis = RowVis::new(needs_matching.to_vec(), show_finished.clone(), &scrolled);
     let vis_toggle = vis.clone();
     let rows = populate_match_list(&list, &needs_matching, state, dialog.upcast_ref(), &ss_missed, &vis);
     vis.set_rows(rows.iter().map(|r| r.row.clone()).collect());
@@ -605,17 +859,20 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     start_steam_title_matching(state, &needs_matching, &rows, vis);
 }
 
-/// One list row: the game's title plus its main action box, which starts
-/// as a dim status label when `searching_text` is set.
+/// One list row: the game's title plus its platform subtitle and main
+/// action box, which starts as a dim status label when `searching_text`
+/// is set.
 fn create_match_row(
     list: &gtk4::ListBox,
     name: &str,
+    platform: &str,
     searching_text: &str,
 ) -> (adw::ActionRow, gtk4::Box) {
     let row = adw::ActionRow::new();
     // Game titles are shown as typed — "Fear & Hunger" is not markup.
     row.set_use_markup(false);
     row.set_title(name);
+    row.set_subtitle(platform);
     // Long names ellipsize like every list row; the full name rides the
     // tooltip. Reserving two title lines here made each title label
     // measure two lines high and collapse to one at the real width —
@@ -674,13 +931,79 @@ mod tests {
     #[test]
     fn test_needs_sgdb_match_covers_console_kinds_with_ids() {
         let mut g = game(ira_models::GameKind::ThreeDS);
-        g.app_id = "00040000000e5c00".to_string();
+        g.name = "Kid Icarus: Uprising".to_string();
+        g.steam_id = "00040000000e5c00".to_string();
         assert!(needs_sgdb_match(&g), "3ds games match via sgdb by default");
         g.sgdb_id = "42".to_string();
         assert!(!needs_sgdb_match(&g));
         g.sgdb_id.clear();
         g.manual_unmatch = true;
         assert!(!needs_sgdb_match(&g));
+    }
+
+    #[test]
+    fn test_pc_kinds_auto_match_with_steam_and_never_confirm() {
+        // PC games bypass the Link/Skip confirm entirely: the PC batch
+        // pass still auto-matches them, and the title pass never claims
+        // them.
+        for kind in [
+            ira_models::GameKind::Wine,
+            ira_models::GameKind::Linux,
+            ira_models::GameKind::Steam,
+        ] {
+            let mut g = game(kind);
+            g.name = "Hollow Knight".to_string();
+            assert!(needs_steam_match(&g), "{kind} auto-matches");
+            assert!(!needs_steam_title_match(&g), "{kind} never confirms");
+        }
+    }
+
+    #[test]
+    fn test_game_concluded_needs_every_attempt() {
+        // A row with an open pass stays; attempted passes retire it.
+        let mut g = game(ira_models::GameKind::Wine);
+        g.name = "Hollow Knight".to_string();
+        let empty: HashSet<i64> = HashSet::new();
+        assert!(!game_concluded(&g, &empty));
+        let attempted: HashSet<i64> = HashSet::from([g.db_id]);
+        assert!(game_concluded(&g, &attempted));
+    }
+
+    #[test]
+    fn test_exact_title_hit_ignores_punctuation_variants() {
+        // "X: Y" and "X - Y" normalize identically: the store's
+        // spelling must not decide the match.
+        let results = vec![
+            ("787480".to_string(), "Phoenix Wright: Ace Attorney Trilogy".to_string()),
+            ("1032760".to_string(), "Phoenix Wright: Ace Attorney Trilogy - Turnabout Tunes".to_string()),
+        ];
+        let norm = normalize_title("Phoenix Wright - Ace Attorney Trilogy");
+        assert_eq!(
+            exact_title_hit(&results, &norm),
+            Some((
+                "787480".to_string(),
+                "Phoenix Wright: Ace Attorney Trilogy".to_string()
+            ))
+        );
+        assert!(exact_title_hit(&results, "no such game").is_none());
+        assert!(exact_title_hit(&[], &norm).is_none());
+    }
+
+    #[test]
+    fn test_name_searches_skip_unsearchable_names() {        for name in ["", "   ", "App ID: 1234567"] {
+            assert!(!has_searchable_name(name), "{name:?} is not searchable");
+            let mut sgdb = game(ira_models::GameKind::Switch);
+            sgdb.name = name.to_string();
+            assert!(
+                !needs_sgdb_match(&sgdb),
+                "sgdb must not search {name:?}"
+            );
+            let mut ss = game(ira_models::GameKind::Switch);
+            ss.name = name.to_string();
+            ss.platform_id = "switch".to_string();
+            assert!(!needs_ss_match(&ss), "ss must not search {name:?}");
+        }
+        assert!(has_searchable_name("Twilight Syndrome: Saikai"));
     }
 
     #[test]
@@ -693,8 +1016,25 @@ mod tests {
     #[test]
     fn test_needs_sgdb_match_skips_steam_enriched_games() {
         let mut g = game(ira_models::GameKind::Wine);
-        g.app_id = "420530".to_string();
+        g.name = "Half-Life 2".to_string();
+        g.steam_id = "420530".to_string();
         assert!(!needs_sgdb_match(&g), "steam-driven enrichment owns these");
+    }
+
+    #[test]
+    fn test_platform_linkage_is_not_a_match() {
+        // A Goldberg game carries the Steam appid as its platform linkage
+        // (`app_id`) with no match behind it: both passes must still claim
+        // it, or it sits unmatched forever with only the SS button showing.
+        let mut g = game(ira_models::GameKind::Wine);
+        g.name = "Hollow Knight".to_string();
+        g.app_id = "1966900".to_string();
+        assert!(needs_steam_match(&g));
+        assert!(needs_sgdb_match(&g));
+        // A real Steam match closes both passes again.
+        g.steam_id = "1966900".to_string();
+        assert!(!needs_steam_match(&g));
+        assert!(!needs_sgdb_match(&g));
     }
 
     #[test]
@@ -702,12 +1042,14 @@ mod tests {
         // 3ds is a console-emulator kind on a mapped platform: the prime
         // ScreenScraper candidate.
         let mut g = game(ira_models::GameKind::ThreeDS);
+        g.name = "Kid Icarus: Uprising".to_string();
         g.platform_id = "3ds".to_string();
         assert!(needs_ss_match(&g));
         // The live shape: a 3DS game carries its title id as the platform
         // id and usually an SGDB id already — neither may keep the SS pass
         // away, or the game silently never gets searched.
         let mut live = game(ira_models::GameKind::ThreeDS);
+        live.name = "The Legend of Zelda: Ocarina of Time 3D".to_string();
         live.platform_id = "0004000000038800".to_string();
         live.sgdb_id = "37340".to_string();
         assert!(needs_ss_match(&live));
@@ -728,9 +1070,15 @@ mod tests {
         // PC games search ScreenScraper's Windows/Linux systems and then
         // diff the whole source against their Steam data — every PC kind
         // qualifies, whatever their store-app-id platforms map to.
-        assert!(needs_ss_match(&game(ira_models::GameKind::Wine)));
-        assert!(needs_ss_match(&game(ira_models::GameKind::Linux)));
-        assert!(needs_ss_match(&game(ira_models::GameKind::Steam)));
+        for kind in [
+            ira_models::GameKind::Wine,
+            ira_models::GameKind::Linux,
+            ira_models::GameKind::Steam,
+        ] {
+            let mut g = game(kind);
+            g.name = "Hollow Knight".to_string();
+            assert!(needs_ss_match(&g), "{kind} qualifies");
+        }
         // Manual unmatch still wins over the pass.
         let mut g = game(ira_models::GameKind::Wine);
         g.manual_unmatch = true;
@@ -742,9 +1090,11 @@ mod tests {
         // PS3/PS4 games carry a native product code as the platform id;
         // the kind is what names the console.
         let mut g = game(ira_models::GameKind::Ps4);
+        g.name = "Bloodborne".to_string();
         g.platform_id = "CUSA12112".to_string();
         assert!(needs_ss_match(&g));
         let mut g = game(ira_models::GameKind::Ps3);
+        g.name = "Demon's Souls".to_string();
         g.platform_id = "NPUB30698".to_string();
         assert!(needs_ss_match(&g));
     }

@@ -38,8 +38,9 @@ pub(super) struct RowActions {
     pub(super) main: gtk4::Box,
     pub(super) ra: Option<gtk4::Box>,
     pub(super) ss: Option<gtk4::Box>,
-    /// Console games whose metadata can be garnished from Steam by an
-    /// exact title match — additive to the SS/RA boxes, never a match.
+    /// Console games whose metadata Steam can garnish, linked by exact
+    /// title — additive to the SS/RA boxes, and the link repoints the
+    /// Steam identity only, never the console one.
     pub(super) steam: Option<gtk4::Box>,
 }
 

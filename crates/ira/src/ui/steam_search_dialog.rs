@@ -37,7 +37,7 @@ pub(super) fn status_label(text: &str, css_class: &str) -> gtk4::Label {
 }
 
 /// Text for the Steam match success label: matched store name first, id second.
-fn matched_text(sid: &str, name: &str) -> String {
+pub(super) fn matched_text(sid: &str, name: &str) -> String {
     crate::tr!("Matched: {} ({})")
         .replacen("{}", name, 1)
         .replacen("{}", sid, 1)

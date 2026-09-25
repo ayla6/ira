@@ -5,6 +5,11 @@ use crate::AppMessage;
 use crate::Game;
 use adw::prelude::*;
 
+/// The entity/group dialog list repainter, shared out so rows can
+/// refresh the list after they mutate it.
+type RepaintFn = std::rc::Rc<dyn Fn(&str)>;
+type RepaintCell = std::rc::Rc<std::cell::RefCell<Option<RepaintFn>>>;
+
 pub(super) fn setup_play_action(actions: &gio::SimpleActionGroup, state: SharedState, game: Game) {
     let play_action = gio::SimpleAction::new("play", None);
     play_action.connect_activate(move |_, _| {
@@ -264,99 +269,6 @@ pub(super) fn setup_open_gog_status_action(
     actions.add_action(&open_gog);
 }
 
-pub(super) fn setup_toggle_group_action(
-    actions: &gio::SimpleActionGroup,
-    state: SharedState,
-    game: Game,
-) {
-    let toggle_group = gio::SimpleAction::new("toggle_group", Some(&i64::static_variant_type()));
-    toggle_group.connect_activate(move |_, param| {
-        let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
-        let db = state.borrow().db.clone();
-        let existing =
-            super::helpers::logged_db_vec("Failed to read game groups", ira_db::get_groups_for_game(&db, game.db_id));
-        if existing.iter().any(|g| g.id == group_id) {
-            if let Err(e) = ira_db::remove_game_from_group(&db, game.db_id, group_id) {
-                eprintln!("Failed to remove game from group: {}", e);
-            }
-            if let Some(members) = state.borrow_mut().group_members.get_mut(&group_id) {
-                members.remove(&game.db_id);
-            }
-        } else {
-            if let Err(e) = ira_db::add_game_to_group(&db, game.db_id, group_id) {
-                eprintln!("Failed to add game to group: {}", e);
-            }
-            state
-                .borrow_mut()
-                .group_members
-                .entry(group_id)
-                .or_default()
-                .insert(game.db_id);
-        }
-        super::sidebar::rebuild_sidebar(&state);
-    });
-    actions.add_action(&toggle_group);
-}
-
-pub(super) fn setup_new_collection_action(
-    actions: &gio::SimpleActionGroup,
-    state: SharedState,
-    game: Game,
-) {
-    let new_collection = gio::SimpleAction::new("new_collection", None);
-    new_collection.connect_activate(move |_, _| {
-        let window = state.borrow().window.clone();
-        let sc = state.clone();
-        show_collection_name_dialog(window, sc, move |db, group_id| {
-            if let Err(e) = ira_db::add_game_to_group(db, game.db_id, group_id) {
-                eprintln!("Failed to add game to new group: {}", e);
-            }
-        });
-    });
-    actions.add_action(&new_collection);
-}
-
-pub(super) fn setup_multi_toggle_group_action(
-    actions: &gio::SimpleActionGroup,
-    state: SharedState,
-    ids: Vec<i64>,
-) {
-    let toggle_group = gio::SimpleAction::new("toggle_group", Some(&i64::static_variant_type()));
-    toggle_group.connect_activate(move |_, param| {
-        let group_id = param.and_then(|p| p.get::<i64>()).unwrap_or(0);
-        let db = state.borrow().db.clone();
-
-        let all_in = ids.iter().all(|&db_id| {
-            let game_groups = super::helpers::logged_db_vec(
-                "Failed to read game groups",
-                ira_db::get_groups_for_game(&db, db_id),
-            );
-            game_groups.iter().any(|g| g.id == group_id)
-        });
-
-        for &db_id in &ids {
-            if all_in {
-                if let Err(e) = ira_db::remove_game_from_group(&db, db_id, group_id) {
-                    eprintln!("Failed to remove game from group: {}", e);
-                }
-                if let Some(members) = state.borrow_mut().group_members.get_mut(&group_id) {
-                    members.remove(&db_id);
-                }
-            } else if let Err(e) = ira_db::add_game_to_group(&db, db_id, group_id) {
-                eprintln!("Failed to add game to group: {}", e);
-            } else {
-                state
-                    .borrow_mut()
-                    .group_members
-                    .entry(group_id)
-                    .or_default()
-                    .insert(db_id);
-            }
-        }
-        super::sidebar::rebuild_sidebar(&state);
-    });
-    actions.add_action(&toggle_group);
-}
 
 /// Which metadata list a mass entity add targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -404,28 +316,262 @@ impl MassEntityList {
             MassEntityList::Publisher => &mut meta.publishers,
         }
     }
+
+    pub(super) fn add_action(self) -> &'static str {
+        match self {
+            MassEntityList::Family => "game.mass_family",
+            MassEntityList::Genre => "game.mass_genre",
+            MassEntityList::Developer => "game.mass_developer",
+            MassEntityList::Publisher => "game.mass_publisher",
+        }
+    }
+
+    pub(super) fn add_dialog_title(self) -> String {
+        match self {
+            MassEntityList::Family => crate::tr!("Add to family…"),
+            MassEntityList::Genre => crate::tr!("Add to genre…"),
+            MassEntityList::Developer => crate::tr!("Add to developer…"),
+            MassEntityList::Publisher => crate::tr!("Add to publisher…"),
+        }
+    }
+
+    pub(super) fn entities(
+        self,
+        meta: &ira_models::ScraperMetadata,
+    ) -> &[ira_models::ScraperEntity] {
+        match self {
+            MassEntityList::Family => &meta.families,
+            MassEntityList::Genre => &meta.genres,
+            MassEntityList::Developer => &meta.developers,
+            MassEntityList::Publisher => &meta.publishers,
+        }
+    }
 }
 
-/// Mass metadata adds: search the entity cache, pick one, and it lands
-/// on every selected game's record.
+/// One pickable collection behind the organise dialogs: metadata
+/// lists (family/genre/...) and plain groups share search, shared-
+/// first display, add/remove and mint — one dialog, many sources.
+trait OrganizeSource {
+    fn dialog_title(&self) -> String;
+    fn search(&self, db: &ira_db::DbConn, term: &str) -> Vec<ira_models::ScraperEntity>;
+    fn mint(&self, state: &SharedState, term: &str) -> Option<ira_models::ScraperEntity>;
+    fn held_by(&self, db: &ira_db::DbConn, db_id: i64) -> Vec<ira_models::ScraperEntity>;
+    fn add(&self, state: &SharedState, db_id: i64, entity: &ira_models::ScraperEntity);
+    fn remove(&self, state: &SharedState, db_id: i64, entity_id: &str);
+}
+
+impl OrganizeSource for MassEntityList {
+    fn dialog_title(&self) -> String {
+        self.add_dialog_title()
+    }
+
+    fn search(&self, db: &ira_db::DbConn, term: &str) -> Vec<ira_models::ScraperEntity> {
+        MassEntityList::search(*self, db, term)
+    }
+
+    fn mint(&self, state: &SharedState, term: &str) -> Option<ira_models::ScraperEntity> {
+        MassEntityList::mint(*self, &state.borrow().db, term)
+    }
+
+    fn held_by(&self, db: &ira_db::DbConn, db_id: i64) -> Vec<ira_models::ScraperEntity> {
+        ira_db::scraper_metadata_for_game(db, db_id)
+            .ok()
+            .flatten()
+            .map(|meta| self.entities(&meta).to_vec())
+            .unwrap_or_default()
+    }
+
+    fn add(&self, state: &SharedState, db_id: i64, entity: &ira_models::ScraperEntity) {
+        let db = state.borrow().db.clone();
+        let mut meta = ira_db::scraper_metadata_for_game(&db, db_id)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let target = self.target(&mut meta);
+        // The same entity twice is noise, not data.
+        if target.iter().any(|held| held.id == entity.id) {
+            return;
+        }
+        target.push(entity.clone());
+        if let Err(e) = ira_db::store_scraper_metadata(&db, db_id, &meta) {
+            eprintln!("Failed to store metadata for {db_id}: {e}");
+        }
+    }
+
+    fn remove(&self, state: &SharedState, db_id: i64, entity_id: &str) {
+        let db = state.borrow().db.clone();
+        let mut meta = ira_db::scraper_metadata_for_game(&db, db_id)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let target = self.target(&mut meta);
+        if !target.iter().any(|held| held.id == entity_id) {
+            return;
+        }
+        target.retain(|held| held.id != entity_id);
+        if let Err(e) = ira_db::store_scraper_metadata(&db, db_id, &meta) {
+            eprintln!("Failed to store metadata for {db_id}: {e}");
+        }
+    }
+}
+
+/// Plain groups as an organise source: membership rows instead of a
+/// metadata record, creation instead of minting.
+struct GroupSource;
+
+impl OrganizeSource for GroupSource {
+    fn dialog_title(&self) -> String {
+        crate::tr!("Groups")
+    }
+
+    fn search(&self, db: &ira_db::DbConn, term: &str) -> Vec<ira_models::ScraperEntity> {
+        let query = term.trim().to_lowercase();
+        ira_db::get_all_groups(db)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|group| {
+                query.is_empty() || group.name.to_lowercase().contains(&query)
+            })
+            .map(|group| ira_models::ScraperEntity {
+                id: group.id.to_string(),
+                name: group.name,
+            })
+            .collect()
+    }
+
+    fn mint(&self, state: &SharedState, term: &str) -> Option<ira_models::ScraperEntity> {
+        let name = term.trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+        let db = state.borrow().db.clone();
+        match ira_db::create_group(&db, &name) {
+            Ok(id) => {
+                state.borrow_mut().groups = super::helpers::logged_db_vec(
+                    "Failed to read groups",
+                    ira_db::get_all_groups(&db),
+                );
+                Some(ira_models::ScraperEntity {
+                    id: id.to_string(),
+                    name,
+                })
+            }
+            Err(e) => {
+                eprintln!("Failed to create group: {e}");
+                None
+            }
+        }
+    }
+
+    fn held_by(&self, db: &ira_db::DbConn, db_id: i64) -> Vec<ira_models::ScraperEntity> {
+        ira_db::get_groups_for_game(db, db_id)
+            .unwrap_or_default()
+            .iter()
+            .map(|group| ira_models::ScraperEntity {
+                id: group.id.to_string(),
+                name: group.name.clone(),
+            })
+            .collect()
+    }
+
+    fn add(&self, state: &SharedState, db_id: i64, entity: &ira_models::ScraperEntity) {
+        let Ok(group_id) = entity.id.parse::<i64>() else {
+            return;
+        };
+        let db = state.borrow().db.clone();
+        if let Err(e) = ira_db::add_game_to_group(&db, db_id, group_id) {
+            eprintln!("Failed to add game to group: {e}");
+            return;
+        }
+        state
+            .borrow_mut()
+            .group_members
+            .entry(group_id)
+            .or_default()
+            .insert(db_id);
+    }
+
+    fn remove(&self, state: &SharedState, db_id: i64, entity_id: &str) {
+        let Ok(group_id) = entity_id.parse::<i64>() else {
+            return;
+        };
+        let db = state.borrow().db.clone();
+        if let Err(e) = ira_db::remove_game_from_group(&db, db_id, group_id) {
+            eprintln!("Failed to remove game from group: {e}");
+            return;
+        }
+        if let Some(members) = state.borrow_mut().group_members.get_mut(&group_id) {
+            members.remove(&db_id);
+        }
+    }
+}
+
+/// Split one metadata list across a selection: entities every selected
+/// game holds come first and toggle to remove-from-all; everything else
+/// toggles to complete-the-set. Pure over the loaded lists, so menu
+/// builders stay thin and this stays tested.
+pub(super) fn partition_entities(
+    all: &[Vec<ira_models::ScraperEntity>],
+) -> (
+    Vec<ira_models::ScraperEntity>,
+    Vec<ira_models::ScraperEntity>,
+) {
+    use std::collections::{HashMap, HashSet};
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    let mut by_id: HashMap<&str, &ira_models::ScraperEntity> = HashMap::new();
+    for list in all {
+        // One vote per game even when a record repeats an entity.
+        let mut seen = HashSet::new();
+        for entity in list {
+            if seen.insert(entity.id.as_str()) {
+                *counts.entry(entity.id.as_str()).or_default() += 1;
+                by_id.entry(entity.id.as_str()).or_insert(entity);
+            }
+        }
+    }
+    let mut shared = Vec::new();
+    let mut rest = Vec::new();
+    for (id, entity) in by_id {
+        if counts[id] == all.len() {
+            shared.push(entity.clone());
+        } else {
+            rest.push(entity.clone());
+        }
+    }
+    // Stable menu order within each section.
+    let by_name = |a: &ira_models::ScraperEntity, b: &ira_models::ScraperEntity| {
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.id.cmp(&b.id))
+    };
+    shared.sort_by(by_name);
+    rest.sort_by(by_name);
+    (shared, rest)
+}
+
+/// One toggle per metadata list: held-by-all removes from every
+/// selected game, otherwise the missing games gain it — the group
+/// toggle's shape, applied to entities. The target carries the
+/// entity's id and display name, fresh from the row just shown.
 pub(super) fn setup_multi_entity_add_actions(
     actions: &gio::SimpleActionGroup,
     state: SharedState,
     ids: Vec<i64>,
 ) {
-    let choices: [(&str, String, MassEntityList); 4] = [
-        ("mass_family", crate::tr!("Add to family…"), MassEntityList::Family),
-        ("mass_genre", crate::tr!("Add to genre…"), MassEntityList::Genre),
-        ("mass_developer", crate::tr!("Add to developer…"), MassEntityList::Developer),
-        ("mass_publisher", crate::tr!("Add to publisher…"), MassEntityList::Publisher),
-    ];
-    for (name, title, list) in choices {
-        let action = gio::SimpleAction::new(name, None);
+    for list in [
+        MassEntityList::Family,
+        MassEntityList::Genre,
+        MassEntityList::Developer,
+        MassEntityList::Publisher,
+    ] {
+        let action = gio::SimpleAction::new(list.add_action().trim_start_matches("game."), None);
         let state = state.clone();
         let ids = ids.clone();
+        let source: std::rc::Rc<dyn OrganizeSource> = std::rc::Rc::new(list);
         action.connect_activate(move |_, _| {
             let window = state.borrow().window.clone();
-            show_mass_entity_add(&state, &window, ids.clone(), list, title.clone());
+            show_organize_picker(&state, &window, ids.clone(), source.clone());
         });
         actions.add_action(&action);
     }
@@ -434,13 +580,13 @@ pub(super) fn setup_multi_entity_add_actions(
 /// The search dialog behind a mass add: the cache's matches plus a
 /// custom-add row for names the sources have never listed. A pick
 /// writes every selected game's record at once.
-fn show_mass_entity_add(
+fn show_organize_picker(
     state: &SharedState,
     parent: &impl glib::object::IsA<gtk4::Window>,
     ids: Vec<i64>,
-    list: MassEntityList,
-    title: String,
+    source: std::rc::Rc<dyn OrganizeSource>,
 ) {
+    let title = source.dialog_title();
     let dialog = adw::Dialog::new();
     dialog.set_title(&title);
     dialog.set_content_width(460);
@@ -463,52 +609,104 @@ fn show_mass_entity_add(
     content.append(&entry);
     let (scrolled, results) = super::helpers::clamped_boxed_list(460);
     scrolled.set_vexpand(true);
+    results.set_selection_mode(gtk4::SelectionMode::None);
     content.append(&scrolled);
     toolbar.set_content(Some(&content));
     dialog.set_child(Some(&toolbar));
 
     let state = std::rc::Rc::new(state.clone());
     let ids = std::rc::Rc::new(ids);
-    let apply = {
+    let refresh_views = {
         let state = state.clone();
         let ids = ids.clone();
-        let dialog = dialog.clone();
-        move |entity: ira_models::ScraperEntity| {
-            let db = state.borrow().db.clone();
-            for &db_id in ids.iter() {
-                let mut meta = ira_db::scraper_metadata_for_game(&db, db_id)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
-                let target = list.target(&mut meta);
-                // The same entity twice is noise, not data.
-                if target.iter().any(|held| held.id == entity.id) {
-                    continue;
-                }
-                target.push(entity.clone());
-                if let Err(e) = ira_db::store_scraper_metadata(&db, db_id, &meta) {
-                    eprintln!("Failed to store metadata for {db_id}: {e}");
-                }
-            }
+        move || {
             super::sidebar::rebuild_sidebar_and_show_grid(&state);
             for &db_id in ids.iter() {
                 super::edit_game_scraper::refresh_scraper_section(&state, db_id);
             }
-            dialog.close();
+        }
+    };
+    let apply = {
+        let state = state.clone();
+        let ids = ids.clone();
+        let source = source.clone();
+        let refresh_views = refresh_views.clone();
+        move |entity: ira_models::ScraperEntity| {
+            for &db_id in ids.iter() {
+                source.add(&state, db_id, &entity);
+            }
+            refresh_views();
+        }
+    };
+    let remove = {
+        let state = state.clone();
+        let ids = ids.clone();
+        let source = source.clone();
+        let refresh_views = refresh_views.clone();
+        move |entity_id: &str| {
+            for &db_id in ids.iter() {
+                source.remove(&state, db_id, entity_id);
+            }
+            refresh_views();
         }
     };
 
-    let populate = {
+    let slf: RepaintCell = Default::default();
+    {
+        let slf_c = slf.clone();
         let state = state.clone();
+        let source = source.clone();
         let apply = apply.clone();
+        let remove = remove.clone();
         let results = results.clone();
         let ids = ids.clone();
-        move |term: &str| {
+        let entry = entry.clone();
+        let populate_fn = move |term: &str| {
             super::helpers::clear_children(&results);
             let db = state.borrow().db.clone();
             let term = term.trim();
-            for entity in list.search(&db, term) {
+            let query = term.to_lowercase();
+            // Shared entities pin to the top with Remove; the search
+            // below only offers what isn't already everywhere.
+            let all: Vec<Vec<ira_models::ScraperEntity>> = ids
+                .iter()
+                .map(|&db_id| source.held_by(&db, db_id))
+                .collect();
+            let (shared, _) = partition_entities(&all);
+            let shared_id: std::collections::HashSet<&str> = shared
+                .iter()
+                .map(|entity| entity.id.as_str())
+                .collect();
+            for entity in &shared {
+                if !query.is_empty() && !entity.name.to_lowercase().contains(&query) {
+                    continue;
+                }
+                let remove = remove.clone();
+                let slf = slf_c.clone();
+                let entry = entry.clone();
+                let entity_id = entity.id.clone();
+                let row = adw::ActionRow::new();
+                row.set_use_markup(false);
+                row.set_title(&entity.name);
+                row.set_subtitle(&format!("id {}", entity.id));
+                let pick = gtk4::Button::with_label(&crate::tr!("Remove"));
+                pick.set_valign(gtk4::Align::Center);
+                pick.connect_clicked(move |_| {
+                    remove(&entity_id);
+                    if let Some(populate) = slf.borrow().as_ref() {
+                        populate(&entry.text());
+                    }
+                });
+                row.add_suffix(&pick);
+                results.append(&row);
+            }
+            for entity in source.search(&db, term) {
+                if shared_id.contains(entity.id.as_str()) {
+                    continue;
+                }
                 let apply = apply.clone();
+                let slf = slf_c.clone();
+                let entry = entry.clone();
                 let row_entity = entity.clone();
                 let row = adw::ActionRow::new();
                 row.set_use_markup(false);
@@ -517,7 +715,12 @@ fn show_mass_entity_add(
                 let pick = gtk4::Button::with_label(&crate::tr!("Add"));
                 pick.add_css_class(super::css::CSS_SUGGESTED_ACTION);
                 pick.set_valign(gtk4::Align::Center);
-                pick.connect_clicked(move |_| apply(row_entity.clone()));
+                pick.connect_clicked(move |_| {
+                    apply(row_entity.clone());
+                    if let Some(populate) = slf.borrow().as_ref() {
+                        populate(&entry.text());
+                    }
+                });
                 row.add_suffix(&pick);
                 results.append(&row);
             }
@@ -525,18 +728,18 @@ fn show_mass_entity_add(
             // must not fill up with every prefix the user tried.
             if !term.is_empty() {
                 let already_held = |db_id: i64| {
-                    let mut meta = ira_db::scraper_metadata_for_game(&db, db_id)
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default();
-                    list.target(&mut meta)
+                    source
+                        .held_by(&db, db_id)
                         .iter()
                         .any(|held| held.name.eq_ignore_ascii_case(term))
                 };
                 let all_held = ids.iter().all(|&db_id| already_held(db_id));
                 let apply = apply.clone();
+                let slf_c = slf_c.clone();
+                let entry = entry.clone();
                 let term_c = term.to_string();
-                let db_for_mint = db.clone();
+                let source = source.clone();
+                let state = state.clone();
                 let row = adw::ActionRow::new();
                 row.set_use_markup(false);
                 row.set_title(&crate::tr!("Add \"{}\"").replacen("{}", term, 1));
@@ -545,41 +748,32 @@ fn show_mass_entity_add(
                 pick.set_valign(gtk4::Align::Center);
                 pick.set_sensitive(!all_held);
                 pick.connect_clicked(move |_| {
-                    if let Some(entity) = list.mint(&db_for_mint, &term_c) {
+                    if let Some(entity) = source.mint(&state, &term_c) {
                         apply(entity);
+                        if let Some(populate) = slf_c.borrow().as_ref() {
+                            populate(&entry.text());
+                        }
                     }
                 });
                 row.add_suffix(&pick);
                 results.append(&row);
             }
-        }
-    };
-    let populate_for_changed = populate.clone();
-    entry.connect_search_changed(move |entry| populate_for_changed(&entry.text()));
-    populate("");
-
-    dialog.present(Some(parent.upcast_ref()));
-}
-
-pub(super) fn setup_multi_new_collection_action(
-    actions: &gio::SimpleActionGroup,
-    state: SharedState,
-    ids: Vec<i64>,
-) {
-    let new_collection = gio::SimpleAction::new("new_collection", None);
-    new_collection.connect_activate(move |_, _| {
-        let window = state.borrow().window.clone();
-        let sc = state.clone();
-        let ids = ids.clone();
-        show_collection_name_dialog(window, sc, move |db, group_id| {
-            for &db_id in &ids {
-                if let Err(e) = ira_db::add_game_to_group(db, db_id, group_id) {
-                    eprintln!("Failed to add game to new group: {}", e);
-                }
+        };
+        *slf.borrow_mut() = Some(std::rc::Rc::new(populate_fn));
+    }
+    {
+        let slf = slf.clone();
+        entry.connect_search_changed(move |entry| {
+            if let Some(populate) = slf.borrow().as_ref() {
+                populate(&entry.text());
             }
         });
-    });
-    actions.add_action(&new_collection);
+    }
+    if let Some(populate) = slf.borrow().as_ref() {
+        populate("");
+    }
+
+    dialog.present(Some(parent.upcast_ref()));
 }
 
 pub(super) fn setup_multi_toggle_hide_action(
@@ -611,58 +805,56 @@ pub(super) fn setup_multi_toggle_hide_action(
     actions.add_action(&toggle_hide);
 }
 
-pub(super) fn show_collection_name_dialog(
-    window: adw::ApplicationWindow,
+/// The Groups entry behind single Organise and the flattened multi
+/// menu: one picker for one game or a whole selection.
+pub(super) fn setup_organize_groups_action(
+    actions: &gio::SimpleActionGroup,
     state: SharedState,
-    add_games: impl Fn(&ira_db::DbConn, i64) + 'static,
+    ids: Vec<i64>,
 ) {
-    let dialog = adw::AlertDialog::new(
-        Some(&crate::tr!("New collection")),
-        Some(&crate::tr!("Enter a name for the collection:")),
-    );
-    let entry = gtk4::Entry::new();
-    entry.set_placeholder_text(Some(&crate::tr!("Collection name")));
-    entry.set_margin_start(12);
-    entry.set_margin_end(12);
-    entry.set_margin_top(8);
-    entry.set_margin_bottom(8);
-    dialog.set_extra_child(Some(&entry));
-    dialog.add_response("cancel", &crate::tr!("Cancel"));
-    dialog.add_response("create", &crate::tr!("Create"));
-    dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
-    dialog.set_default_response(Some("create"));
-    dialog.set_close_response("cancel");
-
-    let entry_clone = entry;
-    dialog.connect_response(None, move |_, resp| {
-        if resp != "create" {
-            return;
-        }
-        let name = entry_clone.text().trim().to_string();
-        if name.is_empty() {
-            return;
-        }
-        let db = state.borrow().db.clone();
-        match ira_db::create_group(&db, &name) {
-            Ok(group_id) => {
-                add_games(&db, group_id);
-                let groups =
-                    super::helpers::logged_db_vec("Failed to read groups", ira_db::get_all_groups(&db));
-                let members = super::helpers::logged_db_vec(
-                    "Failed to read group members",
-                    ira_db::get_game_ids_in_group(&db, group_id),
-                );
-                state.borrow_mut().groups = groups;
-                state
-                    .borrow_mut()
-                    .group_members
-                    .insert(group_id, members.into_iter().collect());
-                super::sidebar::rebuild_sidebar(&state);
-            }
-            Err(e) => {
-                eprintln!("Failed to create group: {}", e);
-            }
-        }
+    let action = gio::SimpleAction::new("organize_groups", None);
+    action.connect_activate(move |_, _| {
+        let window = state.borrow().window.clone();
+        let source: std::rc::Rc<dyn OrganizeSource> = std::rc::Rc::new(GroupSource);
+        show_organize_picker(&state, &window, ids.clone(), source);
     });
-    dialog.present(Some(&window));
+    actions.add_action(&action);
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::partition_entities;
+
+    fn entity(id: &str, name: &str) -> ira_models::ScraperEntity {
+        ira_models::ScraperEntity {
+            id: id.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_partition_entities_splits_shared_first() {
+        let action_rpg = entity("2620", "Action RPG");
+        let adventure = entity("12", "Adventure");
+        let all = vec![
+            vec![action_rpg.clone(), adventure.clone()],
+            vec![action_rpg.clone()],
+            vec![],
+        ];
+        let (shared, rest) = partition_entities(&all);
+        // Only the id every game holds counts — the third game holds
+        // nothing, so nothing is shared.
+        assert!(shared.is_empty());
+        assert_eq!(rest.len(), 2);
+        let all = vec![
+            vec![action_rpg.clone(), adventure.clone()],
+            vec![adventure.clone(), action_rpg.clone()],
+        ];
+        let (shared, rest) = partition_entities(&all);
+        assert_eq!(shared.len(), 2);
+        assert!(rest.is_empty());
+        // Order within a section is by name, stable across runs.
+        assert!(shared[0].name <= shared[1].name);
+    }
 }

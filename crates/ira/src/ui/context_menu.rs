@@ -2,13 +2,10 @@ use std::collections::HashSet;
 
 use super::context_menu_actions::{
     setup_controller_action, setup_delete_game_action, setup_edit_action, setup_hide_action,
-    setup_multi_entity_add_actions, setup_multi_new_collection_action,
-    setup_multi_toggle_group_action,
-    setup_multi_toggle_hide_action, setup_new_collection_action,
+    setup_multi_entity_add_actions, setup_multi_toggle_hide_action,
     setup_open_game_folder_action, setup_open_gog_status_action, setup_open_images_action,
-    setup_open_save_location_action, setup_open_steam_status_action, setup_open_wine_prefix_action,
-    setup_play_action, setup_play_history_action, setup_run_manual_script_action,
-    setup_toggle_group_action,
+    setup_open_save_location_action, setup_open_steam_status_action,     setup_open_wine_prefix_action, setup_organize_groups_action, setup_play_action,
+    setup_play_history_action, setup_run_manual_script_action,
 };
 use super::state::SharedState;
 use crate::Game;
@@ -28,40 +25,13 @@ fn setup_and_show_popover(
     super::helpers::popup_context_popover(parent, &popover, actions, "game", at_x as i32, at_y as i32);
 }
 
-fn build_collections_submenu(
-    groups: &[ira_models::Group],
-    is_checked: impl Fn(&ira_models::Group) -> bool,
-) -> gio::Menu {
-    let collections_menu = gio::Menu::new();
-    for g in groups {
-        let label = if is_checked(g) {
-            format!("✓ {}", g.name)
-        } else {
-            g.name.clone()
-        };
-        let item = gio::MenuItem::new(Some(&label), None);
-        item.set_action_and_target_value(Some("game.toggle_group"), Some(&g.id.to_variant()));
-        collections_menu.append_item(&item);
-    }
-    if !groups.is_empty() {
-        collections_menu.append_section(None, &gio::Menu::new());
-    }
-    collections_menu.append(
-        Some(&crate::tr!("Add to new group…")),
-        Some("game.new_collection"),
-    );
-    collections_menu
-}
-
-/// The entity-picker entries behind "Add to" — the same actions land
+/// The entity-picker entries behind "Organise" — the same actions land
 /// the pick on one game or on a whole selection.
-fn build_add_to_submenu() -> gio::Menu {
-    let menu = gio::Menu::new();
+fn append_organise_entity_entries(menu: &gio::Menu) {
     menu.append(Some(&crate::tr!("Family")), Some("game.mass_family"));
     menu.append(Some(&crate::tr!("Genre")), Some("game.mass_genre"));
     menu.append(Some(&crate::tr!("Developer")), Some("game.mass_developer"));
     menu.append(Some(&crate::tr!("Publisher")), Some("game.mass_publisher"));
-    menu
 }
 
 pub fn show_game_context_menu(
@@ -193,16 +163,10 @@ pub fn show_game_context_menu(
         menu.append_submenu(Some(&crate::tr!("Open folder")), &folders_menu);
     }
 
-    let groups = state.borrow().groups.clone();
-    let game_groups = {
-        let db = state.borrow().db.clone();
-        ira_db::get_groups_for_game(&db, game.db_id).unwrap_or_default()
-    };
-    let collections_menu =
-        build_collections_submenu(&groups, |g| game_groups.iter().any(|gg| gg.id == g.id));
-    menu.append_submenu(Some(&crate::tr!("Groups")), &collections_menu);
-
-    menu.append_submenu(Some(&crate::tr!("Add to")), &build_add_to_submenu());
+    let organise_menu = gio::Menu::new();
+    organise_menu.append(Some(&crate::tr!("Groups")), Some("game.organize_groups"));
+    append_organise_entity_entries(&organise_menu);
+    menu.append_submenu(Some(&crate::tr!("Organise")), &organise_menu);
 
     if !manual_script.is_empty() {
         menu.append(
@@ -260,9 +224,8 @@ pub fn show_game_context_menu(
     if game.trophy_source == ira_models::TrophySource::Nge {
         setup_open_gog_status_action(&actions, state.clone(), game.clone());
     }
-    setup_toggle_group_action(&actions, state.clone(), game.clone());
-    setup_new_collection_action(&actions, state.clone(), game.clone());
     setup_multi_entity_add_actions(&actions, state.clone(), vec![game.db_id]);
+    setup_organize_groups_action(&actions, state.clone(), vec![game.db_id]);
 
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }
@@ -276,33 +239,16 @@ pub fn show_multi_game_context_menu(
 ) {
     let menu = gio::Menu::new();
 
-    let groups = state.borrow().groups.clone();
-    let db = state.borrow().db.clone();
+    // Flat organise entries: every item opens its picker popup — the
+    // analysis (shared first, remove on click) lives in the dialogs,
+    // not in nested submenus.
+    menu.append(Some(&crate::tr!("Groups")), Some("game.organize_groups"));
 
-    let game_group_map: std::collections::HashMap<i64, Vec<i64>> = db_ids
-        .iter()
-        .map(|&db_id| {
-            let group_ids = ira_db::get_groups_for_game(&db, db_id)
-                .unwrap_or_default()
-                .iter()
-                .map(|g| g.id)
-                .collect();
-            (db_id, group_ids)
-        })
-        .collect();
-
-    let collections_menu = build_collections_submenu(&groups, |g| {
-        db_ids.iter().all(|&db_id| {
-            game_group_map
-                .get(&db_id)
-                .is_some_and(|ids| ids.contains(&g.id))
-        })
-    });
-    menu.append_submenu(Some(&crate::tr!("Groups")), &collections_menu);
-
-    // Mass metadata adds: one pick lands on every selected game at
-    // once.
-    menu.append_submenu(Some(&crate::tr!("Add to")), &build_add_to_submenu());
+    let ids: Vec<i64> = db_ids.iter().copied().collect();
+    menu.append(Some(&crate::tr!("Family")), Some("game.mass_family"));
+    menu.append(Some(&crate::tr!("Genre")), Some("game.mass_genre"));
+    menu.append(Some(&crate::tr!("Developer")), Some("game.mass_developer"));
+    menu.append(Some(&crate::tr!("Publisher")), Some("game.mass_publisher"));
 
     let all_hidden = db_ids.iter().all(|&db_id| {
         state
@@ -321,13 +267,11 @@ pub fn show_multi_game_context_menu(
     hide_section.append(Some(&hide_label), Some("game.toggle_hide"));
     menu.append_section(None, &hide_section);
 
-    let ids: Vec<i64> = db_ids.iter().copied().collect();
     let actions = gio::SimpleActionGroup::new();
 
-    setup_multi_toggle_group_action(&actions, state.clone(), ids.clone());
-    setup_multi_new_collection_action(&actions, state.clone(), ids.clone());
     setup_multi_toggle_hide_action(&actions, state.clone(), ids.clone(), all_hidden);
-    setup_multi_entity_add_actions(&actions, state.clone(), ids);
+    setup_multi_entity_add_actions(&actions, state.clone(), ids.clone());
+    setup_organize_groups_action(&actions, state.clone(), ids);
 
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }

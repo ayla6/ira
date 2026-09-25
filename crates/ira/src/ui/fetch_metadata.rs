@@ -236,6 +236,37 @@ fn spawn_steam_refetch_worker(
     rx
 }
 
+/// Store a console Steam link: the id alone, the miss healed, the
+/// in-memory copy synced, and a metadata garnish kicked off for a
+/// fresh (non-empty) link. The single root behind the settings save
+/// and the mass-match confirm.
+pub(crate) fn store_steam_link(state: &SharedState, db_id: i64, link: &str) -> bool {
+    let db = state.borrow().db.clone();
+    if let Err(e) = ira_db::set_steam_id(&db, db_id, link) {
+        eprintln!("Steam link: store failed: {e}");
+        return false;
+    }
+    // A fresh link heals a Steam miss: the game re-enters the pool.
+    let _ = ira_db::clear_match_miss(&db, db_id, ira_db::miss_source::STEAM);
+    if let Some(game) = state
+        .borrow_mut()
+        .games
+        .iter_mut()
+        .find(|g| g.db_id == db_id)
+    {
+        game.steam_id = link.to_string();
+    }
+    if link.is_empty() {
+        return true;
+    }
+    let (steam, save_dir, sender) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.save_dir.clone(), s.sender.clone())
+    };
+    garnish_steam_link(&steam, &db, &save_dir, &sender, db_id);
+    true
+}
+
 /// Garnish a fresh Steam link off-thread: refetch the store metadata
 /// and reload the game into the views when anything filled.
 /// Fire-and-forget for the settings save and the mass-match confirm.

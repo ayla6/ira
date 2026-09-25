@@ -143,7 +143,7 @@ fn save_app_id(db: &ira_db::DbConn, params: &SaveGameSettingsParams) -> AppIdRes
 /// The console Steam-link entry: validated like the row's own apply,
 /// written when it moved, and a fresh link kicks off a Steam metadata
 /// garnish on a thread — linking must fetch, not just store.
-fn save_steam_link(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
+fn save_steam_link(params: &SaveGameSettingsParams) {
     let Some(ref row) = params.steam_id_entry else {
         return;
     };
@@ -165,29 +165,9 @@ fn save_steam_link(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
     if link == current {
         return;
     }
-    if let Err(e) = ira_db::set_steam_id(db, params.db_id, &link) {
-        eprintln!("Failed to store the Steam id: {e}");
-        return;
+    if !super::fetch_metadata::store_steam_link(&params.state, params.db_id, &link) {
+        eprintln!("game settings: Steam id not stored");
     }
-    // A fresh link heals a Steam miss: the game re-enters the pool.
-    let _ = ira_db::clear_match_miss(db, params.db_id, ira_db::miss_source::STEAM);
-    if let Some(g) = params
-        .state
-        .borrow_mut()
-        .games
-        .iter_mut()
-        .find(|g| g.db_id == params.db_id)
-    {
-        g.steam_id = link.clone();
-    }
-    if link.is_empty() {
-        return;
-    }
-    let (steam, save_dir, sender) = {
-        let s = params.state.borrow();
-        (s.steam.clone(), params.save_dir.clone(), s.sender.clone())
-    };
-    super::fetch_metadata::garnish_steam_link(&steam, db, &save_dir, &sender, params.db_id);
 }
 
 fn save_version_and_overrides(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {    if let Some(ver) = params.pending_version.borrow().as_ref() {
@@ -906,7 +886,7 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     }
 
     let app_id_result = save_app_id(&db, &params);
-    save_steam_link(&db, &params);
+    save_steam_link(&params);
 
     save_version_and_overrides(&db, &params);
 

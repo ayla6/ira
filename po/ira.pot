@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-24 22:02-0300\n"
+"POT-Creation-Date: 2026-09-25 00:16-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -198,7 +198,6 @@ msgstr ""
 #: crates/ira/src/ui/auto_group_dialog.rs:114
 #: crates/ira/src/ui/background.rs:19
 #: crates/ira/src/ui/big_picture/keyboard.rs:619
-#: crates/ira/src/ui/context_menu_actions.rs:630
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:256
 #: crates/ira/src/ui/edit_game_playtime.rs:257
 #: crates/ira/src/ui/fetch_images.rs:882
@@ -740,8 +739,9 @@ msgid "Everything"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/all_games.rs:287
-#: crates/ira/src/ui/context_menu.rs:203
-#: crates/ira/src/ui/context_menu.rs:301
+#: crates/ira/src/ui/context_menu_actions.rs:424
+#: crates/ira/src/ui/context_menu.rs:167
+#: crates/ira/src/ui/context_menu.rs:245
 msgid "Groups"
 msgstr ""
 
@@ -753,7 +753,7 @@ msgstr ""
 #: crates/ira/src/ui/big_picture/all_games.rs:793
 #: crates/ira/src/ui/big_picture/all_games.rs:798
 #: crates/ira/src/ui/big_picture/view.rs:128
-#: crates/ira/src/ui/context_menu.rs:85
+#: crates/ira/src/ui/context_menu.rs:55
 #: crates/ira/src/ui/play_button.rs:28
 #: crates/ira/src/ui/play_button.rs:48
 msgid "Play"
@@ -885,46 +885,47 @@ msgstr ""
 msgid "Rename the group"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:109
+#: crates/ira/src/ui/context_menu_actions.rs:114
 msgid "Remove game?"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:110
+#: crates/ira/src/ui/context_menu_actions.rs:115
 #, rust-format
 msgid "Remove \"{}\"?"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:111
+#: crates/ira/src/ui/context_menu_actions.rs:116
+#: crates/ira/src/ui/context_menu_actions.rs:692
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:421
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:974
 msgid "Remove"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:417
+#: crates/ira/src/ui/context_menu_actions.rs:331
 msgid "Add to family…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:418
+#: crates/ira/src/ui/context_menu_actions.rs:332
 msgid "Add to genre…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:419
+#: crates/ira/src/ui/context_menu_actions.rs:333
 msgid "Add to developer…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:420
+#: crates/ira/src/ui/context_menu_actions.rs:334
 msgid "Add to publisher…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:462
+#: crates/ira/src/ui/context_menu_actions.rs:608
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:182
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:195
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:273
 msgid "Search…"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:517
-#: crates/ira/src/ui/context_menu_actions.rs:543
+#: crates/ira/src/ui/context_menu_actions.rs:715
+#: crates/ira/src/ui/context_menu_actions.rs:746
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:156
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:1021
 #: crates/ira/src/ui/edit_game_metadata_editors.rs:41
@@ -933,142 +934,123 @@ msgstr ""
 msgid "Add"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:542
+#: crates/ira/src/ui/context_menu_actions.rs:745
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:545
 #: crates/ira/src/ui/settings_pages.rs:1328
 #, rust-format
 msgid "Add \"{}\""
 msgstr ""
 
-#: crates/ira/src/ui/context_menu_actions.rs:620
-msgid "New collection"
-msgstr ""
-
-#: crates/ira/src/ui/context_menu_actions.rs:621
-msgid "Enter a name for the collection:"
-msgstr ""
-
-#: crates/ira/src/ui/context_menu_actions.rs:624
-#: crates/ira/src/ui/group_dialog.rs:13
-msgid "Collection name"
-msgstr ""
-
-#: crates/ira/src/ui/context_menu_actions.rs:631
-#: crates/ira/src/ui/group_dialog.rs:21
-msgid "Create"
-msgstr ""
-
-#: crates/ira/src/ui/context_menu.rs:50
-msgid "Add to new group…"
-msgstr ""
-
-#: crates/ira/src/ui/context_menu.rs:60
+#: crates/ira/src/ui/context_menu.rs:31
+#: crates/ira/src/ui/context_menu.rs:248
 #: crates/ira/src/ui/edit_game_scraper.rs:457
 msgid "Family"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:61
+#: crates/ira/src/ui/context_menu.rs:32
+#: crates/ira/src/ui/context_menu.rs:249
 #: crates/ira/src/ui/edit_game_scraper.rs:448
 msgid "Genre"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:62
+#: crates/ira/src/ui/context_menu.rs:33
+#: crates/ira/src/ui/context_menu.rs:250
 #: crates/ira/src/ui/edit_game_scraper.rs:430
 msgid "Developer"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:63
+#: crates/ira/src/ui/context_menu.rs:34
+#: crates/ira/src/ui/context_menu.rs:251
 #: crates/ira/src/ui/edit_game_scraper.rs:439
 msgid "Publisher"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:88
+#: crates/ira/src/ui/context_menu.rs:58
 msgid "Edit game settings"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:90
+#: crates/ira/src/ui/context_menu.rs:60
 #: crates/ira/src/ui/game_header.rs:308
 msgid "Controller settings"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:94
+#: crates/ira/src/ui/context_menu.rs:64
 #: crates/ira/src/ui/game_header.rs:109
 msgid "View play history"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:162
+#: crates/ira/src/ui/context_menu.rs:132
 msgid "Game location"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:168
+#: crates/ira/src/ui/context_menu.rs:138
 msgid "Wine prefix"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:172
+#: crates/ira/src/ui/context_menu.rs:142
 msgid "Data location"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:177
+#: crates/ira/src/ui/context_menu.rs:147
 msgid "Save location"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:183
-#: crates/ira/src/ui/context_menu.rs:188
+#: crates/ira/src/ui/context_menu.rs:153
+#: crates/ira/src/ui/context_menu.rs:158
 msgid "Achievement status"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:193
+#: crates/ira/src/ui/context_menu.rs:163
 msgid "Open folder"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:205
-#: crates/ira/src/ui/context_menu.rs:305
-msgid "Add to"
+#: crates/ira/src/ui/context_menu.rs:169
+msgid "Organise"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:209
+#: crates/ira/src/ui/context_menu.rs:173
 msgid "Run manual script"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:215
-#: crates/ira/src/ui/context_menu.rs:316
+#: crates/ira/src/ui/context_menu.rs:179
+#: crates/ira/src/ui/context_menu.rs:262
 msgid "Unhide game"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:217
-#: crates/ira/src/ui/context_menu.rs:318
+#: crates/ira/src/ui/context_menu.rs:181
+#: crates/ira/src/ui/context_menu.rs:264
 msgid "Hide game"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:227
+#: crates/ira/src/ui/context_menu.rs:191
 msgid "Remove game"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:356
+#: crates/ira/src/ui/context_menu.rs:300
 msgid "Icon"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:357
+#: crates/ira/src/ui/context_menu.rs:301
 msgid "Capsule"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:358
+#: crates/ira/src/ui/context_menu.rs:302
 msgid "Square"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:359
+#: crates/ira/src/ui/context_menu.rs:303
 msgid "Header"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:360
+#: crates/ira/src/ui/context_menu.rs:304
 msgid "Logo"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:361
+#: crates/ira/src/ui/context_menu.rs:305
 msgid "Hero"
 msgstr ""
 
-#: crates/ira/src/ui/context_menu.rs:378
+#: crates/ira/src/ui/context_menu.rs:322
 msgid "Reset image"
 msgstr ""
 
@@ -2317,6 +2299,14 @@ msgstr ""
 
 #: crates/ira/src/ui/group_dialog.rs:9
 msgid "Enter a name for the group:"
+msgstr ""
+
+#: crates/ira/src/ui/group_dialog.rs:13
+msgid "Collection name"
+msgstr ""
+
+#: crates/ira/src/ui/group_dialog.rs:21
+msgid "Create"
 msgstr ""
 
 #: crates/ira/src/ui/group_dialog.rs:58

@@ -547,9 +547,9 @@ fn start_steam_title_matching(
     }
     eprintln!("Steam title pass: {} game(s)", queue.len());
 
-    let (steam, db, sender, save_dir) = {
+    let (steam, db) = {
         let s = state.borrow();
-        (s.steam.clone(), s.db.clone(), s.sender.clone(), s.save_dir.clone())
+        (s.steam.clone(), s.db.clone())
     };
     // The strip shows the pass and carries its cancel button; when
     // another job owns the strip the pass simply runs without visible
@@ -572,12 +572,9 @@ fn start_steam_title_matching(
     // The applier outlives this call: it needs its own state, like
     // every other pass.
     let state = std::rc::Rc::clone(state);
-    // The Link/Skip clicks run on the main loop: they need the same
-    // handles as the worker.
+    // The Skip clicks run on the main loop: they need the database
+    // handle the worker used.
     let db_main = db.clone();
-    let steam_main = steam.clone();
-    let sender_main = sender.clone();
-    let save_dir_main = save_dir.clone();
     run_batch(
         queue,
         400, // one title search per game; the garnish runs after Link
@@ -674,44 +671,20 @@ fn start_steam_title_matching(
                 ab.append(&link_btn);
                 ab.append(&skip_btn);
                 {
-                    let db = db_main.clone();
                     let state = state.clone();
-                    let steam = steam_main.clone();
-                    let sender = sender_main.clone();
-                    let save_dir = save_dir_main.clone();
                     let vis = vis.clone();
                     let steam_box = steam_box.clone();
                     link_btn.connect_clicked(move |_| {
-                        match ira_db::set_steam_id(&db, db_id, &id) {
-                            Ok(()) => {
-                                let _ = ira_db::clear_match_miss(
-                                    &db,
-                                    db_id,
-                                    ira_db::miss_source::STEAM,
-                                );
-                                if let Some(g) = state
-                                    .borrow_mut()
-                                    .games
-                                    .iter_mut()
-                                    .find(|g| g.db_id == db_id)
-                                {
-                                    g.steam_id = id.clone();
-                                }
-                                replace_row_actions(&steam_box, |ab| {
-                                    ab.append(&status_label(
-                                        &crate::tr!("Steam: matched"),
-                                        CSS_SUCCESS_LABEL,
-                                    ));
-                                });
-                                vis.pass_done(row_idx);
-                                super::fetch_metadata::garnish_steam_link(
-                                    &steam, &db, &save_dir, &sender, db_id,
-                                );
-                            }
-                            Err(e) => eprintln!(
-                                "Steam title pass: link for '{}' failed: {e}",
-                                candidate
-                            ),
+                        if super::fetch_metadata::store_steam_link(&state, db_id, &id) {
+                            replace_row_actions(&steam_box, |ab| {
+                                ab.append(&status_label(
+                                    &crate::tr!("Steam: matched"),
+                                    CSS_SUCCESS_LABEL,
+                                ));
+                            });
+                            vis.pass_done(row_idx);
+                        } else {
+                            eprintln!("Steam title pass: link for '{candidate}' failed");
                         }
                     });
                 }

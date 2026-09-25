@@ -212,6 +212,10 @@ pub(super) fn show_entity_dialog(
         "Your rename wins over the source's spelling"
     )));
     name_group.add(&name_entry);
+    let id_row = adw::ActionRow::new();
+    id_row.set_title(&crate::tr!("ID"));
+    id_row.set_sensitive(false);
+    name_group.add(&id_row);
     entity_content.append(&name_group);
 
     let alias_group = adw::PreferencesGroup::new();
@@ -336,17 +340,32 @@ pub(super) fn show_entity_dialog(
 
     // Open an entity's management page: its stored state loads into
     // the staging area first.
+    fn show_entity(
+        title: &gtk4::Label,
+        name_entry: &adw::EntryRow,
+        id_row: &adw::ActionRow,
+        id: i64,
+        name: &str,
+    ) {
+        // The header carries the name; the ID row carries the id — the
+        // id is what matches and merges key on.
+        title.set_text(name);
+        name_entry.set_text(name);
+        id_row.set_subtitle(&id.to_string());
+    }
     let open_entity = {
         let state = state.clone();
         let navigate = navigate.clone();
         let selected = selected.clone();
         let edits = edits.clone();
+        let title = title.clone();
         let name_entry = name_entry.clone();
+        let id_row = id_row.clone();
         let alias_list = alias_list.clone();
         move |id: i64, name: &str| {
             let db = state.borrow().db.clone();
             let loaded = load_edits(&db, kind, id);
-            name_entry.set_text(&loaded.name);
+            show_entity(&title, &name_entry, &id_row, id, &loaded.name);
             name_entry.remove_css_class(CSS_ERROR);
             *edits.borrow_mut() = loaded;
             repaint_alias_list(&alias_list, &edits);
@@ -824,6 +843,7 @@ pub(super) fn show_entity_dialog(
         let edits = edits.clone();
         let name_entry = name_entry.clone();
         let alias_list = alias_list.clone();
+        let id_row = id_row.clone();
         let refresh_manage = refresh_manage.clone();
         let manage_search = manage_search.clone();
         let title = title.clone();
@@ -870,8 +890,7 @@ pub(super) fn show_entity_dialog(
             }
             name_entry.remove_css_class(CSS_ERROR);
             let reloaded = load_edits(&db, kind, id);
-            name_entry.set_text(&reloaded.name);
-            title.set_text(&reloaded.name);
+            show_entity(&title, &name_entry, &id_row, id, &reloaded.name);
             *edits.borrow_mut() = reloaded;
             repaint_alias_list(&alias_list, &edits);
             refresh_manage(&manage_search.text());
@@ -881,24 +900,27 @@ pub(super) fn show_entity_dialog(
         });
     }
     {
-        // Discard throws the staged edits away and re-reads the entity.
+        // Discard throws the staged edits away, re-reads the entity,
+        // and goes back to the manage list like Save does.
         let state = state.clone();
         let selected = selected.clone();
         let edits = edits.clone();
         let name_entry = name_entry.clone();
         let alias_list = alias_list.clone();
+        let id_row = id_row.clone();
         let title = title.clone();
+        let navigate = navigate.clone();
         cancel_btn.connect_clicked(move |_| {
             let Some(id) = *selected.borrow() else {
                 return;
             };
             let db = state.borrow().db.clone();
             let reloaded = load_edits(&db, kind, id);
-            name_entry.set_text(&reloaded.name);
-            title.set_text(&reloaded.name);
+            show_entity(&title, &name_entry, &id_row, id, &reloaded.name);
             *edits.borrow_mut() = reloaded;
             name_entry.remove_css_class(CSS_ERROR);
             repaint_alias_list(&alias_list, &edits);
+            navigate(Page::Manage, "");
         });
     }
     {
@@ -919,6 +941,12 @@ pub(super) fn show_entity_dialog(
         let refresh_merge = refresh_merge.clone();
         merge_search.connect_changed(move |entry| {
             refresh_merge(&entry.text());
+        });
+    }
+    {
+        let refresh_manage = refresh_manage.clone();
+        manage_search.connect_changed(move |entry| {
+            refresh_manage(&entry.text());
         });
     }
 

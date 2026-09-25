@@ -326,6 +326,7 @@ fn switch_hidraw_driver_reads_motion_buttons_and_rumble_from_a_twin() {
         product: 0x2009,
         version: 0,
         has_evdev_gyro: false,
+        uniq: String::new(),
         supported_buttons: Vec::new(),
     };
     let running = Arc::new(AtomicBool::new(true));
@@ -443,6 +444,7 @@ fn kernel_imu_node_streams_gyro_for_a_registered_switch_pro_twin() {
         product: 0x2009,
         version: 0,
         has_evdev_gyro: false,
+        uniq: String::new(),
         supported_buttons: Vec::new(),
     };
     // udev publishes each node on its own schedule; the pad appeared a

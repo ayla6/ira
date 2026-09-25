@@ -300,8 +300,14 @@ struct PadUi {
 
 impl PadUi {
     fn after_rescan(&mut self, pads: &[PhysicalGamepad]) {
-        self.count = pads.len();
-        self.family = pads.first().map(|pad| pad.info().family());
+        // Twins count as their physical source, never as extra pads:
+        // the reader opens the virtual nodes (the grabbed physicals
+        // are silent), but the rail shows the real controller.
+        let infos: Vec<ira_input::DeviceInfo> =
+            pads.iter().map(|pad| pad.info().clone()).collect();
+        let (count, family) = ira_input::pad_status_summary(&infos);
+        self.count = count;
+        self.family = family;
     }
 
     /// Push the current status when it changed; false when the receiver is

@@ -84,7 +84,8 @@ pub(crate) fn reload_needs_full_rebuild(old: &InputProfile, new: &InputProfile) 
 
 fn twin_uniq() -> String {
     format!(
-        "ira-virtual-{}-{}",
+        "{}{}-{}",
+        crate::physical::TWIN_UNIQ_PREFIX,
         std::process::id(),
         TWIN_SERIAL.fetch_add(1, Ordering::Relaxed)
     )

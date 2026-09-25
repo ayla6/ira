@@ -21,8 +21,9 @@ pub use calibration::{
 pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use mapping::{InputEvent, MappingEngine, OutputEvent};
 pub use physical::{
-    discover_gamepads, discover_gamepads_including_virtual, ControllerFamily, DeviceInfo,
-    PhysicalGamepad, ReportedInputMode,
+    discover_gamepads, discover_gamepads_including_virtual, is_virtual_gamepad,
+    pad_status_summary, ControllerFamily, DeviceInfo, PhysicalGamepad, ReportedInputMode,
+    TWIN_UNIQ_PREFIX,
 };
 pub use profile::{
     ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,

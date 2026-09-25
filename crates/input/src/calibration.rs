@@ -98,6 +98,7 @@ mod tests {
             product: 0x2009,
             version: 0,
             has_evdev_gyro: false,
+            uniq: String::new(),
             supported_buttons: Vec::new(),
         }
     }

@@ -363,6 +363,7 @@ mod tests {
             product: 2,
             version: 3,
             has_evdev_gyro: false,
+            uniq: String::new(),
             supported_buttons: Vec::new(),
         };
         replace_snapshot(&snapshot, &generation, vec![device.clone()]);

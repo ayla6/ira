@@ -19,6 +19,12 @@ pub struct DeviceInfo {
     pub vendor: u16,
     pub product: u16,
     pub version: u16,
+    /// The evdev UNIQ serial, empty when the node carries none (uinput
+    /// cannot set one; some hardware reports none either). uhid twins
+    /// carry the daemon's serial here — the only stable handle from a
+    /// twin back to nothing, since their HID identity is deliberately
+    /// fake.
+    pub uniq: String,
     pub has_evdev_gyro: bool,
     pub supported_buttons: Vec<GamepadButton>,
 }
@@ -198,15 +204,25 @@ fn device_info(path: PathBuf, device: &Device, skip_virtual: bool) -> Option<Dev
             .into_iter()
             .all(|code| axes.contains(AbsoluteAxisCode(code)))
     });
+    let uniq = evdev_uniq(&path);
     Some(DeviceInfo {
         path,
         name: device.name().unwrap_or("Unknown gamepad").to_string(),
         vendor: id.vendor(),
         product: id.product(),
         version: id.version(),
+        uniq,
         has_evdev_gyro,
         supported_buttons,
     })
+}
+
+/// The evdev UNIQ serial from sysfs, empty when the node carries none.
+fn evdev_uniq(path: &Path) -> String {
+    let node = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    std::fs::read_to_string(format!("/sys/class/input/{node}/device/uniq"))
+        .map(|serial| serial.trim().to_string())
+        .unwrap_or_default()
 }
 
 pub struct PhysicalGamepad {
@@ -814,6 +830,38 @@ fn is_ira_virtual_device(name: &str) -> bool {
     name.starts_with("Ira Virtual ") || name.ends_with("(Ira)")
 }
 
+/// The evdev UNIQ prefix the daemon stamps on its uhid twins
+/// (`ira-virtual-<pid>-<serial>`). A twin's HID identity is
+/// deliberately fake — SDL needs it that way — so this prefix is the
+/// only stable handle from a twin back to ira at all.
+pub const TWIN_UNIQ_PREFIX: &str = "ira-virtual-";
+
+/// Ira's own virtual outputs (uinput pads by name, uhid twins by
+/// serial): Big Picture counts these as their physical source, never
+/// as extra pads.
+pub fn is_virtual_gamepad(info: &DeviceInfo) -> bool {
+    is_ira_virtual_device(&info.name) || info.uniq.starts_with(TWIN_UNIQ_PREFIX)
+}
+
+/// What Big Picture shows about connected gamepads: virtual outputs
+/// count as their physical source, never as extra pads — every virtual
+/// evdev node implies a grabbed, silent physical pad (passthrough
+/// builds no virtual devices at all). With no physical pad visible the
+/// virtuals still count, so an unplugged-but-held pad reads as present.
+pub fn pad_status_summary(pads: &[DeviceInfo]) -> (usize, Option<ControllerFamily>) {
+    let physical: Vec<&DeviceInfo> = pads
+        .iter()
+        .filter(|pad| !is_virtual_gamepad(pad))
+        .collect();
+    let shown: Vec<&DeviceInfo> = if physical.is_empty() {
+        pads.iter().collect()
+    } else {
+        physical
+    };
+    let family = shown.first().map(|pad| pad.family());
+    (shown.len(), family)
+}
+
 /// Real Sony pad identities, by the kernel drivers that bind them
 /// (hid-sony: DualShock 4 and its dongle; hid-playstation: DualSense and
 /// DualSense Edge). A pad with one of these identities speaks the Sony
@@ -831,9 +879,10 @@ pub(crate) fn is_dualsense_identity(vendor: u16, product: u16) -> bool {
 mod tests {
     use super::{
         button_layout, device_gone, is_dualsense_identity, is_dualshock4_identity,
-        is_ira_virtual_device, map_button, map_button_for_device, normalize_signed,
-        normalize_trigger, poll_timeout_ms, same_device, swap_face_buttons,
-        synthesized_trigger_click, ButtonLayout, ControllerFamily, DeviceInfo, ReportedInputMode,
+        is_ira_virtual_device, is_virtual_gamepad, map_button, map_button_for_device,
+        normalize_signed, normalize_trigger, pad_status_summary, poll_timeout_ms, same_device,
+        swap_face_buttons, synthesized_trigger_click, ButtonLayout, ControllerFamily, DeviceInfo,
+        ReportedInputMode,
     };
     use crate::hid_8bitdo::{is_ultimate_2, VENDOR_8BITDO, ULTIMATE_2_WIRELESS};
     use crate::GamepadButton;
@@ -865,6 +914,7 @@ mod tests {
                 product: 0x5678,
                 version: 0,
                 has_evdev_gyro: false,
+                uniq: String::new(),
                 supported_buttons: Vec::new(),
             },
             device: None,
@@ -1062,6 +1112,7 @@ mod tests {
             product: 0,
             version: 0,
             has_evdev_gyro: false,
+            uniq: String::new(),
             supported_buttons: Vec::new(),
         };
         assert_eq!(device.family(), ControllerFamily::EightBitDo);
@@ -1076,9 +1127,64 @@ mod tests {
             product: 0,
             version: 0,
             has_evdev_gyro: false,
+            uniq: String::new(),
             supported_buttons: Vec::new(),
         };
         assert_eq!(device.family(), ControllerFamily::EightBitDo);
+    }
+
+    #[test]
+    fn test_virtual_gamepads_count_as_their_source() {
+        fn device(name: &str, vendor: u16, product: u16, uniq: &str) -> DeviceInfo {
+            DeviceInfo {
+                path: PathBuf::from("/dev/input/event0"),
+                name: name.to_string(),
+                vendor,
+                product,
+                version: 0,
+                has_evdev_gyro: false,
+                uniq: uniq.to_string(),
+                supported_buttons: Vec::new(),
+            }
+        }
+        // uinput pads by name, uhid twins by serial.
+        let physical = device("8BitDo Ultimate 2 Wireless", 0x2dc8, 0x6012, "");
+        assert!(!is_virtual_gamepad(&physical));
+        assert!(is_virtual_gamepad(&device(
+            "Ira Virtual Xbox Controller",
+            0x045e,
+            0x028e,
+            ""
+        )));
+        assert!(is_virtual_gamepad(&device(
+            "Nintendo Switch Pro Controller",
+            0x057e,
+            0x2009,
+            "ira-virtual-123-0"
+        )));
+        // A grabbed physical plus its twin counts once, as the real pad.
+        let twin = device(
+            "Nintendo Switch Pro Controller",
+            0x057e,
+            0x2009,
+            "ira-virtual-123-0",
+        );
+        assert_eq!(
+            pad_status_summary(&[physical.clone(), twin.clone()]),
+            (1, Some(ControllerFamily::EightBitDo))
+        );
+        // Twins with no physical visible still read as present.
+        assert_eq!(
+            pad_status_summary(&[twin.clone()]),
+            (1, Some(ControllerFamily::Nintendo))
+        );
+        // Two real pads count twice; nothing connected counts zero.
+        let second = device("Xbox 360 Controller", 0x045e, 0x028e, "");
+        assert_eq!(
+            pad_status_summary(&[physical, second]),
+            (2, Some(ControllerFamily::EightBitDo))
+        );
+        assert_eq!(pad_status_summary(&[]), (0, None));
     }
 
     #[test]
@@ -1090,6 +1196,7 @@ mod tests {
             product: ULTIMATE_2_WIRELESS,
             version: 0,
             has_evdev_gyro: false,
+            uniq: String::new(),
             supported_buttons: Vec::new(),
         };
         assert_eq!(device.reported_input_mode(), ReportedInputMode::DirectInput);
@@ -1104,6 +1211,7 @@ mod tests {
             product: ULTIMATE_2_WIRELESS,
             version: 0,
             has_evdev_gyro: false,
+            uniq: String::new(),
             supported_buttons: Vec::new(),
         };
         assert_eq!(device.reported_input_mode(), ReportedInputMode::XInput);
@@ -1127,6 +1235,7 @@ mod tests {
             product: 2,
             version: 3,
             has_evdev_gyro: false,
+            uniq: String::new(),
             supported_buttons: Vec::new(),
         };
         let right = DeviceInfo {

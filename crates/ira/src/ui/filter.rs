@@ -137,9 +137,7 @@ pub(crate) fn group_key(
     entity_names: &HashMap<i64, String>,
 ) -> String {
     match group_by {
-        ira_models::GroupBy::Console => ira_models::find_console(&game.platform_id)
-            .map(|console| console.display_name.to_string())
-            .unwrap_or_else(|| game.platform_id.clone()),
+        ira_models::GroupBy::Console => ira_models::platform_display_name(&game.platform_id),
         ira_models::GroupBy::Year => {
             if game.release_timestamp > 0 {
                 use chrono::Datelike;

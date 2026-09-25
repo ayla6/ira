@@ -366,6 +366,16 @@ pub fn find_console(id: &str) -> Option<&'static ConsoleDef> {
     all_consoles().find(|c| c.id == id)
 }
 
+/// The display name for a game's platform: the console's full name
+/// where the platform is a known console, else the raw platform id
+/// (`wine`, `linux`, `steam`, `gog`) — the same fallback the sidebar
+/// grouping and the autogroup Platform matcher use.
+pub fn platform_display_name(platform_id: &str) -> String {
+    find_console(platform_id)
+        .map(|c| c.display_name.to_string())
+        .unwrap_or_else(|| platform_id.to_string())
+}
+
 /// The compressed Switch containers, gated behind the
 /// `compressed_switch_roms` toggle (off by default).
 pub const COMPRESSED_SWITCH_EXTENSIONS: &[&str] = &["nsz", "xcz"];
@@ -395,6 +405,17 @@ mod tests {
         assert_eq!(c.display_name, "PlayStation 1");
         assert_eq!(c.ra_console_id, 12);
         assert!(c.extensions.contains(&"bin"));
+    }
+
+    #[test]
+    fn test_platform_display_name_falls_back_to_raw_id() {
+        assert_eq!(platform_display_name("psx"), "PlayStation 1");
+        assert_eq!(platform_display_name("snes"), "SNES");
+        // PC platforms have no console entry: the id itself shows,
+        // matching the sidebar grouping and the autogroup matcher.
+        for id in ["wine", "linux", "steam", "gog"] {
+            assert_eq!(platform_display_name(id), id);
+        }
     }
 
     #[test]

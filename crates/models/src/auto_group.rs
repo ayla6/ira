@@ -3,10 +3,16 @@
 //! a playtime floor — updated by themselves, because membership is
 //! derived from the live games on every evaluation instead of stored.
 
-use crate::find_console;
 use crate::game::Game;
+use crate::kind::TrophySource;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// The autogroup Console value that groups Goldberg-emulated Steam
+/// games: they share the Wine/Linux platform ids with plain PC games,
+/// so the platform alone cannot tell them apart — the GSE trophy
+/// source can. GOG needs no twin: DRM-free needs no emulator.
+pub const STEAM_EMULATED_VALUE: &str = "Steam (Emulated)";
 
 /// The dimensions a rule can look at. Value dimensions match any-of a
 /// list of names; the range dimensions read the bounds instead.
@@ -41,7 +47,7 @@ impl AutoDimension {
             AutoDimension::Family => "Series",
             AutoDimension::Developer => "Developer",
             AutoDimension::Publisher => "Publisher",
-            AutoDimension::Console => "Console",
+            AutoDimension::Console => "Platform",
             AutoDimension::Released => "Release date",
             AutoDimension::Playtime => "Playtime",
         }
@@ -91,12 +97,15 @@ impl AutoCriterion {
                 values_overlap(&self.values, ctx.publishers.get(&game.db_id))
             }
             AutoDimension::Console => {
-                let console = find_console(&game.platform_id)
-                    .map(|c| c.display_name.to_string())
-                    .unwrap_or_else(|| game.platform_id.clone());
-                self.values
-                    .iter()
-                    .any(|v| v.eq_ignore_ascii_case(console.trim()))
+                let console = crate::platform_display_name(&game.platform_id);
+                self.values.iter().any(|v| {
+                    // Goldberg games hide inside the Wine/Linux
+                    // platforms: the value names the trophy source.
+                    if v.eq_ignore_ascii_case(STEAM_EMULATED_VALUE) {
+                        return game.trophy_source == TrophySource::Gse;
+                    }
+                    v.eq_ignore_ascii_case(console.trim())
+                })
             }
             // ISO dates and bare years compare correctly as strings —
             // `1998` sits inside `1996-01-01`..`1998-03-30` either way.
@@ -289,8 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn test_auto_console_matches_the_display_name() {
-        let g = game();
+    fn test_auto_console_matches_the_display_name() {        let g = game();
         let ctx = AutoGroupContext::default();
         let rule = AutoCriterion {
             dimension: AutoDimension::Console,
@@ -303,6 +311,52 @@ mod tests {
             find_console("snes").map(|c| c.display_name.to_string()),
             Some("SNES".to_string())
         );
+    }
+
+    #[test]
+    fn test_auto_console_matches_pc_platforms_by_raw_id() {
+        // PC platforms are not in the console table: the matcher falls
+        // back to the raw platform id, case-insensitively, which is what
+        // the autogroup picker offers for Linux, Wine, Steam and GOG.
+        let ctx = AutoGroupContext::default();
+        for (platform, value) in [
+            ("linux", "Linux"),
+            ("wine", "Wine"),
+            ("steam", "Steam"),
+            ("gog", "GOG"),
+        ] {
+            let mut g = game();
+            g.platform_id = platform.to_string();
+            let rule = AutoCriterion {
+                dimension: AutoDimension::Console,
+                values: vec![value.to_string()],
+                ..Default::default()
+            };
+            assert!(rule.matches(&g, &ctx), "{value} matches {platform}");
+        }
+    }
+
+    #[test]
+    fn test_auto_console_steam_emulated_matches_goldberg_only() {
+        // Goldberg games share the Wine platform with plain PC games:
+        // only the GSE trophy source tells them apart.
+        let ctx = AutoGroupContext::default();
+        let rule = AutoCriterion {
+            dimension: AutoDimension::Console,
+            values: vec![STEAM_EMULATED_VALUE.to_string()],
+            ..Default::default()
+        };
+        let mut goldberg = game();
+        goldberg.platform_id = "wine".to_string();
+        goldberg.trophy_source = TrophySource::Gse;
+        assert!(rule.matches(&goldberg, &ctx));
+        let mut plain = game();
+        plain.platform_id = "wine".to_string();
+        assert!(!rule.matches(&plain, &ctx));
+        let mut native = game();
+        native.platform_id = "steam".to_string();
+        native.trophy_source = TrophySource::SteamNative;
+        assert!(!rule.matches(&native, &ctx));
     }
 
     #[test]

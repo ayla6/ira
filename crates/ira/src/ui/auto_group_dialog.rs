@@ -176,7 +176,8 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
 
 /// One value menu per dimension, fetched once per dialog: the pickers
 /// offer what the library has on record (plus the console set, which is
-/// closed). Consoles search on their hidden aliases too — "ps1" finds
+/// closed, plus the PC platforms, which are not consoles but group like
+/// them). Consoles search on their hidden aliases too — "ps1" finds
 /// "PlayStation 1" — while only the full name is stored or shown.
 fn dimension_menus(state: &SharedState) -> ValueMenus {
     let db = state.borrow().db.clone();
@@ -219,6 +220,25 @@ fn dimension_menus(state: &SharedState) -> ValueMenus {
                 value: c.display_name.to_string(),
                 search: c.search_haystack(),
             })
+            // PC platforms are not consoles — the models console table
+            // drives ROM scanning and emulator settings and must stay
+            // console-only — but the Console matcher falls back to the
+            // raw platform id, so offering these values just works. The
+            // match folds case, hence the display capitalisation; "Wine"
+            // (not "Windows") because the platform id is `wine`. Steam
+            // (Emulated) is Goldberg games, matched on the GSE trophy
+            // source instead of any platform.
+            .chain(
+                [
+                    "Linux",
+                    "Wine",
+                    "Steam",
+                    "GOG",
+                    ira_models::STEAM_EMULATED_VALUE,
+                ]
+                .into_iter()
+                .map(|name| ValueOption::plain(name.to_string())),
+            )
             .collect(),
     );
     menus

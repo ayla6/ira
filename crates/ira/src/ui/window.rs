@@ -525,6 +525,7 @@ fn connect_window_signals(
             drop(s);
             state_clone.borrow_mut().multi_selected_ids = selected_ids;
             super::sidebar::update_sticky_selection(&state_clone);
+            super::helpers::unfocus_search(&state_clone);
             return;
         }
 
@@ -580,6 +581,7 @@ fn connect_window_signals(
                 switch_to_game(&state_clone, db_id, item.variant_id());
             }
         }
+        super::helpers::unfocus_search(&state_clone);
         super::sidebar::update_sticky_selection(&state_clone);
     });
 
@@ -682,6 +684,36 @@ fn connect_search_signals(
             }
         });
     });
+
+    // Escape drops focus instead of leaving the entry swallowing keys.
+    {
+        let state_clone = state.clone();
+        let key = gtk4::EventControllerKey::new();
+        key.connect_key_pressed(move |_, key, _, _| {
+            if key == gdk4::Key::Escape {
+                super::helpers::unfocus_search(&state_clone);
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+        search_entry.add_controller(key);
+    }
+
+    // Clicking anywhere in the sidebar or content area drops the search
+    // focus: grid tiles are not focusable, so without this the entry keeps
+    // the keyboard after a click elsewhere.
+    for scroll in [
+        state.borrow().sidebar_scroll.clone(),
+        state.borrow().content_scroll.clone(),
+    ] {
+        let state_clone = state.clone();
+        let click = gtk4::GestureClick::new();
+        click.connect_pressed(move |_, _, _, _| {
+            super::helpers::unfocus_search(&state_clone);
+        });
+        scroll.add_controller(click);
+    }
 
     let search_entry_clone = search_entry.clone();
     let search_action = gio::SimpleAction::new("search", None);

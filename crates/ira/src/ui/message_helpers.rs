@@ -668,6 +668,7 @@ pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
 
 pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) {
     let _span = tracing::info_span!("switch_to_game", db_id, variant_id = ?variant_id).entered();
+    super::helpers::unfocus_search(state);
     state.borrow_mut().selected_id = match variant_id {
         Some(vid) => format!("{}-v{}", db_id, vid),
         None => db_id.to_string(),

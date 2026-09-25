@@ -527,6 +527,7 @@ pub fn build_sticky_all_games(state: &SharedState) -> gtk4::Box {
 /// Select the library root from the pinned header: mirrors the
 /// `AllGames` arm of the sidebar selection handler.
 pub fn select_all_games(state: &SharedState) {
+    super::helpers::unfocus_search(state);
     state.borrow_mut().selected_id.clear();
     state.borrow_mut().selected_group = GroupSelection::AllGames;
     state.borrow_mut().multi_selected_ids.clear();

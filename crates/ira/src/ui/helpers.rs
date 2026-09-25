@@ -816,6 +816,20 @@ pub fn replace_grid_game(state: &SharedState, game: &Game) {
     }
 }
 
+/// Drop keyboard focus from the library search box when the user navigates
+/// elsewhere (sidebar, grid tile, empty-area click). Clicking a non-focusable
+/// tile never moves focus on its own, so the entry keeps swallowing keys
+/// until it is cleared explicitly.
+pub fn unfocus_search(state: &SharedState) {
+    let (entry, window) = {
+        let s = state.borrow();
+        (s.search_entry.clone(), s.window.clone())
+    };
+    if entry.has_focus() {
+        gtk4::prelude::GtkWindowExt::set_focus(&window, Option::<&gtk4::Widget>::None);
+    }
+}
+
 /// The most recently played visible games, newest first. Shared by the
 /// desktop grid header and the big-picture carousel so both agree on what
 /// "recent" means.

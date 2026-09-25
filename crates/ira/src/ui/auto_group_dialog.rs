@@ -45,17 +45,26 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
     toolbar.add_top_bar(&header);
 
     // Two pages: the editor and the value picker. The header's back
-    // button and the title travel with the switch.
+    // button and the title travel with the switch; Cancel/Save belong
+    // to the editor, so they hide on the value picker.
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
     stack.set_vhomogeneous(false);
     stack.set_vexpand(true);
+
+    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    buttons.set_halign(gtk4::Align::End);
+    buttons.set_margin_top(6);
+    buttons.set_margin_bottom(6);
+    buttons.set_margin_start(12);
+    buttons.set_margin_end(12);
 
     let values_page = Rc::new(ValuesPage::new());
     {
         let stack = stack.clone();
         let back_button = back.clone();
         let title = title.clone();
+        let buttons = buttons.clone();
         let main_title = crate::tr!("Auto group");
         let values_title = crate::tr!("Pick values");
         values_page.set_navigation(Rc::new(move |on_values: bool| {
@@ -66,6 +75,7 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
             });
             back_button.set_visible(on_values);
             title.set_text(if on_values { &values_title } else { &main_title });
+            buttons.set_visible(!on_values);
         }));
         {
             let values_page = values_page.clone();
@@ -105,12 +115,6 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
 
     toolbar.set_content(Some(&stack));
 
-    let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    buttons.set_halign(gtk4::Align::End);
-    buttons.set_margin_top(6);
-    buttons.set_margin_bottom(6);
-    buttons.set_margin_start(12);
-    buttons.set_margin_end(12);
     let cancel = gtk4::Button::with_label(&crate::tr!("Cancel"));
     cancel.add_css_class(super::css::CSS_FLAT);
     let save = gtk4::Button::with_label(&crate::tr!("Save"));

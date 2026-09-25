@@ -193,7 +193,6 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let sticky_all_games = super::sidebar::build_sticky_all_games(state);
     let sidebar_column = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar_column.append(&sticky_all_games);
-    sidebar_column.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
     sidebar_column.append(&sidebar_scroll);
     sidebar_toolbar.set_content(Some(&sidebar_column));
 

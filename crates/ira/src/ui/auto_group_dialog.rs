@@ -11,9 +11,6 @@ use super::auto_group_editor::GroupsUi;
 use super::auto_group_values_page::{ValueMenus, ValueOption, ValuesPage};
 use super::state::SharedState;
 
-const MAIN_PAGE: &str = "main";
-const VALUES_PAGE: &str = "values";
-
 pub(super) fn show_auto_group_create(state: &SharedState) {
     show(state, None);
 }
@@ -33,24 +30,19 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
     dialog.set_content_width(560);
     dialog.set_content_height(600);
 
-    let toolbar = adw::ToolbarView::new();
-    let header = adw::HeaderBar::new();
-    let back = gtk4::Button::from_icon_name("go-previous-symbolic");
-    back.add_css_class(super::css::CSS_FLAT);
-    back.set_visible(false);
-    header.pack_start(&back);
-    let title = gtk4::Label::new(Some(&crate::tr!("Auto group")));
-    title.add_css_class("heading");
-    header.set_title_widget(Some(&title));
-    toolbar.add_top_bar(&header);
+    // Stacked navigation: the editor is the root, the value picker
+    // pushes on top of it. The navigation view owns the back button,
+    // the swipe-back gesture and Escape — the picker can never be
+    // swiped into unopened.
+    let nav = adw::NavigationView::new();
+    dialog.set_child(Some(&nav));
 
-    // Two pages: the editor and the value picker. The header's back
-    // button and the title travel with the switch; Cancel/Save belong
-    // to the editor, so they hide on the value picker.
-    let stack = gtk4::Stack::new();
-    stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
-    stack.set_vhomogeneous(false);
-    stack.set_vexpand(true);
+    let main_toolbar = adw::ToolbarView::new();
+    let main_header = adw::HeaderBar::new();
+    let main_title = gtk4::Label::new(Some(&crate::tr!("Auto group")));
+    main_title.add_css_class("heading");
+    main_header.set_title_widget(Some(&main_title));
+    main_toolbar.add_top_bar(&main_header);
 
     let buttons = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     buttons.set_halign(gtk4::Align::End);
@@ -60,27 +52,29 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
     buttons.set_margin_end(12);
 
     let values_page = Rc::new(ValuesPage::new());
+    let values_toolbar = adw::ToolbarView::new();
+    let values_header = adw::HeaderBar::new();
+    let values_title = gtk4::Label::new(Some(&crate::tr!("Pick values")));
+    values_title.add_css_class("heading");
+    values_header.set_title_widget(Some(&values_title));
+    values_toolbar.add_top_bar(&values_header);
+    values_toolbar.set_content(Some(&values_page.root()));
+    let values_nav_page = adw::NavigationPage::new(&values_toolbar, "values");
     {
-        let stack = stack.clone();
-        let back_button = back.clone();
-        let title = title.clone();
-        let buttons = buttons.clone();
-        let main_title = crate::tr!("Auto group");
-        let values_title = crate::tr!("Pick values");
+        let nav = nav.clone();
+        let values_nav_page = values_nav_page.clone();
+        // Cancel/Save belong to the editor page alone now, so the
+        // switch only pushes and pops — pushing an already-open
+        // picker would stack it twice, so a repeated open is a no-op.
         values_page.set_navigation(Rc::new(move |on_values: bool| {
-            stack.set_visible_child_name(if on_values {
-                VALUES_PAGE
+            if on_values {
+                if values_nav_page.parent().is_none() {
+                    nav.push(&values_nav_page);
+                }
             } else {
-                MAIN_PAGE
-            });
-            back_button.set_visible(on_values);
-            title.set_text(if on_values { &values_title } else { &main_title });
-            buttons.set_visible(!on_values);
+                nav.pop_to_tag("main");
+            }
         }));
-        {
-            let values_page = values_page.clone();
-            back.connect_clicked(move |_| values_page.close());
-        }
     }
 
     // The editor page: the name, the root gate, one card per rule
@@ -110,10 +104,9 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
     main_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     main_scroll.set_vexpand(true);
 
-    stack.add_titled(&main_scroll, Some(MAIN_PAGE), "main");
-    stack.add_named(&values_page.root(), Some(VALUES_PAGE));
-
-    toolbar.set_content(Some(&stack));
+    main_toolbar.set_content(Some(&main_scroll));
+    main_toolbar.add_bottom_bar(&buttons);
+    nav.add(&adw::NavigationPage::new(&main_toolbar, "main"));
 
     let cancel = gtk4::Button::with_label(&crate::tr!("Cancel"));
     cancel.add_css_class(super::css::CSS_FLAT);
@@ -121,9 +114,6 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
     save.add_css_class(super::css::CSS_SUGGESTED_ACTION);
     buttons.append(&cancel);
     buttons.append(&save);
-    toolbar.add_bottom_bar(&buttons);
-
-    dialog.set_child(Some(&toolbar));
     {
         let dialog = dialog.clone();
         cancel.connect_clicked(move |_| {

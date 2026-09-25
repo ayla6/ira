@@ -1,8 +1,8 @@
 //! The value-picking page of the auto group dialog: a search entry over
 //! a boxed list of check rows. Rule rows hand their list to
-//! [`ValuesPage::open`], which hosts it until the back button returns
-//! to the editor; the search entry narrows the hosted rows as you type,
-//! matching each option's haystack, not just its shown name.
+//! [`ValuesPage::open`], which hosts it until the navigation view pops
+//! back to the editor; the search entry narrows the hosted rows as you
+//! type, matching each option's haystack, not just its shown name.
 
 use adw::prelude::*;
 use gtk4::glib;
@@ -129,13 +129,6 @@ impl ValuesPage {
         glib::idle_add_local_once(move || {
             search.grab_focus();
         });
-    }
-
-    /// Return to the editor page.
-    pub(super) fn close(&self) {
-        if let Some(f) = self.navigate.borrow().as_ref() {
-            f(false);
-        }
     }
 }
 

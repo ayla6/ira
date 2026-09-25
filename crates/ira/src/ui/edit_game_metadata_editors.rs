@@ -14,11 +14,11 @@ use super::state::SharedState;
 use crate::Game;
 use ira_models::ScraperClassification;
 
-/// The age-rating editor: a two-page dialog like the entity pickers, but
-/// with nothing to search — the root page lists the stored ratings with
-/// remove buttons (their marks as prefixes), and the add page picks a
+/// The age-rating editor: a two-level dialog like the entity pickers, but
+/// with nothing to search — the root level lists the stored ratings with
+/// remove buttons (their marks as prefixes), and the add level picks a
 /// board and then one of its known values from two combo rows. Adding
-/// keeps the page up so several ratings can go in.
+/// keeps the level up so several ratings can go in.
 pub(super) fn show_classifications_edit_dialog(
     state: &SharedState,
     game: &Game,
@@ -30,7 +30,7 @@ pub(super) fn show_classifications_edit_dialog(
     dialog.set_content_width(460);
     dialog.set_content_height(320);
 
-    // List page: every stored rating with its remove button.
+    // List level: every stored rating with its remove button.
     let list_toolbar = adw::ToolbarView::new();
     let list_header = adw::HeaderBar::new();
     let list_title = gtk4::Label::new(Some(&crate::tr!("Age ratings")));
@@ -44,8 +44,10 @@ pub(super) fn show_classifications_edit_dialog(
     let (list_scrolled, list) = super::helpers::clamped_boxed_list(460);
     list_toolbar.set_content(Some(&list_scrolled));
 
-    // Add page: board and rating as two pickers over the hardcoded
+    // Add level: board and rating as two pickers over the hardcoded
     // value sets. There is no source to search, so no query entry.
+    // The navigation view's own back button returns — the level only
+    // ever exists after an explicit push, never as a swipe target.
     let boards: Vec<&ira_models::ratings::RatingBoard> =
         ira_models::ratings::BOARDS.iter().collect();
     let add_toolbar = adw::ToolbarView::new();
@@ -53,10 +55,6 @@ pub(super) fn show_classifications_edit_dialog(
     let add_title = gtk4::Label::new(Some(&crate::tr!("Add a rating")));
     add_title.add_css_class("heading");
     add_header.set_title_widget(Some(&add_title));
-    let back_btn = gtk4::Button::from_icon_name("go-previous-symbolic");
-    back_btn.add_css_class(CSS_FLAT);
-    back_btn.set_tooltip_text(Some(&crate::tr!("Back")));
-    add_header.pack_start(&back_btn);
     add_toolbar.add_top_bar(&add_header);
     let add_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
     add_box.set_margin_top(12);
@@ -94,31 +92,23 @@ pub(super) fn show_classifications_edit_dialog(
     add_box.append(&confirm);
     add_toolbar.set_content(Some(&add_box));
 
-    let stack = gtk4::Stack::new();
-    stack.set_vhomogeneous(false);
-    stack.add_named(&list_toolbar, Some("list"));
-    stack.add_named(&add_toolbar, Some("add"));
-    dialog.set_child(Some(&stack));
+    let nav = adw::NavigationView::new();
+    nav.add(&adw::NavigationPage::new(&list_toolbar, "list"));
+    let add_page = adw::NavigationPage::new(&add_toolbar, "add");
+    dialog.set_child(Some(&nav));
 
     fill_classification_list(&list, state, game, win, slot);
 
     {
-        let stack = stack.clone();
+        let nav = nav.clone();
+        let add_page = add_page.clone();
         let board_combo = board_combo.clone();
         add_btn.connect_clicked(move |_| {
-            stack.set_transition_type(gtk4::StackTransitionType::SlideRight);
-            stack.set_visible_child(&add_toolbar);
+            nav.push(&add_page);
             let board_combo = board_combo.clone();
             glib::idle_add_local_once(move || {
                 board_combo.grab_focus();
             });
-        });
-    }
-    {
-        let stack = stack.clone();
-        back_btn.connect_clicked(move |_| {
-            stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
-            stack.set_visible_child(&list_toolbar);
         });
     }
     {
@@ -181,7 +171,7 @@ fn fill_value_combo(value_combo: &adw::ComboRow, board: &ira_models::ratings::Ra
     value_combo.set_selected(0);
 }
 
-/// (Re)fill the editor's list page: every stored rating with a remove
+/// (Re)fill the editor's list level: every stored rating with a remove
 /// button. Edits restage the draft and refresh the Identity page's rows.
 fn fill_classification_list(
     list: &gtk4::ListBox,

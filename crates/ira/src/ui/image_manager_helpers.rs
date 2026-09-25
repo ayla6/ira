@@ -47,6 +47,40 @@ pub(super) fn add_sgdb_filtered_user(state: &SharedState, author: &str, steam64:
     });
 }
 
+/// Remove an SGDB author from the config's filtered-users list (the eye
+/// button's unfilter action) and push the list to the shared API client.
+/// No-op when the author isn't filtered. Saves on a background thread like
+/// the add path so the click never blocks the UI.
+pub(super) fn remove_sgdb_filtered_user(state: &SharedState, author: &str) {
+    let author = author.trim();
+    if author.is_empty() {
+        return;
+    }
+    let cfg = {
+        let mut s = state.borrow_mut();
+        let before = s.cfg.sgdb_filtered_users.len();
+        s.cfg
+            .sgdb_filtered_users
+            .retain(|u| !u.name.eq_ignore_ascii_case(author));
+        if s.cfg.sgdb_filtered_users.len() == before {
+            return;
+        }
+        s.steam.set_sgdb_filtered_users(
+            &s.cfg
+                .sgdb_filtered_users
+                .iter()
+                .map(|u| (u.name.clone(), u.steam64.clone()))
+                .collect::<Vec<_>>(),
+        );
+        s.cfg.clone()
+    };
+    std::thread::spawn(move || {
+        if let Err(e) = cfg.save() {
+            eprintln!("Failed to save config after unfiltering user: {e}");
+        }
+    });
+}
+
 pub(super) fn find_best_image_path(
     game: &Game,
     field: &str,

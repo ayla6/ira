@@ -24,6 +24,9 @@ pub struct SteamDataClient {
     pub(crate) sgdb_filtered_users: Mutex<Vec<String>>,
     /// SGDB styles ("blurred", "white_logo", ...) treated the same way.
     pub(crate) sgdb_filtered_styles: Mutex<Vec<String>>,
+    /// Show filtered art dimmed at the bottom of manual pickers (on by
+    /// default). Off hides it; automatic downloads always skip it.
+    pub(crate) sgdb_show_filtered: std::sync::atomic::AtomicBool,
 }
 
 impl SteamDataClient {
@@ -42,6 +45,7 @@ impl SteamDataClient {
             sgdb_auto_mask: AtomicU64::new(u64::MAX),
             sgdb_filtered_users: Mutex::new(Vec::new()),
             sgdb_filtered_styles: Mutex::new(Vec::new()),
+            sgdb_show_filtered: std::sync::atomic::AtomicBool::new(true),
         }
     }
 
@@ -82,7 +86,10 @@ impl SteamDataClient {
         self.sgdb_filtered_users.lock().unwrap().clone()
     }
 
-    pub(crate) fn user_filtered(&self, author: &str) -> bool {
+    /// True when this author is on the filtered-users list (matched
+    /// case-insensitively). The manual picker reads this to draw the
+    /// per-item eye button in its filter/unfilter state.
+    pub fn user_filtered(&self, author: &str) -> bool {
         self.sgdb_filtered_users
             .lock()
             .unwrap()
@@ -101,7 +108,10 @@ impl SteamDataClient {
         self.sgdb_filtered_styles.lock().unwrap().clone()
     }
 
-    pub(crate) fn style_filtered(&self, style: &str) -> bool {
+    /// True when this style is on the filtered-styles list (matched
+    /// case-insensitively). The picker re-checks this per card when an
+    /// author is unfiltered, so art that is still style-filtered stays dim.
+    pub fn style_filtered(&self, style: &str) -> bool {
         self.sgdb_filtered_styles
             .lock()
             .unwrap()
@@ -113,6 +123,16 @@ impl SteamDataClient {
     /// automatic downloads and sunk to the bottom of manual pickers.
     pub fn asset_filtered(&self, author: &str, style: &str) -> bool {
         self.user_filtered(author) || self.style_filtered(style)
+    }
+
+    /// Whether filtered art shows dimmed at the bottom of manual pickers.
+    /// Off hides it entirely.
+    pub fn set_sgdb_show_filtered(&self, show: bool) {
+        self.sgdb_show_filtered.store(show, Ordering::Relaxed);
+    }
+
+    pub fn sgdb_show_filtered(&self) -> bool {
+        self.sgdb_show_filtered.load(Ordering::Relaxed)
     }
 
     pub(crate) fn api_key(&self) -> String {

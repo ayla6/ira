@@ -16,6 +16,7 @@ fn build_sgdb_asset_card(
     ctx: &SgdbPickerCtx,
     on_download: Rc<dyn Fn()>,
     thumb_size: i32,
+    dimmed: bool,
 ) -> (gtk4::Widget, gtk4::Widget) {
     let mut info = String::new();
     if a.width > 0 && a.height > 0 {
@@ -42,7 +43,7 @@ fn build_sgdb_asset_card(
     card.set_margin_top(8);
     card.set_margin_bottom(8);
 
-    // Thumbnail with the hide-author button overlaid top-right; the button
+    // Thumbnail with the author eye button overlaid top-right; the button
     // is revealed by hovering anywhere on the card (see the sgdb-filter
     // CSS rules).
     let thumb_overlay = gtk4::Overlay::new();
@@ -158,35 +159,88 @@ fn build_sgdb_asset_card(
         }
     });
 
-    // Wrapped and tagged by author so a filter click can pluck exactly
-    // these widgets out of their containers without rebuilding anything.
+    // Wrapped and tagged by author and style so a filter click can pluck
+    // exactly these widgets out of their containers without rebuilding
+    // anything, and an unfilter click can re-evaluate each card (art that
+    // is still style-filtered stays dim). Split with tag_author/tag_style.
     let flow_child = gtk4::FlowBoxChild::new();
-    flow_child.set_widget_name(&a.author);
+    flow_child.set_widget_name(&widget_tag(&a.author, &a.style));
     flow_child.set_child(Some(&card));
+    if dimmed {
+        flow_child.add_css_class(CSS_SGDB_DIMMED);
+    }
     let list_row = gtk4::ListBoxRow::new();
-    list_row.set_widget_name(&a.author);
+    list_row.set_widget_name(&widget_tag(&a.author, &a.style));
     list_row.set_child(Some(&row));
+    if dimmed {
+        list_row.add_css_class(CSS_SGDB_DIMMED);
+    }
     (
         flow_child.upcast::<gtk4::Widget>(),
         list_row.upcast::<gtk4::Widget>(),
     )
 }
 
-/// The hide-author button: an eye-not-looking icon that follows the theme
-/// text color, overlaid on thumbnails and revealed on hover (rows included).
+/// Tag pairing an asset's author with its style on its card and row
+/// widgets: author names alone can't re-evaluate one card's dim state,
+/// and no widget↔asset map is kept (see [`tag_author`], [`tag_style`]).
+fn widget_tag(author: &str, style: &str) -> String {
+    format!("{author}\u{1f}{style}")
+}
+
+/// The author half of a [`widget_tag`]; the pluck match, kept exact like
+/// the previous bare-name comparison.
+fn tag_author(tag: &str) -> &str {
+    tag.split('\u{1f}').next().unwrap_or(tag)
+}
+
+/// The style half of a [`widget_tag`]; empty when the asset has no style.
+fn tag_style(tag: &str) -> &str {
+    tag.split('\u{1f}').nth(1).unwrap_or("")
+}
+
+/// The author eye button, overlaid on thumbnails and revealed on hover
+/// (rows included): a crossed eye to filter a shown author, the open eye
+/// to unfilter an already-filtered one. Both follow the theme text color.
 fn build_filter_button(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Option<gtk4::Button> {
     if a.author.is_empty() || ctx.filter_user.is_none() {
         return None;
     }
-    let btn = gtk4::Button::from_icon_name("eye-not-looking-symbolic");
+    let btn = if ctx.steam.user_filtered(&a.author) {
+        let btn = gtk4::Button::from_icon_name("eye-open-negative-filled-symbolic");
+        btn.set_tooltip_text(Some(&crate::tr!("Show art by this author")));
+        btn
+    } else {
+        let btn = gtk4::Button::from_icon_name("eye-not-looking-symbolic");
+        btn.set_tooltip_text(Some(&crate::tr!("Hide art by this author")));
+        btn
+    };
     btn.add_css_class("flat");
     btn.add_css_class("sgdb-filter");
-    btn.set_tooltip_text(Some(&crate::tr!("Hide art by this author")));
     let ctx = ctx.clone();
     let author = a.author.clone();
     let steam64 = a.author_steam64.clone();
-    btn.connect_clicked(move |_| ctx.filter_author(&author, &steam64));
+    btn.connect_clicked(move |_| ctx.toggle_author(&author, &steam64));
     Some(btn)
+}
+
+/// The first descendant carrying the filter-button class, if any: cards
+/// hold two buttons (filter eye, Download) and rows do too, so the class
+/// is the only reliable marker.
+fn find_filter_button(widget: &gtk4::Widget) -> Option<gtk4::Button> {
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        child = c.next_sibling();
+        if let Some(btn) = c.downcast_ref::<gtk4::Button>() {
+            if btn.has_css_class("sgdb-filter") {
+                return Some(btn.clone());
+            }
+        }
+        if let Some(found) = find_filter_button(&c) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn all_buttons_push(ctx: &SgdbPickerCtx, btn: &gtk4::Button) {
@@ -243,6 +297,9 @@ struct SgdbPickerCtx {
     // Persists an author (name, steam64) to the config's filtered-users
     // list; None when the caller has no config to persist to.
     filter_user: Option<Rc<dyn Fn(String, String)>>,
+    // Removes an author from the filtered-users list; the eye button's
+    // unfilter half. Paired with filter_user above.
+    unfilter_user: Option<Rc<dyn Fn(String)>>,
 }
 
 impl SgdbPickerCtx {
@@ -279,11 +336,23 @@ impl SgdbPickerCtx {
         self.rendered.set(assets.len());
     }
 
+    /// The eye button's click: filter a shown author, unfilter an
+    /// already-filtered one. The state is read live so every one of the
+    /// author's cards agrees no matter which card was clicked.
+    fn toggle_author(&self, author: &str, steam64: &str) {
+        if self.steam.user_filtered(author) {
+            self.unfilter_author(author);
+        } else {
+            self.filter_author(author, steam64);
+        }
+    }
+
     /// Hide one author's art: persist the choice, then pluck exactly that
     /// author's card and row widgets out of their containers — no rebuild,
     /// so loaded thumbnails and the scroll position stay untouched. The
     /// store keeps its indices, and append/full rebuild skip filtered
-    /// authors and styles, so future pages stay consistent.
+    /// authors and styles while the show-filtered toggle is off, so future
+    /// pages stay consistent.
     fn filter_author(&self, author: &str, steam64: &str) {
         if let Some(persist) = &self.filter_user {
             persist(author.to_string(), steam64.to_string());
@@ -295,16 +364,58 @@ impl SgdbPickerCtx {
         let mut child = flow.first_child();
         while let Some(w) = child {
             child = w.next_sibling();
-            if w.widget_name() == author {
+            if tag_author(&w.widget_name()) == author {
                 flow.remove(&w);
             }
         }
         let mut child = list_view.first_child();
         while let Some(w) = child {
             child = w.next_sibling();
-            if w.widget_name() == author {
+            if tag_author(&w.widget_name()) == author {
                 list_view.remove(&w);
             }
+        }
+    }
+
+    /// Show one author's art again: persist the removal, then undim exactly
+    /// that author's cards and rows in place and flip their eye buttons
+    /// back to the hide state — no rebuild, so loaded thumbnails and the
+    /// scroll position stay untouched. Cards whose style is still filtered
+    /// keep their dim (re-checked per card via its tag).
+    fn unfilter_author(&self, author: &str) {
+        if let Some(persist) = &self.unfilter_user {
+            persist(author.to_string());
+        }
+        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
+        else {
+            return;
+        };
+        let mut child = flow.first_child();
+        while let Some(w) = child {
+            child = w.next_sibling();
+            if tag_author(&w.widget_name()) == author {
+                self.undim_card(&w);
+            }
+        }
+        let mut child = list_view.first_child();
+        while let Some(w) = child {
+            child = w.next_sibling();
+            if tag_author(&w.widget_name()) == author {
+                self.undim_card(&w);
+            }
+        }
+    }
+
+    /// Drop one card-or-row's dim when its style is no longer filtered and
+    /// flip its eye button back to hide. The author half just left the
+    /// filtered-users list, so only the tag's style half still matters.
+    fn undim_card(&self, widget: &gtk4::Widget) {
+        if !self.steam.style_filtered(tag_style(&widget.widget_name())) {
+            widget.remove_css_class(CSS_SGDB_DIMMED);
+        }
+        if let Some(btn) = find_filter_button(widget) {
+            btn.set_icon_name("eye-not-looking-symbolic");
+            btn.set_tooltip_text(Some(&crate::tr!("Hide art by this author")));
         }
     }
 }
@@ -502,12 +613,18 @@ fn append_assets(
     ctx: &SgdbPickerCtx,
 ) {
     flow.set_max_children_per_line((900 / (thumb_size + 20)).clamp(1, 8) as u32);
+    // Filtered authors/styles already sink to the bottom via
+    // list_sgdb_assets' partition; render them dimmed when the toggle is on,
+    // skip them entirely when it is off.
+    let show_filtered = ctx.steam.sgdb_show_filtered();
     for a in &assets[start..] {
-        if ctx.steam.asset_filtered(&a.author, &a.style) {
+        let filtered = ctx.steam.asset_filtered(&a.author, &a.style);
+        if filtered && !show_filtered {
             continue;
         }
         let on_download = build_on_download(ctx, a);
-        let (grid_card, list_row) = build_sgdb_asset_card(a, ctx, on_download, thumb_size);
+        let (grid_card, list_row) =
+            build_sgdb_asset_card(a, ctx, on_download, thumb_size, filtered);
         flow.append(&grid_card);
         list_view.append(&list_row);
     }
@@ -552,6 +669,9 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     /// Persists an author (name, steam64) to the filtered-users config;
     /// enables the per-item filter buttons when set.
     pub filter_user: Option<Rc<dyn Fn(String, String)>>,
+    /// Removes an author from the filtered-users config; the eye button's
+    /// unfilter half. Paired with filter_user above.
+    pub unfilter_user: Option<Rc<dyn Fn(String)>>,
 }
 
 pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
@@ -568,6 +688,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         save_dir,
         dest_dir,
         filter_user,
+        unfilter_user,
     } = params;
     // Key the settings-screen cache by the full SGDB query, not just the
     // asset type: a Steam game's picker runs against its Steam id until it's
@@ -719,6 +840,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         flow: flow.downgrade(),
         list_view: list_view.downgrade(),
         filter_user,
+        unfilter_user,
     };
 
     // Re-showing a hidden picker resets any buttons left disabled by a
@@ -936,4 +1058,23 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_widget_tag_roundtrips_author_and_style() {
+        let tag = widget_tag("Some Artist", "blurred");
+        assert_eq!(tag_author(&tag), "Some Artist");
+        assert_eq!(tag_style(&tag), "blurred");
+    }
+
+    #[test]
+    fn test_tag_style_empty_without_style() {
+        let tag = widget_tag("Some Artist", "");
+        assert_eq!(tag_author(&tag), "Some Artist");
+        assert_eq!(tag_style(&tag), "");
+    }
 }

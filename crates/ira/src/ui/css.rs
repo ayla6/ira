@@ -108,6 +108,7 @@ pub const CSS_SQUARE_BUTTON: &str = "square-button";
 pub const CSS_STATUS_NO_SCROLL: &str = "status-no-scroll";
 pub const CSS_COMMAND_TILE: &str = "command-tile";
 pub const CSS_COMMAND_TILE_ACTIVE: &str = "command-tile-active";
+pub const CSS_SGDB_DIMMED: &str = "sgdb-dimmed";
 pub const CSS_DISC_TILE: &str = "disc-tile";
 pub const CSS_DISC_NUMBER: &str = "disc-number";
 pub const CSS_DISC_TILE_CAPTION: &str = "disc-tile-caption";
@@ -421,6 +422,14 @@ button.sgdb-filter.sgdb-reveal,
 button.sgdb-filter:hover {
     opacity: 1;
     background: rgba(0, 0, 0, 0.55);
+}
+/* SGDB picker: filtered art sinks to the bottom and renders transparent,
+   returning to full opacity while the pointer is over it. */
+.sgdb-dimmed {
+    opacity: 0.35;
+}
+.sgdb-dimmed:hover {
+    opacity: 1;
 }
 ";
 

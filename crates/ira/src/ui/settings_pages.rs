@@ -1188,6 +1188,7 @@ pub(super) struct SgdbSettingsWidgets {
     pub sgdb_entry: adw::PasswordEntryRow,
     pub auto_asset_rows: AutoAssetRows,
     pub style_rows: AutoAssetRows,
+    pub show_filtered_row: adw::SwitchRow,
     pub filter_users_list: gtk4::ListBox,
     /// steam64 per author name for rows currently in the filter editor, so
     /// activating a row can open the author's profile page.
@@ -1241,7 +1242,7 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
     let style_group = adw::PreferencesGroup::new();
     style_group.set_title(&crate::tr!("Allowed image styles"));
     style_group.set_description(Some(&crate::tr!(
-        "Enabled styles are fetched automatically and come first in manual image search; disabled ones sink to the bottom"
+        "Enabled styles are fetched automatically and come first in manual image search; disabled ones sink to the bottom when shown"
     )));
     let mut style_rows: Vec<(String, adw::SwitchRow)> = Vec::new();
     for (label, name) in [
@@ -1258,6 +1259,17 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
         style_rows.push((name.to_string(), row));
     }
     page.append(&style_group);
+
+    let filtered_group = adw::PreferencesGroup::new();
+    filtered_group.set_title(&crate::tr!("Filtered art"));
+    let show_filtered_row = adw::SwitchRow::new();
+    show_filtered_row.set_title(&crate::tr!("Show filtered art"));
+    show_filtered_row.set_subtitle(&crate::tr!(
+        "Show filtered authors and styles dimmed at the bottom of manual image search"
+    ));
+    show_filtered_row.set_active(cfg.sgdb_show_filtered);
+    filtered_group.add(&show_filtered_row);
+    page.append(&filtered_group);
 
     // The filtered-users management (search, list, add) is a focused
     // window of its own — long lists and search do not belong inline in a
@@ -1398,6 +1410,7 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
             sgdb_entry,
             auto_asset_rows,
             style_rows,
+            show_filtered_row,
             filter_users_list,
             filter_user_ids,
         },

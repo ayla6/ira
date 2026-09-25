@@ -308,6 +308,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
                 .collect::<Vec<_>>(),
         );
         steam_clone.set_sgdb_filtered_styles(&s.cfg.sgdb_filtered_styles);
+        steam_clone.set_sgdb_show_filtered(s.cfg.sgdb_show_filtered);
 
         let reload_games = discovery_settings_changed(&old_cfg, &s.cfg);
         let cfg = s.cfg.clone();
@@ -379,6 +380,7 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
         .filter(|(_, row)| !row.is_active())
         .map(|(name, _)| name.clone())
         .collect();
+    cfg.sgdb_show_filtered = widgets.sgdb.show_filtered_row.is_active();
     cfg.sgdb_filtered_users =
         super::settings_pages::filtered_users(&widgets.sgdb.filter_users_list, &widgets.sgdb.filter_user_ids);
     cfg.centralize_game_saves = widgets.saves_row.is_active();

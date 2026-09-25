@@ -389,6 +389,12 @@ fn build_sgdb_picker_button(
                 super::image_manager_helpers::add_sgdb_filtered_user(&state, &author, &steam64)
             })
         };
+        let unfilter_user: Rc<dyn Fn(String)> = {
+            let state = filter_state.clone();
+            Rc::new(move |author| {
+                super::image_manager_helpers::remove_sgdb_filtered_user(&state, &author)
+            })
+        };
         show_sgdb_picker(ShowSgdbPickerParams {
             steam: &steam,
             id: &sgdb_id_c,
@@ -402,6 +408,7 @@ fn build_sgdb_picker_button(
             save_dir: &save_dir_c,
             dest_dir: Some(&dest_dir),
             filter_user: Some(filter_user),
+            unfilter_user: Some(unfilter_user),
         });
     });
     Some(btn)
@@ -1314,6 +1321,12 @@ fn build_dir_buttons(
                     super::image_manager_helpers::add_sgdb_filtered_user(&state, &author, &steam64)
                 })
             };
+            let unfilter_user: Rc<dyn Fn(String)> = {
+                let state = filter_state.clone();
+                Rc::new(move |author| {
+                    super::image_manager_helpers::remove_sgdb_filtered_user(&state, &author)
+                })
+            };
             show_sgdb_picker(ShowSgdbPickerParams {
                 steam: &steam,
                 id: &sgdb_id_c,
@@ -1327,6 +1340,7 @@ fn build_dir_buttons(
                 save_dir: &save_dir,
                 dest_dir: Some(&target_dir_c),
                 filter_user: Some(filter_user),
+                unfilter_user: Some(unfilter_user),
             });
         });
         btns.append(&btn);

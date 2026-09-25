@@ -141,6 +141,10 @@ pub struct Config {
     pub sgdb_filtered_users: Vec<SgdbFilteredUser>,
     #[serde(default)]
     pub sgdb_filtered_styles: Vec<String>,
+    /// Show filtered SGDB art dimmed at the bottom of manual pickers.
+    /// Off hides it entirely; automatic downloads always skip it.
+    #[serde(default = "default_true")]
+    pub sgdb_show_filtered: bool,
     #[serde(default = "default_grid_cover_width")]
     pub grid_cover_width: i32,
     #[serde(default)]
@@ -309,6 +313,7 @@ impl Default for Config {
             sgdb_disabled_assets: Vec::new(),
             sgdb_filtered_users: Vec::new(),
             sgdb_filtered_styles: Vec::new(),
+            sgdb_show_filtered: true,
             grid_cover_width: DEFAULT_GRID_COVER_WIDTH,
             shadps4_enabled: false,
             shadps4_executable: String::new(),
@@ -541,6 +546,14 @@ mod tests {
         assert!(cfg.auto_reload_switch);
         assert!(cfg.unpack_roms);
         assert!(!cfg.compressed_switch_roms);
+    }
+
+    #[test]
+    fn test_config_default_shows_filtered_sgdb_art() {
+        assert!(Config::default().sgdb_show_filtered);
+        // Configs written before the toggle omit the key: they load as shown.
+        let cfg: Config = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(cfg.sgdb_show_filtered);
     }
 
     #[test]

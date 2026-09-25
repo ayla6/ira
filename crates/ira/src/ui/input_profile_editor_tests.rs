@@ -34,6 +34,7 @@ fn test_default_action_sets_honor_device_buttons() {
         product: 0,
         version: 0,
         has_evdev_gyro: false,
+        uniq: String::new(),
         supported_buttons: vec![GamepadButton::A, GamepadButton::Paddle1],
     };
     // Paddles only exist on DirectInput-class virtual devices.

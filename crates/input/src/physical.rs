@@ -1175,7 +1175,7 @@ mod tests {
         );
         // Twins with no physical visible still read as present.
         assert_eq!(
-            pad_status_summary(&[twin.clone()]),
+            pad_status_summary(std::slice::from_ref(&twin)),
             (1, Some(ControllerFamily::Nintendo))
         );
         // Two real pads count twice; nothing connected counts zero.

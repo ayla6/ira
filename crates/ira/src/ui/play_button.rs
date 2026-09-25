@@ -988,6 +988,7 @@ mod tests {
             product: 0,
             version: 0,
             has_evdev_gyro: false,
+            uniq: String::new(),
             supported_buttons: Vec::new(),
         }
     }

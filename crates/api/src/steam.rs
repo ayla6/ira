@@ -33,6 +33,9 @@ pub struct StoreExtras {
     pub synopsis: String,
     pub ratings: Vec<(String, String)>,
     pub release_date: String,
+    /// The store's genre descriptions ("Action", "Adventure", ...) —
+    /// ScreenScraper's genre rows win on spelling, these only fill gaps.
+    pub genres: Vec<String>,
 }
 
 /// Steam's store date strings come in several shapes — "21 Jan, 2018",
@@ -90,6 +93,14 @@ struct StoreAppShortInfo {
     ratings: Option<std::collections::HashMap<String, StoreBoardRating>>,
     #[serde(default)]
     release_date: Option<StoreReleaseDate>,
+    #[serde(default)]
+    genres: Vec<StoreGenre>,
+}
+
+#[derive(serde::Deserialize)]
+struct StoreGenre {
+    #[serde(default)]
+    description: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -102,6 +113,19 @@ struct StoreReleaseDate {
 struct StoreBoardRating {
     #[serde(default)]
     rating: String,
+}
+
+/// Steam's store search reads a leading `-word` as "exclude word", so a
+/// title like "Twilight Syndrome - Saikai" searches for Twilight Syndrome
+/// WITHOUT Saikai and matches nothing. Punctuation becomes spaces (word
+/// boundaries survive), mirroring what the store's own search box does.
+pub(crate) fn sanitize_store_term(term: &str) -> String {
+    term.chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 impl SteamDataClient {
@@ -256,49 +280,73 @@ impl SteamDataClient {
         if !entry.success {
             return None;
         }
-        let data = entry.data.as_ref()?;
-        let synopsis = data.short_description.trim();
-        let mut ratings: Vec<(String, String)> = data
-            .ratings
-            .as_ref()
-            .map(|boards| {
-                boards
-                    .iter()
-                    .filter(|(_, board)| !board.rating.trim().is_empty())
-                    .map(|(board, info)| {
-                        // The stored kind is the canonical board id from
-                        // the ratings table, so Steam's `class_ind` lands
-                        // as CLASSIND beside ScreenScraper's own spelling.
-                        let board = ira_models::ratings::find_board(board)
-                            .map(|known| known.id)
-                            .unwrap_or(board);
-                        (board.to_string(), info.rating.trim().to_string())
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        ratings.sort();
-        let release_date = data
-            .release_date
-            .as_ref()
-            .map(|release| parse_store_release_date(&release.date))
-            .unwrap_or_default();
-        Some(StoreExtras {
-            synopsis: synopsis.to_string(),
-            ratings,
-            release_date,
-        })
+        entry.data.as_ref().map(Self::store_extras_from)
     }
 
+/// The pure half of [`SteamDataClient::fetch_store_extras`]: shape one
+/// appdetails answer into extras without touching the network.
+fn store_extras_from(data: &StoreAppShortInfo) -> StoreExtras {
+    let synopsis = data.short_description.trim();
+    let mut ratings: Vec<(String, String)> = data
+        .ratings
+        .as_ref()
+        .map(|boards| {
+            boards
+                .iter()
+                .filter(|(_, board)| !board.rating.trim().is_empty())
+                .map(|(board, info)| {
+                    // The stored kind is the canonical board id from
+                    // the ratings table, so Steam's `class_ind` lands
+                    // as CLASSIND beside ScreenScraper's own spelling.
+                    let board = ira_models::ratings::find_board(board)
+                        .map(|known| known.id)
+                        .unwrap_or(board);
+                    (board.to_string(), info.rating.trim().to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ratings.sort();
+    let release_date = data
+        .release_date
+        .as_ref()
+        .map(|release| parse_store_release_date(&release.date))
+        .unwrap_or_default();
+    let genres: Vec<String> = data
+        .genres
+        .iter()
+        .map(|genre| genre.description.trim().to_string())
+        .filter(|genre| !genre.is_empty())
+        .collect();
+    StoreExtras {
+        synopsis: synopsis.to_string(),
+        ratings,
+        release_date,
+        genres,
+    }
+}
+
     pub fn search_steam_store(&self, term: &str) -> Vec<(String, String)> {
+        self.search_steam_store_result(term).unwrap_or_default()
+    }
+
+    /// The same search, but transport failures stay visible: `Err` means
+    /// the request itself failed (quota, network) and must be retried,
+    /// while `Ok` with no exact hit downstream means the store answered
+    /// and the game is simply not there.
+    pub fn search_steam_store_result(
+        &self,
+        term: &str,
+    ) -> Result<Vec<(String, String)>, String> {
         let url = format!(
             "https://store.steampowered.com/api/storesearch/?term={}&l=en&cc=US",
-            urlencode(term)
+            urlencode(&sanitize_store_term(term))
         );
         let json = self
             .http_get_json::<serde_json::Value>(&url)
-            .unwrap_or_default();
-        json.get("items")
+            .ok_or_else(|| format!("store search request failed for {term:?}"))?;
+        Ok(json
+            .get("items")
             .and_then(|items| items.as_array())
             .map(|arr| {
                 arr.iter()
@@ -309,11 +357,10 @@ impl SteamDataClient {
                     })
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
-    pub fn generate_steam_settings(&self, app_id: &str) -> Result<(), String> {
-        let _s = tracing::info_span!("generate_steam_settings", app_id).entered();
+    pub fn generate_steam_settings(&self, app_id: &str) -> Result<(), String> {        let _s = tracing::info_span!("generate_steam_settings", app_id).entered();
 
         let settings_dir = self.game_dir(app_id).join("achievements");
         let img_dir = settings_dir.join("achievement_images");
@@ -772,6 +819,54 @@ fn header_image_base(header_image: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::types::SteamCmdConfig;
+
+    #[test]
+    fn test_store_extras_from_reads_genres_and_boards() {
+        let data: StoreAppShortInfo = serde_json::from_value(serde_json::json!({
+            "short_description": "Ace attorneys at law.",
+            "ratings": {
+                "esrb": { "rating": "M" },
+                "pegi": { "rating": "" }
+            },
+            "release_date": { "date": "9 Apr, 2019" },
+            "genres": [
+                { "id": "1", "description": "Action" },
+                { "id": "25", "description": "Adventure" },
+                { "id": "x", "description": "  " }
+            ]
+        }))
+        .unwrap();
+        let extras = super::SteamDataClient::store_extras_from(&data);
+        assert_eq!(extras.synopsis, "Ace attorneys at law.");
+        // Empty board ratings drop out; genres trim and drop blanks.
+        assert_eq!(extras.ratings, vec![("ESRB".to_string(), "M".to_string())]);
+        assert_eq!(extras.release_date, "2019-04-09");
+        assert_eq!(extras.genres, vec!["Action".to_string(), "Adventure".to_string()]);
+    }
+
+    #[test]
+    fn test_sanitize_store_term_strips_dash_exclusion() {
+        // Steam reads "- Saikai" as "exclude Saikai" — the dash must go.
+        assert_eq!(
+            sanitize_store_term("Twilight Syndrome - Saikai"),
+            "Twilight Syndrome Saikai"
+        );
+        assert_eq!(
+            sanitize_store_term("Higurashi When They Cry Hou - Ch.3 Tatarigoroshi"),
+            "Higurashi When They Cry Hou Ch 3 Tatarigoroshi"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_store_term_collapses_whitespace() {
+        assert_eq!(sanitize_store_term("  Half-Life  2: Episode (One) "), "Half Life 2 Episode One");
+        assert_eq!(sanitize_store_term(""), "");
+    }
+
+    #[test]
+    fn test_sanitize_store_term_keeps_unicode_words() {
+        assert_eq!(sanitize_store_term("Pokémon Snap"), "Pokémon Snap");
+    }
 
     #[test]
     fn test_parse_store_release_date_handles_the_steam_shapes() {

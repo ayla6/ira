@@ -48,6 +48,10 @@ pub struct ScrapedGame {
     pub screenshot: Option<String>,
     /// Region-picked 2D box URL — the PS1 square's source.
     pub box2d: Option<String>,
+    /// Region-picked wheel logo URL — the logo slot's source.
+    pub wheel: Option<String>,
+    /// Region-picked Steam grid URL — the header slot's source.
+    pub steamgrid: Option<String>,
     /// Region-picked title screen URL — the fallback for consoles whose
     /// cover art runs ugly, 3DS above all.
     pub title_screen: Option<String>,
@@ -668,6 +672,8 @@ fn scraped_game_with(jeu: &SsJeu, regions: &[&str]) -> ScrapedGame {
     let screenshot = medias.and_then(|m| media_url(&m.media, "ss", regions));
     let box2d = medias.and_then(|m| media_url(&m.media, "box-2D", regions));
     let title_screen = medias.and_then(|m| media_url(&m.media, "sstitle", regions));
+    let wheel = medias.and_then(|m| media_url(&m.media, "wheel", regions));
+    let steamgrid = medias.and_then(|m| media_url(&m.media, "steamgrid", regions));
     let disc_images = medias
         .map(|m| disc_media_urls(&m.media, regions, false))
         .unwrap_or_default();
@@ -698,6 +704,8 @@ fn scraped_game_with(jeu: &SsJeu, regions: &[&str]) -> ScrapedGame {
         synopses,
         screenshot,
         box2d,
+        wheel,
+        steamgrid,
         title_screen,
         disc_images,
         system_name: jeu
@@ -1261,6 +1269,8 @@ mod tests {
             <media type="ss" region="wor" format="png">https://ss.example/dq2_wor.png</media>
             <media type="box-2D" region="us" format="png">https://ss.example/dq2_box.png</media>
             <media type="sstitle" region="us" format="png">https://ss.example/dq2_title.png</media>
+            <media type="wheel" region="us" format="png">https://ss.example/dq2_wheel.png</media>
+            <media type="steamgrid" region="us" format="png">https://ss.example/dq2_grid.png</media>
           </medias>
           <familles>
             <famille id="732" nom="Dragon Quest"/>
@@ -1354,6 +1364,11 @@ mod tests {
         // Region preference for media: us is preferred over wor.
         assert_eq!(game.screenshot.as_deref(), Some("https://ss.example/dq2_us.png"));
         assert_eq!(game.box2d.as_deref(), Some("https://ss.example/dq2_box.png"));
+        assert_eq!(game.wheel.as_deref(), Some("https://ss.example/dq2_wheel.png"));
+        assert_eq!(
+            game.steamgrid.as_deref(),
+            Some("https://ss.example/dq2_grid.png")
+        );
         assert_eq!(
             game.title_screen.as_deref(),
             Some("https://ss.example/dq2_title.png")

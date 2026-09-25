@@ -1936,6 +1936,7 @@ mod tests {
             synopsis: "A poetry horror.".into(),
             ratings: vec![],
             release_date: String::new(),
+            genres: vec![],
         };
         let finished = super::finish_pc_pick(&conn, game.clone(), Some(&info), Some(&extras));
         assert_eq!(
@@ -1988,6 +1989,7 @@ mod tests {
             synopsis: String::new(),
             ratings: vec![],
             release_date: "2015-09-15".into(),
+            genres: vec![],
         };
         // An empty date fills from the store page.
         let undated = ScrapedGame {

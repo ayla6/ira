@@ -49,18 +49,21 @@ pub struct GameEntry {
     pub kind: GameKind,
     pub trophy_source: TrophySource,
     pub steam_id: String,
+    /// The system scope: console id (`psx`, `switch`, `3ds`…​) for
+    /// emulator rows, the kind id (`wine`, `steam`…​) for PC rows. Never
+    /// a game id — product ids and title ids live in `native_id`.
     pub platform_id: String,
     pub title: String,
     pub hidden: bool,
-    /// RetroAchievements' game id, set when the game is RA-matched.
-    pub ra_id: String,
+    /// Achievement identity: the RetroAchievements game id once matched,
+    /// or the manufacturer's trophy id (NPWR) on Sony consoles. Writers
+    /// are kind-disjoint — RA flows never touch Sony rows and vice versa —
+    /// so the two never collide in one column.
+    pub trophy_id: String,
     /// The id native to the game's own platform: the title id on
     /// switch/wiiu/3ds, the manufacturer serial on disc consoles, the
     /// emulator's app id on integration platforms.
     pub native_id: String,
-    /// Steam app id a console game was matched to by title — metadata
-    /// only, never used for Steam enrichment or image folders.
-    pub steam_link_id: String,
     /// SteamGridDB id for games with no achievement source but need images.
     pub sgdb_id: Option<String>,
     /// Per-game logo overlay position (e.g. "bottom-left").
@@ -129,14 +132,15 @@ pub struct GameEntry {
 }
 
 impl GameEntry {
-    /// The id this row's data dirs and external references key on: the RA
-    /// id for matched rows, the platform-native id (title id, serial) for
-    /// everything else. Matches the pre-split game_id values exactly.
+    /// The id this row's data dirs and external references key on: the
+    /// achievement identity (RA match, NPWR trophy id) for rows that
+    /// have one, the platform-native id (title id, serial, emulator
+    /// app id) for everything else.
     pub fn external_id(&self) -> &str {
-        if self.ra_id.is_empty() {
+        if self.trophy_id.is_empty() {
             &self.native_id
         } else {
-            &self.ra_id
+            &self.trophy_id
         }
     }
 
@@ -155,9 +159,8 @@ impl GameEntry {
             kind,
             trophy_source,
             steam_id: steam_id.to_string(),
-            ra_id: String::new(),
+            trophy_id: String::new(),
             native_id: native_id.to_string(),
-            steam_link_id: String::new(),
             platform_id: platform_id.to_string(),
             title: String::new(),
             hidden: false,
@@ -197,14 +200,9 @@ impl GameEntry {
             id: g.db_id,
             kind: g.kind,
             trophy_source: g.trophy_source,
-            steam_id: if g.app_id.is_empty() {
-                String::new()
-            } else {
-                g.app_id.clone()
-            },
-            ra_id: String::new(),
+            steam_id: g.steam_id.clone(),
+            trophy_id: String::new(),
             native_id: g.app_id.clone(),
-            steam_link_id: g.steam_link_id.clone(),
             platform_id: g.platform_id.clone(),
             title: g.name.clone(),
             hidden: g.hidden,
@@ -250,8 +248,9 @@ impl GameEntry {
         super::game::Game {
             kind: self.kind,
             trophy_source: self.trophy_source,
+            steam_id: self.steam_id.clone(),
             platform_id: self.platform_id.clone(),
-            steam_link_id: self.steam_link_id.clone(),
+            native_id: self.native_id.clone(),
             db_id: self.id,
             name: self.title.clone(),
             name_lower: self.title.to_lowercase(),
@@ -350,6 +349,7 @@ mod tests {
     fn test_from_game_copies_all_fields() {
         let g = Game {
             app_id: "app123".to_string(),
+            steam_id: "steam456".to_string(),
             kind: GameKind::Steam,
             trophy_source: TrophySource::Gse,
             platform_id: "plat1".to_string(),
@@ -382,7 +382,9 @@ mod tests {
         assert_eq!(entry.id, g.db_id);
         assert_eq!(entry.kind, g.kind);
         assert_eq!(entry.trophy_source, g.trophy_source);
-        assert_eq!(entry.steam_id, g.app_id);
+        // The match id round-trips on its own field; the platform id
+        // never leaks into the match column.
+        assert_eq!(entry.steam_id, "steam456");
         assert_eq!(entry.native_id, g.app_id);
         assert_eq!(entry.platform_id, g.platform_id);
         assert_eq!(entry.title, g.name);

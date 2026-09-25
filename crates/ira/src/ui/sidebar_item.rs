@@ -93,7 +93,7 @@ impl SidebarItem {
             game.db_id,
             game.variant_id,
             &game.name,
-            &game.icon_path,
+            game.display_icon(),
             game.hidden,
             running_games.contains(&game.db_id),
         )

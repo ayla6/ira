@@ -4,13 +4,25 @@ use super::kind::{GameKind, TrophySource};
 
 #[derive(Debug, Clone)]
 pub struct Game {
+    /// Platform-native id: Goldberg appid, GOG product id, title id,
+    /// serial, RA id — whatever the platform links on. Never a match
+    /// proof; match gates must use `steam_id`/`sgdb_id`, never this.
     pub app_id: String,
-    /// Steam app id a console game was matched to by title — metadata
-    /// only, never used for Steam enrichment or image folders.
-    pub steam_link_id: String,
+    /// The Steam id: the store match for PC games, the title-linked entry
+    /// for console games (metadata garnish — console trophy sources never
+    /// run Steam enrichment off it). Empty = no Steam identity at all.
+    /// Anything querying Steam with a game id uses this (see
+    /// `steam_api_id`), never `app_id`.
+    pub steam_id: String,
+    /// Platform-native product id: CUSA/NPUB serials, title ids,
+    /// emulator app ids, GOG product ids. Never a match proof; matches
+    /// live in `steam_id`/`trophy_id`/`sgdb_id`.
+    pub native_id: String,
     pub kind: GameKind,
     pub trophy_source: TrophySource,
     pub platform_id: String,
+    /// The system scope: console id (`psx`, `switch`…​) or kind id
+    /// (`wine`, `steam`…​). Never a game id.
     pub db_id: i64,
     pub name: String,
     /// Precomputed lowercase name for fast search filtering.
@@ -73,10 +85,11 @@ impl Default for Game {
     fn default() -> Self {
         Game {
             app_id: String::new(),
-            steam_link_id: String::new(),
+            steam_id: String::new(),
             kind: GameKind::default(),
             trophy_source: TrophySource::default(),
             platform_id: String::new(),
+            native_id: String::new(),
             db_id: 0,
             name: String::new(),
             name_lower: String::new(),
@@ -119,6 +132,38 @@ impl Game {
     pub fn set_name(&mut self, name: impl Into<String>) {
         self.name = name.into();
         self.name_lower = self.name.to_lowercase();
+    }
+
+    /// PS1 library entries: Retro games on the psx system, whose square
+    /// box art comes from ScreenScraper's 2D boxes.
+    pub fn is_ps1(&self) -> bool {
+        self.kind == GameKind::Retro && self.platform_id == "psx"
+    }
+
+    /// The icon the sidebar and other icon slots show: the icon when the
+    /// game has one, else the square art as a display-only fallback. The
+    /// fallback never writes back into `icon_path` — matching and fetch
+    /// passes keep seeing the game as icon-less.
+    pub fn display_icon(&self) -> &str {
+        if !self.icon_path.is_empty() {
+            &self.icon_path
+        } else {
+            &self.square_path
+        }
+    }
+
+    /// The Steam app id for store/CDN/API calls: the store match when
+    /// there is one, else the platform id sources whose id already is a
+    /// Steam app id carry (Goldberg, native Steam). Anything querying
+    /// Steam with a game id must use this, never `app_id` — which is the
+    /// platform-native id and only doubles as a Steam id for those
+    /// sources. Empty when the game has no Steam-usable id at all.
+    pub fn steam_api_id(&self) -> &str {
+        if !self.steam_id.is_empty() {
+            &self.steam_id
+        } else {
+            &self.app_id
+        }
     }
 
     /// The key this game's overlay settings live under: Steam and the
@@ -205,6 +250,53 @@ pub fn parse_db_id(grid_id: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_ps1_needs_retro_and_psx() {
+        let mut g = Game {
+            kind: GameKind::Retro,
+            ..Default::default()
+        };
+        g.platform_id = "psx".to_string();
+        assert!(g.is_ps1());
+        g.platform_id = "snes".to_string();
+        assert!(!g.is_ps1());
+        g.kind = GameKind::Wine;
+        g.platform_id = "psx".to_string();
+        assert!(!g.is_ps1());
+    }
+
+    #[test]
+    fn test_display_icon_prefers_icon_falls_back_to_square() {
+        let mut g = Game {
+            icon_path: "icon.webp".to_string(),
+            square_path: "square.webp".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(g.display_icon(), "icon.webp");
+        g.icon_path.clear();
+        assert_eq!(g.display_icon(), "square.webp");
+        g.square_path.clear();
+        assert_eq!(g.display_icon(), "");
+    }
+
+    #[test]
+    fn test_steam_api_id_prefers_the_match() {
+        let mut g = Game {
+            app_id: "1966900".to_string(),
+            ..Default::default()
+        };
+        // Platform linkage alone already resolves: the native id is what
+        // store calls used before any match.
+        assert_eq!(g.steam_api_id(), "1966900");
+        // A match wins over the linkage.
+        g.steam_id = "123".to_string();
+        assert_eq!(g.steam_api_id(), "123");
+        // Nothing anywhere: empty.
+        g.steam_id.clear();
+        g.app_id.clear();
+        assert_eq!(g.steam_api_id(), "");
+    }
 
     #[test]
     fn test_sort_key_uses_sort_title_when_non_empty() {

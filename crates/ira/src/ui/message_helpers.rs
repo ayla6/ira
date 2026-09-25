@@ -536,11 +536,7 @@ pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
             .unwrap()
             .insert(updated.app_id.clone(), updated.name.clone());
 
-        let icon_path = if updated.icon_path.is_empty() {
-            String::new()
-        } else {
-            updated.icon_path.clone()
-        };
+        let icon_path = updated.display_icon().to_string();
         let sidebar_update = (updated.db_id, updated.name.clone(), icon_path);
 
         let needs_rebuild = s.selected_id == updated.grid_id() && !s.content_unloaded;
@@ -653,7 +649,7 @@ pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
         let (name, icon_path) = {
             let s = state.borrow();
             let g = s.games.iter().find(|g| g.db_id == db_id);
-            g.map(|g| (g.name.clone(), g.icon_path.clone()))
+            g.map(|g| (g.name.clone(), g.display_icon().to_string()))
                 .unwrap_or_default()
         };
         super::sidebar::update_sidebar_game(state, db_id, &name, &icon_path);

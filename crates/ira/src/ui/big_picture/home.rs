@@ -312,11 +312,19 @@ pub(super) fn refresh(state: &SharedState) {
         // whose square.webp has not landed yet falls back to its vertical
         // capsule, scaled to cover (centered, overflow cropped). The
         // small square variant decodes much faster than the full art and
-        // the capsule never draws larger than it.
-        let art: String = if square_mode && !game.square_path.is_empty() {
-            small_square_path(&game.square_path).unwrap_or_else(|| game.square_path.clone())
-        } else {
+        // the capsule never draws larger than it. Outside square mode the
+        // mirror applies: a missing vertical capsule falls back to the
+        // square, so neither slot ever blanks for want of the other.
+        let art: String = if square_mode {
+            if !game.square_path.is_empty() {
+                small_square_path(&game.square_path).unwrap_or_else(|| game.square_path.clone())
+            } else {
+                game.grid_path.clone()
+            }
+        } else if !game.grid_path.is_empty() {
             game.grid_path.clone()
+        } else {
+            game.square_path.clone()
         };
         let cover = build_cover(state, game, &art, width, capsule, square_mode, move |state| {
             on_cover_clicked(state, index)

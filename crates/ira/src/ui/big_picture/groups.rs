@@ -8,7 +8,6 @@ use crate::ui::css::*;
 use crate::ui::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
-use ira_models::Group;
 use std::cell::{Cell, RefCell};
 
 /// How many tiles sit in one row, fixed like the game grid's columns.
@@ -43,6 +42,11 @@ pub(super) struct GroupsGrid {
     tile: Cell<i32>,
     /// Each tile's square slot in tile order, for anchoring the ring.
     slots: RefCell<Vec<gtk4::Box>>,
+    /// Tile identity in display order: `None` is the leading New Group
+    /// tile, otherwise the manual group id or the auto group's negated
+    /// memory id. Selection resolves through this, so display orderings
+    /// (by size) can never desync which group a tile opens.
+    order: RefCell<Vec<Option<i64>>>,
 }
 
 impl GroupsGrid {
@@ -108,6 +112,7 @@ impl GroupsGrid {
             selection: Cell::new(0),
             tile: Cell::new(0),
             slots: RefCell::new(Vec::new()),
+            order: RefCell::new(Vec::new()),
         };
         grid.reload(state);
         grid
@@ -147,16 +152,22 @@ impl GroupsGrid {
         true
     }
 
-    /// Rebuild the tiles: New Group first, then one per group in the
-    /// configured order (alphabetical, or most games first). Counts and
-    /// collages only consider games the library shows — hidden games are
-    /// not advertised by a group tile.
+    /// Rebuild the tiles: New Group first, then one per manual group and
+    /// one per auto group in the configured order (alphabetical, or most
+    /// games first). Counts and collages only consider games the library
+    /// shows — hidden games are not advertised by a group tile. Auto
+    /// membership comes from the shared map (refreshed on tab entry, like
+    /// the desktop sidebar refreshes on rebuild): this runs inside layout
+    /// callbacks that may execute under an outstanding shared borrow, so
+    /// it must never take the state mutably here.
     pub(super) fn reload(&self, state: &SharedState) {
         self.ensure_sized();
-        let (groups, db, show_hidden, order) = {
+        let (groups, autos, members, db, show_hidden, order) = {
             let s = state.borrow();
             (
                 s.groups.clone(),
+                s.auto_groups.clone(),
+                s.group_members.clone(),
                 s.db.clone(),
                 s.cfg.show_hidden_games,
                 s.cfg.group_order,
@@ -171,6 +182,7 @@ impl GroupsGrid {
             .collect();
         crate::ui::helpers::clear_children(&self.flow);
         self.slots.borrow_mut().clear();
+        self.order.borrow_mut().clear();
         // 0 means the flow has no real allocation yet; building at the
         // reference size keeps the first layout sane. Once a real tile
         // size exists it is used as-is — flooring small viewports at a
@@ -183,9 +195,10 @@ impl GroupsGrid {
             200
         };
         self.append_new_group_tile(state, tile);
-        // (member count, group, cover games) — the count feeds the size
-        // ordering, the covers feed the collage.
-        let mut entries: Vec<(usize, &Group, Vec<&Game>)> = groups
+        self.order.borrow_mut().push(None);
+        // (member count, tile id, name, cover games) — the count feeds
+        // the size ordering, the covers feed the collage.
+        let mut entries: Vec<(usize, i64, String, Vec<&Game>)> = groups
             .iter()
             .map(|group| {
                 let members = super::super::helpers::logged_db_vec(
@@ -197,14 +210,26 @@ impl GroupsGrid {
                     .filter_map(|id| visible_games.iter().find(|g| g.db_id == *id))
                     .take(4)
                     .collect();
-                (members.len(), group, covers)
+                (members.len(), group.id, group.name.clone(), covers)
             })
             .collect();
-        if order == ira_models::GroupOrder::Size {
-            entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+        for auto in &autos {
+            let member_ids = members.get(&auto.id);
+            let covers: Vec<&Game> = member_ids
+                .into_iter()
+                .flatten()
+                .filter_map(|id| visible_games.iter().find(|g| g.db_id == *id))
+                .take(4)
+                .collect();
+            let count = member_ids.map(|ids| ids.len()).unwrap_or(0);
+            entries.push((count, auto.id, auto.name.clone(), covers));
         }
-        for (group, covers) in entries.into_iter().map(|(_, group, covers)| (group, covers)) {
-            self.append_group_tile(state, group, &covers, tile);
+        if order == ira_models::GroupOrder::Size {
+            entries.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.2.cmp(&b.2)));
+        }
+        for (_, id, name, covers) in &entries {
+            self.append_group_tile(state, name, covers, tile);
+            self.order.borrow_mut().push(Some(*id));
         }
         self.clamp_selection(state);
         self.repaint_selection();
@@ -263,8 +288,8 @@ impl GroupsGrid {
         slot.append(&icon);
     }
 
-    fn append_group_tile(&self, state: &SharedState, group: &Group, covers: &[&Game], tile: i32) {
-        let slot = self.append_tile_shell(state, &group.name, tile);
+    fn append_group_tile(&self, state: &SharedState, name: &str, covers: &[&Game], tile: i32) {
+        let slot = self.append_tile_shell(state, name, tile);
         // A 2x2 collage of the group's first four squares, or a
         // placeholder icon for an empty group.
         if covers.is_empty() {
@@ -349,18 +374,17 @@ impl GroupsGrid {
         self.repaint_selection();
     }
 
-    /// How many tiles exist: New Group plus one per group.
-    pub(super) fn tile_count(&self, state: &SharedState) -> usize {
-        state.borrow().groups.len() + 1
+    /// How many tiles exist: New Group plus one per manual and auto group.
+    pub(super) fn tile_count(&self, _state: &SharedState) -> usize {
+        self.order.borrow().len()
     }
 
     /// The group id of the selected tile; None on the New Group tile.
-    pub(super) fn selected_group_id(&self, state: &SharedState) -> Option<i64> {
+    /// Auto groups resolve to their negated memory ids, which the group
+    /// game view filters through the shared membership map.
+    pub(super) fn selected_group_id(&self, _state: &SharedState) -> Option<i64> {
         let index = self.selection.get();
-        if index == 0 {
-            return None;
-        }
-        state.borrow().groups.get(index - 1).map(|g| g.id)
+        self.order.borrow().get(index).copied().flatten()
     }
 
     pub(super) fn move_selection(&self, state: &SharedState, dx: i32, dy: i32, engage: bool) {

@@ -222,7 +222,8 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
             }
             gdk4::Key::Escape => {
                 // Escape peels overlays first: keyboard, then menu, then
-                // the disc picker, then the page.
+                // the disc picker, then the page. It never quits the app —
+                // the system window controls own that.
                 let keyboard_open = state
                     .borrow()
                     .big_picture
@@ -250,8 +251,6 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
                     if let Some(big) = state.borrow().big_picture.clone() {
                         big.disc_picker.close();
                     }
-                } else {
-                    quit_app(&state);
                 }
             }
             gdk4::Key::q if modifiers.contains(gdk4::ModifierType::CONTROL_MASK) => {
@@ -369,7 +368,11 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
             return;
         }
     }
-    let Some(big) = state.borrow().big_picture.clone() else {
+    // Grab the shell without holding the state borrow: tab switches
+    // below refresh auto membership mutably, and GTK handlers routinely
+    // run reentrantly under an outstanding borrow.
+    let big = state.borrow().big_picture.clone();
+    let Some(big) = big else {
         return;
     };
     // The shoulders change tabs from every tab, Recent included — on

@@ -1,8 +1,8 @@
 //! A floating tooltip bubble for the big-picture screens, drawn as one shape in
 //! a single `snapshot()` pass: a rounded pill joined with a tail that
-//! reaches the selected tile (Cairo), with titles wrapping to the bubble
-//! instead of stretching it single-line across the page — only novels
-//! drift, pausing readable at each loop restart. The bubble and its tail
+//! reaches the selected tile (Cairo), with titles that fit wrapping to
+//! the bubble while overflowing ones drift as a single-line ticker —
+//! pausing readable at each loop restart. The bubble and its tail
 //! are one Cairo sub-path union (same winding, single fill), so they
 //! cannot come apart or double-composite. The widget spans its rail and
 //! positions the bubble internally; moving it only queues a redraw.
@@ -78,6 +78,13 @@ fn advance_with_dwell(slide: f64, period: f64, dt_ms: f64, dwell: u32) -> (f64, 
     } else {
         (next, 0)
     }
+}
+
+/// Whether the drift engages: the unwrapped line is wider than the
+/// bubble's content width, so static text would clip. Settled text
+/// wraps instead; drifting text stays single-line and slides.
+fn should_drift(natural_w: f64, content_w: f64) -> bool {
+    natural_w > content_w + 1.0
 }
 
 /// A clipping window for the drifting title. Two copies of the label ride
@@ -438,15 +445,15 @@ mod imp {
 
             // The drift can only engage once the label carries its final
             // style — measuring at set_text time races the CSS font size.
-            // Text that wraps to two lines sits still; only novels drift.
             let single_h =
                 label.measure(gtk4::Orientation::Vertical, -1).1 as f64;
             let bubble_w = (natural_w + 2.0 * s(PAD_X as f64)).min(max_width);
             let content_w = (bubble_w - 2.0 * s(PAD_X as f64)).max(1.0);
             let wrapped_h =
                 label.measure(gtk4::Orientation::Vertical, content_w as i32).1 as f64;
-            let lines = (wrapped_h / single_h.max(1.0)).round().max(1.0);
-            let overflowing = lines > 2.0;
+            // The drift engages whenever the unwrapped line overflows the
+            // content width — the classic ticker — not just for novels.
+            let overflowing = should_drift(natural_w, content_w);
             if overflowing && !self.sliding.get() {
                 self.sliding.set(true);
                 self.slide.set(0.0);
@@ -738,7 +745,20 @@ impl Marquee {
 
 #[cfg(test)]
 mod tests {
-    use super::{advance_slide, advance_with_dwell, Bubble, SPEED, DWELL_TICKS};
+    use super::{advance_slide, advance_with_dwell, should_drift, Bubble, SPEED, DWELL_TICKS};
+
+    #[test]
+    fn test_should_drift_engages_on_overflow_only() {
+        assert!(should_drift(500.0, 300.0), "a line wider than the bubble slides");
+        assert!(
+            !should_drift(200.0, 300.0),
+            "a fitting line sits still, however many rows it wraps to"
+        );
+        assert!(
+            !should_drift(300.5, 300.0),
+            "sub-pixel shove at the boundary is not overflow"
+        );
+    }
 
     #[test]
     fn test_advance_slide_advances_and_wraps() {

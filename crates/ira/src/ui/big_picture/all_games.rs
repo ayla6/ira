@@ -306,7 +306,8 @@ pub(super) fn build(
     {
         let tab_state = state.clone();
         tabs.connect_active_name_notify(move |_| {
-            let Some(big) = tab_state.borrow().big_picture.clone() else {
+            let big = tab_state.borrow().big_picture.clone();
+            let Some(big) = big else {
                 return;
             };
             let tab = match big.all.tabs.active_name().as_deref() {
@@ -597,6 +598,10 @@ impl AllSoftwareUi {
             self.tabs.set_active_name(Some(name));
         }
         if tab == Tab::Groups {
+            // Auto memberships refresh on entry (never inside the tile
+            // reload itself: that runs in layout callbacks that cannot
+            // take the state mutably).
+            super::super::auto_groups::refresh_auto_members(state);
             self.groups_grid.reload(state);
         }
         self.apply_mode(state);
@@ -664,12 +669,16 @@ impl AllSoftwareUi {
     }
 
     /// Delete the group under the selection (the X button on the Groups
-    /// tiles). Membership rows go with it; games stay.
+    /// tiles). Membership rows go with it; games stay. Auto groups are
+    /// managed in the desktop settings, never from here.
     /// The groups tab's X: ask before the group is gone for good.
     pub(super) fn groups_delete_selected(&self, state: &SharedState) {
         let Some(id) = self.groups_grid.selected_group_id(state) else {
             return;
         };
+        if id < 0 {
+            return;
+        }
         let name = state
             .borrow()
             .groups
@@ -696,11 +705,15 @@ impl AllSoftwareUi {
         self.apply_mode(state);
     }
 
-    /// Rename the group under the selection through the keyboard.
+    /// Rename the group under the selection through the keyboard. Auto
+    /// groups are managed in the desktop settings, never from here.
     pub(super) fn groups_rename_selected(&self, state: &SharedState) {
         let Some(id) = self.groups_grid.selected_group_id(state) else {
             return;
         };
+        if id < 0 {
+            return;
+        }
         let current = state
             .borrow()
             .groups

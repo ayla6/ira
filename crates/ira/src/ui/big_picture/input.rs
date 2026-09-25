@@ -2,9 +2,14 @@
 //! gamepads without grabbing them (big-picture mode runs without the input daemon,
 //! so the devices are free) and translates sticks, dpads and the A/B buttons
 //! into navigation messages delivered on the GTK main loop.
+//!
+//! The reader opens Ira's virtual pads too: while the input daemon holds
+//! the physical controller grabbed for the desktop session, the remapped
+//! stream is only readable on the virtual pad — a grabbed physical node
+//! goes silent without erroring.
 
 use crate::ui::state::SharedState;
-use ira_input::{discover_gamepads, PhysicalGamepad};
+use ira_input::{discover_gamepads_including_virtual, PhysicalGamepad};
 use ira_input::{GamepadAxis, GamepadButton, InputSource};
 use std::collections::HashSet;
 use std::path::Path;
@@ -384,14 +389,16 @@ fn fold_event(
 
 /// Open every gamepad that appeared since last time, applying each device's
 /// resolved face-button layout so A/Confirm follows the physical marking.
+/// Virtual pads are included: when the daemon holds the physical pad, the
+/// remapped input only exists on the virtual one.
 fn rescan(pads: &mut Vec<PhysicalGamepad>, calibration_path: &Path) {
     pads.retain(|pad| pad.is_connected());
     let known: HashSet<_> = pads.iter().map(|pad| pad.info().path.clone()).collect();
-    for device in discover_gamepads() {
+    for device in discover_gamepads_including_virtual() {
         if known.contains(&device.path) {
             continue;
         }
-        let Ok(mut pad) = PhysicalGamepad::open(&device.path, false) else {
+        let Ok(mut pad) = PhysicalGamepad::open_including_virtual(&device.path, false) else {
             continue;
         };
         let layout = ira_input::resolved_nintendo_layout(calibration_path, &device);

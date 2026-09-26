@@ -19,8 +19,7 @@ pub(super) struct SystemWidgets {
     pub gamescope_h_state: Rc<RefCell<Option<u32>>>,
     pub gamescope_fps_state: Rc<RefCell<Option<u32>>>,
     pub gamescope_upscaling_state: Rc<RefCell<Option<String>>>,
-    pub gpu_row: Option<adw::ComboRow>,
-    pub gpu_options: Vec<String>,
+    pub gpu_override: Rc<RefCell<Option<String>>>,
     pub env_vars_box: gtk4::ListBox,
     pub ld_preload_entry: adw::EntryRow,
     pub ld_library_path_entry: adw::EntryRow,
@@ -143,9 +142,20 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     page.append(&perf_group);
 
     // ─── GPU (only when multiple GPUs detected) ───
+    // Same override pattern as the upscaling row and the performance
+    // switches: the row shows the effective GPU (the override, else the
+    // system default), the revert button is visible only while overridden,
+    // and reverting restores following the default. "Auto" is its own
+    // option (`GPU_AUTO`): force no GPU variables, ignoring the default.
     let gpus = ira_launcher::gpu::detect_gpus();
     let gpu_options: Vec<String> = gpus.iter().map(|g| g.card.clone()).collect();
-    let gpu_row = if gpus.len() > 1 {
+    let gpu_override: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(validate_gpu_override(
+        &params.launch.gpu,
+        params.gpu_default,
+        &gpu_options,
+    )));
+    let gpu_effective = gpu_effective_index(params.gpu_default, &gpu_options);
+    if gpus.len() > 1 {
         let group = adw::PreferencesGroup::new();
         group.set_title(&crate::tr!("Graphics"));
 
@@ -158,30 +168,58 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         row.set_title(&crate::tr!("GPU"));
         row.set_subtitle(&crate::tr!("Graphics card to use for rendering"));
         row.set_model(Some(&model));
-        let idx = if params.launch.gpu.is_empty() {
-            // If app-level default is set, select it; otherwise "Auto"
-            if !params.gpu_default.is_empty() {
-                gpu_options
-                    .iter()
-                    .position(|c| c == params.gpu_default)
-                    .map(|i| i + 1)
-                    .unwrap_or(0)
-            } else {
-                0
-            }
-        } else {
-            gpu_options
-                .iter()
-                .position(|c| c == &params.launch.gpu)
-                .map(|i| i + 1)
-                .unwrap_or(0)
-        };
-        row.set_selected(idx as u32);
+        row.set_selected(gpu_display_index(
+            gpu_override.borrow().as_deref(),
+            gpu_effective,
+            &gpu_options,
+        ));
+        let gpu_revert_btn = make_revert_btn();
+        gpu_revert_btn.set_visible(gpu_override.borrow().is_some());
+        row.add_suffix(&gpu_revert_btn);
+        let gpu_reverting = Rc::new(RefCell::new(false));
+        {
+            let state_c = gpu_override.clone();
+            let options_c = gpu_options.clone();
+            let btn_c = gpu_revert_btn.clone();
+            let rev_c = gpu_reverting.clone();
+            row.connect_selected_item_notify(move |row| {
+                if *rev_c.borrow() {
+                    return;
+                }
+                let idx = row.selected() as usize;
+                // Index 0 ("Auto") is only reachable when it differs from
+                // the effective GPU; with no default it is the effective
+                // choice and counts as following.
+                let card = if idx == 0 && gpu_effective == 0 {
+                    None
+                } else {
+                    gpu_card_for_index(idx, &options_c)
+                };
+                *state_c.borrow_mut() = card;
+                btn_c.set_visible(state_c.borrow().is_some());
+            });
+        }
+        {
+            let state_c = gpu_override.clone();
+            let btn_c = Downgrade::downgrade(&gpu_revert_btn);
+            let row_c = Downgrade::downgrade(&row);
+            let rev_c = gpu_reverting.clone();
+            gpu_revert_btn.connect_clicked(move |_| {
+                let Some(row_c) = row_c.upgrade() else {
+                    return;
+                };
+                let Some(btn_c) = btn_c.upgrade() else {
+                    return;
+                };
+                *rev_c.borrow_mut() = true;
+                row_c.set_selected(gpu_effective);
+                *rev_c.borrow_mut() = false;
+                *state_c.borrow_mut() = None;
+                btn_c.set_visible(false);
+            });
+        }
         group.add(&row);
         page.append(&group);
-        Some(row)
-    } else {
-        None
     };
 
     let (env_group, env_vars_box) = build_env_vars_group(&params.launch.env_vars);
@@ -214,10 +252,132 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         gamescope_h_state,
         gamescope_fps_state,
         gamescope_upscaling_state,
-        gpu_row,
-        gpu_options,
+        gpu_override,
         env_vars_box,
         ld_preload_entry,
         ld_library_path_entry,
+    }
+}
+
+/// Validates a stored per-game GPU override against the detected cards:
+/// empty follows the default, `GPU_AUTO` pins Auto (unless the default
+/// itself sets nothing, making them equivalent), `cardN` pins one GPU.
+/// Unknown/removed cards fall back to following the default.
+fn validate_gpu_override(stored: &str, default_gpu: &str, options: &[String]) -> Option<String> {
+    if stored.is_empty() {
+        return None;
+    }
+    if stored == ira_models::GPU_AUTO {
+        if options.iter().any(|c| c == default_gpu) {
+            return Some(ira_models::GPU_AUTO.to_string());
+        }
+        return None;
+    }
+    options.iter().find(|c| c == &stored).cloned()
+}
+
+/// ComboRow index of the system default: its card at +1, or 0 ("Auto")
+/// when no default is set or it is no longer detected.
+fn gpu_effective_index(default_gpu: &str, options: &[String]) -> u32 {
+    options
+        .iter()
+        .position(|c| c == default_gpu)
+        .map(|i| i + 1)
+        .unwrap_or(0) as u32
+}
+
+/// ComboRow index to display: the override's entry (`GPU_AUTO` is index 0,
+/// cards follow at +1), else the effective index while following.
+fn gpu_display_index(override_value: Option<&str>, effective: u32, options: &[String]) -> u32 {
+    match override_value {
+        None => effective,
+        Some(card) if card == ira_models::GPU_AUTO => 0,
+        Some(card) => options
+            .iter()
+            .position(|c| c == card)
+            .map(|i| i + 1)
+            .unwrap_or(effective as usize) as u32,
+    }
+}
+
+/// Stored value for a ComboRow index: 0 ("Auto") is `GPU_AUTO`.
+fn gpu_card_for_index(idx: usize, options: &[String]) -> Option<String> {
+    if idx == 0 {
+        return Some(ira_models::GPU_AUTO.to_string());
+    }
+    options.get(idx - 1).cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn options() -> Vec<String> {
+        vec!["card0".to_string(), "card1".to_string()]
+    }
+
+    #[test]
+    fn test_validate_gpu_override_empty_follows_default() {
+        assert_eq!(validate_gpu_override("", "card0", &options()), None);
+    }
+
+    #[test]
+    fn test_validate_gpu_override_auto_sticks_out_default() {
+        assert_eq!(
+            validate_gpu_override("auto", "card0", &options()),
+            Some("auto".to_string())
+        );
+    }
+
+    #[test]
+    fn test_validate_gpu_override_auto_is_following_without_default() {
+        assert_eq!(validate_gpu_override("auto", "", &options()), None);
+        assert_eq!(validate_gpu_override("auto", "card9", &options()), None);
+    }
+
+    #[test]
+    fn test_validate_gpu_override_known_card() {
+        assert_eq!(
+            validate_gpu_override("card1", "card0", &options()),
+            Some("card1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_validate_gpu_override_unknown_card_follows_default() {
+        assert_eq!(validate_gpu_override("card9", "card0", &options()), None);
+    }
+
+    #[test]
+    fn test_gpu_effective_index_resolves_default_card() {
+        assert_eq!(gpu_effective_index("card0", &options()), 1);
+        assert_eq!(gpu_effective_index("card1", &options()), 2);
+    }
+
+    #[test]
+    fn test_gpu_effective_index_unset_or_unknown_default_is_auto() {
+        assert_eq!(gpu_effective_index("", &options()), 0);
+        assert_eq!(gpu_effective_index("card9", &options()), 0);
+    }
+
+    #[test]
+    fn test_gpu_display_index_shows_override_over_default() {
+        // Following shows the effective GPU…
+        assert_eq!(gpu_display_index(None, 1, &options()), 1);
+        assert_eq!(gpu_display_index(None, 0, &options()), 0);
+        // …an explicit Auto stays on the Auto entry…
+        assert_eq!(gpu_display_index(Some("auto"), 1, &options()), 0);
+        // …and a pinned card shows its own entry.
+        assert_eq!(gpu_display_index(Some("card1"), 1, &options()), 2);
+    }
+
+    #[test]
+    fn test_gpu_card_for_index_round_trip() {
+        // Arrange: the index mapping behind the Auto/cards dropdown.
+        // Act + assert: saving maps the selection back to the stored value.
+        assert_eq!(gpu_card_for_index(0, &options()), Some("auto".to_string()));
+        assert_eq!(gpu_card_for_index(1, &options()), Some("card0".to_string()));
+        assert_eq!(gpu_card_for_index(2, &options()), Some("card1".to_string()));
+        assert_eq!(gpu_card_for_index(99, &options()), None);
     }
 }

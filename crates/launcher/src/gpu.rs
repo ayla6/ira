@@ -201,7 +201,7 @@ fn get_gpu_name(pci_slot: &str) -> Option<String> {
 /// Build environment variables for GPU selection.
 /// Returns a list of (key, value) pairs to set when launching with a specific GPU.
 pub fn build_gpu_env(gpu_card: &str) -> Vec<(String, String)> {
-    if gpu_card.is_empty() {
+    if gpu_card.is_empty() || gpu_card == ira_models::GPU_AUTO {
         return Vec::new();
     }
     let gpus = detect_gpus();
@@ -308,6 +308,11 @@ mod tests {
     fn test_build_gpu_env_empty() {
         let env = build_gpu_env("");
         assert!(env.is_empty());
+    }
+
+    #[test]
+    fn test_build_gpu_env_explicit_auto_forces_nothing() {
+        assert!(build_gpu_env(ira_models::GPU_AUTO).is_empty());
     }
 
     #[test]

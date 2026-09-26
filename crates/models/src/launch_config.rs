@@ -11,6 +11,11 @@ pub enum ControllerInputMode {
     Enabled,
 }
 
+/// Per-game GPU value meaning "Auto": force no GPU variables, ignoring the
+/// system default. Distinct from empty (follow the default) and `cardN`
+/// (pin one GPU). Never collides with a real card name (`cardN`).
+pub const GPU_AUTO: &str = "auto";
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameLaunchConfig {
     pub exe: String,
@@ -62,6 +67,8 @@ pub struct GameLaunchConfig {
     pub gamescope_fps: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamescope_upscaling: Option<String>,
+    /// Pinned GPU (`cardN`), empty to follow the system default, or
+    /// [`GPU_AUTO`] for an explicit Auto (force no GPU variables).
     #[serde(default)]
     pub gpu: String,
     #[serde(default)]

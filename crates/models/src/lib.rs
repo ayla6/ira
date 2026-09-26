@@ -43,7 +43,7 @@ pub use title::{normalize_name, normalize_phrase};
 pub use group::{derived_group_id, Group, GroupSelection};
 pub use group_by::GroupBy;
 pub use kind::*;
-pub use launch_config::{ControllerInputMode, GameLaunchConfig, WineConfig, WineProfile};
+pub use launch_config::{ControllerInputMode, GameLaunchConfig, WineConfig, WineProfile, GPU_AUTO};
 pub use message::{AppMessage, AppSender};
 pub use session::PlaySession;
 pub use group_order::GroupOrder;

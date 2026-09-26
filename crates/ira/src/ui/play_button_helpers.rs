@@ -143,6 +143,10 @@ fn apply_system_defaults(launch: &mut ira_models::GameLaunchConfig, defaults: &S
     if launch.gamescope_upscaling.is_none() {
         launch.gamescope_upscaling = Some(defaults.gamescope_upscaling.clone());
     }
+    // Explicit values (including GPU_AUTO) are never overwritten: this
+    // runs twice per launch (before and after variant overrides), so any
+    // normalization here must be idempotent. GPU_AUTO resolves at the
+    // consumer (`build_gpu_env` yields no variables for it).
     if launch.gpu.is_empty() {
         launch.gpu = defaults.gpu.clone();
     }
@@ -1364,6 +1368,35 @@ mod tests {
             launch.env_vars,
             vec![("MESA_VK_DEVICE_SELECT".to_string(), "10de:2684".to_string())]
         );
+    }
+
+    #[test]
+    fn test_apply_system_defaults_explicit_auto_survives_default() {
+        let defaults = SystemDefaults {
+            gpu: "card0".to_string(),
+            ..Default::default()
+        };
+        // Empty follows the default…
+        let mut follow = ira_models::GameLaunchConfig::default();
+        apply_system_defaults(&mut follow, &defaults);
+        assert_eq!(follow.gpu, "card0");
+        // …an explicit Auto is preserved (build_gpu_env yields no variables
+        // for it) — and stays preserved when resolution runs twice, as
+        // launch_other does around variant overrides…
+        let mut auto = ira_models::GameLaunchConfig {
+            gpu: ira_models::GPU_AUTO.to_string(),
+            ..Default::default()
+        };
+        apply_system_defaults(&mut auto, &defaults);
+        apply_system_defaults(&mut auto, &defaults);
+        assert_eq!(auto.gpu, ira_models::GPU_AUTO);
+        // …and a pinned card survives untouched.
+        let mut pinned = ira_models::GameLaunchConfig {
+            gpu: "card1".to_string(),
+            ..Default::default()
+        };
+        apply_system_defaults(&mut pinned, &defaults);
+        assert_eq!(pinned.gpu, "card1");
     }
 
     #[test]

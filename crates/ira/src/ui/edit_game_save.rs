@@ -217,16 +217,7 @@ fn build_launch_config_and_wine(
     let gamescope = sw.and_then(|s| *s.gamescope_state.borrow());
     let gamescope_flags = sw.map_or(String::new(), |s| s.gamescope_flags.text().to_string());
     let gpu = sw
-        .and_then(|s| {
-            s.gpu_row.as_ref().map(|gr| {
-                let idx = gr.selected() as usize;
-                if idx == 0 {
-                    String::new()
-                } else {
-                    s.gpu_options.get(idx - 1).cloned().unwrap_or_default()
-                }
-            })
-        })
+        .and_then(|s| s.gpu_override.borrow().clone())
         .unwrap_or_default();
     let overlay_encoder = ow
         .and_then(|s| s.overlay_encoder_row.as_ref())

@@ -19,6 +19,8 @@ pub(super) struct SystemWidgets {
     pub gamescope_h_state: Rc<RefCell<Option<u32>>>,
     pub gamescope_fps_state: Rc<RefCell<Option<u32>>>,
     pub gamescope_upscaling_state: Rc<RefCell<Option<String>>>,
+    pub gamescope_wsi_state: OverrideState,
+    pub gamescope_wayland_state: OverrideState,
     pub gpu_override: Rc<RefCell<Option<String>>>,
     pub env_vars_box: gtk4::ListBox,
     pub ld_preload_entry: adw::EntryRow,
@@ -35,6 +37,8 @@ pub(super) struct SystemPageParams<'a> {
     pub gamescope_h_default: u32,
     pub gamescope_fps_default: u32,
     pub gamescope_upscaling_default: String,
+    pub gamescope_wsi_default: bool,
+    pub gamescope_wayland_default: bool,
     pub sidebar: &'a gtk4::ListBox,
     pub stack: &'a gtk4::Stack,
 }
@@ -125,6 +129,8 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
             h: params.gamescope_h_default,
             fps: params.gamescope_fps_default,
             upscaling: params.gamescope_upscaling_default.clone(),
+            wsi: params.gamescope_wsi_default,
+            wayland: params.gamescope_wayland_default,
         },
         Some(&super::system_settings::GamescopeOverride {
             flags: params.launch.gamescope_flags.clone(),
@@ -132,6 +138,8 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
             h: params.launch.gamescope_h,
             fps: params.launch.gamescope_fps,
             upscaling: params.launch.gamescope_upscaling.clone(),
+            wsi: params.launch.gamescope_wsi,
+            wayland: params.launch.gamescope_wayland,
         }),
     );
     let gamescope_flags = gs_widgets.flags;
@@ -139,6 +147,8 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     let gamescope_h_state = gs_widgets.h_state;
     let gamescope_fps_state = gs_widgets.fps_state;
     let gamescope_upscaling_state = gs_widgets.upscaling_state;
+    let gamescope_wsi_state = gs_widgets.wsi_state;
+    let gamescope_wayland_state = gs_widgets.wayland_state;
     page.append(&perf_group);
 
     // ─── GPU (only when multiple GPUs detected) ───
@@ -252,6 +262,8 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
         gamescope_h_state,
         gamescope_fps_state,
         gamescope_upscaling_state,
+        gamescope_wsi_state,
+        gamescope_wayland_state,
         gpu_override,
         env_vars_box,
         ld_preload_entry,

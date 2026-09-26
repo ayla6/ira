@@ -121,6 +121,8 @@ fn build_launch_wine_advanced_pages(
         gamescope_h_default,
         gamescope_fps_default,
         gamescope_upscaling_default,
+        gamescope_wsi_default,
+        gamescope_wayland_default,
         gpu_default,
     ) = {
         let s = state.borrow();
@@ -139,6 +141,8 @@ fn build_launch_wine_advanced_pages(
             s.cfg.default_system.gamescope_h,
             s.cfg.default_system.gamescope_fps,
             s.cfg.default_system.gamescope_upscaling.clone(),
+            s.cfg.default_system.gamescope_wsi,
+            s.cfg.default_system.gamescope_wayland,
             s.cfg.default_system.gpu.clone(),
         )
     };
@@ -173,6 +177,8 @@ fn build_launch_wine_advanced_pages(
             gamescope_h_default,
             gamescope_fps_default,
             gamescope_upscaling_default,
+            gamescope_wsi_default,
+            gamescope_wayland_default,
             sidebar,
             stack,
         },

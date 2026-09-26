@@ -346,6 +346,17 @@ fn gamescope_game_env(env: &mut Vec<(String, String)>) -> (Vec<(String, String)>
     (game_env, Vec::new())
 }
 
+/// Extra variables for the game inside Gamescope beyond the compositor-safe
+/// set: the WSI toggle is opt-in (some games break with it forced on), so an
+/// unset or off toggle contributes nothing and never stomps the session env.
+pub(crate) fn gamescope_wsi_env(wsi: Option<bool>) -> Vec<(String, String)> {
+    if wsi == Some(true) {
+        vec![("ENABLE_GAMESCOPE_WSI".to_string(), "1".to_string())]
+    } else {
+        Vec::new()
+    }
+}
+
 /// Prefixes `game_env` onto the command that runs inside Gamescope — directly
 /// after its `--` separator, so the compositor never sees the variables while
 /// the game and its wrappers do. `unset_env` keys are removed with
@@ -420,6 +431,15 @@ pub(crate) fn gamescope_args(launch: &GameLaunchConfig, mangoapp: bool) -> Vec<S
         gs_args.push(upscaling.to_string());
     }
 
+    // Wayland clients need an explicit opt-in on gamescope's side: without
+    // it gamescope unsets WAYLAND_DISPLAY for its children (X11-only) and
+    // reports XDG_SESSION_TYPE=x11. With it they get gamescope's own
+    // socket (always advertised as GAMESCOPE_WAYLAND_DISPLAY) and
+    // XDG_SESSION_TYPE=wayland.
+    if launch.gamescope_wayland.unwrap_or(false) {
+        gs_args.push("--expose-wayland".to_string());
+    }
+
     gs_args.push("--fullscreen".to_string());
 
     // With gamescope, use --mangoapp instead of mangohud in the command.
@@ -483,7 +503,8 @@ pub fn apply_performance(
         // itself to a secondary GPU breaks its presentation to the desktop
         // compositor. The game-only variables are re-applied past the `--`
         // separator so only the game inherits them.
-        let (game_env, unset_env) = gamescope_game_env(env);
+        let (mut game_env, unset_env) = gamescope_game_env(env);
+        game_env.extend(gamescope_wsi_env(launch.gamescope_wsi));
         apply_game_env_inside_gamescope(command, &game_env, &unset_env);
         true
     } else {
@@ -1092,6 +1113,44 @@ mod tests {
 
         assert!(args.contains(&"-w".to_string()));
         assert!(!args.contains(&"-h".to_string()));
+    }
+
+    #[test]
+    fn test_gamescope_args_expose_wayland_opt_in() {
+        // Arrange: Wayland support explicitly enabled…
+        let launch = GameLaunchConfig {
+            gamescope: Some(true),
+            gamescope_wayland: Some(true),
+            ..Default::default()
+        };
+        // Act
+        let args = gamescope_args(&launch, false);
+        // Assert: the flag lands before the `--` separator…
+        assert!(args.contains(&"--expose-wayland".to_string()));
+        assert!(
+            args.iter().position(|a| a == "--expose-wayland").unwrap()
+                < args.iter().position(|a| a == "--").unwrap()
+        );
+        // …and stays out unless opted in.
+        let plain = gamescope_args(&gamescope_launch(), false);
+        assert!(!plain.contains(&"--expose-wayland".to_string()));
+        let off = GameLaunchConfig {
+            gamescope: Some(true),
+            gamescope_wayland: Some(false),
+            ..Default::default()
+        };
+        assert!(!gamescope_args(&off, false).contains(&"--expose-wayland".to_string()));
+    }
+
+    #[test]
+    fn test_gamescope_wsi_env_opt_in_only() {
+        assert_eq!(
+            gamescope_wsi_env(Some(true)),
+            vec![("ENABLE_GAMESCOPE_WSI".to_string(), "1".to_string())]
+        );
+        // Off or unset contributes nothing — never stomps the session env.
+        assert!(gamescope_wsi_env(Some(false)).is_empty());
+        assert!(gamescope_wsi_env(None).is_empty());
     }
 
     #[test]

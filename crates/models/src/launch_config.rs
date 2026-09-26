@@ -67,6 +67,17 @@ pub struct GameLaunchConfig {
     pub gamescope_fps: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamescope_upscaling: Option<String>,
+    /// Expose gamescope's Vulkan WSI layer to the game
+    /// (`ENABLE_GAMESCOPE_WSI=1` past its `--` separator). None = inherit
+    /// the system default. Off leaves the variable alone (some games break
+    /// with it forced on).
+    #[serde(default)]
+    pub gamescope_wsi: Option<bool>,
+    /// Let Wayland-native games run inside gamescope (`--expose-wayland`:
+    /// children get gamescope's Wayland socket instead of X11-only).
+    /// None = inherit the system default.
+    #[serde(default)]
+    pub gamescope_wayland: Option<bool>,
     /// Pinned GPU (`cardN`), empty to follow the system default, or
     /// [`GPU_AUTO`] for an explicit Auto (force no GPU variables).
     #[serde(default)]

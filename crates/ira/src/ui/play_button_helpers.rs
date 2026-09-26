@@ -143,6 +143,14 @@ fn apply_system_defaults(launch: &mut ira_models::GameLaunchConfig, defaults: &S
     if launch.gamescope_upscaling.is_none() {
         launch.gamescope_upscaling = Some(defaults.gamescope_upscaling.clone());
     }
+    // Plain inherit-on-empty like the rest: idempotent across the double
+    // resolution in launch_other.
+    if launch.gamescope_wsi.is_none() {
+        launch.gamescope_wsi = Some(defaults.gamescope_wsi);
+    }
+    if launch.gamescope_wayland.is_none() {
+        launch.gamescope_wayland = Some(defaults.gamescope_wayland);
+    }
     // Explicit values (including GPU_AUTO) are never overwritten: this
     // runs twice per launch (before and after variant overrides), so any
     // normalization here must be idempotent. GPU_AUTO resolves at the
@@ -1368,6 +1376,31 @@ mod tests {
             launch.env_vars,
             vec![("MESA_VK_DEVICE_SELECT".to_string(), "10de:2684".to_string())]
         );
+    }
+
+    #[test]
+    fn test_apply_system_defaults_gamescope_toggles_inherit_and_stick() {
+        let defaults = SystemDefaults {
+            gamescope_wsi: true,
+            gamescope_wayland: false,
+            ..Default::default()
+        };
+        // Unset inherits the defaults, twice in a row (launch_other
+        // resolves around variant overrides)…
+        let mut launch = ira_models::GameLaunchConfig::default();
+        apply_system_defaults(&mut launch, &defaults);
+        apply_system_defaults(&mut launch, &defaults);
+        assert_eq!(launch.gamescope_wsi, Some(true));
+        assert_eq!(launch.gamescope_wayland, Some(false));
+        // …explicit overrides survive untouched.
+        let mut over = ira_models::GameLaunchConfig {
+            gamescope_wsi: Some(false),
+            gamescope_wayland: Some(true),
+            ..Default::default()
+        };
+        apply_system_defaults(&mut over, &defaults);
+        assert_eq!(over.gamescope_wsi, Some(false));
+        assert_eq!(over.gamescope_wayland, Some(true));
     }
 
     #[test]

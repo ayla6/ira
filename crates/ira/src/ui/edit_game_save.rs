@@ -244,6 +244,8 @@ fn build_launch_config_and_wine(
     let gamescope_h = sw.and_then(|s| *s.gamescope_h_state.borrow());
     let gamescope_fps = sw.and_then(|s| *s.gamescope_fps_state.borrow());
     let gamescope_upscaling = sw.and_then(|s| s.gamescope_upscaling_state.borrow().clone());
+    let gamescope_wsi = sw.and_then(|s| *s.gamescope_wsi_state.borrow());
+    let gamescope_wayland = sw.and_then(|s| *s.gamescope_wayland_state.borrow());
 
     let lc = params.launch_config_widgets.as_ref();
     let launch = GameLaunchConfig {
@@ -270,6 +272,8 @@ fn build_launch_config_and_wine(
         gamescope_h,
         gamescope_fps,
         gamescope_upscaling,
+        gamescope_wsi,
+        gamescope_wayland,
         gpu,
         overlay_encoder,
         overlay_recording_quality,

@@ -479,6 +479,8 @@ fn apply_system_defaults(cfg: &mut Config, widgets: &SystemDefaultsWidgets) {
         let idx = widgets.gamescope_upscaling_row.selected() as usize;
         upscale_values.get(idx).copied().unwrap_or("").to_string()
     };
+    cfg.default_system.gamescope_wsi = widgets.gamescope_wsi.is_active();
+    cfg.default_system.gamescope_wayland = widgets.gamescope_wayland.is_active();
     cfg.default_system.env_vars =
         super::wine_config_env_dll::collect_env_vars(&widgets.env_vars_box);
     cfg.default_system.ld_preload = widgets.ld_preload.text().to_string();

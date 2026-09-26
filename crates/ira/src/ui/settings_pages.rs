@@ -285,6 +285,8 @@ pub(super) struct SystemDefaultsWidgets {
     pub gamescope_h: adw::SpinRow,
     pub gamescope_fps: adw::SpinRow,
     pub gamescope_upscaling_row: adw::ComboRow,
+    pub gamescope_wsi: adw::SwitchRow,
+    pub gamescope_wayland: adw::SwitchRow,
     pub gpu_row: Rc<RefCell<Option<adw::ComboRow>>>,
     pub gpu_options: Rc<RefCell<Vec<String>>>,
     pub gpu_default: Rc<RefCell<String>>,
@@ -338,6 +340,8 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
             h: s.gamescope_h,
             fps: s.gamescope_fps,
             upscaling: s.gamescope_upscaling.clone(),
+            wsi: s.gamescope_wsi,
+            wayland: s.gamescope_wayland,
         },
         None,
     );
@@ -346,6 +350,8 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
     let gamescope_h = gs_widgets.h;
     let gamescope_fps = gs_widgets.fps;
     let gamescope_upscaling_row = gs_widgets.upscaling;
+    let gamescope_wsi = gs_widgets.wsi;
+    let gamescope_wayland = gs_widgets.wayland;
     page.append(&perf_group);
 
     // GPU enumeration invokes filesystem reads and lspci; populate this optional
@@ -381,6 +387,8 @@ pub(super) fn build_system_defaults_page(cfg: &Config) -> (gtk4::Box, SystemDefa
             gamescope_h,
             gamescope_fps,
             gamescope_upscaling_row,
+            gamescope_wsi,
+            gamescope_wayland,
             gpu_row,
             gpu_options,
             gpu_default,

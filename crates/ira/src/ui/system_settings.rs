@@ -123,6 +123,8 @@ pub(super) struct GamescopeDefaults {
     pub h: u32,
     pub fps: u32,
     pub upscaling: String,
+    pub wsi: bool,
+    pub wayland: bool,
 }
 
 pub(super) struct GamescopeOverride {
@@ -131,6 +133,8 @@ pub(super) struct GamescopeOverride {
     pub h: Option<u32>,
     pub fps: Option<u32>,
     pub upscaling: Option<String>,
+    pub wsi: Option<bool>,
+    pub wayland: Option<bool>,
 }
 
 pub(super) struct GamescopeWidgets {
@@ -139,10 +143,14 @@ pub(super) struct GamescopeWidgets {
     pub h: adw::SpinRow,
     pub fps: adw::SpinRow,
     pub upscaling: adw::ComboRow,
+    pub wsi: adw::SwitchRow,
+    pub wayland: adw::SwitchRow,
     pub w_state: Rc<RefCell<Option<u32>>>,
     pub h_state: Rc<RefCell<Option<u32>>>,
     pub fps_state: Rc<RefCell<Option<u32>>>,
     pub upscaling_state: Rc<RefCell<Option<String>>>,
+    pub wsi_state: OverrideState,
+    pub wayland_state: OverrideState,
 }
 
 fn make_spin_row(
@@ -320,15 +328,35 @@ pub(super) fn add_gamescope_rows(
     );
     expander.add_row(&upscaling_row);
 
+    let (wsi_row, wsi_state) = build_override_switch_row(
+        &crate::tr!("Vulkan WSI layer"),
+        &crate::tr!("Expose gamescope's Vulkan WSI layer to the game"),
+        defaults.wsi,
+        override_vals.and_then(|o| o.wsi),
+    );
+    expander.add_row(&wsi_row);
+
+    let (wayland_row, wayland_state) = build_override_switch_row(
+        &crate::tr!("Wayland support"),
+        &crate::tr!("Let Wayland-native games run inside gamescope"),
+        defaults.wayland,
+        override_vals.and_then(|o| o.wayland),
+    );
+    expander.add_row(&wayland_row);
+
     GamescopeWidgets {
         flags,
         w: w_spin,
         h: h_spin,
         fps: fps_spin,
         upscaling: upscaling_row,
+        wsi: wsi_row,
+        wayland: wayland_row,
         w_state,
         h_state,
         fps_state,
         upscaling_state,
+        wsi_state,
+        wayland_state,
     }
 }

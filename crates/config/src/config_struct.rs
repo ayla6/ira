@@ -109,6 +109,14 @@ pub struct SystemDefaults {
     pub gamescope_fps: u32,
     #[serde(default)]
     pub gamescope_upscaling: String,
+    /// Expose gamescope's Vulkan WSI layer by default (Steam/ChimeraOS
+    /// sessions export it too); opt out per game or globally.
+    #[serde(default = "default_true")]
+    pub gamescope_wsi: bool,
+    /// Pass `--expose-wayland` to gamescope. Off by default, matching
+    /// gamescope itself (Wayland clients need it explicitly).
+    #[serde(default)]
+    pub gamescope_wayland: bool,
     #[serde(default)]
     pub gpu: String,
     #[serde(default)]
@@ -117,6 +125,27 @@ pub struct SystemDefaults {
     pub ld_preload: String,
     #[serde(default)]
     pub ld_library_path: String,
+}
+
+impl Default for SystemDefaults {
+    fn default() -> Self {
+        Self {
+            gamemode: false,
+            mangohud: false,
+            gamescope: false,
+            gamescope_flags: String::new(),
+            gamescope_w: 0,
+            gamescope_h: 0,
+            gamescope_fps: 0,
+            gamescope_upscaling: String::new(),
+            gamescope_wsi: true,
+            gamescope_wayland: false,
+            gpu: String::new(),
+            env_vars: Vec::new(),
+            ld_preload: String::new(),
+            ld_library_path: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

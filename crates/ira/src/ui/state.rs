@@ -121,6 +121,11 @@ pub struct AppState {
     /// absent when the game is unlinked. Filled when the game list loads
     /// and refreshed when the settings change a link.
     pub playtime_links: HashMap<i64, Vec<i64>>,
+    /// Open play-history windows (per-game and daily) waiting for session
+    /// inserts/deletes: each entry rebuilds its window on broadcast, placed
+    /// on the changed entry. Unregistered on close; the strong rebuild would
+    /// otherwise keep the window alive.
+    pub history_dialogs: RefCell<Vec<super::play_history::HistoryDialog>>,
     /// The big-picture view's widgets and selection, present only in big-picture
     /// mode (see `big_picture::is_big_picture`). Shared behind an `Rc` so
     /// refreshes and navigation mutate the same selection state.

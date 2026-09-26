@@ -36,9 +36,17 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             game_id,
             variant_id,
             duration_seconds,
+            started_at,
             ..
         } => {
             handle_session_recorded(state, game_id, variant_id, duration_seconds);
+            // A game just closed: any open history window showing it reloads,
+            // placed on the new session's day.
+            super::play_history::notify_sessions_changed(
+                state,
+                game_id,
+                Some(super::play_history::session_focus(started_at)),
+            );
         }
         AppMessage::ShadPS4PlaytimeChanged => handle_shadps4_playtime_changed(state),
         AppMessage::Rpcs3PlaytimeChanged => handle_rpcs3_playtime_changed(state),

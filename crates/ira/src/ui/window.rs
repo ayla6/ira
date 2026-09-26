@@ -113,6 +113,7 @@ pub fn build_ui(
         collapsed_collections: HashSet::new(),
         multi_selected_ids: HashSet::new(),
         playtime_links: HashMap::new(),
+        history_dialogs: RefCell::new(Vec::new()),
         big_picture: None,
         fetch_progress: RefCell::new(None),
         ss_job_busy: Cell::new(false),

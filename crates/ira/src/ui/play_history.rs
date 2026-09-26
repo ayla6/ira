@@ -10,7 +10,62 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 type RebuildFn = std::rc::Rc<dyn Fn(Option<ChartFocus>)>;
-type RebuildHandle = std::rc::Rc<std::cell::RefCell<Option<RebuildFn>>>;
+
+/// An open history window: a per-game dialog (`Some` game id) or the daily
+/// dialog (`None`, matches every game). Unregistered on close; the rebuild
+/// owns its widgets, so a forgotten unregister would leak the window.
+pub struct HistoryDialog {
+    game_id: Option<i64>,
+    rebuild: RebuildFn,
+}
+
+/// Whether an open history window shows sessions of the changed game: the
+/// daily window shows everything, a per-game window shows its own game and
+/// its playtime-linked members.
+fn history_dialog_matches(entry_game_id: Option<i64>, linked: &[i64], changed_game_id: i64) -> bool {
+    entry_game_id.is_none_or(|id| id == changed_game_id || linked.contains(&changed_game_id))
+}
+
+/// Cursor placement for a changed session: its own day, so an insert
+/// reveals the new entry and a delete stays where the entry was (falling
+/// back through the usual focus resolution when that week is gone).
+pub(super) fn session_focus(started_at: i64) -> ChartFocus {
+    let day = ts_to_date(started_at);
+    ChartFocus {
+        week: week_start(day),
+        day,
+    }
+}
+
+/// Rebuild every open history window showing the changed game's sessions,
+/// placed on the changed entry. Call after a session row is inserted (game
+/// close) or deleted (from another window).
+pub(super) fn notify_sessions_changed(
+    state: &SharedState,
+    changed_game_id: i64,
+    focus: Option<ChartFocus>,
+) {
+    // Snapshot the registry first: matching borrows state, and each rebuild
+    // below borrows it too — nothing may be held across those calls.
+    let entries: Vec<(Option<i64>, RebuildFn)> = {
+        state
+            .borrow()
+            .history_dialogs
+            .borrow()
+            .iter()
+            .map(|d| (d.game_id, d.rebuild.clone()))
+            .collect()
+    };
+    for (game_id, rebuild) in entries {
+        let linked = game_id
+            .map(|id| super::helpers::linked_members(state, id))
+            .unwrap_or_default();
+        if !history_dialog_matches(game_id, &linked, changed_game_id) {
+            continue;
+        }
+        rebuild(focus);
+    }
+}
 
 /// Some sources store milliseconds; normalize everything to seconds.
 fn ts_secs(timestamp: i64) -> i64 {
@@ -100,16 +155,13 @@ pub fn show_play_history_dialog(
     box_.set_margin_top(12);
     box_.set_margin_bottom(12);
 
-    // Rebuild handle stored in a RefCell so the delete callback can reference
-    // the rebuild closure that creates it (self-referential).
-    let rebuild_handle: RebuildHandle = std::rc::Rc::new(std::cell::RefCell::new(None));
-
-    {
+    // Rebuild closure: re-reads the sessions and re-renders the chart.
+    // Stored strongly in the registry (unregistered on close).
+    let rebuild: RebuildFn = std::rc::Rc::new({
         let state = state.clone();
         let box_ = box_.clone();
         let dialog = dialog.clone();
-        let rebuild_handle_c = rebuild_handle.clone();
-        let rebuild: RebuildFn = std::rc::Rc::new(move |focus: Option<ChartFocus>| {
+        move |focus: Option<ChartFocus>| {
             // Linked entries contribute their sessions here too: the
             // chart is the history of everything the link counts.
             let db = state.borrow().db.clone();
@@ -128,15 +180,11 @@ pub fn show_play_history_dialog(
             let on_delete: super::play_history_chart::DeleteSessionFn = {
                 let state = state.clone();
                 let dialog_weak = dialog.downgrade();
-                let rebuild_handle = rebuild_handle_c.clone();
                 std::rc::Rc::new(move |session_id: i64, ctrl: bool| {
                     let Some(dialog) = dialog_weak.upgrade() else {
                         return;
                     };
-                    let rebuild = rebuild_handle.borrow().clone();
-                    if let Some(rebuild) = rebuild {
-                        delete_session_with_confirm(&state, &dialog, session_id, ctrl, rebuild);
-                    }
+                    delete_session_with_confirm(&state, &dialog, session_id, ctrl);
                 })
             };
             // Always render the full chart (axes, day labels, nav, sidebar);
@@ -153,25 +201,31 @@ pub fn show_play_history_dialog(
                 ctrl_held.clone(),
                 empty_hint,
             ));
-        });
-        *rebuild_handle.borrow_mut() = Some(rebuild);
-    }
+        }
+    });
 
-    if let Some(rebuild) = rebuild_handle.borrow().clone() {
-        rebuild(None);
-    }
+    rebuild(None);
+    // Strong registration: the rebuild owns its widgets, so the entry must
+    // go on close (below) — that also breaks the registry → window cycle.
+    let close_rebuild = rebuild.clone();
+    state.borrow_mut().history_dialogs.borrow_mut().push(HistoryDialog {
+        game_id: Some(game_id),
+        rebuild,
+    });
 
     toolbar_view.set_content(Some(&box_));
     dialog.set_child(Some(&toolbar_view));
     dialog.present(Some(&state.borrow().window));
 
     let refresh_state = state.clone();
-    let rebuild_handle_close = rebuild_handle.clone();
     dialog.connect_closed(move |_| {
-        // The rebuild closure is stored inside rebuild_handle and itself holds
-        // a strong clone of it — an Rc cycle. Clear it here so the dialog and
-        // its widget tree are freed on close instead of leaking.
-        *rebuild_handle_close.borrow_mut() = None;
+        // Unregister first: the registry's strong rebuild would otherwise
+        // keep this window (and its widgets) alive.
+        refresh_state
+            .borrow_mut()
+            .history_dialogs
+            .borrow_mut()
+            .retain(|d| !Rc::ptr_eq(&close_rebuild, &d.rebuild));
         let still_active = refresh_state.borrow().displayed_db_id == game_id;
         let game = if still_active {
             refresh_state.borrow().find_game(game_id, variant_id)
@@ -197,17 +251,18 @@ fn delete_session_with_confirm(
     parent: &adw::Dialog,
     session_id: i64,
     ctrl: bool,
-    rebuild: RebuildFn,
 ) {
     let do_delete = {
         let state = state.clone();
-        let rebuild = rebuild.clone();
         move || {
-            let focus = delete_session_from_db(&state, session_id)
+            // One broadcast refreshes every open window showing this
+            // session — the initiating window included, placed on the
+            // deleted entry's day exactly as its own rebuild did before.
+            if let Ok((game_id, focus)) = delete_session_from_db(&state, session_id)
                 .map_err(|e| eprintln!("Failed to delete session: {}", e))
-                .ok()
-                .flatten();
-            rebuild(focus);
+            {
+                notify_sessions_changed(&state, game_id, focus);
+            }
         }
     };
     if ctrl {
@@ -227,14 +282,11 @@ fn delete_session_with_confirm(
 fn delete_session_from_db(
     state: &SharedState,
     session_id: i64,
-) -> Result<Option<ChartFocus>, String> {
+) -> Result<(i64, Option<ChartFocus>), String> {
     let session = ira_db::delete_session(&state.borrow().db, session_id)?
         .ok_or_else(|| format!("session {} not found", session_id))?;
-    let deleted_day = ts_to_date(session.started_at);
-    let focus = ChartFocus {
-        week: week_start(deleted_day),
-        day: deleted_day,
-    };
+    let game_id = session.game_id;
+    let focus = Some(session_focus(session.started_at));
     let hours = (session.duration_seconds as f64) / 3600.0;
     let (db, new_base_playtime, new_variant_playtime) = {
         let mut s = state.borrow_mut();
@@ -271,7 +323,7 @@ fn delete_session_from_db(
             }
         }
     }
-    Ok(Some(focus))
+    Ok((game_id, focus))
 }
 
 fn compute_game_weeks(sessions: &[ira_models::PlaySession], game_name: &str) -> Vec<WeekData> {
@@ -361,42 +413,68 @@ pub fn show_daily_history_dialog(state: &SharedState) {
     box_.set_margin_top(12);
     box_.set_margin_bottom(12);
 
-    let now = now_secs();
-    let from = now - 84 * 86400;
+    // Same outside-change registry as the per-game window: a game closing
+    // while this is open inserts a session that must appear. None matches
+    // every game; unregistered on close.
+    let rebuild: RebuildFn = std::rc::Rc::new({
+        let state = state.clone();
+        let box_ = box_.clone();
+        move |focus: Option<ChartFocus>| {
+            let now = now_secs();
+            let from = now - 84 * 86400;
 
-    let all_sessions = ira_db::get_sessions_range(&state.borrow().db, from, now)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to read play sessions: {e}");
-            Vec::new()
-        });
+            let all_sessions = ira_db::get_sessions_range(&state.borrow().db, from, now)
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to read play sessions: {e}");
+                    Vec::new()
+                });
 
-    // Straight from the database: games that left the library keep their
-    // rows, and their past sessions must still read as themselves.
-    let game_names: HashMap<i64, String> = {
-        let db = state.borrow().db.clone();
-        ira_db::load_all_games(&db)
-            .unwrap_or_else(|e| {
-                eprintln!("Failed to read game titles: {e}");
-                Vec::new()
-            })
-            .into_iter()
-            .map(|entry| (entry.id, entry.title))
-            .collect()
-    };
+            // Straight from the database: games that left the library keep their
+            // rows, and their past sessions must still read as themselves.
+            let game_names: HashMap<i64, String> = {
+                let db = state.borrow().db.clone();
+                ira_db::load_all_games(&db)
+                    .unwrap_or_else(|e| {
+                        eprintln!("Failed to read game titles: {e}");
+                        Vec::new()
+                    })
+                    .into_iter()
+                    .map(|entry| (entry.id, entry.title))
+                    .collect()
+            };
 
-    let empty_hint = all_sessions
-        .is_empty()
-        .then(|| crate::tr!("No play sessions recorded yet"));
-    let weeks = compute_app_weeks(&all_sessions, &game_names);
+            let empty_hint = all_sessions
+                .is_empty()
+                .then(|| crate::tr!("No play sessions recorded yet"));
+            let weeks = compute_app_weeks(&all_sessions, &game_names);
 
-    box_.append(&build_weekly_chart(
-        weeks,
-        false,
-        None,
-        None,
-        Rc::new(Cell::new(false)),
-        empty_hint,
-    ));
+            clear_children(&box_);
+            box_.append(&build_weekly_chart(
+                weeks,
+                false,
+                None,
+                focus,
+                Rc::new(Cell::new(false)),
+                empty_hint,
+            ));
+        }
+    });
+
+    rebuild(None);
+    let close_rebuild = rebuild.clone();
+    state.borrow_mut().history_dialogs.borrow_mut().push(HistoryDialog {
+        game_id: None,
+        rebuild,
+    });
+
+    let unregister = state.clone();
+    dialog.connect_closed(move |_| {
+        unregister
+            .borrow_mut()
+            .history_dialogs
+            .borrow_mut()
+            .retain(|d| !Rc::ptr_eq(&close_rebuild, &d.rebuild));
+    });
 
     toolbar_view.set_content(Some(&box_));
     dialog.set_child(Some(&toolbar_view));
@@ -498,6 +576,40 @@ fn build_day_data(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn test_history_dialog_matches_daily_sees_every_game() {
+        assert!(history_dialog_matches(None, &[], 7));
+        assert!(history_dialog_matches(None, &[7], 7));
+    }
+
+    #[test]
+    fn test_history_dialog_matches_own_and_linked_games() {
+        // The window's own game and its playtime-linked members refresh…
+        assert!(history_dialog_matches(Some(7), &[7], 7));
+        assert!(history_dialog_matches(Some(7), &[7, 9], 9));
+        // …anything else does not.
+        assert!(!history_dialog_matches(Some(7), &[7], 9));
+        assert!(!history_dialog_matches(Some(7), &[7, 9], 12));
+    }
+
+    #[test]
+    fn test_session_focus_lands_on_session_day() {
+        // A Tuesday noon session focuses its own day in its Monday week.
+        let noon = chrono::Local
+            .with_ymd_and_hms(2026, 8, 25, 12, 0, 0)
+            .single()
+            .unwrap();
+        let focus = session_focus(noon.timestamp());
+        assert_eq!(
+            focus.day,
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 25).unwrap()
+        );
+        assert_eq!(
+            focus.week,
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 24).unwrap()
+        );
+    }
 
     #[test]
     fn test_ts_secs_passthrough_seconds() {

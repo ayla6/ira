@@ -13,11 +13,20 @@ const CANVAS_VERT_SPV: &[u8] = include_bytes!("../shaders/canvas_vert.spv");
 const CANVAS_FRAG_SPV: &[u8] = include_bytes!("../shaders/canvas_frag.spv");
 
 pub(crate) struct CanvasTex {
+    pub(crate) core: TexCore,
+    pub(crate) sampler: vk::Sampler,
+    pub(crate) set_layout: vk::DescriptorSetLayout,
+}
+
+unsafe impl Send for CanvasTex {}
+
+/// Texture resources shared by the panel and cursor bundles: image + view +
+/// descriptor + staging + quad buffers + upload state. The panel adds its
+/// sampler/layout on top; the cursor adds its size/hotspot.
+pub(crate) struct TexCore {
     pub(crate) image: vk::Image,
     pub(crate) memory: vk::DeviceMemory,
     pub(crate) view: vk::ImageView,
-    pub(crate) sampler: vk::Sampler,
-    pub(crate) set_layout: vk::DescriptorSetLayout,
     pub(crate) pool: vk::DescriptorPool,
     pub(crate) set: vk::DescriptorSet,
     pub(crate) staging: vk::Buffer,
@@ -32,7 +41,7 @@ pub(crate) struct CanvasTex {
     pub(crate) last_seq: u32,
 }
 
-unsafe impl Send for CanvasTex {}
+unsafe impl Send for TexCore {}
 
 /// Borrowed upload target: the image + staging pair both texture kinds
 /// share, so one copy routine serves panel and cursor.
@@ -43,7 +52,7 @@ pub(crate) struct UploadImage<'a> {
     pub initialized: &'a mut bool,
 }
 
-impl CanvasTex {
+impl TexCore {
     pub(crate) fn upload_image(&mut self) -> UploadImage<'_> {
         UploadImage {
             image: self.image,
@@ -54,24 +63,11 @@ impl CanvasTex {
     }
 }
 
-/// Cursor texture bundle. Smaller sibling of `CanvasTex`: image + view +
-/// descriptor + staging only (vertices reuse the panel VBO per draw).
+/// Cursor texture bundle: shared core plus size/hotspot (vertices reuse
+/// per-draw uploads, so no VBO sharing hazard beyond the dedicated pair
+/// in the core).
 pub(crate) struct CursorTex {
-    pub(crate) image: vk::Image,
-    pub(crate) memory: vk::DeviceMemory,
-    pub(crate) view: vk::ImageView,
-    pub(crate) pool: vk::DescriptorPool,
-    pub(crate) set: vk::DescriptorSet,
-    pub(crate) staging: vk::Buffer,
-    pub(crate) staging_memory: vk::DeviceMemory,
-    pub(crate) staging_ptr: *mut u8,
-    pub(crate) vbo: vk::Buffer,
-    pub(crate) vbo_memory: vk::DeviceMemory,
-    pub(crate) vbo_ptr: *mut u8,
-    pub(crate) ibo: vk::Buffer,
-    pub(crate) ibo_memory: vk::DeviceMemory,
-    pub(crate) initialized: bool,
-    pub(crate) last_seq: u32,
+    pub(crate) core: TexCore,
     pub(crate) w: u32,
     pub(crate) h: u32,
     pub(crate) xhot: i32,
@@ -80,15 +76,118 @@ pub(crate) struct CursorTex {
 
 unsafe impl Send for CursorTex {}
 
-impl CursorTex {
-    pub(crate) fn upload_image(&mut self) -> UploadImage<'_> {
-        UploadImage {
-            image: self.image,
-            staging: self.staging,
-            staging_ptr: self.staging_ptr,
-            initialized: &mut self.initialized,
-        }
-    }
+/// Allocates the vertex/index buffer pair for one textured quad plus the
+/// fixed triangle indices. Shared by both bundles.
+unsafe fn create_quad_buffers(
+    fns: DeviceFns,
+    device: vk::Device,
+    physical_device: vk::PhysicalDevice,
+) -> Option<(
+    vk::Buffer,
+    vk::DeviceMemory,
+    *mut u8,
+    vk::Buffer,
+    vk::DeviceMemory,
+)> {
+    let (vbo, vbo_memory, vbo_ptr) = create_host_buffer(
+        fns,
+        device,
+        physical_device,
+        super::canvas::QUAD_VBO_BYTES,
+        vk::BufferUsageFlags::VERTEX_BUFFER,
+    )?;
+    let (ibo, ibo_memory, ibo_ptr) = create_host_buffer(
+        fns,
+        device,
+        physical_device,
+        super::canvas::QUAD_IBO_BYTES,
+        vk::BufferUsageFlags::INDEX_BUFFER,
+    )?;
+    let indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
+    std::ptr::copy_nonoverlapping(
+        indices.as_ptr() as *const u8,
+        ibo_ptr as *mut u8,
+        std::mem::size_of_val(&indices),
+    );
+    Some((vbo, vbo_memory, vbo_ptr as *mut u8, ibo, ibo_memory))
+}
+
+/// Parameters for one texture bundle: dimensions, staging size, swizzle,
+/// and the sampler/layout it is described with.
+struct TexParams {
+    width: u32,
+    height: u32,
+    staging_bytes: u64,
+    swizzle_rb: bool,
+    sampler: vk::Sampler,
+    set_layout: vk::DescriptorSetLayout,
+}
+
+/// Allocates image + view + descriptor + staging + quad buffers: everything
+/// both bundles share. Callers pass their sampler/layout (fresh for the
+/// panel, shared for the cursor) and get back the core.
+unsafe fn create_core(
+    fns: DeviceFns,
+    device: vk::Device,
+    physical_device: vk::PhysicalDevice,
+    params: TexParams,
+) -> Option<TexCore> {
+    let (image, memory) = create_image(
+        fns,
+        device,
+        physical_device,
+        vk::Format::R8G8B8A8_UNORM,
+        params.width,
+        params.height,
+        vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+    )?;
+    let view = create_view(fns, device, image, params.swizzle_rb)?;
+    let (pool, set) = create_set(fns, device, params.set_layout)?;
+    write_descriptor(fns, device, set, view, params.sampler);
+    let (staging, staging_memory, staging_ptr) = create_host_buffer(
+        fns,
+        device,
+        physical_device,
+        params.staging_bytes,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+    )?;
+    let (vbo, vbo_memory, vbo_ptr, ibo, ibo_memory) =
+        create_quad_buffers(fns, device, physical_device)?;
+    Some(TexCore {
+        image,
+        memory,
+        view,
+        pool,
+        set,
+        staging,
+        staging_memory,
+        staging_ptr: staging_ptr as *mut u8,
+        vbo,
+        vbo_memory,
+        vbo_ptr,
+        ibo,
+        ibo_memory,
+        initialized: false,
+        last_seq: 0,
+    })
+}
+
+/// Destroys the shared core. No GPU work may reference it.
+unsafe fn destroy_core(fns: DeviceFns, device: vk::Device, core: &TexCore) {
+    let d = device;
+    (fns.destroy_image_view)(d, core.view, std::ptr::null());
+    (fns.destroy_image)(d, core.image, std::ptr::null());
+    (fns.free_memory)(d, core.memory, std::ptr::null());
+    (fns.destroy_descriptor_pool)(d, core.pool, std::ptr::null());
+    (fns.unmap_memory)(d, core.staging_memory);
+    (fns.destroy_buffer)(d, core.staging, std::ptr::null());
+    (fns.free_memory)(d, core.staging_memory, std::ptr::null());
+    (fns.unmap_memory)(d, core.vbo_memory);
+    (fns.destroy_buffer)(d, core.vbo, std::ptr::null());
+    (fns.free_memory)(d, core.vbo_memory, std::ptr::null());
+    (fns.unmap_memory)(d, core.ibo_memory);
+    (fns.destroy_buffer)(d, core.ibo, std::ptr::null());
+    (fns.free_memory)(d, core.ibo_memory, std::ptr::null());
 }
 
 /// Creates the cursor texture (128×128 RGBA, no swizzle) + descriptor +
@@ -100,64 +199,21 @@ pub(crate) unsafe fn create_cursor(
     sampler: vk::Sampler,
     set_layout: vk::DescriptorSetLayout,
 ) -> Option<CursorTex> {
-    let (image, memory) = create_image(
+    let core = create_core(
         fns,
         device,
         physical_device,
-        vk::Format::R8G8B8A8_UNORM,
-        ira_overlay_ipc::CURSOR_MAX as u32,
-        ira_overlay_ipc::CURSOR_MAX as u32,
-        vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+        TexParams {
+            width: ira_overlay_ipc::CURSOR_MAX as u32,
+            height: ira_overlay_ipc::CURSOR_MAX as u32,
+            staging_bytes: CURSOR_MAX_BYTES as u64,
+            swizzle_rb: false,
+            sampler,
+            set_layout,
+        },
     )?;
-    let view = create_view(fns, device, image, false)?;
-    let (pool, set) = create_set(fns, device, set_layout)?;
-    write_descriptor(fns, device, set, view, sampler);
-    let (staging, staging_memory, staging_ptr) = create_host_buffer(
-        fns,
-        device,
-        physical_device,
-        CURSOR_MAX_BYTES as u64,
-        vk::BufferUsageFlags::TRANSFER_SRC,
-    )?;
-    // Dedicated vertex/index buffers: the panel and cursor draws share one
-    // command buffer, so sharing one VBO would let the second upload
-    // clobber the first draw's vertices before the GPU executes them.
-    let (vbo, vbo_memory, vbo_ptr) = create_host_buffer(
-        fns,
-        device,
-        physical_device,
-        4 * 20,
-        vk::BufferUsageFlags::VERTEX_BUFFER,
-    )?;
-    let (ibo, ibo_memory, ibo_ptr) = create_host_buffer(
-        fns,
-        device,
-        physical_device,
-        6 * 4,
-        vk::BufferUsageFlags::INDEX_BUFFER,
-    )?;
-    let indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
-    std::ptr::copy_nonoverlapping(
-        indices.as_ptr() as *const u8,
-        ibo_ptr as *mut u8,
-        std::mem::size_of_val(&indices),
-    );
     Some(CursorTex {
-        image,
-        memory,
-        view,
-        pool,
-        set,
-        staging,
-        staging_memory,
-        staging_ptr: staging_ptr as *mut u8,
-        vbo,
-        vbo_memory,
-        vbo_ptr: vbo_ptr as *mut u8,
-        ibo,
-        ibo_memory,
-        initialized: false,
-        last_seq: 0,
+        core,
         w: 0,
         h: 0,
         xhot: 0,
@@ -196,20 +252,7 @@ unsafe fn create_set(
 
 /// Destroys cursor resources. No GPU work may reference them.
 pub(crate) unsafe fn destroy_cursor(fns: DeviceFns, device: vk::Device, tex: &CursorTex) {
-    let d = device;
-    (fns.destroy_image_view)(d, tex.view, std::ptr::null());
-    (fns.destroy_image)(d, tex.image, std::ptr::null());
-    (fns.free_memory)(d, tex.memory, std::ptr::null());
-    (fns.destroy_descriptor_pool)(d, tex.pool, std::ptr::null());
-    (fns.unmap_memory)(d, tex.staging_memory);
-    (fns.destroy_buffer)(d, tex.staging, std::ptr::null());
-    (fns.free_memory)(d, tex.staging_memory, std::ptr::null());
-    (fns.unmap_memory)(d, tex.vbo_memory);
-    (fns.destroy_buffer)(d, tex.vbo, std::ptr::null());
-    (fns.free_memory)(d, tex.vbo_memory, std::ptr::null());
-    (fns.unmap_memory)(d, tex.ibo_memory);
-    (fns.destroy_buffer)(d, tex.ibo, std::ptr::null());
-    (fns.free_memory)(d, tex.ibo_memory, std::ptr::null());
+    destroy_core(fns, device, &tex.core);
 }
 
 /// Creates the canvas texture + sampler + descriptor + staging resources.
@@ -219,58 +262,25 @@ pub(crate) unsafe fn create(
     device: vk::Device,
     physical_device: vk::PhysicalDevice,
 ) -> Option<CanvasTex> {
-    let (image, memory) = create_canvas_image(fns, device, physical_device)?;
-    let view = create_view(fns, device, image, true)?;
     let sampler = create_sampler(fns, device);
-    let (set_layout, pool, set) = create_descriptors(fns, device)?;
-    write_descriptor(fns, device, set, view, sampler);
-
-    let (staging, staging_memory, staging_ptr) = create_host_buffer(
+    let set_layout = create_layout(fns, device)?;
+    let core = create_core(
         fns,
         device,
         physical_device,
-        CANVAS_MAX_BYTES as u64,
-        vk::BufferUsageFlags::TRANSFER_SRC,
+        TexParams {
+            width: CANVAS_MAX_W as u32,
+            height: CANVAS_MAX_H as u32,
+            staging_bytes: CANVAS_MAX_BYTES as u64,
+            swizzle_rb: true,
+            sampler,
+            set_layout,
+        },
     )?;
-    let (vbo, vbo_memory, vbo_ptr) = create_host_buffer(
-        fns,
-        device,
-        physical_device,
-        4 * 20,
-        vk::BufferUsageFlags::VERTEX_BUFFER,
-    )?;
-    let (ibo, ibo_memory, ibo_ptr) = create_host_buffer(
-        fns,
-        device,
-        physical_device,
-        6 * 4,
-        vk::BufferUsageFlags::INDEX_BUFFER,
-    )?;
-    let indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
-    std::ptr::copy_nonoverlapping(
-        indices.as_ptr() as *const u8,
-        ibo_ptr as *mut u8,
-        std::mem::size_of_val(&indices),
-    );
-
     Some(CanvasTex {
-        image,
-        memory,
-        view,
+        core,
         sampler,
         set_layout,
-        pool,
-        set,
-        staging,
-        staging_memory,
-        staging_ptr: staging_ptr as *mut u8,
-        vbo,
-        vbo_memory,
-        vbo_ptr: vbo_ptr as *mut u8,
-        ibo,
-        ibo_memory,
-        initialized: false,
-        last_seq: 0,
     })
 }
 
@@ -287,48 +297,11 @@ pub(crate) unsafe fn create_pipeline(
     vk::ShaderModule,
     vk::ShaderModule,
 ) {
-    let vert_code = words(CANVAS_VERT_SPV);
-    let vert_info = vk::ShaderModuleCreateInfo::default().code(&vert_code);
-    let mut shader_vert = vk::ShaderModule::null();
-    let _ = (fns.create_shader_module)(device, &vert_info, std::ptr::null(), &mut shader_vert);
+    let (shader_vert, shader_frag) = load_shaders(fns, device);
+    let stages = shader_stages(shader_vert, shader_frag);
 
-    let frag_code = words(CANVAS_FRAG_SPV);
-    let frag_info = vk::ShaderModuleCreateInfo::default().code(&frag_code);
-    let mut shader_frag = vk::ShaderModule::null();
-    let _ = (fns.create_shader_module)(device, &frag_info, std::ptr::null(), &mut shader_frag);
-
-    let stages = [
-        vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .module(shader_vert)
-            .name(c"main"),
-        vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .module(shader_frag)
-            .name(c"main"),
-    ];
-
-    let binding = vk::VertexInputBindingDescription::default()
-        .binding(0)
-        .stride(20)
-        .input_rate(vk::VertexInputRate::VERTEX);
-    let attributes = [
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(0)
-            .format(vk::Format::R32G32_SFLOAT)
-            .offset(0),
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(1)
-            .format(vk::Format::R32G32_SFLOAT)
-            .offset(8),
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(2)
-            .format(vk::Format::R8G8B8A8_UNORM)
-            .offset(16),
-    ];
+    let binding = vertex_binding();
+    let attributes = vertex_attributes();
     let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(std::slice::from_ref(&binding))
         .vertex_attribute_descriptions(&attributes);
@@ -346,16 +319,7 @@ pub(crate) unsafe fn create_pipeline(
         .cull_mode(vk::CullModeFlags::NONE);
     let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-    // Canvas pixels are premultiplied — same factors as the glyph pipeline.
-    let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-        .color_write_mask(vk::ColorComponentFlags::RGBA)
-        .blend_enable(true)
-        .src_color_blend_factor(vk::BlendFactor::ONE)
-        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .alpha_blend_op(vk::BlendOp::ADD);
+    let blend_attachment = blend_attachment();
     let color_blend = vk::PipelineColorBlendStateCreateInfo::default()
         .attachments(std::slice::from_ref(&blend_attachment));
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
@@ -396,24 +360,81 @@ pub(crate) unsafe fn create_pipeline(
     (pipeline_layout, pipeline, shader_vert, shader_frag)
 }
 
+unsafe fn load_shaders(fns: DeviceFns, device: vk::Device) -> (vk::ShaderModule, vk::ShaderModule) {
+    let vert_code = words(CANVAS_VERT_SPV);
+    let vert_info = vk::ShaderModuleCreateInfo::default().code(&vert_code);
+    let mut shader_vert = vk::ShaderModule::null();
+    let _ = (fns.create_shader_module)(device, &vert_info, std::ptr::null(), &mut shader_vert);
+
+    let frag_code = words(CANVAS_FRAG_SPV);
+    let frag_info = vk::ShaderModuleCreateInfo::default().code(&frag_code);
+    let mut shader_frag = vk::ShaderModule::null();
+    let _ = (fns.create_shader_module)(device, &frag_info, std::ptr::null(), &mut shader_frag);
+    (shader_vert, shader_frag)
+}
+
+fn shader_stages(
+    shader_vert: vk::ShaderModule,
+    shader_frag: vk::ShaderModule,
+) -> [vk::PipelineShaderStageCreateInfo<'static>; 2] {
+    [
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(shader_vert)
+            .name(c"main"),
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(shader_frag)
+            .name(c"main"),
+    ]
+}
+
+fn vertex_binding() -> vk::VertexInputBindingDescription {
+    vk::VertexInputBindingDescription::default()
+        .binding(0)
+        .stride(20)
+        .input_rate(vk::VertexInputRate::VERTEX)
+}
+
+fn vertex_attributes() -> [vk::VertexInputAttributeDescription; 3] {
+    [
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(0)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(0),
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(1)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(8),
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(2)
+            .format(vk::Format::R8G8B8A8_UNORM)
+            .offset(16),
+    ]
+}
+
+fn blend_attachment() -> vk::PipelineColorBlendAttachmentState {
+    // Canvas pixels are premultiplied — same factors as the glyph pipeline.
+    vk::PipelineColorBlendAttachmentState::default()
+        .color_write_mask(vk::ColorComponentFlags::RGBA)
+        .blend_enable(true)
+        .src_color_blend_factor(vk::BlendFactor::ONE)
+        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+        .color_blend_op(vk::BlendOp::ADD)
+        .src_alpha_blend_factor(vk::BlendFactor::ONE)
+        .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+        .alpha_blend_op(vk::BlendOp::ADD)
+}
+
 /// Destroys all canvas resources. No GPU work may reference them.
 pub(crate) unsafe fn destroy(fns: DeviceFns, device: vk::Device, tex: &CanvasTex) {
     let d = device;
+    destroy_core(fns, device, &tex.core);
     (fns.destroy_sampler)(d, tex.sampler, std::ptr::null());
-    (fns.destroy_image_view)(d, tex.view, std::ptr::null());
-    (fns.destroy_image)(d, tex.image, std::ptr::null());
-    (fns.free_memory)(d, tex.memory, std::ptr::null());
-    (fns.destroy_descriptor_pool)(d, tex.pool, std::ptr::null());
     (fns.destroy_descriptor_set_layout)(d, tex.set_layout, std::ptr::null());
-    (fns.unmap_memory)(d, tex.staging_memory);
-    (fns.destroy_buffer)(d, tex.staging, std::ptr::null());
-    (fns.free_memory)(d, tex.staging_memory, std::ptr::null());
-    (fns.unmap_memory)(d, tex.vbo_memory);
-    (fns.destroy_buffer)(d, tex.vbo, std::ptr::null());
-    (fns.free_memory)(d, tex.vbo_memory, std::ptr::null());
-    (fns.unmap_memory)(d, tex.ibo_memory);
-    (fns.destroy_buffer)(d, tex.ibo, std::ptr::null());
-    (fns.free_memory)(d, tex.ibo_memory, std::ptr::null());
 }
 
 fn words(spv: &[u8]) -> Vec<u32> {
@@ -536,22 +557,24 @@ unsafe fn create_image(
     Some((image, memory))
 }
 
-/// Device-local canvas texture at max extent; the live frame occupies the
-/// top-left `w×h` subregion.
-unsafe fn create_canvas_image(
-    fns: DeviceFns,
-    device: vk::Device,
-    physical_device: vk::PhysicalDevice,
-) -> Option<(vk::Image, vk::DeviceMemory)> {
-    create_image(
-        fns,
-        device,
-        physical_device,
-        vk::Format::R8G8B8A8_UNORM,
-        CANVAS_MAX_W as u32,
-        CANVAS_MAX_H as u32,
-        vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
-    )
+/// Descriptor-set layout for one combined image sampler. The pool + set
+/// allocation half lives in `create_set`, shared with the cursor path via
+/// `create_core`.
+unsafe fn create_layout(fns: DeviceFns, device: vk::Device) -> Option<vk::DescriptorSetLayout> {
+    let binding = vk::DescriptorSetLayoutBinding::default()
+        .binding(0)
+        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+        .descriptor_count(1)
+        .stage_flags(vk::ShaderStageFlags::FRAGMENT);
+    let layout_info =
+        vk::DescriptorSetLayoutCreateInfo::default().bindings(std::slice::from_ref(&binding));
+    let mut set_layout = vk::DescriptorSetLayout::null();
+    if (fns.create_descriptor_set_layout)(device, &layout_info, std::ptr::null(), &mut set_layout)
+        != vk::Result::SUCCESS
+    {
+        return None;
+    }
+    Some(set_layout)
 }
 
 /// View with optional R↔B swizzle. Panel bytes are Cairo ARGB32 (BGRA on
@@ -606,54 +629,6 @@ unsafe fn create_sampler(fns: DeviceFns, device: vk::Device) -> vk::Sampler {
     let mut sampler = vk::Sampler::null();
     let _ = (fns.create_sampler)(device, &info, std::ptr::null(), &mut sampler);
     sampler
-}
-
-unsafe fn create_descriptors(
-    fns: DeviceFns,
-    device: vk::Device,
-) -> Option<(
-    vk::DescriptorSetLayout,
-    vk::DescriptorPool,
-    vk::DescriptorSet,
-)> {
-    let binding = vk::DescriptorSetLayoutBinding::default()
-        .binding(0)
-        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-        .descriptor_count(1)
-        .stage_flags(vk::ShaderStageFlags::FRAGMENT);
-    let layout_info =
-        vk::DescriptorSetLayoutCreateInfo::default().bindings(std::slice::from_ref(&binding));
-    let mut set_layout = vk::DescriptorSetLayout::null();
-    if (fns.create_descriptor_set_layout)(device, &layout_info, std::ptr::null(), &mut set_layout)
-        != vk::Result::SUCCESS
-    {
-        return None;
-    }
-
-    let pool_size = vk::DescriptorPoolSize::default()
-        .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-        .descriptor_count(1);
-    let pool_info = vk::DescriptorPoolCreateInfo::default()
-        .max_sets(1)
-        .pool_sizes(std::slice::from_ref(&pool_size));
-    let mut pool = vk::DescriptorPool::null();
-    if (fns.create_descriptor_pool)(device, &pool_info, std::ptr::null(), &mut pool)
-        != vk::Result::SUCCESS
-    {
-        (fns.destroy_descriptor_set_layout)(device, set_layout, std::ptr::null());
-        return None;
-    }
-
-    let alloc_info = vk::DescriptorSetAllocateInfo::default()
-        .descriptor_pool(pool)
-        .set_layouts(std::slice::from_ref(&set_layout));
-    let mut set = vk::DescriptorSet::null();
-    if (fns.allocate_descriptor_sets)(device, &alloc_info, &mut set) != vk::Result::SUCCESS {
-        (fns.destroy_descriptor_pool)(device, pool, std::ptr::null());
-        (fns.destroy_descriptor_set_layout)(device, set_layout, std::ptr::null());
-        return None;
-    }
-    Some((set_layout, pool, set))
 }
 
 unsafe fn write_descriptor(

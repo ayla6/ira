@@ -20,20 +20,18 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
 use ira_overlay::capture;
-use ira_overlay_ipc::{CanvasCommand, ShmHeader, CMD_ACTIVATE, CMD_NAV_DOWN, CMD_NAV_LEFT,
-    CMD_NAV_RIGHT, CMD_NAV_UP};
+use ira_overlay_ipc::{
+    CanvasCommand, ShmHeader, CMD_ACTIVATE, CMD_NAV_DOWN, CMD_NAV_LEFT, CMD_NAV_RIGHT, CMD_NAV_UP,
+};
 
 pub static HAS_FOCUS: AtomicBool = AtomicBool::new(false);
-
-/// One-shot env check for input-path diagnostics (`IRA_OVERLAY_DEBUG=1`).
-fn wl_debug() -> bool {
-    static DEBUG: OnceLock<bool> = OnceLock::new();
-    *DEBUG.get_or_init(|| std::env::var_os("IRA_OVERLAY_DEBUG").is_some())
-}
 
 // --- Tracked input state (all accessed from dispatch(), single-threaded) ---
 
 static MODS_DEPRESSED: AtomicU32 = AtomicU32::new(0);
+/// Toggle key currently held (u32::MAX = none): XKB/Wayland re-fires
+/// key-press for held keys, which would strobe the overlay without this.
+static TOGGLE_HELD: AtomicU32 = AtomicU32::new(u32::MAX);
 static MOUSE_SX: AtomicI32 = AtomicI32::new(0);
 static MOUSE_SY: AtomicI32 = AtomicI32::new(0);
 static POINTER: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -232,23 +230,36 @@ extern "C" fn keyboard_key(_: *mut c_void, _: *mut c_void, _: u32, _: u32, key: 
     let pressed = state == KEY_PRESSED;
     let mods = MODS_DEPRESSED.load(Ordering::Relaxed);
 
-    // Hotkeys work even when overlay is hidden.
-    let (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods) = crate::shim_bridge::hotkeys();
-    if pressed && (mods & tog_mods) == tog_mods && key == tog_kc {
-        if !crate::shim_bridge::ready_for_overlay() {
-            return;
+    // Hotkeys work even when overlay is hidden. Edge-triggered: held
+    // keys re-fire press events, which must not re-toggle.
+    if pressed {
+        match hotkey_action(key, mods) {
+            Some(KeyAction::Toggle) => {
+                if !crate::shim_bridge::ready_for_overlay() {
+                    return;
+                }
+                if TOGGLE_HELD
+                    .compare_exchange(u32::MAX, key, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
+                    let visible = crate::shim_bridge::is_visible();
+                    crate::shim_bridge::set_visible(!visible);
+                }
+                return;
+            }
+            Some(KeyAction::Screenshot) => {
+                capture::request_screenshot();
+                return;
+            }
+            Some(KeyAction::Record) => {
+                capture::toggle_recording();
+                return;
+            }
+            None => {}
         }
-        let visible = crate::shim_bridge::is_visible();
-        crate::shim_bridge::set_visible(!visible);
-        return;
     }
-    if pressed && (mods & ss_mods) == ss_mods && key == ss_kc {
-        capture::request_screenshot();
-        return;
-    }
-    if pressed && (mods & rec_mods) == rec_mods && key == rec_kc {
-        capture::toggle_recording();
-        return;
+    if !pressed {
+        let _ = TOGGLE_HELD.compare_exchange(key, u32::MAX, Ordering::SeqCst, Ordering::SeqCst);
     }
 
     // Navigation keys and debug toggles only when overlay is visible.
@@ -256,17 +267,41 @@ extern "C" fn keyboard_key(_: *mut c_void, _: *mut c_void, _: u32, _: u32, key: 
         return;
     }
     if pressed {
-        let kind = match key {
-            KC_UP => Some(CMD_NAV_UP),
-            KC_DOWN => Some(CMD_NAV_DOWN),
-            KC_LEFT => Some(CMD_NAV_LEFT),
-            KC_RIGHT => Some(CMD_NAV_RIGHT),
-            KC_RETURN => Some(CMD_ACTIVATE),
-            _ => None,
-        };
-        if let Some(kind) = kind {
+        if let Some(kind) = nav_kind(key) {
             crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
         }
+    }
+}
+
+enum KeyAction {
+    Toggle,
+    Screenshot,
+    Record,
+}
+
+/// Matches a (key, mods) press against the three configured hotkeys.
+/// Toggle first: a Super-based toggle must win over desktop combos.
+fn hotkey_action(key: u32, mods: u32) -> Option<KeyAction> {
+    let (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods) = crate::shim_bridge::hotkeys();
+    [
+        ((tog_kc, tog_mods), KeyAction::Toggle),
+        ((ss_kc, ss_mods), KeyAction::Screenshot),
+        ((rec_kc, rec_mods), KeyAction::Record),
+    ]
+    .into_iter()
+    .find(|((kc, m), _)| (mods & m) == *m && key == *kc)
+    .map(|(_, action)| action)
+}
+
+/// Overlay nav keys (evdev codes; Wayland needs no +8 offset).
+fn nav_kind(key: u32) -> Option<u32> {
+    match key {
+        KC_UP => Some(CMD_NAV_UP),
+        KC_DOWN => Some(CMD_NAV_DOWN),
+        KC_LEFT => Some(CMD_NAV_LEFT),
+        KC_RIGHT => Some(CMD_NAV_RIGHT),
+        KC_RETURN => Some(CMD_ACTIVATE),
+        _ => None,
     }
 }
 
@@ -284,6 +319,11 @@ extern "C" fn keyboard_modifiers(
 
 // --- Pointer callbacks ---
 
+fn store_mouse(sx: i32, sy: i32) {
+    MOUSE_SX.store(sx, Ordering::Relaxed);
+    MOUSE_SY.store(sy, Ordering::Relaxed);
+}
+
 extern "C" fn pointer_enter(
     _: *mut c_void,
     _: *mut c_void,
@@ -292,18 +332,16 @@ extern "C" fn pointer_enter(
     sx: i32,
     sy: i32,
 ) {
-    MOUSE_SX.store(sx, Ordering::Relaxed);
-    MOUSE_SY.store(sy, Ordering::Relaxed);
+    store_mouse(sx, sy);
 }
 
 extern "C" fn pointer_motion(_: *mut c_void, _: *mut c_void, _: u32, sx: i32, sy: i32) {
-    MOUSE_SX.store(sx, Ordering::Relaxed);
-    MOUSE_SY.store(sy, Ordering::Relaxed);
+    store_mouse(sx, sy);
     if crate::shim_bridge::is_visible() {
         let (x, y) = fixed_to_f32(sx, sy);
         // Second-source tracing: proves whether layer-Wayland pointer
         // events fire alongside shim events in the same session.
-        if wl_debug() {
+        if crate::types::debug_log() {
             static LAST_WL_MS: AtomicU32 = AtomicU32::new(0);
             let now = crate::canvas::now_ms();
             if now.wrapping_sub(LAST_WL_MS.load(Ordering::Relaxed)) > 2000 {

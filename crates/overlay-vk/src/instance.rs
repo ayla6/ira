@@ -70,7 +70,9 @@ pub unsafe extern "system" fn get_instance_proc_addr(
             unsafe extern "system" fn(vk::Device, *const vk::AllocationCallbacks)
         ),
         b"vkCreateWaylandSurfaceKHR" => {
-            eprintln!("ira-overlay: vkCreateWaylandSurfaceKHR queried");
+            if crate::types::debug_log() {
+                eprintln!("ira-overlay: vkCreateWaylandSurfaceKHR queried");
+            }
             into_vk_void_fn!(
                 create_wayland_surface,
                 unsafe extern "system" fn(
@@ -82,7 +84,9 @@ pub unsafe extern "system" fn get_instance_proc_addr(
             )
         }
         b"vkCreateXcbSurfaceKHR" => {
-            eprintln!("ira-overlay: vkCreateXcbSurfaceKHR queried (XWayland)");
+            if crate::types::debug_log() {
+                eprintln!("ira-overlay: vkCreateXcbSurfaceKHR queried (XWayland)");
+            }
             into_vk_void_fn!(
                 create_xcb_surface,
                 unsafe extern "system" fn(
@@ -94,7 +98,9 @@ pub unsafe extern "system" fn get_instance_proc_addr(
             )
         }
         b"vkCreateXlibSurfaceKHR" => {
-            eprintln!("ira-overlay: vkCreateXlibSurfaceKHR queried (XWayland)");
+            if crate::types::debug_log() {
+                eprintln!("ira-overlay: vkCreateXlibSurfaceKHR queried (XWayland)");
+            }
             into_vk_void_fn!(
                 create_xlib_surface,
                 unsafe extern "system" fn(
@@ -105,17 +111,7 @@ pub unsafe extern "system" fn get_instance_proc_addr(
                 ) -> vk::Result
             )
         }
-        _ => {
-            let map = INSTANCES.lock().unwrap();
-            if let Some(map) = map.as_ref() {
-                if let Some(data) = map.get(&(instance.as_raw() as usize)) {
-                    if let Some(gipa) = data.loader_gipa {
-                        return gipa(instance, name.as_ptr());
-                    }
-                }
-            }
-            None
-        }
+        _ => loader_gipa(instance).and_then(|gipa| gipa(instance, name.as_ptr())),
     }
 }
 
@@ -133,6 +129,29 @@ unsafe fn find_layer_link_info(
         chain = (*chain).p_next as *mut vk::BaseInStructure;
     }
     std::ptr::null_mut()
+}
+
+/// The loader's proc-addr for an instance, if we hooked its creation.
+/// Shared by the surface forwarders and teardown below.
+unsafe fn loader_gipa(instance: vk::Instance) -> PfnGetInstanceProcAddr {
+    let map = INSTANCES.lock().unwrap();
+    map.as_ref()
+        .and_then(|m| m.get(&(instance.as_raw() as usize)))
+        .and_then(|d| d.loader_gipa)
+}
+
+/// Resolves the driver's real surface creator through the loader chain.
+/// None (unknown instance, or driver lacks the platform) chains as
+/// initialization failure instead of panicking in the game process.
+unsafe fn driver_surface_fn<T>(instance: vk::Instance, fn_name: &CStr) -> Option<T> {
+    let gipa = loader_gipa(instance)?;
+    let ptr = gipa(instance, fn_name.as_ptr());
+    if ptr.is_some() {
+        // `ptr` is known-Some: reinterpret its bits as the target table type.
+        Some(unsafe { std::mem::transmute_copy::<vk::PFN_vkVoidFunction, T>(&ptr) })
+    } else {
+        None
+    }
 }
 
 unsafe extern "system" fn create_instance(
@@ -196,12 +215,7 @@ unsafe extern "system" fn destroy_instance(
     allocator: *const vk::AllocationCallbacks,
 ) {
     let destroy_fn = {
-        let gipa = {
-            let map = INSTANCES.lock().unwrap();
-            map.as_ref()
-                .and_then(|m| m.get(&(instance.as_raw() as usize)))
-                .and_then(|d| d.loader_gipa)
-        };
+        let gipa = loader_gipa(instance);
         if let Some(gipa) = gipa {
             let f: vk::PFN_vkDestroyInstance =
                 super::negotiate::transmute_fn(gipa(instance, c"vkDestroyInstance".as_ptr()));
@@ -229,18 +243,12 @@ unsafe extern "system" fn create_wayland_surface(
     surface: *mut vk::SurfaceKHR,
 ) -> vk::Result {
     eprintln!("ira-overlay: Wayland surface created");
-    let gipa = {
-        let map = INSTANCES.lock().unwrap();
-        map.as_ref()
-            .and_then(|m| m.get(&(instance.as_raw() as usize)))
-            .and_then(|d| d.loader_gipa)
-    };
-    let Some(gipa) = gipa else {
+    let Some(func) = driver_surface_fn::<vk::PFN_vkCreateWaylandSurfaceKHR>(
+        instance,
+        c"vkCreateWaylandSurfaceKHR",
+    ) else {
         return vk::Result::ERROR_INITIALIZATION_FAILED;
     };
-
-    let func: vk::PFN_vkCreateWaylandSurfaceKHR =
-        super::negotiate::transmute_fn(gipa(instance, c"vkCreateWaylandSurfaceKHR".as_ptr()));
 
     let result = func(instance, create_info, allocator, surface);
     if result == vk::Result::SUCCESS {
@@ -255,19 +263,15 @@ unsafe extern "system" fn create_xcb_surface(
     allocator: *const vk::AllocationCallbacks,
     surface: *mut vk::SurfaceKHR,
 ) -> vk::Result {
-    eprintln!("ira-overlay: Xcb surface created (XWayland — keyboard/mouse via X11 shim)");
-    let gipa = {
-        let map = INSTANCES.lock().unwrap();
-        map.as_ref()
-            .and_then(|m| m.get(&(instance.as_raw() as usize)))
-            .and_then(|d| d.loader_gipa)
-    };
-    let Some(gipa) = gipa else {
+    eprintln!(
+        "ira-overlay: Xcb surface created (XWayland — events via X11 shim; \
+        no Display* in XCB create-info, so no origin translation)"
+    );
+    let Some(func) =
+        driver_surface_fn::<vk::PFN_vkCreateXcbSurfaceKHR>(instance, c"vkCreateXcbSurfaceKHR")
+    else {
         return vk::Result::ERROR_INITIALIZATION_FAILED;
     };
-
-    let func: vk::PFN_vkCreateXcbSurfaceKHR =
-        super::negotiate::transmute_fn(gipa(instance, c"vkCreateXcbSurfaceKHR".as_ptr()));
     func(instance, create_info, allocator, surface)
 }
 
@@ -278,29 +282,18 @@ unsafe extern "system" fn create_xlib_surface(
     surface: *mut vk::SurfaceKHR,
 ) -> vk::Result {
     eprintln!("ira-overlay: Xlib surface created (XWayland — keyboard/mouse via X11 shim)");
-    let gipa = {
-        let map = INSTANCES.lock().unwrap();
-        map.as_ref()
-            .and_then(|m| m.get(&(instance.as_raw() as usize)))
-            .and_then(|d| d.loader_gipa)
-    };
-    let Some(gipa) = gipa else {
+    let Some(func) =
+        driver_surface_fn::<vk::PFN_vkCreateXlibSurfaceKHR>(instance, c"vkCreateXlibSurfaceKHR")
+    else {
         return vk::Result::ERROR_INITIALIZATION_FAILED;
     };
-
-    let func: vk::PFN_vkCreateXlibSurfaceKHR =
-        super::negotiate::transmute_fn(gipa(instance, c"vkCreateXlibSurfaceKHR".as_ptr()));
     let result = func(instance, create_info, allocator, surface);
     // Remember the X window behind this surface for input translation:
     // X11 reports pointer motion in root coordinates, but the panel rect
     // lives in client space. Windowed games need the origin subtracted.
     if result == vk::Result::SUCCESS {
         let info = *create_info;
-        crate::canvas::record_xlib_surface(
-            (*surface).as_raw(),
-            info.dpy as usize,
-            info.window,
-        );
+        crate::xwin::record_xlib_surface((*surface).as_raw(), info.dpy as usize, info.window);
     }
     result
 }

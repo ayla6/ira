@@ -21,8 +21,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use ira_overlay_ipc::{
-    gamepad_button_mask_from_evdev, CanvasCommand, CMD_ACTIVATE, CMD_NAV_DOWN, CMD_NAV_LEFT,
-    CMD_NAV_RIGHT, CMD_NAV_UP,
+    gamepad_button_mask_from_evdev, CanvasCommand, CMD_ACTIVATE, CMD_BACK, CMD_NAV_DOWN,
+    CMD_NAV_LEFT, CMD_NAV_RIGHT, CMD_NAV_UP,
 };
 
 // evdev event types
@@ -62,6 +62,8 @@ const _: () = assert!(std::mem::size_of::<InputEvent>() == 24);
 
 const KEY_BUF_BYTES: u32 = 96; // 768 bits — covers all BTN_* codes
 const MAX_EVENTS_PER_READ: usize = 16;
+/// Drain chunk: the open loop reads until empty, 64 events at a time.
+const DRAIN_EVENTS: usize = 64;
 
 static OVERLAY_ACTIVE: OnceLock<bool> = OnceLock::new();
 static GAMEPAD_FDS: Mutex<Vec<c_int>> = Mutex::new(Vec::new());
@@ -169,7 +171,7 @@ fn scan_devices() {
             eprintln!("ira-overlay: gamepad found at /dev/input/{name}");
             // Drain stale events from the kernel buffer so we don't
             // misinterpret old events as button presses.
-            let drain_buf = [0u8; 24 * 64];
+            let drain_buf = [0u8; std::mem::size_of::<InputEvent>() * DRAIN_EVENTS];
             loop {
                 let n = unsafe { libc::read(fd, drain_buf.as_ptr() as *mut _, drain_buf.len()) };
                 if n <= 0 {
@@ -221,7 +223,7 @@ pub fn poll() {
         return;
     }
 
-    let mut buf = [0u8; 24 * MAX_EVENTS_PER_READ];
+    let mut buf = [0u8; std::mem::size_of::<InputEvent>() * MAX_EVENTS_PER_READ];
     for &fd in &*fds {
         loop {
             let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut _, buf.len()) };
@@ -229,9 +231,11 @@ pub fn poll() {
                 break;
             }
 
-            let count = (n as usize) / 24;
+            let count = (n as usize) / std::mem::size_of::<InputEvent>();
             for i in 0..count {
-                let ev = unsafe { &*(buf.as_ptr().add(i * 24) as *const InputEvent) };
+                let ev = unsafe {
+                    &*(buf.as_ptr().add(i * std::mem::size_of::<InputEvent>()) as *const InputEvent)
+                };
                 handle_event(ev);
             }
         }
@@ -240,101 +244,109 @@ pub fn poll() {
 
 fn handle_event(ev: &InputEvent) {
     match ev.type_ {
-        EV_KEY => {
-            let Some(button) = gamepad_button_mask_from_evdev(ev.code) else {
-                return;
-            };
-            if ev.value == 0 {
-                let held = PRESSED_BUTTONS.fetch_and(!button, Ordering::Relaxed) & !button;
-                if TOGGLE_PENDING.swap(false, Ordering::Relaxed) && held == 0 {
-                    toggle_overlay();
-                }
-                return;
-            }
-            if ev.value != KEY_PRESS {
-                return;
-            }
-            let held = PRESSED_BUTTONS.fetch_or(button, Ordering::Relaxed) | button;
-            match hotkey_action(held) {
-                HotkeyAction::Screenshot => {
-                    TOGGLE_PENDING.store(false, Ordering::Relaxed);
-                    ira_overlay::capture::request_screenshot();
-                    return;
-                }
-                HotkeyAction::Record => {
-                    TOGGLE_PENDING.store(false, Ordering::Relaxed);
-                    ira_overlay::capture::toggle_recording();
-                    return;
-                }
-                HotkeyAction::Toggle => {
-                    if injected_ui_disabled() {
-                        return;
-                    }
-                    TOGGLE_PENDING.store(true, Ordering::Relaxed);
-                    return;
-                }
-                HotkeyAction::None => {}
-            }
-            // Other buttons only when overlay is visible.
-            if injected_ui_disabled() || !crate::shim_bridge::is_visible() {
-                return;
-            }
-            let kind = match ev.code {
-                BTN_SOUTH => Some(CMD_ACTIVATE),
-                BTN_EAST => {
-                    crate::shim_bridge::set_visible(false);
-                    None
-                }
-                BTN_DPAD_UP => Some(CMD_NAV_UP),
-                BTN_DPAD_DOWN => Some(CMD_NAV_DOWN),
-                BTN_DPAD_LEFT => Some(CMD_NAV_LEFT),
-                BTN_DPAD_RIGHT => Some(CMD_NAV_RIGHT),
-                BTN_TL => {
-                    crate::shim_bridge::push_canvas_command(CanvasCommand::scroll(-1.0));
-                    None
-                }
-                BTN_TR => {
-                    crate::shim_bridge::push_canvas_command(CanvasCommand::scroll(1.0));
-                    None
-                }
-                _ => None,
-            };
-            if let Some(kind) = kind {
-                crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
-            }
-        }
-        EV_ABS => {
-            if injected_ui_disabled() || !crate::shim_bridge::is_visible() {
-                return;
-            }
-            match ev.code {
-                ABS_HAT0X => {
-                    let prev = HAT_X.swap(ev.value, Ordering::Relaxed);
-                    if prev == 0 && ev.value != 0 {
-                        let kind = if ev.value < 0 {
-                            CMD_NAV_LEFT
-                        } else {
-                            CMD_NAV_RIGHT
-                        };
-                        crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
-                    }
-                }
-                ABS_HAT0Y => {
-                    let prev = HAT_Y.swap(ev.value, Ordering::Relaxed);
-                    if prev == 0 && ev.value != 0 {
-                        let kind = if ev.value < 0 {
-                            CMD_NAV_UP
-                        } else {
-                            CMD_NAV_DOWN
-                        };
-                        crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
-                    }
-                }
-                _ => {}
-            }
-        }
+        EV_KEY => handle_key(ev),
+        EV_ABS => handle_abs(ev),
         _ => {}
     }
+}
+
+fn handle_key(ev: &InputEvent) {
+    let Some(button) = gamepad_button_mask_from_evdev(ev.code) else {
+        return;
+    };
+    if ev.value == 0 {
+        let held = PRESSED_BUTTONS.fetch_and(!button, Ordering::Relaxed) & !button;
+        if TOGGLE_PENDING.swap(false, Ordering::Relaxed) && held == 0 {
+            toggle_overlay();
+        }
+        return;
+    }
+    if ev.value != KEY_PRESS {
+        return;
+    }
+    let held = PRESSED_BUTTONS.fetch_or(button, Ordering::Relaxed) | button;
+    match hotkey_action(held) {
+        HotkeyAction::Screenshot => {
+            TOGGLE_PENDING.store(false, Ordering::Relaxed);
+            ira_overlay::capture::request_screenshot();
+            return;
+        }
+        HotkeyAction::Record => {
+            TOGGLE_PENDING.store(false, Ordering::Relaxed);
+            ira_overlay::capture::toggle_recording();
+            return;
+        }
+        HotkeyAction::Toggle => {
+            // Yields to the daemon when it owns the chord; otherwise
+            // the same press would flip the flag twice.
+            if daemon_owns_toggle() {
+                return;
+            }
+            TOGGLE_PENDING.store(true, Ordering::Relaxed);
+            return;
+        }
+        HotkeyAction::None => {}
+    }
+    // Other buttons only when overlay is visible.
+    if !ui_accepts_gamepad() {
+        return;
+    }
+    if let Some(delta) = scroll_delta(ev.code) {
+        crate::shim_bridge::push_canvas_command(CanvasCommand::scroll(delta));
+        return;
+    }
+    if let Some(kind) = nav_kind(ev.code) {
+        crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
+    }
+}
+
+fn handle_abs(ev: &InputEvent) {
+    if !ui_accepts_gamepad() {
+        return;
+    }
+    match ev.code {
+        ABS_HAT0X => hat_edge(&HAT_X, ev.value, CMD_NAV_LEFT, CMD_NAV_RIGHT),
+        ABS_HAT0Y => hat_edge(&HAT_Y, ev.value, CMD_NAV_UP, CMD_NAV_DOWN),
+        _ => {}
+    }
+}
+
+/// Edge-triggered hat axis: only the neutral→tilt transition emits nav.
+fn hat_edge(axis: &AtomicI32, value: i32, neg: u32, pos: u32) {
+    let prev = axis.swap(value, Ordering::Relaxed);
+    if prev == 0 && value != 0 {
+        let kind = if value < 0 { neg } else { pos };
+        crate::shim_bridge::push_canvas_command(CanvasCommand::nav(kind));
+    }
+}
+
+/// Overlay nav buttons: evdev code → canvas command kind.
+fn nav_kind(code: u16) -> Option<u32> {
+    match code {
+        BTN_SOUTH => Some(CMD_ACTIVATE),
+        // Back out one screen (submenu → menu, menu → close,
+        // decided host-side).
+        BTN_EAST => Some(CMD_BACK),
+        BTN_DPAD_UP => Some(CMD_NAV_UP),
+        BTN_DPAD_DOWN => Some(CMD_NAV_DOWN),
+        BTN_DPAD_LEFT => Some(CMD_NAV_LEFT),
+        BTN_DPAD_RIGHT => Some(CMD_NAV_RIGHT),
+        _ => None,
+    }
+}
+
+/// Shoulder scroll: evdev code → scroll delta.
+fn scroll_delta(code: u16) -> Option<f32> {
+    match code {
+        BTN_TL => Some(-1.0),
+        BTN_TR => Some(1.0),
+        _ => None,
+    }
+}
+
+/// Visible overlay with injected UI enabled: gamepad input belongs to it.
+fn ui_accepts_gamepad() -> bool {
+    !injected_ui_disabled() && crate::shim_bridge::is_visible()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -370,6 +382,14 @@ fn toggle_overlay() {
 
 fn injected_ui_disabled() -> bool {
     std::env::var_os("IRA_OVERLAY_DISABLE_UI").is_some()
+}
+
+/// Whether the input daemon owns the gamepad toggle chord (gamescope
+/// launches with `IRA_OVERLAY_DAEMON_TOGGLE`). In-process gamepad handling
+/// stands down when it does; keyboard chords stay in-process (the daemon
+/// never sees keyboards).
+fn daemon_owns_toggle() -> bool {
+    std::env::var_os("IRA_OVERLAY_DAEMON_TOGGLE").is_some_and(|v| v == "1")
 }
 
 #[cfg(test)]

@@ -94,3 +94,38 @@ pub struct SwapchainData {
 pub static INSTANCES: Mutex<Option<HashMap<usize, InstanceData>>> = Mutex::new(None);
 pub static DEVICES: Mutex<Option<HashMap<usize, DeviceData>>> = Mutex::new(None);
 pub static SWAPCHAINS: Mutex<Option<HashMap<u64, SwapchainData>>> = Mutex::new(None);
+
+/// One-shot env check for layer diagnostics (`IRA_OVERLAY_DEBUG=1`).
+/// Single source of truth: canvas, wayland, and shim_bridge shared
+/// copy-pasted versions of this.
+pub(crate) fn debug_log() -> bool {
+    static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *DEBUG.get_or_init(|| std::env::var_os("IRA_OVERLAY_DEBUG").is_some())
+}
+
+/// One transfer/render barrier with the layer's standard queue-family
+/// handling; callers vary only layouts and access masks. Shared by the
+/// present hook and the canvas upload path.
+pub(crate) fn image_barrier(
+    image: vk::Image,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+    src_access: vk::AccessFlags,
+    dst_access: vk::AccessFlags,
+) -> vk::ImageMemoryBarrier<'static> {
+    vk::ImageMemoryBarrier::default()
+        .old_layout(old_layout)
+        .new_layout(new_layout)
+        .src_access_mask(src_access)
+        .dst_access_mask(dst_access)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(image)
+        .subresource_range(vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        })
+}

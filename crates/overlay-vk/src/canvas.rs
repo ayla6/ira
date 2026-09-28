@@ -8,27 +8,30 @@
 //! state and the upload/draw orchestration.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use ash::vk;
 
 use ira_overlay::types::DeviceFns;
-use ira_overlay_ipc::{
-    canvas_panel_rect, CanvasShm, CANVAS_MAX_H, CANVAS_MAX_W,
-};
+use ira_overlay_ipc::{canvas_panel_rect, CanvasShm, CANVAS_MAX_H, CANVAS_MAX_W};
 
 use super::canvas_res::{self, CanvasTex, CursorTex};
 
 /// 20-byte vertex: screen-space pos, texture uv, packed color.
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct CanvasVertex {
+pub(crate) struct CanvasVertex {
     pos: [f32; 2],
     uv: [f32; 2],
     color: [u8; 4],
 }
 
 const _: () = assert!(std::mem::size_of::<CanvasVertex>() == 20);
+/// Quad vertex-buffer footprint (4 verts) shared with `canvas_res`.
+/// Derived from the type so the assert above guards it.
+pub(crate) const QUAD_VBO_BYTES: u64 = 4 * std::mem::size_of::<CanvasVertex>() as u64;
+/// Quad index-buffer footprint (6 u32 indices) shared with `canvas_res`.
+pub(crate) const QUAD_IBO_BYTES: u64 = 6 * std::mem::size_of::<u32>() as u64;
 
 /// 24-byte push constants, same layout as the glyph pipeline.
 #[repr(C)]
@@ -42,7 +45,13 @@ struct CanvasPush {
 const _: () = assert!(std::mem::size_of::<CanvasPush>() == 24);
 
 /// Panel rect + canvas frame size returned per composited frame.
-pub type PanelDraw = ((f32, f32, f32, f32), (u32, u32));
+#[derive(Clone, Copy, Debug)]
+pub struct PanelDraw {
+    /// Screen-space panel rect (x, y, w, h).
+    pub rect: (f32, f32, f32, f32),
+    /// Canvas content size (w, h).
+    pub size: (u32, u32),
+}
 
 struct CanvasEntry {
     tex: CanvasTex,
@@ -62,112 +71,6 @@ static LAST_PANEL: Mutex<Option<(f32, f32, f32)>> = Mutex::new(None);
 /// surface-local already client), so cursor and commands always agree.
 static LAST_MOUSE: Mutex<Option<(f32, f32)>> = Mutex::new(None);
 
-/// Game X11 window behind a swapchain, with its cached root-space origin.
-/// X11 reports pointer motion in root (screen) coordinates, but the panel
-/// rect lives in the swapchain's client space: for fullscreen games at the
-/// origin these coincide, for moved windows they differ by the origin.
-/// The origin refreshes about once a second (windows rarely move); a
-/// failed refresh keeps the previous one. No entry (non-X11 surfaces)
-/// means root coordinates pass through untouched.
-struct Xwin {
-    dpy: usize,
-    window: u64,
-    ox: i32,
-    oy: i32,
-    age: u32,
-}
-
-/// Created VkSurface → (Display*, Window), filled by the surface hooks.
-static SURFACE_XWIN: Mutex<Option<HashMap<u64, (usize, u64)>>> = Mutex::new(None);
-/// Swapchain → game window translation state.
-static SWAPCHAIN_XWIN: Mutex<Option<HashMap<u64, Xwin>>> = Mutex::new(None);
-
-/// Remembers which X11 window a created VkSurface wraps. Called from the
-/// surface-creation hooks with the raw create-info pointers.
-pub fn record_xlib_surface(surface: u64, dpy: usize, window: u64) {
-    SURFACE_XWIN
-        .lock()
-        .unwrap()
-        .get_or_insert_with(HashMap::new)
-        .insert(surface, (dpy, window));
-}
-
-/// Binds a swapchain to its surface's X11 window for input translation.
-/// Unknown surfaces (Wayland, XCB) leave no entry: coordinates pass
-/// through exactly as before.
-pub fn bind_swapchain_window(swapchain: u64, surface: u64) {
-    let xwin = SURFACE_XWIN
-        .lock()
-        .unwrap()
-        .as_ref()
-        .and_then(|m| m.get(&surface))
-        .map(|&(dpy, window)| Xwin {
-            dpy,
-            window,
-            ox: 0,
-            oy: 0,
-            // Refresh on first use: windowed games need their origin
-            // before the first mapped event, not a second later.
-            age: 60,
-        });
-    if let Some(xwin) = xwin {
-        SWAPCHAIN_XWIN
-            .lock()
-            .unwrap()
-            .get_or_insert_with(HashMap::new)
-            .insert(swapchain, xwin);
-    }
-}
-
-/// Pure core of the translation (unit-tested): subtract the origin.
-fn apply_origin(rx: f32, ry: f32, ox: i32, oy: i32) -> (f32, f32) {
-    (rx - ox as f32, ry - oy as f32)
-}
-
-type TranslateCoordsFn = unsafe extern "C" fn(
-    *mut std::ffi::c_void,
-    u64,
-    u64,
-    i32,
-    i32,
-    *mut i32,
-    *mut i32,
-    *mut u64,
-) -> i32;
-type DefaultRootFn = unsafe extern "C" fn(*mut std::ffi::c_void) -> u64;
-
-fn x11_fns() -> Option<(TranslateCoordsFn, DefaultRootFn)> {
-    static FNS: OnceLock<Option<(TranslateCoordsFn, DefaultRootFn)>> = OnceLock::new();
-    *FNS.get_or_init(|| unsafe {
-        let translate = libc::dlsym(libc::RTLD_DEFAULT, c"XTranslateCoordinates".as_ptr());
-        let root = libc::dlsym(libc::RTLD_DEFAULT, c"XDefaultRootWindow".as_ptr());
-        if translate.is_null() || root.is_null() {
-            return None;
-        }
-        let translate: TranslateCoordsFn = std::mem::transmute(translate);
-        let root: DefaultRootFn = std::mem::transmute(root);
-        Some((translate, root))
-    })
-}
-
-/// Queries a window's root-space origin: where the window's own (0,0)
-/// lands in root coordinates. `None` when Xlib is absent or the query
-/// fails — callers keep the previous origin (or none).
-fn query_origin(dpy: usize, window: u64) -> Option<(i32, i32)> {
-    let (translate, root_of) = x11_fns()?;
-    unsafe {
-        let dpy = dpy as *mut std::ffi::c_void;
-        let root = root_of(dpy);
-        let (mut x, mut y) = (0i32, 0i32);
-        let mut child = 0u64;
-        // Direction matters: source is the window, destination is root.
-        // (The reverse answers "where is root-(0,0) in window space",
-        // i.e. the negated origin — verified against a live server.)
-        let ok = translate(dpy, window, root, 0, 0, &mut x, &mut y, &mut child);
-        (ok != 0).then_some((x, y))
-    }
-}
-
 /// Publishes the swapchain extent for host window sizing: single writer
 /// here (present hook), single reader on the host tick.
 pub fn publish_extent(shm: &mut CanvasShm, extent: vk::Extent2D) {
@@ -176,31 +79,6 @@ pub fn publish_extent(shm: &mut CanvasShm, extent: vk::Extent2D) {
         .store(extent.width, std::sync::atomic::Ordering::SeqCst);
     hdr.screen_h
         .store(extent.height, std::sync::atomic::Ordering::SeqCst);
-}
-
-/// Translates root-space pointer coordinates into the swapchain's client
-/// space for input mapping (cursor + commands share the result, so they
-/// can never disagree). Fullscreen games sit at the origin and translate
-/// to themselves; unknown swapchains pass through untouched.
-pub fn translate_to_client(swapchain: u64, rx: f32, ry: f32) -> (f32, f32) {
-    let mut map = SWAPCHAIN_XWIN.lock().unwrap();
-    let Some(xwin) = map.as_mut().and_then(|m| m.get_mut(&swapchain)) else {
-        return (rx, ry);
-    };
-    // Refresh about once a second (60 presents): windows rarely move, and
-    // every refresh is a synchronous X round-trip on the game thread.
-    xwin.age = xwin.age.wrapping_add(1);
-    if xwin.age >= 60 {
-        if let Some((ox, oy)) = query_origin(xwin.dpy, xwin.window) {
-            if (ox, oy) != (xwin.ox, xwin.oy) && debug_log() {
-                eprintln!("ira-overlay: window origin now ({ox},{oy})");
-            }
-            xwin.ox = ox;
-            xwin.oy = oy;
-        }
-        xwin.age = 0;
-    }
-    apply_origin(rx, ry, xwin.ox, xwin.oy)
 }
 
 /// Records the pointer position (client pixels) for the layer cursor.
@@ -265,12 +143,6 @@ pub unsafe fn create_bundle(
     Some((pipeline, pipeline_layout, shader_vert, shader_frag))
 }
 
-/// One-shot env check for compositor diagnostics (`IRA_OVERLAY_DEBUG=1`).
-fn debug_log() -> bool {
-    static DEBUG: OnceLock<bool> = OnceLock::new();
-    *DEBUG.get_or_init(|| std::env::var_os("IRA_OVERLAY_DEBUG").is_some())
-}
-
 /// Last reported frame meta, so the per-frame early-out stays silent
 /// unless something actually changes.
 static LAST_META_LOG: Mutex<(u32, u32, u32, u32)> = Mutex::new((u32::MAX, 0, 0, 0));
@@ -288,7 +160,7 @@ pub unsafe fn prepare_upload(
     let (w, h, seq, vis) = shm.frame_meta();
     if vis == 0 || w == 0 || h == 0 || seq == 0 {
         *LAST_PANEL.lock().unwrap() = None;
-        if debug_log() {
+        if crate::types::debug_log() {
             let mut last = LAST_META_LOG.lock().unwrap();
             if *last != (w, h, seq, vis) {
                 eprintln!("ira-overlay: no frame (w={w} h={h} seq={seq} vis={vis})");
@@ -300,22 +172,28 @@ pub unsafe fn prepare_upload(
     let mut map = CANVASES.lock().unwrap();
     let entry = map.as_mut()?.get_mut(&swapchain)?;
     let tex = &mut entry.tex;
-    if seq != tex.last_seq {
-        if debug_log() {
+    if seq != tex.core.last_seq {
+        if crate::types::debug_log() {
             eprintln!("ira-overlay: upload frame {w}x{h} seq={seq}");
         }
         let len = w as usize * h as usize * 4;
         if len > shm.pixels().len() {
             return None;
         }
-        upload(fns, cmd, tex, &shm.pixels()[..len], w, h);
-        tex.last_seq = seq;
+        transition_and_copy(
+            fns,
+            cmd,
+            tex.core.upload_image(),
+            &shm.pixels()[..len],
+            w,
+            h,
+        );
+        tex.core.last_seq = seq;
     }
     let rect = canvas_panel_rect(extent.width, extent.height, w, h, position);
     *LAST_PANEL.lock().unwrap() = Some((rect.0, rect.1, rect.2 / w as f32));
-    if debug_log() {
-        static LAST_GEOM_LOG: Mutex<(u32, u32, u32, u32, u32)> =
-            Mutex::new((u32::MAX, 0, 0, 0, 0));
+    if crate::types::debug_log() {
+        static LAST_GEOM_LOG: Mutex<(u32, u32, u32, u32, u32)> = Mutex::new((u32::MAX, 0, 0, 0, 0));
         let mut last = LAST_GEOM_LOG.lock().unwrap();
         let geom = (extent.width, extent.height, w, h, position);
         if *last != geom {
@@ -329,7 +207,7 @@ pub unsafe fn prepare_upload(
     shm.header_mut()
         .ack_seq
         .store(seq, std::sync::atomic::Ordering::SeqCst);
-    Some((rect, (w, h)))
+    Some(PanelDraw { rect, size: (w, h) })
 }
 
 /// Draws the previously uploaded frame. Call inside an active render pass.
@@ -342,8 +220,7 @@ pub unsafe fn draw_quad(
 ) {
     let map = CANVASES.lock().unwrap();
     if let Some(entry) = map.as_ref().and_then(|m| m.get(&swapchain)) {
-        let (rect, frame) = panel;
-        draw(fns, cmd, entry, extent, rect, frame);
+        draw(fns, cmd, entry, extent, panel.rect, panel.size);
     }
 }
 
@@ -380,12 +257,12 @@ pub unsafe fn prepare_cursor(
     let Some(cursor) = entry.cursor.as_mut() else {
         return false;
     };
-    if seq != cursor.last_seq {
-        if debug_log() {
+    if seq != cursor.core.last_seq {
+        if crate::types::debug_log() {
             eprintln!("ira-overlay: upload cursor {w}x{h} seq={seq}");
         }
-        transition_and_copy(fns, cmd, cursor.upload_image(), pixels, w, h);
-        cursor.last_seq = seq;
+        transition_and_copy(fns, cmd, cursor.core.upload_image(), pixels, w, h);
+        cursor.core.last_seq = seq;
         cursor.w = w;
         cursor.h = h;
         cursor.xhot = xhot;
@@ -407,23 +284,30 @@ pub unsafe fn draw_cursor(
 ) {
     let mouse = *LAST_MOUSE.lock().unwrap();
     let map = CANVASES.lock().unwrap();
-    let (entry, (mx, my)) = match (
-        map.as_ref().and_then(|m| m.get(&swapchain)),
-        mouse,
-    ) {
-        (Some(e), Some(m)) => (e, m),
-        _ => return,
+    let Some(entry) = map.as_ref().and_then(|m| m.get(&swapchain)) else {
+        return;
     };
+    let Some((verts, bind)) = cursor_verts(entry, mouse, extent, panel) else {
+        return;
+    };
+    draw_textured_quad(fns, cmd, bind, &verts, extent);
+}
+
+/// Resolves the cursor quad for this frame: mouse + entry + visibility +
+/// panel clipping. None means draw nothing.
+fn cursor_verts(
+    entry: &CanvasEntry,
+    mouse: Option<(f32, f32)>,
+    extent: vk::Extent2D,
+    panel: (f32, f32, f32, f32),
+) -> Option<([CanvasVertex; 4], QuadBind)> {
+    let (mx, my) = mouse?;
     // Outside the game window the shim hears no motion (it only sees the
     // game's windows), so a stale position would freeze the cursor here
     // while the freed real cursor roams on. Hide instead: positions are
     // client space, the extent is the client space.
-    if mx < 0.0
-        || my < 0.0
-        || mx >= extent.width as f32
-        || my >= extent.height as f32
-    {
-        return;
+    if mx < 0.0 || my < 0.0 || mx >= extent.width as f32 || my >= extent.height as f32 {
+        return None;
     }
     // Outside the panel the real cursor is the interaction point; drawing
     // ours next to it (a frame behind, possibly mid-transition) is what
@@ -431,11 +315,11 @@ pub unsafe fn draw_cursor(
     // never disagree about where its edge is.
     let (px, py, pw, ph) = panel;
     if mx < px || my < py || mx >= px + pw || my >= py + ph {
-        return;
+        return None;
     };
     let cursor = match &entry.cursor {
         Some(c) if c.w > 0 && c.h > 0 => c,
-        _ => return,
+        _ => return None,
     };
     let x = mx - cursor.xhot as f32;
     let y = my - cursor.yhot as f32;
@@ -466,56 +350,17 @@ pub unsafe fn draw_cursor(
             color: white,
         },
     ];
-    std::ptr::copy_nonoverlapping(
-        verts.as_ptr() as *const u8,
-        cursor.vbo_ptr,
-        std::mem::size_of_val(&verts),
-    );
-
-    (fns.cmd_bind_pipeline)(cmd, vk::PipelineBindPoint::GRAPHICS, entry.pipeline);
-    let buffers = [cursor.vbo];
-    let offsets = [0u64];
-    (fns.cmd_bind_vertex_buffers)(cmd, 0, 1, buffers.as_ptr(), offsets.as_ptr());
-    (fns.cmd_bind_index_buffer)(cmd, cursor.ibo, 0, vk::IndexType::UINT32);
-    (fns.cmd_bind_descriptor_sets)(
-        cmd,
-        vk::PipelineBindPoint::GRAPHICS,
-        entry.pipeline_layout,
-        0,
-        1,
-        &cursor.set,
-        0,
-        std::ptr::null(),
-    );
-    let push = CanvasPush {
-        screen_size: [extent.width as f32, extent.height as f32],
-        shape_size: [0.0, 0.0],
-        corner_radius: 0.0,
-        is_shape: 0,
-    };
-    (fns.cmd_push_constants)(
-        cmd,
-        entry.pipeline_layout,
-        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-        0,
-        24,
-        &push as *const CanvasPush as *const std::ffi::c_void,
-    );
-    (fns.cmd_draw_indexed)(cmd, 6, 1, 0, 0, 0);
-}
-
-/// Copies a packed `w×h` RGBA frame into the texture (records barriers +
-/// copy into `cmd`, which must be recording). Seq bookkeeping is the
-/// caller's job via `last_seq`.
-unsafe fn upload(
-    fns: DeviceFns,
-    cmd: vk::CommandBuffer,
-    tex: &mut CanvasTex,
-    pixels: &[u8],
-    width: u32,
-    height: u32,
-) {
-    transition_and_copy(fns, cmd, tex.upload_image(), pixels, width, height);
+    Some((
+        verts,
+        QuadBind {
+            pipeline: entry.pipeline,
+            layout: entry.pipeline_layout,
+            vbo: cursor.core.vbo,
+            vbo_ptr: cursor.core.vbo_ptr,
+            ibo: cursor.core.ibo,
+            set: cursor.core.set,
+        },
+    ))
 }
 
 /// Shared staging upload: CPU copy, layout transitions, buffer→image.
@@ -523,18 +368,12 @@ unsafe fn upload(
 unsafe fn transition_and_copy(
     fns: DeviceFns,
     cmd: vk::CommandBuffer,
-    target: super::canvas_res::UploadImage<'_>,    pixels: &[u8],
+    target: super::canvas_res::UploadImage<'_>,
+    pixels: &[u8],
     width: u32,
     height: u32,
 ) {
     std::ptr::copy_nonoverlapping(pixels.as_ptr(), target.staging_ptr, pixels.len());
-    let subresource = vk::ImageSubresourceRange {
-        aspect_mask: vk::ImageAspectFlags::COLOR,
-        base_mip_level: 0,
-        level_count: 1,
-        base_array_layer: 0,
-        layer_count: 1,
-    };
     let (old_layout, src_stage, src_access) = if *target.initialized {
         (
             vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -548,15 +387,13 @@ unsafe fn transition_and_copy(
             vk::AccessFlags::empty(),
         )
     };
-    let to_dst = vk::ImageMemoryBarrier::default()
-        .old_layout(old_layout)
-        .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-        .src_access_mask(src_access)
-        .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .image(target.image)
-        .subresource_range(subresource);
+    let to_dst = crate::types::image_barrier(
+        target.image,
+        old_layout,
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        src_access,
+        vk::AccessFlags::TRANSFER_WRITE,
+    );
     (fns.cmd_pipeline_barrier)(
         cmd,
         src_stage,
@@ -592,15 +429,13 @@ unsafe fn transition_and_copy(
         &region,
     );
 
-    let to_read = vk::ImageMemoryBarrier::default()
-        .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-        .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-        .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-        .dst_access_mask(vk::AccessFlags::SHADER_READ)
-        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .image(target.image)
-        .subresource_range(subresource);
+    let to_read = crate::types::image_barrier(
+        target.image,
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        vk::AccessFlags::TRANSFER_WRITE,
+        vk::AccessFlags::SHADER_READ,
+    );
     (fns.cmd_pipeline_barrier)(
         cmd,
         vk::PipelineStageFlags::TRANSFER,
@@ -614,6 +449,69 @@ unsafe fn transition_and_copy(
         &to_read,
     );
     *target.initialized = true;
+}
+
+/// Bindings for one textured-quad draw: pipeline + vertex/index buffers +
+/// descriptor set. Panel and cursor draws fill this from their own texture
+/// resources and share the record path below.
+#[derive(Clone, Copy)]
+struct QuadBind {
+    pipeline: vk::Pipeline,
+    layout: vk::PipelineLayout,
+    vbo: vk::Buffer,
+    vbo_ptr: *mut u8,
+    ibo: vk::Buffer,
+    set: vk::DescriptorSet,
+}
+
+/// Binds one textured quad (vertices, pipeline, descriptor, push constants)
+/// and draws it. Shared by the panel and cursor paths, which differ only in
+/// geometry and texture resources.
+unsafe fn draw_textured_quad(
+    fns: DeviceFns,
+    cmd: vk::CommandBuffer,
+    bind: QuadBind,
+    verts: &[CanvasVertex; 4],
+    extent: vk::Extent2D,
+) {
+    std::ptr::copy_nonoverlapping(
+        verts.as_ptr() as *const u8,
+        bind.vbo_ptr,
+        std::mem::size_of_val(verts),
+    );
+
+    (fns.cmd_bind_pipeline)(cmd, vk::PipelineBindPoint::GRAPHICS, bind.pipeline);
+    let buffers = [bind.vbo];
+    let offsets = [0u64];
+    (fns.cmd_bind_vertex_buffers)(cmd, 0, 1, buffers.as_ptr(), offsets.as_ptr());
+    (fns.cmd_bind_index_buffer)(cmd, bind.ibo, 0, vk::IndexType::UINT32);
+    (fns.cmd_bind_descriptor_sets)(
+        cmd,
+        vk::PipelineBindPoint::GRAPHICS,
+        bind.layout,
+        0,
+        1,
+        &bind.set,
+        0,
+        std::ptr::null(),
+    );
+    let push = CanvasPush {
+        screen_size: [extent.width as f32, extent.height as f32],
+        // The shader shares its push layout with the glyph pipeline (24
+        // bytes); only screen_size carries meaning for textured quads.
+        shape_size: [0.0, 0.0],
+        corner_radius: 0.0,
+        is_shape: 0,
+    };
+    (fns.cmd_push_constants)(
+        cmd,
+        bind.layout,
+        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+        0,
+        24,
+        &push as *const CanvasPush as *const std::ffi::c_void,
+    );
+    (fns.cmd_draw_indexed)(cmd, 6, 1, 0, 0, 0);
 }
 
 /// Draws the canvas quad. `rect` is the screen-space panel rect (x, y, w, h),
@@ -654,57 +552,27 @@ unsafe fn draw(
             color: white,
         },
     ];
-    std::ptr::copy_nonoverlapping(
-        verts.as_ptr() as *const u8,
-        tex.vbo_ptr,
-        std::mem::size_of_val(&verts),
-    );
-
-    (fns.cmd_bind_pipeline)(cmd, vk::PipelineBindPoint::GRAPHICS, entry.pipeline);
-    let buffers = [tex.vbo];
-    let offsets = [0u64];
-    (fns.cmd_bind_vertex_buffers)(cmd, 0, 1, buffers.as_ptr(), offsets.as_ptr());
-    (fns.cmd_bind_index_buffer)(cmd, tex.ibo, 0, vk::IndexType::UINT32);
-    (fns.cmd_bind_descriptor_sets)(
+    draw_textured_quad(
+        fns,
         cmd,
-        vk::PipelineBindPoint::GRAPHICS,
-        entry.pipeline_layout,
-        0,
-        1,
-        &tex.set,
-        0,
-        std::ptr::null(),
+        QuadBind {
+            pipeline: entry.pipeline,
+            layout: entry.pipeline_layout,
+            vbo: tex.core.vbo,
+            vbo_ptr: tex.core.vbo_ptr,
+            ibo: tex.core.ibo,
+            set: tex.core.set,
+        },
+        &verts,
+        extent,
     );
-    let push = CanvasPush {
-        screen_size: [extent.width as f32, extent.height as f32],
-        shape_size: [0.0, 0.0],
-        corner_radius: 0.0,
-        is_shape: 0,
-    };
-    (fns.cmd_push_constants)(
-        cmd,
-        entry.pipeline_layout,
-        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-        0,
-        24,
-        &push as *const CanvasPush as *const std::ffi::c_void,
-    );
-    (fns.cmd_draw_indexed)(cmd, 6, 1, 0, 0, 0);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::apply_origin;
-
     #[test]
-    fn test_apply_origin_fullscreen_at_origin_is_identity() {
-        assert_eq!(apply_origin(398.0, 21.0, 0, 0), (398.0, 21.0));
-    }
-
-    #[test]
-    fn test_apply_origin_subtracts_window_offset() {
-        // Windowed game at root offset (100, 50): root (398, 21) is
-        // client (298, -29).
-        assert_eq!(apply_origin(398.0, 21.0, 100, 50), (298.0, -29.0));
+    fn test_quad_buffer_sizes_match_vertex_layout() {
+        assert_eq!(super::QUAD_VBO_BYTES, 80);
+        assert_eq!(super::QUAD_IBO_BYTES, 24);
     }
 }

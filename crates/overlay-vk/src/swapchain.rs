@@ -7,30 +7,69 @@ use ash::vk::Handle;
 use crate::types::*;
 use ira_overlay::types::DeviceFns;
 
+/// Layer function table + physical device for a hooked device.
+/// None chains as initialization failure.
+unsafe fn device_fns(device: vk::Device) -> Option<(DeviceFns, vk::PhysicalDevice)> {
+    let map = DEVICES.lock().unwrap();
+    let dd = map
+        .as_ref()
+        .and_then(|m| m.get(&(device.as_raw() as usize)))?;
+    Some((dd.fns?, dd.physical_device))
+}
+
+/// One semaphore + one signaled fence per swapchain image.
+unsafe fn alloc_sync_objects(
+    fns: DeviceFns,
+    device: vk::Device,
+    image_count: u32,
+) -> (Vec<vk::Semaphore>, Vec<vk::Fence>) {
+    let mut semaphores = Vec::with_capacity(image_count as usize);
+    let mut fences = Vec::with_capacity(image_count as usize);
+    let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
+    for _ in 0..image_count {
+        let mut sem = vk::Semaphore::null();
+        let info = vk::SemaphoreCreateInfo::default();
+        log_vk(
+            (fns.create_semaphore)(device, &info, std::ptr::null(), &mut sem),
+            "create_semaphore",
+        );
+        semaphores.push(sem);
+        let mut fence = vk::Fence::null();
+        log_vk(
+            (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fence),
+            "create_fence",
+        );
+        fences.push(fence);
+    }
+    (semaphores, fences)
+}
+
+/// Swapchain creation is rare (resolution changes), so driver failures log
+/// unconditionally instead of surfacing frames later as null handles.
+/// Nulls stay fail-open: the present hook checks handles before use.
+fn log_vk(result: vk::Result, what: &str) {
+    if result != vk::Result::SUCCESS {
+        eprintln!("ira-overlay: swapchain {what} failed: {result:?}");
+    }
+}
+
 pub(crate) unsafe extern "system" fn create_swapchain(
     device: vk::Device,
     create_info: *const vk::SwapchainCreateInfoKHR,
     allocator: *const vk::AllocationCallbacks,
     swapchain: *mut vk::SwapchainKHR,
 ) -> vk::Result {
-    let (fns, physical_device) = {
-        let map = DEVICES.lock().unwrap();
-        let Some(dd) = map
-            .as_ref()
-            .and_then(|m| m.get(&(device.as_raw() as usize)))
-        else {
-            return vk::Result::ERROR_INITIALIZATION_FAILED;
-        };
-        let Some(fns) = dd.fns else {
-            return vk::Result::ERROR_INITIALIZATION_FAILED;
-        };
-        (fns, dd.physical_device)
+    let Some((fns, physical_device)) = device_fns(device) else {
+        return vk::Result::ERROR_INITIALIZATION_FAILED;
     };
 
     let ci = *create_info;
     // Don't force TRANSFER_SRC — some emulators (shadPS4) crash when the
     // swapchain has unexpected usage flags. Screenshot capture will use
     // a blit to a separate image instead.
+    // Re-arm the compositor: a fresh swapchain usually means fresh queue
+    // state, so a previously wedged queue gets one more chance instead of
+    // staying bypassed for the rest of the session.
     crate::present::DEVICE_LOST.store(false, std::sync::atomic::Ordering::Relaxed);
     let result = (fns.create_swapchain)(device, &ci, allocator, swapchain);
     if result != vk::Result::SUCCESS {
@@ -53,9 +92,15 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     let sc = *swapchain;
 
     let mut image_count = 0u32;
-    let _ = (fns.get_swapchain_images)(device, sc, &mut image_count, std::ptr::null_mut());
+    log_vk(
+        (fns.get_swapchain_images)(device, sc, &mut image_count, std::ptr::null_mut()),
+        "get_swapchain_images(count)",
+    );
     let mut images = vec![vk::Image::null(); image_count as usize];
-    let _ = (fns.get_swapchain_images)(device, sc, &mut image_count, images.as_mut_ptr());
+    log_vk(
+        (fns.get_swapchain_images)(device, sc, &mut image_count, images.as_mut_ptr()),
+        "get_swapchain_images",
+    );
 
     let format = create_info.image_format;
     let extent = create_info.image_extent;
@@ -77,7 +122,10 @@ pub(crate) unsafe extern "system" fn create_swapchain(
         let pool_info = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
         let mut pool = vk::CommandPool::null();
-        let _ = (fns.create_command_pool)(device, &pool_info, std::ptr::null(), &mut pool);
+        log_vk(
+            (fns.create_command_pool)(device, &pool_info, std::ptr::null(), &mut pool),
+            "create_command_pool",
+        );
         pool
     };
 
@@ -87,21 +135,13 @@ pub(crate) unsafe extern "system" fn create_swapchain(
             .command_pool(cmd_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(image_count);
-        let _ = (fns.allocate_cmd_buffers)(device, &alloc_info, cmd_buffers.as_mut_ptr());
+        log_vk(
+            (fns.allocate_cmd_buffers)(device, &alloc_info, cmd_buffers.as_mut_ptr()),
+            "allocate_cmd_buffers",
+        );
     }
 
-    let mut semaphores = Vec::with_capacity(image_count as usize);
-    let mut fences = Vec::with_capacity(image_count as usize);
-    let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-    for _ in 0..image_count {
-        let mut sem = vk::Semaphore::null();
-        let info = vk::SemaphoreCreateInfo::default();
-        let _ = (fns.create_semaphore)(device, &info, std::ptr::null(), &mut sem);
-        semaphores.push(sem);
-        let mut fence = vk::Fence::null();
-        let _ = (fns.create_fence)(device, &fence_info, std::ptr::null(), &mut fence);
-        fences.push(fence);
-    }
+    let (semaphores, fences) = alloc_sync_objects(fns, device, image_count);
 
     ira_overlay::capture::init(fns, device, physical_device, extent, format);
 
@@ -134,31 +174,18 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     // Bind the swapchain to its X11 window (if Xlib-backed) for input
     // translation: windowed games report root coordinates that need the
     // window origin subtracted to land in client space.
-    crate::canvas::bind_swapchain_window(sc.as_raw(), ci.surface.as_raw());
+    crate::xwin::bind_swapchain_window(sc.as_raw(), ci.surface.as_raw());
 
     result
 }
 
-/// Swapchain resources waiting for the GPU to finish with them. Freed once
-/// every fence signals (polled, never waited), so teardown can never hang
-/// the game thread on a wedged queue.
-struct DeadSwapchain {
-    device: vk::Device,
-    fns: DeviceFns,
-    pipeline: vk::Pipeline,
-    pipeline_layout: vk::PipelineLayout,
-    shader_vert: vk::ShaderModule,
-    shader_frag: vk::ShaderModule,
-    render_pass: vk::RenderPass,
-    framebuffers: Vec<vk::Framebuffer>,
-    image_views: Vec<vk::ImageView>,
-    semaphores: Vec<vk::Semaphore>,
-    fences: Vec<vk::Fence>,
-    cmd_pool: vk::CommandPool,
-    swapchain_key: u64,
-}
-
-static DEAD_SWAPCHAINS: Mutex<Option<Vec<DeadSwapchain>>> = Mutex::new(None);
+/// Retired swapchain data waiting for the GPU to finish with it: (raw key,
+/// full data). Freed once every fence signals (polled, never waited), so
+/// teardown can never hang the game thread on a wedged queue. Storing the
+/// full `SwapchainData` keeps one struct instead of a parallel shadow that
+/// must be kept in sync; sweep simply ignores the live-only fields
+/// (images, extent, command buffers — the pool owns those).
+static DEAD_SWAPCHAINS: Mutex<Option<Vec<(u64, SwapchainData)>>> = Mutex::new(None);
 
 /// Frees retired swapchains whose fences all signaled (non-blocking).
 /// Entries on a dead queue never signal and leak boundedly until process
@@ -166,41 +193,47 @@ static DEAD_SWAPCHAINS: Mutex<Option<Vec<DeadSwapchain>>> = Mutex::new(None);
 unsafe fn sweep_dead() {
     let mut dead = DEAD_SWAPCHAINS.lock().unwrap();
     let Some(list) = dead.as_mut() else { return };
-    list.retain(|entry| {
+    list.retain(|(key, sc)| {
         // SUCCESS = signaled. Anything else keeps the entry, except a lost
         // device where waiting is pointless and destruction is harmless.
-        let done = entry.fences.iter().all(|fence| {
+        let done = sc.fences.iter().all(|fence| {
             matches!(
-                (entry.fns.get_fence_status)(entry.device, *fence),
+                (sc.fns.get_fence_status)(sc.device, *fence),
                 vk::Result::SUCCESS | vk::Result::ERROR_DEVICE_LOST
             )
         });
         if !done {
             return true;
         }
-        let fns = entry.fns;
-        let device = entry.device;
-        crate::canvas::destroy_canvas(fns, device, entry.swapchain_key);
-        for fb in &entry.framebuffers {
-            (fns.destroy_framebuffer)(device, *fb, std::ptr::null());
-        }
-        for iv in &entry.image_views {
-            (fns.destroy_image_view)(device, *iv, std::ptr::null());
-        }
-        for sem in &entry.semaphores {
-            (fns.destroy_semaphore)(device, *sem, std::ptr::null());
-        }
-        for fence in &entry.fences {
-            (fns.destroy_fence)(device, *fence, std::ptr::null());
-        }
-        (fns.destroy_pipeline)(device, entry.pipeline, std::ptr::null());
-        (fns.destroy_pipeline_layout)(device, entry.pipeline_layout, std::ptr::null());
-        (fns.destroy_shader_module)(device, entry.shader_vert, std::ptr::null());
-        (fns.destroy_shader_module)(device, entry.shader_frag, std::ptr::null());
-        (fns.destroy_render_pass)(device, entry.render_pass, std::ptr::null());
-        (fns.destroy_command_pool)(device, entry.cmd_pool, std::ptr::null());
+        crate::canvas::destroy_canvas(sc.fns, sc.device, *key);
+        free_retired(sc);
         false
     });
+}
+
+/// Destroys one retired swapchain's layer resources (not the swapchain
+/// itself — that belongs to the game and dies immediately).
+unsafe fn free_retired(sc: &SwapchainData) {
+    let fns = sc.fns;
+    let device = sc.device;
+    for fb in &sc.framebuffers {
+        (fns.destroy_framebuffer)(device, *fb, std::ptr::null());
+    }
+    for iv in &sc.image_views {
+        (fns.destroy_image_view)(device, *iv, std::ptr::null());
+    }
+    for sem in &sc.semaphores {
+        (fns.destroy_semaphore)(device, *sem, std::ptr::null());
+    }
+    for fence in &sc.fences {
+        (fns.destroy_fence)(device, *fence, std::ptr::null());
+    }
+    (fns.destroy_pipeline)(device, sc.pipeline, std::ptr::null());
+    (fns.destroy_pipeline_layout)(device, sc.pipeline_layout, std::ptr::null());
+    (fns.destroy_shader_module)(device, sc.shader_vert, std::ptr::null());
+    (fns.destroy_shader_module)(device, sc.shader_frag, std::ptr::null());
+    (fns.destroy_render_pass)(device, sc.render_pass, std::ptr::null());
+    (fns.destroy_command_pool)(device, sc.cmd_pool, std::ptr::null());
 }
 
 pub(crate) unsafe extern "system" fn destroy_swapchain(
@@ -213,7 +246,7 @@ pub(crate) unsafe extern "system" fn destroy_swapchain(
         .unwrap()
         .as_mut()
         .and_then(|m| m.remove(&(swapchain.as_raw())));
-        if let Some(sc) = sc_data {
+    if let Some(sc) = sc_data {
         let fns = sc.fns;
 
         ira_overlay::capture::drain_pending();
@@ -225,21 +258,7 @@ pub(crate) unsafe extern "system" fn destroy_swapchain(
             .lock()
             .unwrap()
             .get_or_insert_with(Vec::new)
-            .push(DeadSwapchain {
-                device: sc.device,
-                fns,
-                pipeline: sc.pipeline,
-                pipeline_layout: sc.pipeline_layout,
-                shader_vert: sc.shader_vert,
-                shader_frag: sc.shader_frag,
-                render_pass: sc.render_pass,
-                framebuffers: sc.framebuffers,
-                image_views: sc.image_views,
-                semaphores: sc.semaphores,
-                fences: sc.fences,
-                cmd_pool: sc.cmd_pool,
-                swapchain_key: swapchain.as_raw(),
-            });
+            .push((swapchain.as_raw(), sc));
         // The actual swapchain belongs to the game; destroy it immediately.
         (fns.destroy_swapchain)(device, swapchain, allocator);
     } else {
@@ -324,7 +343,10 @@ unsafe fn create_framebuffers(
                     layer_count: 1,
                 });
             let mut image_view = vk::ImageView::null();
-            let _ = (fns.create_image_view)(device, &view_info, std::ptr::null(), &mut image_view);
+            log_vk(
+                (fns.create_image_view)(device, &view_info, std::ptr::null(), &mut image_view),
+                "create_image_view",
+            );
 
             let fb_info = vk::FramebufferCreateInfo::default()
                 .render_pass(render_pass)
@@ -333,7 +355,10 @@ unsafe fn create_framebuffers(
                 .height(extent.height)
                 .layers(1);
             let mut fb = vk::Framebuffer::null();
-            let _ = (fns.create_framebuffer)(device, &fb_info, std::ptr::null(), &mut fb);
+            log_vk(
+                (fns.create_framebuffer)(device, &fb_info, std::ptr::null(), &mut fb),
+                "create_framebuffer",
+            );
 
             (fb, image_view)
         })

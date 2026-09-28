@@ -15,7 +15,7 @@ use std::sync::{Mutex, OnceLock};
 use ira_overlay::capture;
 use ira_overlay_ipc::{
     canvas_shm_path, command_from_raw, CanvasCommand, CanvasShm, InputEventRaw, MappedShm,
-    ShmHeader, ACT_HIDE_OVERLAY, ACT_SCREENSHOT, ACT_TOGGLE_RECORD,
+    ShmHeader, ACT_EXIT_GAME, ACT_HIDE_OVERLAY, ACT_SCREENSHOT, ACT_TOGGLE_RECORD,
 };
 
 type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;
@@ -35,27 +35,50 @@ static INCREMENT_PRESENT: OnceLock<Option<IncrementPresentFn>> = OnceLock::new()
 static RESET_PRESENT: OnceLock<Option<ResetPresentFn>> = OnceLock::new();
 static READY_FOR_OVERLAY: OnceLock<Option<ReadyForOverlayFn>> = OnceLock::new();
 static ENFORCE_CURSOR: OnceLock<Option<EnforceCursorFn>> = OnceLock::new();
-static PRESENT_COUNT: AtomicU32 = AtomicU32::new(0);
+/// Layer-side tick for cursor re-enforcement (see `enforce_cursor`).
+/// Distinct from the shim's own present counter (`increment_present_count`
+/// drives the overlay-ready delay game-side).
+static ENFORCE_TICK: AtomicU32 = AtomicU32::new(0);
+
+/// Single `dlsym(RTLD_DEFAULT, …)` path for every shim import: NULL means
+/// "shim absent", cached forever.
+fn resolve<T: Copy>(slot: &OnceLock<Option<T>>, sym: &std::ffi::CStr) -> Option<T> {
+    *slot.get_or_init(|| {
+        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, sym.as_ptr()) };
+        (!p.is_null()).then(|| unsafe { std::mem::transmute_copy::<_, T>(&p) })
+    })
+}
 
 fn poll_fn() -> Option<PollEventsFn> {
-    *POLL_EVENTS.get_or_init(|| {
-        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_poll_events".as_ptr()) };
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    resolve(&POLL_EVENTS, c"ira_overlay_poll_events")
 }
 
 fn visible_fn() -> Option<IsVisibleFn> {
-    *IS_VISIBLE.get_or_init(|| {
-        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_is_visible".as_ptr()) };
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    resolve(&IS_VISIBLE, c"ira_overlay_is_visible")
 }
 
 fn set_visible_fn() -> Option<SetVisibleFn> {
-    *SET_VISIBLE.get_or_init(|| {
-        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_set_visible".as_ptr()) };
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    resolve(&SET_VISIBLE, c"ira_overlay_set_visible")
+}
+
+fn has_sdl_fn() -> Option<HasSdlFn> {
+    resolve(&HAS_SDL, c"ira_overlay_has_sdl")
+}
+
+fn increment_present_fn() -> Option<IncrementPresentFn> {
+    resolve(&INCREMENT_PRESENT, c"ira_overlay_increment_present_count")
+}
+
+fn reset_present_fn() -> Option<ResetPresentFn> {
+    resolve(&RESET_PRESENT, c"ira_overlay_reset_present_count")
+}
+
+fn ready_fn() -> Option<ReadyForOverlayFn> {
+    resolve(&READY_FOR_OVERLAY, c"ira_overlay_ready_for_overlay")
+}
+
+fn enforce_cursor_fn() -> Option<EnforceCursorFn> {
+    resolve(&ENFORCE_CURSOR, c"ira_overlay_enforce_cursor")
 }
 
 /// Returns true if the overlay is visible (synced from the shim).
@@ -77,6 +100,10 @@ pub fn set_visible(v: bool) {
 /// out-of-process host (gamescope window mode) can show/hide its window.
 /// Called every present; writes only on change. Covers every toggle path
 /// (Wayland, evdev, shim hooks) in one place.
+///
+/// NOTE: in gamescope/flatpak launches the shim is absent, so `is_visible`
+/// is always false here and this never fires — the daemon owns the flag.
+/// If this log line ever appears in such a setup, something regressed.
 pub fn sync_visible_to_shm() {
     static LAST_SYNCED: AtomicBool = AtomicBool::new(false);
     let visible = is_visible();
@@ -86,6 +113,7 @@ pub fn sync_visible_to_shm() {
                 .header()
                 .overlay_visible
                 .store(u32::from(visible), Ordering::SeqCst);
+            eprintln!("ira-overlay: layer mirrored visible={visible} into SHM");
         }
     }
 }
@@ -94,41 +122,19 @@ pub fn sync_visible_to_shm() {
 /// When true, evdev gamepad polling is skipped since SDL hooks can consume
 /// events (evdev can't).
 pub fn has_sdl_hooks() -> bool {
-    let f = *HAS_SDL.get_or_init(|| {
-        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_has_sdl".as_ptr()) };
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    });
-    f.is_some_and(|f| unsafe { f() != 0 })
+    has_sdl_fn().is_some_and(|f| unsafe { f() != 0 })
 }
 
 /// Increments the present counter in the shim. Called on every queue_present.
 pub fn increment_present_count() {
-    let f = *INCREMENT_PRESENT.get_or_init(|| {
-        let p = unsafe {
-            libc::dlsym(
-                libc::RTLD_DEFAULT,
-                c"ira_overlay_increment_present_count".as_ptr(),
-            )
-        };
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    });
-    if let Some(f) = f {
+    if let Some(f) = increment_present_fn() {
         unsafe { f() };
     }
 }
 
 /// Resets the present counter to zero. Called when a new swapchain is created.
 pub fn reset_present_count() {
-    let f = *RESET_PRESENT.get_or_init(|| {
-        let p = unsafe {
-            libc::dlsym(
-                libc::RTLD_DEFAULT,
-                c"ira_overlay_reset_present_count".as_ptr(),
-            )
-        };
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    });
-    if let Some(f) = f {
+    if let Some(f) = reset_present_fn() {
         unsafe { f() };
     }
 }
@@ -143,14 +149,13 @@ pub fn enforce_cursor() {
     if *DISABLED.get_or_init(|| std::env::var_os("IRA_OVERLAY_NO_ENFORCE").is_some()) {
         return;
     }
-    if !PRESENT_COUNT.fetch_add(1, Ordering::Relaxed).is_multiple_of(30) {
+    if !ENFORCE_TICK
+        .fetch_add(1, Ordering::Relaxed)
+        .is_multiple_of(30)
+    {
         return;
     }
-    let f = *ENFORCE_CURSOR.get_or_init(|| {
-        let p = unsafe { libc::dlsym(libc::RTLD_DEFAULT, c"ira_overlay_enforce_cursor".as_ptr()) };
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    });
-    if let Some(f) = f {
+    if let Some(f) = enforce_cursor_fn() {
         unsafe { f() };
     }
 }
@@ -158,16 +163,7 @@ pub fn enforce_cursor() {
 /// Returns true if enough frames have been presented for the overlay to be safe.
 /// If the shim isn't loaded (dlsym fails), returns true — no present count to wait for.
 pub fn ready_for_overlay() -> bool {
-    let f = *READY_FOR_OVERLAY.get_or_init(|| {
-        let p = unsafe {
-            libc::dlsym(
-                libc::RTLD_DEFAULT,
-                c"ira_overlay_ready_for_overlay".as_ptr(),
-            )
-        };
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    });
-    f.is_none_or(|f| unsafe { f() != 0 })
+    ready_fn().is_none_or(|f| unsafe { f() != 0 })
 }
 
 // ─── SHM-based hotkey config ───
@@ -180,7 +176,10 @@ fn shm() -> Option<&'static Mutex<MappedShm>> {
         let path = match std::env::var_os("IRA_OVERLAY_SHM") {
             Some(p) => p,
             None => {
-                warn_once(&SHM_WARNED, "ira-overlay: IRA_OVERLAY_SHM unset, input ring dead");
+                warn_once(
+                    &SHM_WARNED,
+                    "ira-overlay: IRA_OVERLAY_SHM unset, input ring dead",
+                );
                 return None;
             }
         };
@@ -230,11 +229,9 @@ pub fn poll_and_forward(swapchain: u64) {
     let mut buf = [InputEventRaw::default(); 64];
     let count = unsafe { f(buf.as_mut_ptr(), buf.len()) };
 
-    if count > 0 && poll_debug() {
+    if count > 0 && crate::types::debug_log() {
         static LAST_LOG_MS: AtomicU32 = AtomicU32::new(0);
-        let now = crate::canvas::now_ms();
-        if now.wrapping_sub(LAST_LOG_MS.load(Ordering::Relaxed)) > 1000 {
-            LAST_LOG_MS.store(now, Ordering::Relaxed);
+        if debug_throttled(&LAST_LOG_MS, 1000) {
             let kinds: Vec<u32> = buf[..count].iter().map(|r| r.event_type).collect();
             eprintln!("ira-overlay: polled {count} shim events: {kinds:?}");
         }
@@ -245,10 +242,14 @@ pub fn poll_and_forward(swapchain: u64) {
     }
 }
 
-/// One-shot env check for input-path diagnostics (`IRA_OVERLAY_DEBUG=1`).
-fn poll_debug() -> bool {
-    static DEBUG: OnceLock<bool> = OnceLock::new();
-    *DEBUG.get_or_init(|| std::env::var_os("IRA_OVERLAY_DEBUG").is_some())
+/// Throttled debug logging: true at most once per `every_ms` (stamps on true).
+fn debug_throttled(last_ms: &AtomicU32, every_ms: u32) -> bool {
+    let now = crate::canvas::now_ms();
+    if now.wrapping_sub(last_ms.load(Ordering::Relaxed)) > every_ms {
+        last_ms.store(now, Ordering::Relaxed);
+        return true;
+    }
+    false
 }
 
 fn convert_and_forward(raw: &InputEventRaw, swapchain: u64) {
@@ -256,56 +257,7 @@ fn convert_and_forward(raw: &InputEventRaw, swapchain: u64) {
         // Mouse: root pixels become client pixels via the swapchain's game
         // window (identity for fullscreen), then canvas pixels. Screen
         // position always feeds the layer-drawn cursor.
-        0..=2 => {
-            let (sx, sy) = crate::canvas::translate_to_client(
-                swapchain,
-                raw.x as f32,
-                raw.y as f32,
-            );
-            crate::canvas::set_last_mouse(sx, sy);
-            let Some((cx, cy)) = crate::canvas::screen_to_canvas(sx, sy)
-            else {
-                if poll_debug() {
-                    static LAST_DROP_MS: AtomicU32 = AtomicU32::new(0);
-                    let now = crate::canvas::now_ms();
-                    if now.wrapping_sub(LAST_DROP_MS.load(Ordering::Relaxed)) > 2000 {
-                        LAST_DROP_MS.store(now, Ordering::Relaxed);
-                        eprintln!(
-                            "ira-overlay: mouse ({} {}) off-panel, dropped",
-                            raw.x, raw.y
-                        );
-                    }
-                }
-                return;
-            };
-            let cmd = match raw.event_type {
-                0 => CanvasCommand::mouse_move(cx, cy),
-                1 => CanvasCommand::mouse_down(cx, cy, raw.button),
-                _ => CanvasCommand::mouse_up(cx, cy, raw.button),
-            };
-            // Coordinate-bug tracing: raw screen coords next to the mapped
-            // canvas coords they produced. Buttons log every press (rare);
-            // motion throttles (hot path).
-            if poll_debug() {
-                if raw.event_type == 0 {
-                    static LAST_MOTION_MS: AtomicU32 = AtomicU32::new(0);
-                    let now = crate::canvas::now_ms();
-                    if now.wrapping_sub(LAST_MOTION_MS.load(Ordering::Relaxed)) > 2000 {
-                        LAST_MOTION_MS.store(now, Ordering::Relaxed);
-                        eprintln!(
-                            "ira-overlay: motion raw=({},{}) canvas=({cx:.0},{cy:.0})",
-                            raw.x, raw.y
-                        );
-                    }
-                } else {
-                    eprintln!(
-                        "ira-overlay: button{} raw=({},{}) canvas=({cx:.0},{cy:.0})",
-                        raw.event_type, raw.x, raw.y
-                    );
-                }
-            }
-            push_canvas_command(cmd);
-        }
+        0..=2 => forward_mouse(raw, swapchain),
         // Key press — navigation keys become commands via the shared table.
         3 => {
             if let Some(cmd) = command_from_raw(3, 0, 0, 0, raw.keycode) {
@@ -330,6 +282,48 @@ fn convert_and_forward(raw: &InputEventRaw, swapchain: u64) {
         }
         _ => {}
     }
+}
+
+fn forward_mouse(raw: &InputEventRaw, swapchain: u64) {
+    let (sx, sy) = crate::xwin::translate_to_client(swapchain, raw.x as f32, raw.y as f32);
+    crate::canvas::set_last_mouse(sx, sy);
+    let Some((cx, cy)) = crate::canvas::screen_to_canvas(sx, sy) else {
+        if crate::types::debug_log() {
+            static LAST_DROP_MS: AtomicU32 = AtomicU32::new(0);
+            if debug_throttled(&LAST_DROP_MS, 2000) {
+                eprintln!(
+                    "ira-overlay: mouse ({} {}) off-panel, dropped",
+                    raw.x, raw.y
+                );
+            }
+        }
+        return;
+    };
+    let cmd = match raw.event_type {
+        0 => CanvasCommand::mouse_move(cx, cy),
+        1 => CanvasCommand::mouse_down(cx, cy, raw.button),
+        _ => CanvasCommand::mouse_up(cx, cy, raw.button),
+    };
+    // Coordinate-bug tracing: raw screen coords next to the mapped
+    // canvas coords they produced. Buttons log every press (rare);
+    // motion throttles (hot path).
+    if crate::types::debug_log() {
+        if raw.event_type == 0 {
+            static LAST_MOTION_MS: AtomicU32 = AtomicU32::new(0);
+            if debug_throttled(&LAST_MOTION_MS, 2000) {
+                eprintln!(
+                    "ira-overlay: motion raw=({},{}) canvas=({cx:.0},{cy:.0})",
+                    raw.x, raw.y
+                );
+            }
+        } else {
+            eprintln!(
+                "ira-overlay: button{} raw=({},{}) canvas=({cx:.0},{cy:.0})",
+                raw.event_type, raw.x, raw.y
+            );
+        }
+    }
+    push_canvas_command(cmd);
 }
 
 // ─── Canvas SHM (layer side: command producer, action consumer) ───
@@ -367,8 +361,7 @@ fn open_canvas() -> Option<CanvasShm> {
     // Fail loud on ABI drift (stale layer/host binaries): silent garbage
     // is worse than no overlay.
     let hdr = shm.header();
-    if hdr.magic != ira_overlay_ipc::CANVAS_MAGIC
-        || hdr.version != ira_overlay_ipc::CANVAS_VERSION
+    if hdr.magic != ira_overlay_ipc::CANVAS_MAGIC || hdr.version != ira_overlay_ipc::CANVAS_VERSION
     {
         eprintln!(
             "ira-overlay: canvas ABI mismatch (magic={:#x} version={}), overlay disabled",
@@ -391,22 +384,13 @@ fn open_canvas() -> Option<CanvasShm> {
 /// host has created the canvas region).
 pub fn push_canvas_command(cmd: CanvasCommand) {
     use ira_overlay_ipc::CMD_MOUSE_MOVE;
-    static DEBUG: OnceLock<bool> = OnceLock::new();
-    if *DEBUG.get_or_init(|| std::env::var_os("IRA_OVERLAY_DEBUG").is_some())
-        && cmd.kind != CMD_MOUSE_MOVE
-    {
+    if crate::types::debug_log() && cmd.kind != CMD_MOUSE_MOVE {
         eprintln!(
             "ira-overlay: push kind={} a={} b={} c={}",
             cmd.kind, cmd.a, cmd.b, cmd.c
         );
     }
-    let mut guard = CANVAS_SHM.lock().unwrap();
-    if guard.is_none() {
-        *guard = open_canvas();
-    }
-    if let Some(shm) = guard.as_mut() {
-        shm.push_command(cmd);
-    }
+    with_canvas(|shm| shm.push_command(cmd));
 }
 
 /// Runs `f` against the canvas SHM, opening it on first use.
@@ -438,6 +422,15 @@ pub fn drain_host_actions() {
             ACT_SCREENSHOT => capture::request_screenshot(),
             ACT_TOGGLE_RECORD => capture::toggle_recording(),
             ACT_HIDE_OVERLAY => set_visible(false),
+            // Exit Game from the overlay menu (or Alt+F4): terminate this
+            // process — the layer lives inside the game, so no pid
+            // discovery is needed and this works in every launch mode.
+            // `_exit` (not `exit`): no destructors or atexit hooks run,
+            // so nothing re-enters Vulkan during teardown.
+            ACT_EXIT_GAME => {
+                eprintln!("ira-overlay: exit game requested, terminating");
+                unsafe { libc::_exit(0) };
+            }
             _ => {}
         }
     }

@@ -23,11 +23,19 @@ pub const CMD_MOUSE_DOWN: u32 = 7;
 pub const CMD_MOUSE_UP: u32 = 8;
 pub const CMD_SHOW: u32 = 9;
 pub const CMD_HIDE: u32 = 10;
+/// Back out one overlay screen (submenu → menu, menu → close).
+pub const CMD_BACK: u32 = 11;
+/// Exit the game from the overlay (kills the session).
+pub const CMD_EXIT_GAME: u32 = 12;
 
 /// Host → layer action kinds.
 pub const ACT_SCREENSHOT: u32 = 0;
 pub const ACT_TOGGLE_RECORD: u32 = 1;
 pub const ACT_HIDE_OVERLAY: u32 = 2;
+/// Tear down the game: the host kills the gamescope session when there is
+/// one, and always forwards this — the in-process layer terminates the
+/// game itself on receipt, so injected launches exit too.
+pub const ACT_EXIT_GAME: u32 = 3;
 
 /// Ring capacities. Commands burst per frame (one per input event);
 /// 64 covers a full `InputEventRaw` poll batch. Actions are rare.
@@ -49,49 +57,28 @@ pub struct CanvasCommand {
 }
 
 impl CanvasCommand {
+    fn new(kind: u32, a: i32, b: i32, c: u32) -> Self {
+        Self { kind, a, b, c }
+    }
+
     pub fn nav(kind: u32) -> Self {
-        Self {
-            kind,
-            a: 0,
-            b: 0,
-            c: 0,
-        }
+        Self::new(kind, 0, 0, 0)
     }
 
     pub fn scroll(delta_y: f32) -> Self {
-        Self {
-            kind: CMD_SCROLL,
-            a: delta_y as i32,
-            b: 0,
-            c: 0,
-        }
+        Self::new(CMD_SCROLL, delta_y as i32, 0, 0)
     }
 
     pub fn mouse_move(x: f32, y: f32) -> Self {
-        Self {
-            kind: CMD_MOUSE_MOVE,
-            a: x as i32,
-            b: y as i32,
-            c: 0,
-        }
+        Self::new(CMD_MOUSE_MOVE, x as i32, y as i32, 0)
     }
 
     pub fn mouse_down(x: f32, y: f32, button: u32) -> Self {
-        Self {
-            kind: CMD_MOUSE_DOWN,
-            a: x as i32,
-            b: y as i32,
-            c: button,
-        }
+        Self::new(CMD_MOUSE_DOWN, x as i32, y as i32, button)
     }
 
     pub fn mouse_up(x: f32, y: f32, button: u32) -> Self {
-        Self {
-            kind: CMD_MOUSE_UP,
-            a: x as i32,
-            b: y as i32,
-            c: button,
-        }
+        Self::new(CMD_MOUSE_UP, x as i32, y as i32, button)
     }
 }
 

@@ -13,11 +13,10 @@
 //! SPSC with a single atomic write index each — readers track their own
 //! read index locally, matching the notification ring in `protocol.rs`.
 
-use std::ffi::CString;
-use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::commands::{CanvasAction, CanvasCommand, MAX_CANVAS_ACTIONS, MAX_CANVAS_COMMANDS};
+use crate::map::{map_fd as map_shm_fd, open_fd, shm_file_path};
 
 pub const CANVAS_MAGIC: u32 = 0x49524143;
 /// Bumped when the header layout changes (cursor block added in v2,
@@ -88,59 +87,16 @@ pub fn canvas_shm_path(db_id: i64) -> String {
     format!("/ira_canvas_{db_id}")
 }
 
-/// Computes the on-screen panel rect (x, y, w, h) for a canvas frame.
-/// Uniformly fit-scales the frame into the screen minus a 16px margin and
-/// anchors it per `position` (`OverlayPosition` as u32; unknown = top-left).
-pub fn canvas_panel_rect(
-    screen_w: u32,
-    screen_h: u32,
-    frame_w: u32,
-    frame_h: u32,
-    position: u32,
-) -> (f32, f32, f32, f32) {
-    const MARGIN: f32 = 16.0;
-    let fw = frame_w.max(1) as f32;
-    let fh = frame_h.max(1) as f32;
-    let avail_w = (screen_w as f32 - 2.0 * MARGIN).max(1.0);
-    let avail_h = (screen_h as f32 - 2.0 * MARGIN).max(1.0);
-    let scale = (avail_w / fw).min(avail_h / fh).min(1.0);
-    let w = fw * scale;
-    let h = fh * scale;
-    let (x, y) = match position {
-        1 => (screen_w as f32 - MARGIN - w, MARGIN),
-        2 => (MARGIN, screen_h as f32 - MARGIN - h),
-        3 => (screen_w as f32 - MARGIN - w, screen_h as f32 - MARGIN - h),
-        4 => ((screen_w as f32 - w) / 2.0, (screen_h as f32 - h) / 2.0),
-        _ => (MARGIN, MARGIN),
-    };
-    (x.max(0.0), y.max(0.0), w, h)
-}
-
-/// Window size for a screen, keeping the 512:800 panel aspect: fills the
-/// screen minus a margin, clamped to the canvas maximum. The host applies
-/// this to its window so the panel grows and shrinks with the game.
-pub fn fit_panel_size(screen_w: u32, screen_h: u32) -> (u32, u32) {
-    const BASE_W: f64 = 512.0;
-    const BASE_H: f64 = 800.0;
-    const MARGIN: f64 = 32.0;
-    let avail_w = (screen_w as f64 - MARGIN).max(1.0);
-    let avail_h = (screen_h as f64 - MARGIN).max(1.0);
-    let scale = (avail_w / BASE_W).min(avail_h / BASE_H);
-    let w = ((BASE_W * scale) as u32).clamp(1, CANVAS_MAX_W as u32);
-    let h = ((BASE_H * scale) as u32).clamp(1, CANVAS_MAX_H as u32);
-    (w, h)
-}
-
 /// Filesystem path for debugging (`/dev/shm/<name>`).
 pub fn canvas_shm_file_path(name: &str) -> String {
-    format!("/dev/shm/{name}")
+    shm_file_path(name)
 }
 
 /// RAII wrapper around the mapped canvas region. Unmaps on drop.
 pub struct CanvasShm {
     ptr: *mut u8,
     size: usize,
-    owned: bool,
+    writable: bool,
 }
 
 unsafe impl Send for CanvasShm {}
@@ -148,16 +104,9 @@ unsafe impl Send for CanvasShm {}
 impl CanvasShm {
     pub fn create(db_id: i64) -> Result<Self, String> {
         let path = canvas_shm_path(db_id);
-        let c_path = CString::new(path.as_str()).map_err(|e| e.to_string())?;
-        unsafe { libc::shm_unlink(c_path.as_ptr()) };
-        let fd = unsafe { libc::shm_open(c_path.as_ptr(), libc::O_RDWR | libc::O_CREAT, 0o600) };
-        if fd < 0 {
-            return Err(format!(
-                "canvas shm_open failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        Self::map_fd(fd, true)
+        unsafe { libc::shm_unlink(std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?.as_ptr()) };
+        let fd = open_fd(&path, libc::O_RDWR | libc::O_CREAT, "canvas")?;
+        Self::map_shm_fd(fd, true)
     }
 
     pub fn open(path: &str) -> Result<Self, String> {
@@ -169,52 +118,21 @@ impl CanvasShm {
     }
 
     fn open_with(path: &str, flags: i32, writable: bool) -> Result<Self, String> {
-        let c_path = CString::new(path).map_err(|e| e.to_string())?;
-        let fd = unsafe { libc::shm_open(c_path.as_ptr(), flags, 0o600) };
-        if fd < 0 {
-            return Err(format!(
-                "canvas shm_open failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        Self::map_fd(fd, writable)
+        let fd = open_fd(path, flags, "canvas")?;
+        Self::map_shm_fd(fd, writable)
     }
 
-    fn map_fd(fd: RawFd, writable: bool) -> Result<Self, String> {
-        if writable && unsafe { libc::ftruncate(fd, CANVAS_SHM_SIZE as libc::off_t) } < 0 {
-            unsafe { libc::close(fd) };
-            return Err(format!(
-                "canvas ftruncate failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        let prot = if writable {
-            libc::PROT_READ | libc::PROT_WRITE
-        } else {
-            libc::PROT_READ
-        };
-        let ptr = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                CANVAS_SHM_SIZE,
-                prot,
-                libc::MAP_SHARED,
-                fd,
-                0,
-            )
-        };
-        unsafe { libc::close(fd) };
-        if ptr == libc::MAP_FAILED {
-            return Err(format!(
-                "canvas mmap failed: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
+    fn map_shm_fd(fd: std::os::unix::io::RawFd, writable: bool) -> Result<Self, String> {
+        let ptr = map_shm_fd(fd, CANVAS_SHM_SIZE, writable, "canvas")?;
         Ok(Self {
-            ptr: ptr as *mut u8,
+            ptr,
             size: CANVAS_SHM_SIZE,
-            owned: writable,
+            writable,
         })
+    }
+
+    fn assert_writable(&self) {
+        assert!(self.writable, "cannot write to read-only canvas mapping");
     }
 
     pub fn header(&self) -> &CanvasHeader {
@@ -222,7 +140,7 @@ impl CanvasShm {
     }
 
     pub fn header_mut(&mut self) -> &mut CanvasHeader {
-        assert!(self.owned, "cannot write to read-only canvas mapping");
+        self.assert_writable();
         unsafe { &mut *(self.ptr as *mut CanvasHeader) }
     }
 
@@ -238,7 +156,7 @@ impl CanvasShm {
     }
 
     pub fn pixels_mut(&mut self) -> &mut [u8] {
-        assert!(self.owned, "cannot write to read-only canvas mapping");
+        self.assert_writable();
         unsafe {
             std::slice::from_raw_parts_mut(
                 self.ptr.add(std::mem::size_of::<CanvasHeader>()),
@@ -338,47 +256,53 @@ impl CanvasShm {
     /// Layer side: push one input command (producer). Wraps the 64-slot ring.
     pub fn push_command(&mut self, cmd: CanvasCommand) {
         let hdr = self.header_mut();
-        let idx = hdr.cmd_write.load(Ordering::SeqCst);
-        hdr.cmds[idx as usize % MAX_CANVAS_COMMANDS] = cmd;
-        std::sync::atomic::fence(Ordering::SeqCst);
-        hdr.cmd_write.store(idx + 1, Ordering::SeqCst);
+        push_ring(&mut hdr.cmds, &hdr.cmd_write, cmd);
     }
 
     /// Host side: drain commands written since `from_idx`. Returns the new
     /// read index alongside the commands.
     pub fn drain_commands(&self, from_idx: u32) -> (u32, Vec<CanvasCommand>) {
         let hdr = self.header();
-        let write_idx = hdr.cmd_write.load(Ordering::SeqCst);
-        let mut out = Vec::new();
-        let mut idx = from_idx;
-        while idx != write_idx {
-            out.push(hdr.cmds[idx as usize % MAX_CANVAS_COMMANDS]);
-            idx = idx.wrapping_add(1);
-        }
-        (write_idx, out)
+        drain_ring(&hdr.cmds, &hdr.cmd_write, from_idx)
     }
 
     /// Host side: push one action (producer).
     pub fn push_action(&mut self, act: CanvasAction) {
         let hdr = self.header_mut();
-        let idx = hdr.act_write.load(Ordering::SeqCst);
-        hdr.acts[idx as usize % MAX_CANVAS_ACTIONS] = act;
-        std::sync::atomic::fence(Ordering::SeqCst);
-        hdr.act_write.store(idx + 1, Ordering::SeqCst);
+        push_ring(&mut hdr.acts, &hdr.act_write, act);
     }
 
     /// Layer side: drain actions written since `from_idx`.
     pub fn drain_actions(&self, from_idx: u32) -> (u32, Vec<CanvasAction>) {
         let hdr = self.header();
-        let write_idx = hdr.act_write.load(Ordering::SeqCst);
-        let mut out = Vec::new();
-        let mut idx = from_idx;
-        while idx != write_idx {
-            out.push(hdr.acts[idx as usize % MAX_CANVAS_ACTIONS]);
-            idx = idx.wrapping_add(1);
-        }
-        (write_idx, out)
+        drain_ring(&hdr.acts, &hdr.act_write, from_idx)
     }
+}
+
+fn push_ring<T: Copy, const N: usize>(
+    slots: &mut [T; N],
+    write_idx: &AtomicU32,
+    val: T,
+) {
+    let idx = write_idx.load(Ordering::SeqCst);
+    slots[idx as usize % N] = val;
+    std::sync::atomic::fence(Ordering::SeqCst);
+    write_idx.store(idx + 1, Ordering::SeqCst);
+}
+
+fn drain_ring<T: Copy, const N: usize>(
+    slots: &[T; N],
+    write_idx: &AtomicU32,
+    from_idx: u32,
+) -> (u32, Vec<T>) {
+    let write = write_idx.load(Ordering::SeqCst);
+    let mut out = Vec::new();
+    let mut idx = from_idx;
+    while idx != write {
+        out.push(slots[idx as usize % N]);
+        idx = idx.wrapping_add(1);
+    }
+    (write, out)
 }
 
 impl Drop for CanvasShm {
@@ -393,6 +317,7 @@ impl Drop for CanvasShm {
 mod tests {
     use super::*;
     use crate::commands::{ACT_SCREENSHOT, CMD_NAV_UP};
+    use std::ffi::CString;
 
     const _: () = {
         assert!(CANVAS_SHM_SIZE < 4 * 1024 * 1024);
@@ -459,65 +384,6 @@ mod tests {
         let (next2, acts2) = reader.drain_actions(next);
         assert_eq!((next2, acts2.len()), (1, 0));
         cleanup(db_id);
-    }
-
-    #[test]
-    fn test_panel_rect_anchors() {
-        // 512×800 panel on 1920×1080: fits unscaled.
-        assert_eq!(
-            canvas_panel_rect(1920, 1080, 512, 800, 0),
-            (16.0, 16.0, 512.0, 800.0)
-        );
-        assert_eq!(
-            canvas_panel_rect(1920, 1080, 512, 800, 1),
-            (1920.0 - 16.0 - 512.0, 16.0, 512.0, 800.0)
-        );
-        assert_eq!(
-            canvas_panel_rect(1920, 1080, 512, 800, 3),
-            (1920.0 - 16.0 - 512.0, 1080.0 - 16.0 - 800.0, 512.0, 800.0)
-        );
-        assert_eq!(
-            canvas_panel_rect(1920, 1080, 512, 800, 4),
-            ((1920.0 - 512.0) / 2.0, (1080.0 - 800.0) / 2.0, 512.0, 800.0)
-        );
-    }
-
-    #[test]
-    fn test_panel_rect_fit_scales_small_screen() {
-        // 512×800 panel on 1280×720: scale = min(1248/512, 688/800) = 0.86.
-        let (x, y, w, h) = canvas_panel_rect(1280, 720, 512, 800, 0);
-        assert!((w - 512.0 * 0.86).abs() < 0.01);
-        assert!((h - 800.0 * 0.86).abs() < 0.01);
-        assert_eq!((x, y), (16.0, 16.0));
-        assert!(x + w <= 1280.0 && y + h <= 720.0);
-    }
-
-    #[test]
-    fn test_fit_panel_size_1080p() {
-        // 1920×1080: scale = min(1888/512, 1048/800) = 1.31 → 670×1048.
-        assert_eq!(fit_panel_size(1920, 1080), (670, 1048));
-    }
-
-    #[test]
-    fn test_fit_panel_size_shrinks_small_screen() {
-        // 800×600: scale = min(768/512, 568/800) = 0.71 → 363×568.
-        assert_eq!(fit_panel_size(800, 600), (363, 568));
-    }
-
-    #[test]
-    fn test_fit_panel_size_clamps_to_max() {
-        // 4K would ask for 1362×2128: clamped to the canvas maximum.
-        assert_eq!(
-            fit_panel_size(3840, 2160),
-            (CANVAS_MAX_W as u32, CANVAS_MAX_H as u32)
-        );
-    }
-
-    #[test]
-    fn test_fit_panel_size_keeps_aspect() {
-        let (w, h) = fit_panel_size(1920, 1080);
-        let ratio = w as f64 / h as f64;
-        assert!((ratio - 512.0 / 800.0).abs() < 0.01);
     }
 
     #[test]

@@ -78,7 +78,48 @@ pub struct ShmHeader {
     pub replay_buffer_seconds: u32,
     /// Set by the injected Vulkan layer after direct swapchain capture is ready.
     pub direct_capture_ready: AtomicU32,
-    pub padding: [u8; 16],
+    /// Physical controller family (daemon-published for footer glyphs).
+    /// Carved from the padding: header size and every earlier offset
+    /// (including `OVERLAY_VISIBLE_OFFSET`) are unchanged.
+    pub controller_family: AtomicU32,
+    pub padding: [u8; 12],
+}
+
+impl Default for ShmHeader {
+    fn default() -> Self {
+        Self {
+            magic: 0,
+            version: 0,
+            game_db_id: 0,
+            game_name: [0; 256],
+            game_kind: [0; 32],
+            cover_image_path: [0; 512],
+            total_achievements: 0,
+            unlocked_achievements: 0,
+            playtime_seconds: 0,
+            notification_write_index: AtomicU32::new(0),
+            overlay_position: 0,
+            video_encoder: 0,
+            recording_quality: 0,
+            recording_format: 0,
+            toggle_keysym: 0,
+            toggle_mods: 0,
+            screenshot_keysym: 0,
+            screenshot_mods: 0,
+            record_keysym: 0,
+            record_mods: 0,
+            toggle_gamepad: 0,
+            screenshot_gamepad: 0,
+            record_gamepad: 0,
+            overlay_visible: AtomicU32::new(0),
+            last_toggle_ms: AtomicU32::new(0),
+            replay_buffer_enabled: 0,
+            replay_buffer_seconds: 0,
+            direct_capture_ready: AtomicU32::new(0),
+            controller_family: AtomicU32::new(0),
+            padding: [0; 12],
+        }
+    }
 }
 
 /// One achievement entry in the shared memory array.
@@ -133,13 +174,67 @@ pub struct InputEventRaw {
 pub const fn header_offset() -> usize {
     0
 }
-
 pub const fn achievements_offset() -> usize {
     std::mem::size_of::<ShmHeader>()
 }
 
 pub const fn notifications_offset() -> usize {
     std::mem::size_of::<ShmHeader>() + MAX_ACHIEVEMENTS * std::mem::size_of::<AchievementEntry>()
+}
+
+/// Byte offset of `ShmHeader::overlay_visible` from the start of the region.
+///
+/// Our Goldberg fork (`IRA_GBE_PAUSE_ON_OVERLAY`) is C++ and cannot include
+/// this header, so it hardcodes this value to find the visibility flag.
+/// If this number ever changes, update the fork's copy too.
+pub const OVERLAY_VISIBLE_OFFSET: usize = std::mem::offset_of!(ShmHeader, overlay_visible);
+
+/// Launcher marker telling the input daemon it owns the overlay toggle
+/// chord for this game (gamescope/flatpak launches whose in-process hooks
+/// cannot see input). The daemon swallows the chord and reports it; the app
+/// flips the SHM flag.
+pub const DAEMON_TOGGLE_ENV: &str = "IRA_OVERLAY_DAEMON_TOGGLE";
+
+impl ShmHeader {
+    /// Cross-process toggle debounce window in milliseconds.
+    pub(crate) const TOGGLE_DEBOUNCE_MS: u32 = 300;
+
+    /// Wall-clock milliseconds since the UNIX epoch, truncated to u32.
+    /// This is the only clock allowed to write [`ShmHeader::last_toggle_ms`]
+    /// (which is a u32 field), so truncation semantics stay consistent.
+    pub fn now_ms() -> u32 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u32)
+            .unwrap_or(0)
+    }
+
+    /// Atomically toggles [`ShmHeader::overlay_visible`] with a
+    /// cross-process debounce: toggles within
+    /// [`Self::TOGGLE_DEBOUNCE_MS`] of the last committed toggle are
+    /// dropped, and a lost compare_exchange race (another process toggled
+    /// first) is reported as "not toggled".
+    ///
+    /// Returns `Some(new_visible)` when this call flipped the flag and
+    /// stamped `last_toggle_ms`; `None` when debounced or raced.
+    pub fn toggle_visible(&self) -> Option<bool> {
+        use std::sync::atomic::Ordering;
+        let now = Self::now_ms();
+        let last = self.last_toggle_ms.load(Ordering::SeqCst);
+        if now.wrapping_sub(last) < Self::TOGGLE_DEBOUNCE_MS {
+            return None;
+        }
+        let current = self.overlay_visible.load(Ordering::SeqCst);
+        let new_visible = current == 0;
+        let new_value = u32::from(new_visible);
+        self.overlay_visible
+            .compare_exchange(current, new_value, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()?;
+        // Stamp only after a successful flip — matches historical behavior:
+        // a lost race must not refresh the debounce window.
+        self.last_toggle_ms.store(now, Ordering::SeqCst);
+        Some(new_visible)
+    }
 }
 
 #[cfg(test)]
@@ -183,5 +278,12 @@ mod tests {
     fn test_input_event_raw_size() {
         let size = std::mem::size_of::<InputEventRaw>();
         assert_eq!(size, 20);
+    }
+
+    #[test]
+    fn test_overlay_visible_offset_is_stable_for_gbe_fork() {
+        // The Goldberg fork hardcodes this offset (see OVERLAY_VISIBLE_OFFSET
+        // docs). If this fails, the layout moved: update the fork's copy.
+        assert_eq!(OVERLAY_VISIBLE_OFFSET, 888);
     }
 }

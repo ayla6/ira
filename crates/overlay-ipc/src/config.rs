@@ -38,50 +38,39 @@ pub fn parse_gamepad_hotkey(hotkey: &str) -> Option<u32> {
         .filter(|mask| *mask != 0)
 }
 
+/// Single source of truth for gamepad buttons: (config name, evdev code, mask).
+const GAMEPAD_TABLE: &[(&str, u16, u32)] = &[
+    ("A", 0x130, GAMEPAD_A),
+    ("B", 0x131, GAMEPAD_B),
+    ("X", 0x132, GAMEPAD_X),
+    ("Y", 0x133, GAMEPAD_Y),
+    ("L1", 0x136, GAMEPAD_L1),
+    ("R1", 0x137, GAMEPAD_R1),
+    ("L2", 0x138, GAMEPAD_L2),
+    ("R2", 0x139, GAMEPAD_R2),
+    ("Select", 0x13a, GAMEPAD_SELECT),
+    ("Start", 0x13b, GAMEPAD_START),
+    ("Guide", 0x13c, GAMEPAD_GUIDE),
+    ("L3", 0x13d, GAMEPAD_L3),
+    ("R3", 0x13e, GAMEPAD_R3),
+    ("DpadUp", 0x220, GAMEPAD_DPAD_UP),
+    ("DpadDown", 0x221, GAMEPAD_DPAD_DOWN),
+    ("DpadLeft", 0x222, GAMEPAD_DPAD_LEFT),
+    ("DpadRight", 0x223, GAMEPAD_DPAD_RIGHT),
+];
+
 pub fn gamepad_button_mask_from_evdev(code: u16) -> Option<u32> {
-    match code {
-        0x130 => Some(GAMEPAD_A),
-        0x131 => Some(GAMEPAD_B),
-        0x132 => Some(GAMEPAD_X),
-        0x133 => Some(GAMEPAD_Y),
-        0x136 => Some(GAMEPAD_L1),
-        0x137 => Some(GAMEPAD_R1),
-        0x138 => Some(GAMEPAD_L2),
-        0x139 => Some(GAMEPAD_R2),
-        0x13a => Some(GAMEPAD_SELECT),
-        0x13b => Some(GAMEPAD_START),
-        0x13c => Some(GAMEPAD_GUIDE),
-        0x13d => Some(GAMEPAD_L3),
-        0x13e => Some(GAMEPAD_R3),
-        0x220 => Some(GAMEPAD_DPAD_UP),
-        0x221 => Some(GAMEPAD_DPAD_DOWN),
-        0x222 => Some(GAMEPAD_DPAD_LEFT),
-        0x223 => Some(GAMEPAD_DPAD_RIGHT),
-        _ => None,
-    }
+    GAMEPAD_TABLE
+        .iter()
+        .find(|(_, evdev, _)| *evdev == code)
+        .map(|(_, _, mask)| *mask)
 }
 
 fn gamepad_button_mask_from_name(name: &str) -> Option<u32> {
-    match name {
-        "A" => Some(GAMEPAD_A),
-        "B" => Some(GAMEPAD_B),
-        "X" => Some(GAMEPAD_X),
-        "Y" => Some(GAMEPAD_Y),
-        "L1" => Some(GAMEPAD_L1),
-        "R1" => Some(GAMEPAD_R1),
-        "L2" => Some(GAMEPAD_L2),
-        "R2" => Some(GAMEPAD_R2),
-        "Select" => Some(GAMEPAD_SELECT),
-        "Start" => Some(GAMEPAD_START),
-        "Guide" => Some(GAMEPAD_GUIDE),
-        "L3" => Some(GAMEPAD_L3),
-        "R3" => Some(GAMEPAD_R3),
-        "DpadUp" => Some(GAMEPAD_DPAD_UP),
-        "DpadDown" => Some(GAMEPAD_DPAD_DOWN),
-        "DpadLeft" => Some(GAMEPAD_DPAD_LEFT),
-        "DpadRight" => Some(GAMEPAD_DPAD_RIGHT),
-        _ => None,
-    }
+    GAMEPAD_TABLE
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, _, mask)| *mask)
 }
 
 /// Video encoder backend selection.
@@ -300,18 +289,16 @@ impl OverlaySettings {
     /// Resolves the overlay enabled state for a given source.
     /// Returns the per-source override if present, otherwise the global setting.
     pub fn source_enabled(&self, source_id: &str) -> bool {
-        self.source_overrides
-            .get(source_id)
-            .copied()
-            .unwrap_or(self.enabled)
+        get_override(&self.source_overrides, source_id, self.enabled)
     }
 
     pub fn source_gamescope(&self, source_id: &str) -> bool {
-        self.source_gamescope
-            .get(source_id)
-            .copied()
-            .unwrap_or(false)
+        get_override(&self.source_gamescope, source_id, false)
     }
+}
+
+fn get_override(map: &HashMap<String, bool>, source_id: &str, fallback: bool) -> bool {
+    map.get(source_id).copied().unwrap_or(fallback)
 }
 
 impl Default for OverlaySettings {

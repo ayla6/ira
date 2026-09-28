@@ -15,7 +15,7 @@ while IFS= read -r source; do
     sources+=("$destination")
 # Sorted: rg walks in arbitrary order, and xgettext follows the file
 # order it is handed, so an unsorted list reshuffles the pot every run.
-done < <(rg --files crates/ira/src crates/overlay/src -g '*.rs' | sort)
+done < <(rg --files crates/ira/src crates/overlay/src crates/overlay-ui/src -g '*.rs' | sort)
 
 xgettext \
     --language=Rust \

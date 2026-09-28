@@ -14,9 +14,15 @@ use ira_overlay_ipc::InputEventRaw;
 
 use crate::state;
 
+fn cbool(v: bool) -> c_int {
+    v as c_int
+}
+
 /// Drains up to `max` input events from the queue into `out`.
 /// Returns the number of events written.
 /// Called by the Vulkan layer every frame when the overlay is visible.
+///
+/// Contract: `out` must point to room for at least `max` events.
 #[no_mangle]
 pub extern "C" fn ira_overlay_poll_events(out: *mut InputEventRaw, max: usize) -> usize {
     if out.is_null() {
@@ -36,11 +42,7 @@ pub extern "C" fn ira_overlay_set_visible(visible: c_int) {
 #[no_mangle]
 pub extern "C" fn ira_overlay_is_visible() -> c_int {
     state::initialize();
-    if state::is_visible() {
-        1
-    } else {
-        0
-    }
+    cbool(state::is_visible())
 }
 
 /// Returns 1 if SDL2 hooks are active (SDL2 was detected via LD_PRELOAD).
@@ -48,11 +50,7 @@ pub extern "C" fn ira_overlay_is_visible() -> c_int {
 /// can consume events (evdev can't).
 #[no_mangle]
 pub extern "C" fn ira_overlay_has_sdl() -> c_int {
-    if state::has_sdl() {
-        1
-    } else {
-        0
-    }
+    cbool(state::has_sdl())
 }
 
 /// Returns the current mouse position (set by X11 motion events).
@@ -83,11 +81,7 @@ pub extern "C" fn ira_overlay_reset_present_count() {
 /// Returns 1 if enough frames have been presented for the overlay to be safe.
 #[no_mangle]
 pub extern "C" fn ira_overlay_ready_for_overlay() -> c_int {
-    if state::ready_for_overlay() {
-        1
-    } else {
-        0
-    }
+    cbool(state::ready_for_overlay())
 }
 
 /// Re-asserts cursor visibility (ungrab + unblank). Called by the Vulkan

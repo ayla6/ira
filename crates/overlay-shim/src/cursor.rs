@@ -49,68 +49,81 @@ fn parse_focus(reply: *const c_void) -> u32 {
     if reply.is_null() {
         return XCB_WINDOW_NONE;
     }
-    unsafe { *((reply as *const u8).add(8) as *const u32) }
+    #[repr(C)]
+    struct FocusReply {
+        _pad: [u8; 8],
+        focus: u32,
+    }
+    unsafe { (*(reply as *const FocusReply)).focus }
+}
+
+struct XcbApi {
+    connect: ConnectFn,
+    has_error: HasErrorFn,
+    disconnect: DisconnectFn,
+    flush: FlushFn,
+    get_focus: GetInputFocusFn,
+    get_focus_reply: GetInputFocusReplyFn,
+    ungrab: UngrabPointerFn,
+    change_attrs: ChangeAttrsFn,
+}
+
+impl XcbApi {
+    fn resolve() -> Option<Self> {
+        Some(Self {
+            connect: sym!(c"xcb_connect", ConnectFn)?,
+            has_error: sym!(c"xcb_connection_has_error", HasErrorFn)?,
+            disconnect: sym!(c"xcb_disconnect", DisconnectFn)?,
+            flush: sym!(c"xcb_flush", FlushFn)?,
+            get_focus: sym!(c"xcb_get_input_focus", GetInputFocusFn)?,
+            get_focus_reply: sym!(c"xcb_get_input_focus_reply", GetInputFocusReplyFn)?,
+            ungrab: sym!(c"xcb_ungrab_pointer", UngrabPointerFn)?,
+            change_attrs: sym!(c"xcb_change_window_attributes", ChangeAttrsFn)?,
+        })
+    }
 }
 
 /// Releases pointer capture on the focused window: drops any grab and
 /// clears a blanked cursor. Called when the overlay opens and periodically
 /// while visible; games re-grab on their own when it closes.
 pub fn force_cursor_visible() {
-    let Some(connect) = sym!(c"xcb_connect", ConnectFn) else {
-        return;
-    };
-    let Some(has_error) = sym!(c"xcb_connection_has_error", HasErrorFn) else {
-        return;
-    };
-    let Some(disconnect) = sym!(c"xcb_disconnect", DisconnectFn) else {
-        return;
-    };
-    let Some(flush) = sym!(c"xcb_flush", FlushFn) else {
-        return;
-    };
-    let Some(get_focus) = sym!(c"xcb_get_input_focus", GetInputFocusFn) else {
-        return;
-    };
-    let Some(get_focus_reply) = sym!(c"xcb_get_input_focus_reply", GetInputFocusReplyFn)
-    else {
-        return;
-    };
-    let Some(ungrab) = sym!(c"xcb_ungrab_pointer", UngrabPointerFn) else {
+    let Some(api) = XcbApi::resolve() else {
         return;
     };
     let ungrab_keyboard: Option<UngrabKeyboardFn> =
         sym!(c"xcb_ungrab_keyboard", UngrabKeyboardFn);
-    let Some(change_attrs) = sym!(c"xcb_change_window_attributes", ChangeAttrsFn) else {
-        return;
-    };
 
-    let conn = unsafe { connect(std::ptr::null(), std::ptr::null_mut()) };
-    if conn.is_null() || unsafe { has_error(conn) } != 0 {
+    let conn = unsafe { (api.connect)(std::ptr::null(), std::ptr::null_mut()) };
+    if conn.is_null() || unsafe { (api.has_error)(conn) } != 0 {
         if !conn.is_null() {
-            unsafe { disconnect(conn) };
+            unsafe { (api.disconnect)(conn) };
         }
         return;
     }
-    let cookie = unsafe { get_focus(conn) };
+    let cookie = unsafe { (api.get_focus)(conn) };
     let mut err: *mut c_void = std::ptr::null_mut();
-    let reply = unsafe { get_focus_reply(conn, cookie, &mut err) };
+    let reply = unsafe { (api.get_focus_reply)(conn, cookie, &mut err) };
     if !err.is_null() {
         unsafe { libc::free(err) };
+    }
+    if reply.is_null() {
+        unsafe { (api.disconnect)(conn) };
+        return;
     }
     let window = parse_focus(reply);
     unsafe { libc::free(reply) };
     if window != XCB_WINDOW_NONE {
         let none = XCB_CURSOR_NONE;
-        let _ = unsafe { change_attrs(conn, window, XCB_CW_CURSOR, &none) };
-        let _ = unsafe { ungrab(conn) };
+        let _ = unsafe { (api.change_attrs)(conn, window, XCB_CW_CURSOR, &none) };
+        let _ = unsafe { (api.ungrab)(conn) };
         // Keyboard too: an active game grab blinds the compositor to
         // Alt+Tab, Super and Alt+F4. Absent on old servers: skip silently.
         if let Some(ungrab_keyboard) = ungrab_keyboard {
             let _ = unsafe { ungrab_keyboard(conn) };
         }
-        let _ = unsafe { flush(conn) };
+        let _ = unsafe { (api.flush)(conn) };
     }
-    unsafe { disconnect(conn) };
+    unsafe { (api.disconnect)(conn) };
 }
 
 #[cfg(test)]

@@ -6,8 +6,8 @@
 //!
 //! Gamepad button events (`SDL_CONTROLLERBUTTONDOWN`, `SDL_JOYBUTTONDOWN`) are
 //! intercepted. When the overlay is visible, they are consumed (removed from
-//! the queue) so the game doesn't see them. The Guide button always toggles
-//! the overlay, even when hidden.
+//! the queue) so the game doesn't see them. The configured toggle chord
+//! (default Guide) toggles on release; screenshot/record chords fire on press.
 //!
 //! On first call, sets `HAS_SDL` flag so the Vulkan layer knows to skip evdev
 //! (SDL hooks can consume events; evdev can't).
@@ -94,6 +94,16 @@ fn read_button(event: *const c_void) -> u8 {
 }
 
 fn handle_button(button: u8) -> bool {
+    // B is Big Picture back: hide the overlay (consumed, game never sees it).
+    // Checked before the mask lookup: B carries no chord bit, so it would
+    // otherwise return early below and never reach the back handler.
+    if button == BTN_B {
+        if !state::is_visible() {
+            return false;
+        }
+        state::set_visible(false);
+        return true;
+    }
     let Some(mask) = button_mask(button) else {
         return false;
     };
@@ -110,78 +120,65 @@ fn handle_button(button: u8) -> bool {
         return true;
     }
     if held == toggle {
-        if state::injected_ui_disabled() {
+        // Gamepad toggle yields to the daemon when it owns the chord;
+        // otherwise the same press would flip the flag twice.
+        if state::daemon_owns_toggle() {
             return false;
         }
         TOGGLE_PENDING.store(true, Ordering::Relaxed);
         return true;
     }
 
-    // Other buttons only when overlay is visible.
-    if state::injected_ui_disabled() || !state::is_visible() {
+    // Other buttons only when overlay is visible, in any mode: the game
+    // must not react to input meant for the overlay.
+    if !state::is_visible() {
         return false;
     }
 
-    // B is Big Picture back: hide the overlay (consumed, game never sees it).
-    if button == BTN_B {
-        state::set_visible(false);
+    if let Some(event) = map_nav(button) {
+        state::push_event(event);
         return true;
     }
+    false
+}
 
-    let event = match button {
-        BTN_A => InputEventRaw {
-            event_type: 3,
-            x: 0,
-            y: 0,
-            button: 0,
-            keycode: KC_RETURN,
-        },
-        BTN_DPAD_UP => InputEventRaw {
-            event_type: 3,
-            x: 0,
-            y: 0,
-            button: 0,
-            keycode: KC_UP,
-        },
-        BTN_DPAD_DOWN => InputEventRaw {
-            event_type: 3,
-            x: 0,
-            y: 0,
-            button: 0,
-            keycode: KC_DOWN,
-        },
-        BTN_DPAD_LEFT => InputEventRaw {
-            event_type: 3,
-            x: 0,
-            y: 0,
-            button: 0,
-            keycode: KC_LEFT,
-        },
-        BTN_DPAD_RIGHT => InputEventRaw {
-            event_type: 3,
-            x: 0,
-            y: 0,
-            button: 0,
-            keycode: KC_RIGHT,
-        },
-        BTN_LEFTSHOULDER => InputEventRaw {
-            event_type: 7,
-            x: 0,
-            y: -1,
-            button: 0,
-            keycode: 0,
-        },
-        BTN_RIGHTSHOULDER => InputEventRaw {
-            event_type: 7,
-            x: 0,
-            y: 1,
-            button: 0,
-            keycode: 0,
-        },
-        _ => return false,
+/// Maps overlay navigation buttons to input events. Returns None for
+/// buttons with no overlay meaning (chords already handled above).
+fn map_nav(button: u8) -> Option<InputEventRaw> {
+    let keycode = match button {
+        BTN_A => KC_RETURN,
+        BTN_DPAD_UP => KC_UP,
+        BTN_DPAD_DOWN => KC_DOWN,
+        BTN_DPAD_LEFT => KC_LEFT,
+        BTN_DPAD_RIGHT => KC_RIGHT,
+        _ => return scroll_event(button),
     };
-    state::push_event(event);
-    true
+    Some(key_event(keycode))
+}
+
+fn scroll_event(button: u8) -> Option<InputEventRaw> {
+    let delta = match button {
+        BTN_LEFTSHOULDER => -1,
+        BTN_RIGHTSHOULDER => 1,
+        _ => return None,
+    };
+    Some(InputEventRaw {
+        event_type: 7,
+        x: 0,
+        y: delta,
+        button: 0,
+        keycode: 0,
+    })
+}
+
+fn key_event(keycode: u32) -> InputEventRaw {
+    InputEventRaw {
+        event_type: 3,
+        x: 0,
+        y: 0,
+        button: 0,
+        keycode,
+    }
 }
 
 fn handle_button_release(button: u8) -> bool {
@@ -222,10 +219,6 @@ fn capture_event(event_type: u32) -> InputEventRaw {
     }
 }
 
-fn should_consume_gamepad_event(was_visible: bool, handled: bool, ui_disabled: bool) -> bool {
-    handled || (was_visible && !ui_disabled)
-}
-
 /// LD_PRELOAD hook for `SDL_PollEvent`.
 ///
 /// Intercepts gamepad button events. When the overlay is visible, gamepad
@@ -255,38 +248,19 @@ pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
             let handled = handle_button(button);
 
             // Also consume a handled Guide press after it closes the overlay.
-            if should_consume_gamepad_event(was_visible, handled, state::injected_ui_disabled())
-                && consumed < 64
-            {
+            if (handled || was_visible) && consumed < 64 {
                 consumed += 1;
                 continue;
             }
         } else if event_type == SDL_CONTROLLERBUTTONUP || event_type == SDL_JOYBUTTONUP {
             let was_visible = state::is_visible();
             let handled = handle_button_release(read_button(event));
-            if should_consume_gamepad_event(was_visible, handled, state::injected_ui_disabled())
-                && consumed < 64
-            {
+            if (handled || was_visible) && consumed < 64 {
                 consumed += 1;
                 continue;
             }
         }
 
         return result;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::should_consume_gamepad_event;
-
-    #[test]
-    fn test_should_consume_gamepad_event_after_guide_hides_overlay() {
-        assert!(should_consume_gamepad_event(false, true, true));
-    }
-
-    #[test]
-    fn test_should_not_consume_visible_ui_event_when_injected_ui_disabled() {
-        assert!(!should_consume_gamepad_event(true, false, true));
     }
 }

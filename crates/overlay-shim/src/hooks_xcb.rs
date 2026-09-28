@@ -29,7 +29,6 @@ use std::ffi::c_void;
 use std::sync::OnceLock;
 
 use ira_overlay_ipc::InputEventRaw;
-use ira_overlay_ipc::X11_KEYCODE_OFFSET;
 
 use crate::state;
 
@@ -60,30 +59,30 @@ fn resolve(name: &std::ffi::CStr) -> *mut c_void {
     unsafe { libc::dlsym(libc::RTLD_NEXT, name.as_ptr()) }
 }
 
-static REAL_XCB_POLL: OnceLock<Option<XcbPollForEventFn>> = OnceLock::new();
-static REAL_XCB_WAIT: OnceLock<Option<XcbWaitForEventFn>> = OnceLock::new();
+macro_rules! real_fn {
+    ($name:literal, $ty:ty) => {{
+        static CELL: OnceLock<Option<$ty>> = OnceLock::new();
+        *CELL.get_or_init(|| {
+            let p = resolve($name);
+            (!p.is_null()).then(|| unsafe { std::mem::transmute_copy::<_, $ty>(&p) })
+        })
+    }};
+}
 
 fn xcb_poll() -> Option<XcbPollForEventFn> {
-    *REAL_XCB_POLL.get_or_init(|| {
-        let p = resolve(c"xcb_poll_for_event");
-        (!p.is_null()).then(|| cast_fn(p))
-    })
+    real_fn!(c"xcb_poll_for_event", XcbPollForEventFn)
 }
 
 fn xcb_wait() -> Option<XcbWaitForEventFn> {
-    *REAL_XCB_WAIT.get_or_init(|| {
-        let p = resolve(c"xcb_wait_for_event");
-        (!p.is_null()).then(|| cast_fn(p))
-    })
-}
-
-fn cast_fn<T>(p: *mut c_void) -> T {
-    unsafe { std::mem::transmute_copy(&p) }
+    real_fn!(c"xcb_wait_for_event", XcbWaitForEventFn)
 }
 
 // --- XCB event field readers ---
 
 fn xcb_response_type(ev: *const c_void) -> u8 {
+    // Bit 8 marks synthetic (XTest-injected) events; mask it so injected
+    // and real events share one policy (matches the X11 path, which never
+    // distinguished them).
     unsafe { *(ev as *const u8).add(XCB_RESPONSE_TYPE) & 0x7f }
 }
 
@@ -108,7 +107,7 @@ fn xcb_event_xy(ev: *const c_void) -> (i16, i16) {
 /// Inspects an XCB event and decides whether to consume it.
 /// Returns `true` if consumed (caller should free the event and return NULL).
 unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
-    if !state::overlay_active() {
+    if ev.is_null() || !state::overlay_active() {
         return false;
     }
 
@@ -123,43 +122,11 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
     let event_type = xcb_response_type(ev);
 
     // Always check for hotkeys, even when overlay is hidden.
-    if event_type == XCB_KEY_PRESS {
-        let mods = xcb_state(ev) as u32;
-        let keycode = xcb_detail(ev) as u32;
-
-        let (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods) = state::hotkeys();
-        // XCB keycodes are the same as X11 keycodes (evdev + 8).
-        // SHM stores evdev keycodes, so add 8 for comparison.
-        let tog_x11 = tog_kc + X11_KEYCODE_OFFSET;
-        let ss_x11 = ss_kc + X11_KEYCODE_OFFSET;
-        let rec_x11 = rec_kc + X11_KEYCODE_OFFSET;
-
-        if !state::injected_ui_disabled() && (mods & tog_mods) == tog_mods && keycode == tog_x11 {
-            if state::toggle_edge(keycode) {
-                state::toggle_visible();
-            }
-            return true;
-        }
-        if (mods & ss_mods) == ss_mods && keycode == ss_x11 {
-            state::push_event(InputEventRaw {
-                event_type: 5,
-                x: 0,
-                y: 0,
-                button: 0,
-                keycode: 0,
-            });
-            return true;
-        }
-        if (mods & rec_mods) == rec_mods && keycode == rec_x11 {
-            state::push_event(InputEventRaw {
-                event_type: 6,
-                x: 0,
-                y: 0,
-                button: 0,
-                keycode: 0,
-            });
-            return true;
-        }
+    // Shared policy with the X11 backend via state::match_hotkey.
+    if event_type == XCB_KEY_PRESS
+        && check_hotkey(xcb_state(ev) as u32, xcb_detail(ev) as u32)
+    {
+        return true;
     }
 
     // Desktop-level combos always reach the compositor (checked after the
@@ -173,8 +140,9 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
         }
     }
 
-    // When overlay is visible, consume all mouse and keyboard events.
-    if !state::injected_ui_disabled() && state::is_visible() {
+    // When overlay is visible, consume all mouse and keyboard events,
+    // in any mode (see hooks_x11).
+    if state::is_visible() {
         match event_type {
             XCB_MOTION_NOTIFY => {
                 let (x, y) = xcb_event_xy(ev);
@@ -253,6 +221,40 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
     }
 
     false
+}
+
+fn check_hotkey(mods: u32, keycode: u32) -> bool {
+    use crate::state::HotkeyAction;
+    match state::match_hotkey(mods, keycode) {
+        // Keyboard toggle is always ours: see hooks_x11.
+        Some(HotkeyAction::Toggle) => {
+            if state::toggle_edge(keycode) {
+                state::toggle_visible();
+            }
+            true
+        }
+        Some(HotkeyAction::Screenshot) => {
+            state::push_event(InputEventRaw {
+                event_type: 5,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode: 0,
+            });
+            true
+        }
+        Some(HotkeyAction::Record) => {
+            state::push_event(InputEventRaw {
+                event_type: 6,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode: 0,
+            });
+            true
+        }
+        None => false,
+    }
 }
 
 // --- LD_PRELOAD hooks ---

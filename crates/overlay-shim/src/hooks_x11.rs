@@ -17,7 +17,6 @@ use std::ffi::c_void;
 use std::sync::OnceLock;
 
 use ira_overlay_ipc::InputEventRaw;
-use ira_overlay_ipc::X11_KEYCODE_OFFSET;
 
 use crate::state;
 
@@ -71,77 +70,50 @@ fn resolve(name: &std::ffi::CStr) -> *mut c_void {
     unsafe { libc::dlsym(libc::RTLD_NEXT, name.as_ptr()) }
 }
 
-static REAL_XCHECK_IF_EVENT: OnceLock<Option<XCheckIfEventFn>> = OnceLock::new();
-static REAL_XCHECK_WINDOW_EVENT: OnceLock<Option<XCheckWindowEventFn>> = OnceLock::new();
-static REAL_XCHECK_TYPED_EVENT: OnceLock<Option<XCheckTypedEventFn>> = OnceLock::new();
-static REAL_XCHECK_TYPED_WINDOW_EVENT: OnceLock<Option<XCheckTypedWindowEventFn>> = OnceLock::new();
-static REAL_XCHECK_MASK_EVENT: OnceLock<Option<XCheckMaskEventFn>> = OnceLock::new();
-static REAL_XNEXT_EVENT: OnceLock<Option<XNextEventFn>> = OnceLock::new();
-static REAL_XGRAB_POINTER: OnceLock<Option<XGrabPointerFn>> = OnceLock::new();
-static REAL_XI_GRAB_DEVICE: OnceLock<Option<XIGrabDeviceFn>> = OnceLock::new();
-static REAL_XGRAB_KEYBOARD: OnceLock<Option<XGrabKeyboardFn>> = OnceLock::new();
+macro_rules! real_fn {
+    ($name:literal, $ty:ty) => {{
+        static CELL: OnceLock<Option<$ty>> = OnceLock::new();
+        *CELL.get_or_init(|| {
+            let p = resolve($name);
+            (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
+        })
+    }};
+}
 
 fn xcheck_if_event() -> Option<XCheckIfEventFn> {
-    *REAL_XCHECK_IF_EVENT.get_or_init(|| {
-        let p = resolve(c"XCheckIfEvent");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XCheckIfEvent", XCheckIfEventFn)
 }
 
 fn xcheck_window_event() -> Option<XCheckWindowEventFn> {
-    *REAL_XCHECK_WINDOW_EVENT.get_or_init(|| {
-        let p = resolve(c"XCheckWindowEvent");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XCheckWindowEvent", XCheckWindowEventFn)
 }
 
 fn xcheck_typed_event() -> Option<XCheckTypedEventFn> {
-    *REAL_XCHECK_TYPED_EVENT.get_or_init(|| {
-        let p = resolve(c"XCheckTypedEvent");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XCheckTypedEvent", XCheckTypedEventFn)
 }
 
 fn xcheck_typed_window_event() -> Option<XCheckTypedWindowEventFn> {
-    *REAL_XCHECK_TYPED_WINDOW_EVENT.get_or_init(|| {
-        let p = resolve(c"XCheckTypedWindowEvent");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XCheckTypedWindowEvent", XCheckTypedWindowEventFn)
 }
 
 fn xcheck_mask_event() -> Option<XCheckMaskEventFn> {
-    *REAL_XCHECK_MASK_EVENT.get_or_init(|| {
-        let p = resolve(c"XCheckMaskEvent");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XCheckMaskEvent", XCheckMaskEventFn)
 }
 
 fn xnext_event() -> Option<XNextEventFn> {
-    *REAL_XNEXT_EVENT.get_or_init(|| {
-        let p = resolve(c"XNextEvent");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XNextEvent", XNextEventFn)
 }
 
 fn xgrab_pointer() -> Option<XGrabPointerFn> {
-    *REAL_XGRAB_POINTER.get_or_init(|| {
-        let p = resolve(c"XGrabPointer");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XGrabPointer", XGrabPointerFn)
 }
 
 fn xi_grab_device() -> Option<XIGrabDeviceFn> {
-    *REAL_XI_GRAB_DEVICE.get_or_init(|| {
-        let p = resolve(c"XIGrabDevice");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XIGrabDevice", XIGrabDeviceFn)
 }
 
 fn xgrab_keyboard() -> Option<XGrabKeyboardFn> {
-    *REAL_XGRAB_KEYBOARD.get_or_init(|| {
-        let p = resolve(c"XGrabKeyboard");
-        (!p.is_null()).then(|| unsafe { std::mem::transmute(p) })
-    })
+    real_fn!(c"XGrabKeyboard", XGrabKeyboardFn)
 }
 
 /// Overlay grabs the pointer when it is up and interactive: a game grab
@@ -185,12 +157,10 @@ fn read_detail(ev: *const c_void) -> u32 {
 /// Returns `true` if the event was consumed (caller should return 0/False).
 ///
 /// Handles:
-/// - Shift+Tab: toggles overlay visibility (always, even when hidden)
-/// - F12: triggers screenshot (always, when overlay system is active)
-/// - F11: toggles recording (always, when overlay system is active)
+/// - Toggle/screenshot/record hotkeys: always, even when hidden
 /// - Mouse/keyboard: consumed when overlay is visible
 unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
-    if !state::overlay_active() {
+    if ev.is_null() || !state::overlay_active() {
         return false;
     }
 
@@ -205,42 +175,8 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
     let event_type = read_type(ev);
 
     // Always check for hotkeys, even when overlay is hidden.
-    if event_type == KEYPRESS {
-        let mods = read_state(ev);
-        let keycode = read_detail(ev);
-
-        let (tog_kc, tog_mods, ss_kc, ss_mods, rec_kc, rec_mods) = state::hotkeys();
-        // X11 keycodes are evdev + 8.
-        let tog_x11 = tog_kc + X11_KEYCODE_OFFSET;
-        let ss_x11 = ss_kc + X11_KEYCODE_OFFSET;
-        let rec_x11 = rec_kc + X11_KEYCODE_OFFSET;
-
-        if !state::injected_ui_disabled() && (mods & tog_mods) == tog_mods && keycode == tog_x11 {
-            if state::toggle_edge(keycode) {
-                state::toggle_visible();
-            }
-            return true;
-        }
-        if (mods & ss_mods) == ss_mods && keycode == ss_x11 {
-            state::push_event(InputEventRaw {
-                event_type: 5, // screenshot request
-                x: 0,
-                y: 0,
-                button: 0,
-                keycode: 0,
-            });
-            return true;
-        }
-        if (mods & rec_mods) == rec_mods && keycode == rec_x11 {
-            state::push_event(InputEventRaw {
-                event_type: 6, // recording toggle
-                x: 0,
-                y: 0,
-                button: 0,
-                keycode: 0,
-            });
-            return true;
-        }
+    if event_type == KEYPRESS && check_hotkey(ev) {
+        return true;
     }
 
     // Desktop-level combos always reach the compositor (checked after the
@@ -254,91 +190,163 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
         }
     }
 
-    // When overlay is visible, consume all mouse and keyboard events.
-    if !state::injected_ui_disabled() && state::is_visible() {
-        match event_type {
-            MOTIONNOTIFY => {
-                let (x, y) = read_xy(ev);
-                state::set_mouse_pos(x, y);
-                state::push_event(InputEventRaw {
-                    event_type: 0,
-                    x,
-                    y,
-                    button: 0,
-                    keycode: 0,
-                });
-                return true;
-            }
-            BUTTONPRESS => {
-                let (x, y) = read_xy(ev);
-                let button = read_detail(ev);
-                // X11 scroll: button 4 = up, button 5 = down
-                if button == 4 || button == 5 {
-                    let delta = if button == 4 { -1 } else { 1 };
-                    state::push_event(InputEventRaw {
-                        event_type: 7,
-                        x: 0,
-                        y: delta,
-                        button,
-                        keycode: 0,
-                    });
-                    return true;
-                }
-                state::push_event(InputEventRaw {
-                    event_type: 1,
-                    x,
-                    y,
-                    button,
-                    keycode: 0,
-                });
-                return true;
-            }
-            BUTTONRELEASE => {
-                let (x, y) = read_xy(ev);
-                let button = read_detail(ev);
-                // Scroll buttons don't have meaningful release events
-                if button == 4 || button == 5 {
-                    return true;
-                }
-                state::push_event(InputEventRaw {
-                    event_type: 2,
-                    x,
-                    y,
-                    button,
-                    keycode: 0,
-                });
-                return true;
-            }
-            KEYPRESS => {
-                let keycode = read_detail(ev);
-                state::push_event(InputEventRaw {
-                    event_type: 3,
-                    x: 0,
-                    y: 0,
-                    button: 0,
-                    keycode,
-                });
-                return true;
-            }
-            KEYRELEASE => {
-                let keycode = read_detail(ev);
-                state::push_event(InputEventRaw {
-                    event_type: 4,
-                    x: 0,
-                    y: 0,
-                    button: 0,
-                    keycode,
-                });
-                return true;
-            }
-            _ => {}
-        }
+    // When overlay is visible, consume all mouse and keyboard events, in
+    // any mode: the game must not react to input meant for the overlay.
+    // (Toggle handling above stays mode-independent for the same reason.)
+    if state::is_visible() {
+        return consume_visible(event_type, ev);
     }
 
     false
 }
 
+/// Hotkey match shared with the XCB backend via `state::match_hotkey`.
+/// Returns true when the event was a hotkey (consumed).
+unsafe fn check_hotkey(ev: *mut c_void) -> bool {
+    use crate::state::HotkeyAction;
+    let mods = read_state(ev);
+    let keycode = read_detail(ev);
+    match state::match_hotkey(mods, keycode) {
+        // Keyboard toggle is always ours: no other authority handles
+        // keyboard chords (the daemon only sees gamepads), in gamescope or
+        // out. The game keeps focus under gamescope's external overlay, so
+        // this is also the un-toggle path there.
+        Some(HotkeyAction::Toggle) => {
+            if state::toggle_edge(keycode) {
+                state::toggle_visible();
+            }
+            true
+        }
+        Some(HotkeyAction::Screenshot) => {
+            state::push_event(InputEventRaw {
+                event_type: 5, // screenshot request
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode: 0,
+            });
+            true
+        }
+        Some(HotkeyAction::Record) => {
+            state::push_event(InputEventRaw {
+                event_type: 6, // recording toggle
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode: 0,
+            });
+            true
+        }
+        None => false,
+    }
+}
+
+unsafe fn consume_visible(event_type: i32, ev: *mut c_void) -> bool {
+    match event_type {
+        MOTIONNOTIFY => {
+            let (x, y) = read_xy(ev);
+            state::set_mouse_pos(x, y);
+            state::push_event(InputEventRaw {
+                event_type: 0,
+                x,
+                y,
+                button: 0,
+                keycode: 0,
+            });
+            true
+        }
+        BUTTONPRESS => {
+            let (x, y) = read_xy(ev);
+            let button = read_detail(ev);
+            // X11 scroll: button 4 = up, button 5 = down. Press pushes an
+            // event; release is consumed with no event (no release semantics).
+            if button == 4 || button == 5 {
+                let delta = if button == 4 { -1 } else { 1 };
+                state::push_event(InputEventRaw {
+                    event_type: 7,
+                    x: 0,
+                    y: delta,
+                    button,
+                    keycode: 0,
+                });
+                return true;
+            }
+            state::push_event(InputEventRaw {
+                event_type: 1,
+                x,
+                y,
+                button,
+                keycode: 0,
+            });
+            true
+        }
+        BUTTONRELEASE => {
+            let (x, y) = read_xy(ev);
+            let button = read_detail(ev);
+            // Scroll buttons don't have meaningful release events
+            if button == 4 || button == 5 {
+                return true;
+            }
+            state::push_event(InputEventRaw {
+                event_type: 2,
+                x,
+                y,
+                button,
+                keycode: 0,
+            });
+            true
+        }
+        KEYPRESS => {
+            let keycode = read_detail(ev);
+            state::push_event(InputEventRaw {
+                event_type: 3,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode,
+            });
+            true
+        }
+        KEYRELEASE => {
+            let keycode = read_detail(ev);
+            state::push_event(InputEventRaw {
+                event_type: 4,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode,
+            });
+            true
+        }
+        _ => false,
+    }
+}
+
 // --- LD_PRELOAD hooks ---
+
+macro_rules! check_hook {
+    ($name:ident($($arg:ident : $ty:ty),*) => $real:ident) => {
+        #[no_mangle]
+        pub unsafe extern "C" fn $name(
+            $($arg: $ty),*,
+            event_return: *mut c_void,
+        ) -> i32 {
+            let Some(real_fn) = $real() else {
+                return 0;
+            };
+            // NOTE: the real call comes first with the caller's original args;
+            // the macro only appends `event_return` last, so forwarding below
+            // must repeat the exact parameter list.
+            let result = real_fn($($arg),*, event_return);
+            if result != 0 && maybe_consume_event(event_return) {
+                return 0;
+            }
+            result
+        }
+    };
+    // XCheckIfEvent has (display, event, predicate, arg): event_return is 2nd,
+    // not last, so it keeps a hand-written shell (same 3-line body).
+}
 
 /// Non-blocking event check with a predicate. Used by SDL2 and most game engines.
 #[no_mangle]
@@ -358,75 +366,13 @@ pub unsafe extern "C" fn XCheckIfEvent(
     result
 }
 
-/// Non-blocking check for events matching a window and event mask.
-#[no_mangle]
-pub unsafe extern "C" fn XCheckWindowEvent(
-    display: *mut c_void,
-    w: u64,
-    event_mask: i64,
-    event_return: *mut c_void,
-) -> i32 {
-    let Some(real_fn) = xcheck_window_event() else {
-        return 0;
-    };
-    let result = real_fn(display, w, event_mask, event_return);
-    if result != 0 && maybe_consume_event(event_return) {
-        return 0;
-    }
-    result
-}
-
-/// Non-blocking check for events matching a specific type.
-#[no_mangle]
-pub unsafe extern "C" fn XCheckTypedEvent(
-    display: *mut c_void,
-    event_type: i32,
-    event_return: *mut c_void,
-) -> i32 {
-    let Some(real_fn) = xcheck_typed_event() else {
-        return 0;
-    };
-    let result = real_fn(display, event_type, event_return);
-    if result != 0 && maybe_consume_event(event_return) {
-        return 0;
-    }
-    result
-}
-
-/// Non-blocking check for events matching a window and specific type.
-#[no_mangle]
-pub unsafe extern "C" fn XCheckTypedWindowEvent(
-    display: *mut c_void,
-    w: u64,
-    event_type: i32,
-    event_return: *mut c_void,
-) -> i32 {
-    let Some(real_fn) = xcheck_typed_window_event() else {
-        return 0;
-    };
-    let result = real_fn(display, w, event_type, event_return);
-    if result != 0 && maybe_consume_event(event_return) {
-        return 0;
-    }
-    result
-}
-
-/// Non-blocking check for events matching an event mask.
-#[no_mangle]
-pub unsafe extern "C" fn XCheckMaskEvent(
-    display: *mut c_void,
-    event_mask: i64,
-    event_return: *mut c_void,
-) -> i32 {
-    let Some(real_fn) = xcheck_mask_event() else {
-        return 0;
-    };
-    let result = real_fn(display, event_mask, event_return);
-    if result != 0 && maybe_consume_event(event_return) {
-        return 0;
-    }
-    result
-}
+// Non-blocking checks below share one 3-line body (real call → maybe_consume
+// → return 0 when consumed). XCheckIfEvent above is hand-written because its
+// event pointer is 2nd, not last.
+check_hook!(XCheckWindowEvent(display: *mut c_void, w: u64, event_mask: i64) => xcheck_window_event);
+check_hook!(XCheckTypedEvent(display: *mut c_void, event_type: i32) => xcheck_typed_event);
+check_hook!(XCheckTypedWindowEvent(display: *mut c_void, w: u64, event_type: i32) => xcheck_typed_window_event);
+check_hook!(XCheckMaskEvent(display: *mut c_void, event_mask: i64) => xcheck_mask_event);
 
 /// Blocking event wait. Loops internally to skip consumed events.
 #[no_mangle]

@@ -7,6 +7,7 @@ use ira_models::GameLaunchConfig;
 #[derive(Clone)]
 pub(super) struct OverlayWidgets {
     pub overlay_state: OverrideState,
+    pub pause_state: OverrideState,
     pub overlay_encoder_row: Option<adw::ComboRow>,
     pub overlay_quality_row: Option<adw::ComboRow>,
 }
@@ -14,6 +15,7 @@ pub(super) struct OverlayWidgets {
 pub(super) struct OverlayPageParams<'a> {
     pub launch: &'a GameLaunchConfig,
     pub overlay_default: bool,
+    pub pause_default: bool,
     pub sidebar: &'a gtk4::ListBox,
     pub stack: &'a gtk4::Stack,
 }
@@ -27,8 +29,15 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
         params.overlay_default,
         params.launch.overlay_enabled,
     );
+    let (pause_row, pause_state) = build_override_switch_row(
+        &crate::tr!("Pause game while overlay is visible"),
+        &crate::tr!("Freezes the game while the overlay is up (gamescope mode). Not for online games."),
+        params.pause_default,
+        params.launch.pause_game_on_overlay,
+    );
     let overlay_group = adw::PreferencesGroup::new();
     overlay_group.add(&overlay_row);
+    overlay_group.add(&pause_row);
     page.append(&overlay_group);
 
     let overlay_cfg_group = adw::PreferencesGroup::new();
@@ -82,6 +91,7 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
 
     OverlayWidgets {
         overlay_state,
+        pause_state,
         overlay_encoder_row: Some(encoder_row),
         overlay_quality_row: Some(quality_row),
     }

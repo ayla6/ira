@@ -114,6 +114,7 @@ fn build_launch_wine_advanced_pages(
     let overlay_source_id = game.overlay_source_id();
     let (
         overlay_default,
+        pause_default,
         gamemode_default,
         mangohud_default,
         gamescope_default,
@@ -132,8 +133,17 @@ fn build_launch_wine_advanced_pages(
             .unwrap_or(gs_default);
         let overlay_def =
             overlay_source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
+        // Per-game pause row default: platform override wins, else global.
+        // Mirrors the launch-time resolution in play_button.rs.
+        let pause_def = match game.kind {
+            ira_models::GameKind::Wine => s.cfg.wine_pause_game_on_overlay,
+            ira_models::GameKind::Linux => s.cfg.linux_pause_game_on_overlay,
+            _ => s.cfg.console(&game.platform_id).pause_game_on_overlay,
+        }
+        .unwrap_or(s.cfg.pause_game_on_overlay);
         (
             overlay_def,
+            pause_def,
             s.cfg.default_system.gamemode,
             s.cfg.default_system.mangohud,
             gs,
@@ -189,6 +199,7 @@ fn build_launch_wine_advanced_pages(
         super::edit_game_overlay::OverlayPageParams {
             launch: saved_launch,
             overlay_default,
+            pause_default,
             sidebar,
             stack,
         },

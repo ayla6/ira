@@ -35,6 +35,7 @@ impl GroupsUi {
         menus: &Rc<ValueMenus>,
         values_page: &Rc<ValuesPage>,
         existing: Option<&AutoGroup>,
+        state: &super::state::SharedState,
     ) -> Self {
         let root = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
 
@@ -65,8 +66,9 @@ impl GroupsUi {
             let group_box = group_box.clone();
             let menus = menus.clone();
             let values_page = values_page.clone();
+            let state = state.clone();
             add_group_row.connect_activated(move |_| {
-                add_group_card(&menus, &inner, &values_page, &group_box, None);
+                add_group_card(&menus, &inner, &values_page, &group_box, None, &state);
             });
         }
 
@@ -88,6 +90,7 @@ impl GroupsUi {
                             values_page,
                             &group_box,
                             Some((logic, &rules)),
+                            state,
                         );
                     }
                 }
@@ -132,8 +135,9 @@ fn add_group_card(
     values_page: &Rc<ValuesPage>,
     group_box: &gtk4::Box,
     existing: Option<(AutoLogic, &[AutoCriterion])>,
+    state: &super::state::SharedState,
 ) {
-    let (card, collector) = build_group_card(menus, inner, values_page);
+    let (card, collector) = build_group_card(menus, inner, values_page, state);
     if let Some((logic, rules)) = existing {
         collector.gate.set_selected(logic_position(logic));
         for criterion in rules {
@@ -151,6 +155,7 @@ struct GroupCollector {
     add_rule_row: adw::ButtonRow,
     menus: Rc<ValueMenus>,
     values_page: Rc<ValuesPage>,
+    state: super::state::SharedState,
     rules: Rc<RefCell<Vec<CriterionEditor>>>,
 }
 
@@ -162,6 +167,7 @@ impl GroupCollector {
             &self.menus,
             existing,
             &self.values_page,
+            &self.state,
         );
         self.rules.borrow_mut().push(editor);
     }
@@ -174,6 +180,7 @@ fn build_group_card(
     menus: &Rc<ValueMenus>,
     inner: &Rc<RefCell<GroupsInner>>,
     values_page: &Rc<ValuesPage>,
+    state: &super::state::SharedState,
 ) -> (adw::PreferencesGroup, GroupCollector) {
     let card = adw::PreferencesGroup::new();
 
@@ -210,6 +217,7 @@ fn build_group_card(
         add_rule_row: add_rule_row.clone(),
         menus: menus.clone(),
         values_page: values_page.clone(),
+        state: state.clone(),
         rules: Rc::new(RefCell::new(Vec::new())),
     };
     {
@@ -234,6 +242,7 @@ impl CriterionEditor {
         menus: &Rc<ValueMenus>,
         initial: Option<&AutoCriterion>,
         values_page: &Rc<ValuesPage>,
+        state: &super::state::SharedState,
     ) -> Self {
         let initial = initial.cloned().unwrap_or_default();
 
@@ -253,7 +262,7 @@ impl CriterionEditor {
         remove.set_tooltip_text(Some(&crate::tr!("Remove this rule")));
         dimension.add_suffix(&remove);
 
-        let controls = ControlRows::new(&initial, values_page);
+        let controls = ControlRows::new(&initial, values_page, state);
 
         // The card gets the rule's rows; the add-rule row stays last.
         let rows: Vec<gtk4::Widget> = [dimension.clone().upcast()]
@@ -337,6 +346,7 @@ struct ControlRows {
     values_list: gtk4::ListBox,
     value_checks: ValueChecks,
     values_row: adw::ActionRow,
+    state: super::state::SharedState,
     from_pick: Rc<DatePick>,
     from_row: adw::ActionRow,
     to_pick: Rc<DatePick>,
@@ -346,7 +356,11 @@ struct ControlRows {
 }
 
 impl ControlRows {
-    fn new(initial: &AutoCriterion, values_page: &Rc<ValuesPage>) -> Self {
+    fn new(
+        initial: &AutoCriterion,
+        values_page: &Rc<ValuesPage>,
+        state: &super::state::SharedState,
+    ) -> Self {
         // The check list starts unparented; the values row hands it to
         // the values page when activated and gets it back on return.
         let values_list = gtk4::ListBox::new();
@@ -378,6 +392,7 @@ impl ControlRows {
             values_list,
             value_checks,
             values_row,
+            state: state.clone(),
             from_pick,
             from_row,
             to_pick,
@@ -401,7 +416,7 @@ impl ControlRows {
 
     /// Shows the rows `dimension` needs; value dimensions refill the
     /// check list with `picked` pre-checked.
-    fn sync(&self, dimension: AutoDimension, picked: HashSet<String>, menus: &ValueMenus) {
+    fn sync(&self, dimension: AutoDimension, picked: HashSet<String>, menus: &Rc<ValueMenus>) {
         let named = !matches!(
             dimension,
             AutoDimension::Released | AutoDimension::Playtime
@@ -414,13 +429,14 @@ impl ControlRows {
         self.min_hours.set_visible(hours);
         self.max_hours.set_visible(hours);
         if named {
-            let options = menus.get(&dimension).cloned().unwrap_or_default();
             fill_check_list(
                 &self.values_list,
                 &self.value_checks,
-                &options,
+                menus,
+                dimension,
                 picked,
                 &self.values_row,
+                &self.state,
             );
         }
     }

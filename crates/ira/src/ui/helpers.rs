@@ -704,8 +704,7 @@ pub(crate) fn clamped(
 
 /// A vertically scrolling, width-clamped boxed `ListBox` for dialog result
 /// areas. Returns the scrolled container to pack and the list to fill.
-pub(crate) fn clamped_boxed_list(max_width: i32) -> (gtk4::ScrolledWindow, gtk4::ListBox) {
-    let list = gtk4::ListBox::new();
+pub(crate) fn clamped_boxed_list(max_width: i32) -> (gtk4::ScrolledWindow, gtk4::ListBox) {    let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
     list.set_valign(gtk4::Align::Start);
     list.add_css_class(CSS_BOXED_LIST);

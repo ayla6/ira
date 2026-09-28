@@ -2,6 +2,7 @@ use super::css::*;
 use super::helpers::esc;
 use super::helpers::string_list_from;
 use super::settings_dialog::settings_page_container;
+use super::system_settings::{build_override_switch_row, OverrideState};
 use adw::prelude::*;
 use ira_config::Config;
 use ira_models::AssetType;
@@ -841,6 +842,9 @@ pub(super) fn build_api_emulators_page(
 
 pub(super) struct OverlayPageWidgets {
     pub enable_row: adw::SwitchRow,
+    pub pause_row: adw::SwitchRow,
+    pub wine_pause_state: OverrideState,
+    pub linux_pause_state: OverrideState,
     pub replay_buffer_row: adw::SwitchRow,
     pub replay_duration_row: adw::SpinRow,
     pub encoder_row: adw::ComboRow,
@@ -864,6 +868,36 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     enable_row.set_active(o.enabled);
     enable_group.add(&enable_row);
     page.append(&enable_group);
+
+    let pause_group = adw::PreferencesGroup::new();
+    pause_group.set_title(&crate::tr!("Pause while overlay is visible"));
+    pause_group.set_description(Some(&crate::tr!(
+        "Gamescope mode freezes the game while the overlay is up. Do not enable for online games."
+    )));
+
+    let pause_row = adw::SwitchRow::new();
+    pause_row.set_title(&crate::tr!("Pause games while the overlay is visible"));
+    pause_row.set_subtitle(&crate::tr!(
+        "Off by default: freezing is unsafe for online games and fragile engines"
+    ));
+    pause_row.set_active(cfg.pause_game_on_overlay);
+    pause_group.add(&pause_row);
+
+    let (wine_pause_row, wine_pause_state) = build_override_switch_row(
+        &crate::tr!("Pause Wine games"),
+        &crate::tr!("Override for Windows games run through Wine/Proton"),
+        cfg.pause_game_on_overlay,
+        cfg.wine_pause_game_on_overlay,
+    );
+    pause_group.add(&wine_pause_row);
+    let (linux_pause_row, linux_pause_state) = build_override_switch_row(
+        &crate::tr!("Pause Linux games"),
+        &crate::tr!("Override for native Linux games"),
+        cfg.pause_game_on_overlay,
+        cfg.linux_pause_game_on_overlay,
+    );
+    pause_group.add(&linux_pause_row);
+    page.append(&pause_group);
 
     let recording_group = adw::PreferencesGroup::new();
     recording_group.set_title(&crate::tr!("Recording"));
@@ -1008,6 +1042,9 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
         page,
         OverlayPageWidgets {
             enable_row,
+            pause_row,
+            wine_pause_state,
+            linux_pause_state,
             replay_buffer_row,
             replay_duration_row,
             encoder_row,

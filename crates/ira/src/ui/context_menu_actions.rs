@@ -335,6 +335,15 @@ impl MassEntityList {
         }
     }
 
+    /// The entity cache table behind the list, for opening the editor.
+    pub(super) fn cache_kind(self) -> &'static str {
+        match self {
+            MassEntityList::Family => ira_db::KIND_FAMILY,
+            MassEntityList::Genre => ira_db::KIND_GENRE,
+            MassEntityList::Developer | MassEntityList::Publisher => ira_db::KIND_COMPANY,
+        }
+    }
+
     pub(super) fn entities(
         self,
         meta: &ira_models::ScraperMetadata,
@@ -358,11 +367,20 @@ trait OrganizeSource {
     fn held_by(&self, db: &ira_db::DbConn, db_id: i64) -> Vec<ira_models::ScraperEntity>;
     fn add(&self, state: &SharedState, db_id: i64, entity: &ira_models::ScraperEntity);
     fn remove(&self, state: &SharedState, db_id: i64, entity_id: &str);
+    /// The entity cache behind the list, for opening the editor —
+    /// None where there is no editable cache (groups).
+    fn entity_kind(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 impl OrganizeSource for MassEntityList {
     fn dialog_title(&self) -> String {
         self.add_dialog_title()
+    }
+
+    fn entity_kind(&self) -> Option<&'static str> {
+        Some(self.cache_kind())
     }
 
     fn search(&self, db: &ira_db::DbConn, term: &str) -> Vec<ira_models::ScraperEntity> {
@@ -661,6 +679,7 @@ fn show_organize_picker(
         let results = results.clone();
         let ids = ids.clone();
         let entry = entry.clone();
+        let dialog = dialog.clone();
         let populate_fn = move |term: &str| {
             super::helpers::clear_children(&results);
             let db = state.borrow().db.clone();
@@ -689,6 +708,32 @@ fn show_organize_picker(
                 row.set_use_markup(false);
                 row.set_title(&entity.name);
                 row.set_subtitle(&format!("id {}", entity.id));
+                if let (Some(kind), Ok(id)) =
+                    (source.entity_kind(), entity.id.parse::<i64>())
+                {
+                    // The row opens the editor; the button still picks.
+                    // Saving there repaints here.
+                    let state = state.clone();
+                    let dialog = dialog.clone();
+                    let name = entity.name.clone();
+                    let slf = slf_c.clone();
+                    let entry = entry.clone();
+                    row.set_activatable(true);
+                    row.connect_activated(move |_| {
+                        let on_saved: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({
+                            let slf = slf.clone();
+                            let entry = entry.clone();
+                            move || {
+                                if let Some(populate) = slf.borrow().as_ref() {
+                                    populate(&entry.text());
+                                }
+                            }
+                        });
+                        super::edit_game_entity_dialog::show_entity_editor(
+                            &state, &dialog, kind, id, &name, on_saved,
+                        );
+                    });
+                }
                 let pick = gtk4::Button::with_label(&crate::tr!("Remove"));
                 pick.set_valign(gtk4::Align::Center);
                 pick.connect_clicked(move |_| {
@@ -712,6 +757,30 @@ fn show_organize_picker(
                 row.set_use_markup(false);
                 row.set_title(&entity.name);
                 row.set_subtitle(&format!("id {}", entity.id));
+                if let (Some(kind), Ok(id)) =
+                    (source.entity_kind(), entity.id.parse::<i64>())
+                {
+                    let state = state.clone();
+                    let dialog = dialog.clone();
+                    let name = entity.name.clone();
+                    let slf = slf_c.clone();
+                    let entry = entry.clone();
+                    row.set_activatable(true);
+                    row.connect_activated(move |_| {
+                        let on_saved: std::rc::Rc<dyn Fn()> = std::rc::Rc::new({
+                            let slf = slf.clone();
+                            let entry = entry.clone();
+                            move || {
+                                if let Some(populate) = slf.borrow().as_ref() {
+                                    populate(&entry.text());
+                                }
+                            }
+                        });
+                        super::edit_game_entity_dialog::show_entity_editor(
+                            &state, &dialog, kind, id, &name, on_saved,
+                        );
+                    });
+                }
                 let pick = gtk4::Button::with_label(&crate::tr!("Add"));
                 pick.add_css_class(super::css::CSS_SUGGESTED_ACTION);
                 pick.set_valign(gtk4::Align::Center);

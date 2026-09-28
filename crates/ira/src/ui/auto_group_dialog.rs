@@ -96,7 +96,7 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
     main_page.append(&name_group);
 
     let menus = Rc::new(dimension_menus(state));
-    let groups = GroupsUi::new(&menus, &values_page, existing.as_ref());
+    let groups = GroupsUi::new(&menus, &values_page, existing.as_ref(), state);
     main_page.append(&groups.root);
 
     let main_scroll = gtk4::ScrolledWindow::new();

@@ -274,8 +274,16 @@ fn launch_game_with_disc(
                 .flatten()
                 .map(|(launch, _, _)| launch)
                 .unwrap_or_default();
+            // The list entry is fast-loaded (cached counts, no achievement
+            // rows); the overlay needs the real rows, so reload fully here.
+            // Falls back to the list entry (counts only) on any error.
+            let full = ira_db::find_by_db_id(&s.db, game.db_id)
+                .ok()
+                .flatten()
+                .and_then(|entry| crate::game_loader::load_game(&entry, &s.save_dir).ok());
+            let shm_game = full.as_ref().unwrap_or(game);
             crate::overlay::write_game_shm(
-                game,
+                shm_game,
                 super::helpers::display_playtime(state, game),
                 &s.cfg.overlay,
                 launch.overlay_encoder,
@@ -359,6 +367,13 @@ fn launch_game_with_disc(
     let (controller_input_mode, controller_input_profile) =
         active_controller_input(&cfg_clone, &save_dir, &controller_registry);
 
+    let pause_platform = match kind {
+        ira_models::GameKind::Wine => cfg_clone.wine_pause_game_on_overlay,
+        ira_models::GameKind::Linux => cfg_clone.linux_pause_game_on_overlay,
+        _ => cfg_clone.console(&platform_id).pause_game_on_overlay,
+    };
+    let pause_global = cfg_clone.pause_game_on_overlay;
+
     let ctx = play_button_helpers::LaunchCtx {
         db: &db,
         save_dir: &save_dir,
@@ -376,6 +391,8 @@ fn launch_game_with_disc(
         overlay_shm,
         overlay_global_enabled,
         overlay_font_family,
+        pause_platform,
+        pause_global,
         system_defaults,
         controller_input_mode,
         controller_input_profile,
@@ -555,8 +572,16 @@ pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), Stri
                 .flatten()
                 .map(|(launch, _, _)| launch)
                 .unwrap_or_default();
+            // The list entry is fast-loaded (cached counts, no achievement
+            // rows); the overlay needs the real rows, so reload fully here.
+            // Falls back to the list entry (counts only) on any error.
+            let full = ira_db::find_by_db_id(&s.db, game.db_id)
+                .ok()
+                .flatten()
+                .and_then(|entry| crate::game_loader::load_game(&entry, &s.save_dir).ok());
+            let shm_game = full.as_ref().unwrap_or(game);
             crate::overlay::write_game_shm(
-                game,
+                shm_game,
                 super::helpers::display_playtime(state, game),
                 &s.cfg.overlay,
                 launch.overlay_encoder,
@@ -617,6 +642,9 @@ pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), Stri
         overlay_shm,
         overlay_global_enabled,
         overlay_font_family,
+        // No-game emulator window: nothing to pause.
+        pause_platform: None,
+        pause_global: false,
         system_defaults,
         controller_input_mode,
         controller_input_profile,

@@ -10,6 +10,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use ira_models::AutoDimension;
+
 use super::helpers::clear_children;
 
 /// One pickable value of a rule dimension: the stored name plus the
@@ -140,19 +142,41 @@ fn apply_filter(checks: &ValueChecks, query: &str) {
 }
 
 /// Builds one rule's check list for a value dimension: a boxed list of
-/// one row per known option, `picked` pre-checked. Activating a row
-/// toggles its check — the row is in the list box, so activation
-/// actually fires — and every change refreshes the rule row's subtitle.
+/// one row per known option, `picked` pre-checked. The check toggles on
+/// its own clicks; the row opens the entity editor wherever the option
+/// names a cache entry (genre/family/company — never console/date
+/// dimensions, which have nothing to edit).
 pub(super) fn fill_check_list(
     list: &gtk4::ListBox,
     checks: &ValueChecks,
-    options: &[ValueOption],
+    menus: &Rc<ValueMenus>,
+    dimension: AutoDimension,
     picked: HashSet<String>,
     values_row: &adw::ActionRow,
+    state: &super::state::SharedState,
 ) {
+    let options = menus.get(&dimension).cloned().unwrap_or_default();
+    let entity_kind = match dimension {
+        AutoDimension::Genre => Some(ira_db::KIND_GENRE),
+        AutoDimension::Family => Some(ira_db::KIND_FAMILY),
+        AutoDimension::Developer | AutoDimension::Publisher => Some(ira_db::KIND_COMPANY),
+        _ => None,
+    };
     checks.borrow_mut().clear();
     clear_children(list);
-    for opt in options {
+    // Entity dimensions resolve names to cache ids once, so rows can
+    // open the editor; other dimensions have nothing editable.
+    let ids: std::collections::HashMap<String, i64> = entity_kind
+        .map(|kind| {
+            let db = state.borrow().db.clone();
+            ira_db::list_entities(&db, kind, "")
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(id, name)| (name, id))
+                .collect()
+        })
+        .unwrap_or_default();
+    for opt in &options {
         let check = gtk4::CheckButton::new();
         check.set_active(picked.contains(&opt.value));
         check.set_valign(gtk4::Align::Center);
@@ -161,6 +185,46 @@ pub(super) fn fill_check_list(
         // not markup.
         row.set_use_markup(false);
         row.set_title(&opt.value);
+        if let (Some(kind), Some(id)) = (entity_kind, ids.get(&opt.value).copied()) {
+            // The pencil opens the editor; saving there refills this
+            // list so renames land. The row and the check itself
+            // still toggle.
+            let state = state.clone();
+            let row_c = row.clone();
+            let name = opt.value.clone();
+            let list = list.clone();
+            let checks = checks.clone();
+            let values_row = values_row.clone();
+            let menus = menus.clone();
+            let pen = gtk4::Button::from_icon_name("document-edit-symbolic");
+            pen.add_css_class(super::css::CSS_FLAT);
+            pen.set_valign(gtk4::Align::Center);
+            pen.set_tooltip_text(Some(&crate::tr!("Manage")));
+            pen.connect_clicked(move |_| {
+                let on_saved: Rc<dyn Fn()> = Rc::new({
+                    let list = list.clone();
+                    let checks = checks.clone();
+                    let values_row = values_row.clone();
+                    let state = state.clone();
+                    let menus = menus.clone();
+                    move || {
+                        fill_check_list(
+                            &list,
+                            &checks,
+                            &menus,
+                            dimension,
+                            picked_values(&checks).into_iter().collect(),
+                            &values_row,
+                            &state,
+                        );
+                    }
+                });
+                super::edit_game_entity_dialog::show_entity_editor(
+                    &state, &row_c, kind, id, &name, on_saved,
+                );
+            });
+            row.add_suffix(&pen);
+        }
         row.add_suffix(&check);
         row.set_activatable(true);
         {

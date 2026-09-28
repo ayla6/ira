@@ -8,7 +8,7 @@ use gtk4::gdk::{Display, Monitor};
 use ira_config::{Config, SystemDefaults};
 use ira_db::DbConn;
 
-use ira_models::{AppSender, ControllerInputMode, WineConfig};
+use ira_models::{resolve_pause_game_on_overlay, AppSender, ControllerInputMode, WineConfig};
 
 use super::helpers::logged_game_config;
 use super::input_profile_store::read_profile;
@@ -45,6 +45,12 @@ pub(super) struct LaunchCtx<'a> {
     pub overlay_shm: Option<String>,
     pub overlay_global_enabled: bool,
     pub overlay_font_family: Option<String>,
+    /// Platform-level pause-while-overlay-visible override (`None` = inherit
+    /// the global): console override for emulator games, wine/linux override
+    /// for PC games. Resolved against the per-game launch config at launch.
+    pub pause_platform: Option<bool>,
+    /// Global pause-while-overlay-visible default (opt-in, off unless set).
+    pub pause_global: bool,
     pub system_defaults: SystemDefaults,
     pub controller_input_mode: ControllerInputMode,
     pub controller_input_profile: Option<String>,
@@ -214,6 +220,27 @@ fn monitor_context(
     env: &[(String, String)],
     count_playtime: bool,
 ) -> ira_launcher::wrapper::MonitorContext {
+    let (launch, _, _) = logged_game_config(ctx.db, ctx.db_id).unwrap_or_default();
+    // Same 3-level resolution as the PC path (launch_other), but the
+    // overlay SHM only counts when the overlay is actually enabled — it is
+    // created pre-launch regardless, and an eternal-zero flag must not earn
+    // a watcher thread.
+    let pause = resolve_pause_game_on_overlay(
+        launch.pause_game_on_overlay,
+        ctx.pause_platform,
+        ctx.pause_global,
+    );
+    let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
+    let shm = overlay_enabled
+        .then_some(ctx.overlay_shm.as_deref())
+        .flatten();
+    // Freeze only when the un-toggle survives: gamescope/external-host mode.
+    // In-process mode would deadlock (frozen game can't see the un-toggle).
+    // Steam-kind spawns the Steam client itself, which must never freeze.
+    let external = ira_launcher::env_builder::uses_gamescope(cmd)
+        || super::big_picture::running_in_gamescope();
+    let owned = ctx.game_kind != ira_models::GameKind::Steam;
+    let pause_watch = ira_launcher::freeze::watch_config(pause, external, owned, shm);
     ira_launcher::wrapper::MonitorContext {
         sender: ctx.sender.clone(),
         game_id: ctx.game_id,
@@ -227,6 +254,55 @@ fn monitor_context(
         post_exit: String::new(),
         working_dir: None,
         log_file: ira_launcher::wrapper::game_log_path(ctx.save_dir, ctx.game_id),
+        pause_watch,
+    }
+}
+
+/// Resolved controller input for an emulator launch: everything the
+/// resident-daemon handoff (`InputLaunch`) and the wrapper fallback
+/// (`wrap_with_input`) both need.
+pub(super) struct EmulatorInput {
+    pub mode: ControllerInputMode,
+    pub profile: Option<String>,
+    pub pause_unfocused: bool,
+}
+/// Tries handing an emulator launch to the resident input daemon first,
+/// mirroring the PC path (`launch_game`): the game becomes the daemon's
+/// child with no middleman process. Returns true when the daemon took it
+/// (a monitor thread is already running); false means fall back to the
+/// wrapper spawn below. Disabled input never attempts the handoff.
+fn try_daemon_handoff(
+    ctx: &LaunchCtx,
+    cmd: &[String],
+    env: &[(String, String)],
+    input: &EmulatorInput,
+) -> Result<bool, String> {
+    if input.mode == ControllerInputMode::Disabled {
+        return Ok(false);
+    }
+    let calibration = ira_input::calibration_store_path(ctx.save_dir);
+    let launch = ira_launcher::InputLaunch {
+        mode: Some(input.mode),
+        profile: input.profile.clone(),
+        calibration: Some(calibration.to_string_lossy().into_owned()),
+        pause_unfocused: input.pause_unfocused,
+    };
+    match ira_launcher::input_daemon::launch_via_daemon(cmd, env, None, &launch, ctx.game_id) {
+        Ok(client) => {
+            // Same immediate-visibility contract as the PC path: the UI
+            // rebuilds the play button from this map as soon as GameStarted
+            // lands, and the real pid arrives with SessionStarted.
+            ctx.running_games.lock().unwrap().insert(ctx.game_id, 0);
+            let mc = monitor_context(ctx, cmd, env, true);
+            std::thread::spawn(move || {
+                ira_launcher::wrapper::monitor_session(client, mc);
+            });
+            Ok(true)
+        }
+        Err(reason) => {
+            eprintln!("launch: input daemon unavailable ({reason}); using the wrapper");
+            Ok(false)
+        }
     }
 }
 
@@ -282,7 +358,7 @@ fn build_emulator_env_and_wrap(
     cmd: &mut Vec<String>,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
-) -> Result<(Vec<(String, String)>, ControllerInputMode), String> {
+) -> Result<(Vec<(String, String)>, EmulatorInput), String> {
     let mut env = ira_launcher::env_builder::clean_parent_env();
 
     let (launch, wine, _profile_id) =
@@ -352,6 +428,7 @@ fn build_emulator_env_and_wrap(
     if overlay_enabled && (ira_launcher::env_builder::uses_gamescope(cmd) || in_gamescope_session) {
         ira_launcher::env_builder::wrap_with_host_overlay(cmd, &capture_env);
     }
+    ira_launcher::env_builder::maybe_add_daemon_toggle_env(&mut env, cmd, overlay_enabled);
 
     let input_mode = console_input_mode(
         launch.input_mode,
@@ -364,26 +441,42 @@ fn build_emulator_env_and_wrap(
         launch.input_profile.as_deref(),
         console_profile.or(ctx.controller_input_profile.as_deref()),
     )?;
-    if input_mode != ControllerInputMode::Disabled {
+    let input = EmulatorInput {
+        mode: input_mode,
+        profile: input_profile,
+        pause_unfocused: launch.input_pause_unfocused.unwrap_or(true),
+    };
+
+    Ok((env, input))
+}
+
+/// Wraps the command with the ira-input client for the wrapper fallback
+/// path. Skipped when remapping is disabled (the game launches raw).
+/// Mirrors the daemon handoff inputs so both paths remap identically.
+fn wrap_emulator_input(
+    ctx: &LaunchCtx,
+    cmd: &mut Vec<String>,
+    input: &EmulatorInput,
+) -> Result<(), String> {
+    if input.mode != ControllerInputMode::Disabled {
         let calibration = ira_input::calibration_store_path(ctx.save_dir);
         ira_launcher::env_builder::wrap_with_input(
             cmd,
-            input_profile.as_deref(),
+            input.profile.as_deref(),
             Some(calibration.to_str().unwrap_or_default()),
-            launch.input_pause_unfocused.unwrap_or(true),
+            input.pause_unfocused,
         )?;
         eprintln!(
             "ira-input: enabled for {}{}",
             ctx.game_name,
-            input_profile
+            input
+                .profile
+                .as_ref()
                 .map(|profile| format!(" using {profile}"))
                 .unwrap_or_default()
         );
     }
-
-    // The resolved mode tells a no-game caller whether the daemon's
-    // idle desktop session has to stand down for the spawned process.
-    Ok((env, input_mode))
+    Ok(())
 }
 
 /// If the command is a Flatpak invocation, inject overlay env vars as `--env` flags
@@ -576,12 +669,16 @@ pub(super) fn launch_retro(
         fullscreen_flag,
         rom_root,
     );
-    let (env, _) = build_emulator_env_and_wrap(
+    let (env, input) = build_emulator_env_and_wrap(
         ctx,
         &mut cmd,
         cc.controller_mode,
         (!cc.controller_profile.is_empty()).then_some(cc.controller_profile.as_str()),
     )?;
+    if try_daemon_handoff(ctx, &cmd, &env, &input)? {
+        return Ok(());
+    }
+    wrap_emulator_input(ctx, &mut cmd, &input)?;
     spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
 }
 
@@ -672,7 +769,11 @@ fn launch_emulator(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let (env, _) = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
+    let (env, input) = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
+    if try_daemon_handoff(ctx, &cmd, &env, &input)? {
+        return Ok(());
+    }
+    wrap_emulator_input(ctx, &mut cmd, &input)?;
     spawn_and_monitor(ctx, &cmd, &env, label)
 }
 
@@ -890,9 +991,9 @@ pub(super) fn launch_emulator_no_game(
     let input = console_controller_input(cfg, &console_id);
 
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(&exe, &[], None);
-    let (env, input_mode) =
+    let (env, emu_input) =
         build_emulator_env_and_wrap(ctx, &mut cmd, input.0, input.1.as_deref())?;
-    let desktop_hold = ira_launcher::input_daemon::desktop_hold_if_disabled(input_mode);
+    let desktop_hold = ira_launcher::input_daemon::desktop_hold_if_disabled(emu_input.mode);
     ira_launcher::wrapper::spawn_detached(
         &cmd,
         &env,
@@ -1062,6 +1163,19 @@ pub(super) fn launch_other(
 
     if !launch.exe.is_empty() {
         let overlay_enabled = launch.overlay_enabled.unwrap_or(ctx.overlay_global_enabled);
+        let pause_game_on_overlay = resolve_pause_game_on_overlay(
+            launch.pause_game_on_overlay,
+            ctx.pause_platform,
+            ctx.pause_global,
+        );
+        eprintln!(
+            "ira-pause: pause_game_on_overlay={} (game={:?} platform={:?} global={}) trophy={:?}",
+            pause_game_on_overlay,
+            launch.pause_game_on_overlay,
+            ctx.pause_platform,
+            ctx.pause_global,
+            ctx.trophy_source,
+        );
         let wine_opt = wine.enabled.then_some(&wine);
         ira_launcher::launch_game(
             &launch,
@@ -1087,6 +1201,7 @@ pub(super) fn launch_other(
                     None
                 },
                 overlay_font_family: ctx.overlay_font_family.clone(),
+                pause_game_on_overlay,
             },
         )?;
     } else {

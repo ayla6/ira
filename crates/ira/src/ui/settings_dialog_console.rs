@@ -20,6 +20,7 @@ pub(super) struct ConsoleSettingsWidgets {
     pub(super) fullscreen_states: Vec<(String, OverrideState)>,
     pub(super) source_overlay_states: Vec<(String, OverrideState)>,
     pub(super) source_gamescope_states: Vec<(String, OverrideState)>,
+    pub(super) pause_states: Vec<(String, OverrideState)>,
     pub(super) ps4_enable_row: Option<adw::SwitchRow>,
     pub(super) ps4_version_dd: Option<adw::ComboRow>,
     pub(super) ps3_enable_row: Option<adw::SwitchRow>,
@@ -82,9 +83,13 @@ pub(super) fn apply_override_states(
     fullscreen_states: &[(String, OverrideState)],
     overlay_states: &[(String, OverrideState)],
     gamescope_states: &[(String, OverrideState)],
+    pause_states: &[(String, OverrideState)],
 ) {
     for (console_id, state) in fullscreen_states {
         cfg.console_mut(console_id).fullscreen = *state.borrow();
+    }
+    for (console_id, state) in pause_states {
+        cfg.console_mut(console_id).pause_game_on_overlay = *state.borrow();
     }
     for (source_id, state) in overlay_states {
         match *state.borrow() {
@@ -154,6 +159,7 @@ pub(super) fn register_console_pages(
         fullscreen_states: Vec::new(),
         source_overlay_states: Vec::new(),
         source_gamescope_states: Vec::new(),
+        pause_states: Vec::new(),
         ps4_enable_row: None,
         ps4_version_dd: None,
         ps3_enable_row: None,
@@ -531,14 +537,22 @@ fn add_console_page_overrides(
         cfg.default_system.gamescope,
         cfg.overlay.source_gamescope.get(console_id).copied(),
     );
+    let (pause_row, pause_state) = build_override_switch_row(
+        &crate::tr!("Pause while overlay is visible"),
+        &crate::tr!("Freeze the game (gamescope) while the overlay is up"),
+        cfg.pause_game_on_overlay,
+        cfg.console(console_id).pause_game_on_overlay,
+    );
     let group = adw::PreferencesGroup::new();
     group.add(&fullscreen_row);
     group.add(&overlay_row);
     group.add(&gamescope_row);
+    group.add(&pause_row);
     page.prepend(&group);
     result
         .fullscreen_states
         .push((console_id.to_string(), fullscreen_state));
+    result.pause_states.push((console_id.to_string(), pause_state));
     result
         .source_overlay_states
         .push((console_id.to_string(), overlay_state));

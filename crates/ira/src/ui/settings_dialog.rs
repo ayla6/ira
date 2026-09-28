@@ -352,6 +352,7 @@ fn apply_saved_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
         &console_pages.fullscreen_states,
         &console_pages.source_overlay_states,
         &console_pages.source_gamescope_states,
+        &console_pages.pause_states,
     );
     apply_console_settings(cfg, &console_pages);
     apply_profile_settings(cfg, widgets);
@@ -441,6 +442,9 @@ fn apply_controller_defaults(
 
 fn apply_overlay_settings(cfg: &mut Config, widgets: &OverlayPageWidgets) {
     cfg.overlay.enabled = widgets.enable_row.is_active();
+    cfg.pause_game_on_overlay = widgets.pause_row.is_active();
+    cfg.wine_pause_game_on_overlay = *widgets.wine_pause_state.borrow();
+    cfg.linux_pause_game_on_overlay = *widgets.linux_pause_state.borrow();
     cfg.overlay.replay_buffer_enabled = widgets.replay_buffer_row.is_active();
     cfg.overlay.replay_buffer_seconds = ira_overlay_ipc::clamp_replay_buffer_seconds(
         (widgets.replay_duration_row.value().round() as u32).saturating_mul(60),

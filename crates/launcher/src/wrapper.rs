@@ -374,6 +374,10 @@ pub struct MonitorContext {
     /// Game stdout/stderr file the spawn wrote (tail it; empty when the
     /// spawn had nowhere to log, e.g. daemon sessions pump over IPC).
     pub log_file: String,
+    /// Pause-while-overlay-visible freeze permit (`None` = never freeze:
+    /// setting off, in-process overlay, unowned pid, or no SHM).
+    /// Consumed only by `monitor_process`; the daemon path ignores it.
+    pub pause_watch: Option<super::freeze::FreezeCfg>,
 }
 
 pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
@@ -391,6 +395,17 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
     if !ctx.log_file.is_empty() {
         tail_file_to_log(ctx.log_file.clone(), log_buf.clone(), tail_done.clone());
     }
+
+    // Pause watcher: follows the overlay SHM flag from a thread of its own
+    // so the 2s try_wait cadence below never delays a freeze/thaw. The
+    // group id is the child's pid (spawn_game makes it a group leader).
+    // Daemon sessions never reach this monitor, so their pids stay ours.
+    let freeze_exit = Arc::new(AtomicBool::new(false));
+    let freeze_handle = ctx.pause_watch.as_ref().map(|cfg| {
+        let exit = freeze_exit.clone();
+        let shm_name = cfg.shm_name.clone();
+        std::thread::spawn(move || super::freeze::watch(&shm_name, child_pid, exit))
+    });
 
     loop {
         std::thread::sleep(Duration::from_secs(2));
@@ -410,6 +425,14 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
             }
         }
     }
+
+    // Stop the watcher first and thaw unconditionally: finalize (and any
+    // stop_game racing it) must never meet a frozen group.
+    freeze_exit.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(handle) = freeze_handle {
+        let _ = handle.join();
+    }
+    super::freeze::thaw_group(child_pid);
 
     // Let the tail thread flush exit output, then stop (~1s).
     tail_done.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -523,6 +546,20 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
         Event::SessionStarted { child_pid: pid, .. } => {
             child_pid = Some(pid);
             ctx.running_games.lock().unwrap().insert(ctx.game_id, pid);
+            // Handoff proof for the game log (daemon eprintlns land on the
+            // terminal instead): the toggle chord is armed iff the marker
+            // made it into the session env. Whether the daemon could
+            // actually arm (SHM readable, chord decoded) only shows on the
+            // terminal or on the first flip below.
+            if ctx
+                .env
+                .iter()
+                .any(|(k, v)| k == "IRA_OVERLAY_DAEMON_TOGGLE" && v == "1")
+            {
+                log_buf.lock().unwrap().push(
+                    "daemon owns the overlay toggle chord (marker in session env)".to_string(),
+                );
+            }
         }
         Event::Output { line, .. } => log_buf.lock().unwrap().push(line),
         Event::Controller {
@@ -722,6 +759,9 @@ pub fn stop_game(
     wine_prefix: Option<&str>,
     env: &[(String, String)],
 ) {
+    // A pause-frozen game holds SIGTERM pending forever: thaw first so the
+    // stop sequence below can actually kill it. Harmless when not frozen.
+    super::freeze::thaw_group(pid);
     if wine_exe.is_none() && wine_prefix.is_none() {
         stop_native_process_group(pid);
         return;

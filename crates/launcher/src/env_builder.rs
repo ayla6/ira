@@ -749,6 +749,24 @@ pub fn wrap_with_host_overlay(
     let quoted_bin = shlex::try_quote(&bin)
         .map(|c| c.into_owned())
         .unwrap_or(bin);
+    // The host runs as a gamescope child (DISPLAY already repointed at
+    // gamescope's X server), so the desktop display it reads input from
+    // must be passed explicitly — along with its authority file, since the
+    // inherited XAUTHORITY belongs to the gamescope session, not the desk.
+    let host_prefix = [
+        ("DISPLAY", "IRA_OVERLAY_DESKTOP_DISPLAY"),
+        ("XAUTHORITY", "IRA_OVERLAY_DESKTOP_XAUTHORITY"),
+    ]
+    .into_iter()
+    .filter_map(|(src, dst)| {
+        std::env::var(src).ok().map(|value| {
+            let quoted = shlex::try_quote(&value)
+                .map(|c| c.into_owned())
+                .unwrap_or(value);
+            format!("{dst}={quoted} ")
+        })
+    })
+    .collect::<String>();
     let env_prefix = capture_env
         .iter()
         .map(|(key, value)| {
@@ -759,7 +777,7 @@ pub fn wrap_with_host_overlay(
         })
         .collect::<String>();
     let sh_script = format!(
-        "cleanup() {{ status=$?; trap - EXIT INT TERM HUP; if [ -n \"${{overlay_pid:-}}\" ]; then kill \"$overlay_pid\" 2>/dev/null; wait \"$overlay_pid\" 2>/dev/null; fi; exit \"$status\"; }}; trap cleanup EXIT; trap 'exit 143' INT TERM HUP; IRA_OVERLAY_GAMESCOPE=1 GDK_BACKEND=x11 GSK_RENDERER=cairo {quoted_bin} & overlay_pid=$!; {env_prefix}\"$@\""
+        "cleanup() {{ status=$?; trap - EXIT INT TERM HUP; if [ -n \"${{overlay_pid:-}}\" ]; then kill \"$overlay_pid\" 2>/dev/null; wait \"$overlay_pid\" 2>/dev/null; fi; exit \"$status\"; }}; trap cleanup EXIT; trap 'exit 143' INT TERM HUP; IRA_OVERLAY_GAMESCOPE=1 GDK_BACKEND=x11 GSK_RENDERER=cairo {host_prefix}{quoted_bin} & overlay_pid=$!; {env_prefix}\"$@\""
     );
 
     command.push("/usr/bin/sh".to_string());
@@ -774,6 +792,28 @@ pub fn wrap_with_host_overlay(
 /// Returns `true` if the command starts with `gamescope`.
 pub fn uses_gamescope(command: &[String]) -> bool {
     command.first().is_some_and(|c| c == "gamescope")
+}
+
+/// Arms daemon-side overlay toggle for this launch's environment: gamescope
+/// plus overlay. In gamescope mode every in-process toggle path stands down
+/// (`IRA_OVERLAY_DISABLE_UI`: shim keyboard/gamepad hooks, layer evdev), so
+/// the daemon is the only gamepad authority and cannot double-flip.
+/// Flatpaks need no special case: with no LD_PRELOAD shim and no /dev/input
+/// in the sandbox, they were already daemon-or-nothing.
+pub fn maybe_add_daemon_toggle_env(
+    env: &mut Vec<(String, String)>,
+    command: &[String],
+    overlay_enabled: bool,
+) {
+    if !(overlay_enabled && uses_gamescope(command)) {
+        return;
+    }
+    env.retain(|(k, _)| k != ira_overlay_ipc::DAEMON_TOGGLE_ENV);
+    env.push((
+        ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(),
+        "1".to_string(),
+    ));
+    eprintln!("ira-overlay: daemon owns the overlay toggle chord (gamescope)");
 }
 
 /// Returns `true` if gamescope would be applied for this launch config.
@@ -1362,5 +1402,45 @@ mod tests {
             env,
             [("WAYLAND_DISPLAY".to_string(), "wayland-0".to_string())]
         );
+    }
+
+    #[test]
+    fn test_daemon_toggle_env_gated() {
+        // Arrange: gamescope commands with the overlay on, and the rest.
+        let wrapped: Vec<String> = ["gamescope", "--", "flatpak", "run"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let native_wrapped: Vec<String> = ["gamescope", "--", "/games/game"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        // Act + Assert: armed for gamescope+overlay regardless of packaging…
+        let mut env = Vec::new();
+        maybe_add_daemon_toggle_env(&mut env, &wrapped, true);
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "IRA_OVERLAY_DAEMON_TOGGLE" && v == "1")
+        );
+        let mut env = Vec::new();
+        maybe_add_daemon_toggle_env(&mut env, &native_wrapped, true);
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "IRA_OVERLAY_DAEMON_TOGGLE" && v == "1")
+        );
+        // …but not without the overlay or without gamescope.
+        let mut env = Vec::new();
+        maybe_add_daemon_toggle_env(&mut env, &wrapped, false);
+        assert!(env.is_empty());
+        let mut env = Vec::new();
+        maybe_add_daemon_toggle_env(
+            &mut env,
+            &["flatpak".to_string(), "run".to_string()],
+            true,
+        );
+        assert!(env.is_empty());
+        let mut env = Vec::new();
+        maybe_add_daemon_toggle_env(&mut env, &["game".to_string()], true);
+        assert!(env.is_empty());
     }
 }

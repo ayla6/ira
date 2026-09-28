@@ -23,6 +23,11 @@ pub struct LaunchContext {
     pub overlay_enabled: bool,
     pub overlay_shm: Option<String>,
     pub overlay_font_family: Option<String>,
+    /// Resolved pause-while-overlay-visible setting (game → platform →
+    /// global). Consumed two ways: `IRA_GBE_PAUSE_ON_OVERLAY` for
+    /// Goldberg-emulated games (cooperative pause in our fork), and the
+    /// process-group freeze watcher for external-host overlay mode.
+    pub pause_game_on_overlay: bool,
 }
 
 /// Attach the ira-overlay to a prepared command/environment pair.
@@ -217,6 +222,31 @@ pub fn launch_game(
         (cmd, env)
     };
 
+    // Cooperative pause for Goldberg-emulated games: our fork reads this
+    // flag and follows the overlay SHM visibility bit, posting
+    // GameOverlayActivated_t so the game pauses itself like on real Steam.
+    // (Task pause-on-overlay: the freeze watcher for external-host mode
+    // consumes ctx.pause_game_on_overlay from the monitor next.)
+    if let Some((k, v)) = gbe_pause_env(
+        ctx.pause_game_on_overlay,
+        ctx.trophy_source,
+        ctx.overlay_shm.as_deref(),
+    ) {
+        eprintln!("ira-pause: setting {k}=1 for Goldberg game '{}'", ctx.game_name);
+        env.retain(|(ek, _)| ek != &k);
+        env.push((k, v));
+    } else if ctx.pause_game_on_overlay {
+        eprintln!(
+            "ira-pause: enabled for '{}' but not Goldberg-emulated (trophy={:?}) — no cooperative pause",
+            ctx.game_name, ctx.trophy_source
+        );
+    }
+
+    // Daemon-side toggle chord for gamescope launches, where every
+    // in-process toggle path stands down. The daemon swallows the chord
+    // and reports it; the monitor below flips the SHM flag.
+    super::env_builder::maybe_add_daemon_toggle_env(&mut env, &command, ctx.overlay_enabled);
+
     let input_profile = launch.input_profile.as_deref();
     // The GTK host renders the panel out-of-process for injected mode. Under
     // gamescope it runs inside the session (wrapped above), otherwise it
@@ -255,6 +285,12 @@ pub fn launch_game(
             // appears seconds later flipped the button back to "Play"
             // mid-launch.
             ctx.running_games.lock().unwrap().insert(ctx.game_id, 0);
+            if ctx.pause_game_on_overlay {
+                eprintln!(
+                    "ira-pause: freeze skipped for '{}': the input daemon owns the game process",
+                    ctx.game_name
+                );
+            }
             let mc = super::wrapper::MonitorContext {
                 sender: ctx.sender.clone(),
                 game_id: ctx.game_id,
@@ -269,6 +305,9 @@ pub fn launch_game(
                 working_dir: game_dir.clone(),
                 // Daemon sessions pump output over IPC; nothing to tail.
                 log_file: String::new(),
+                // The daemon supervises the pid; freezing from outside
+                // could race its session teardown, so never watch here.
+                pause_watch: None,
             };
             std::thread::spawn(move || super::wrapper::monitor_session(client, mc));
             if let Some(host) = host_child {
@@ -357,6 +396,19 @@ pub fn launch_game(
 
     let game_id = ctx.game_id;
     let variant_id = ctx.variant_id;
+    // Freeze only when the un-toggle survives: gamescope/external-host
+    // mode, where ira-overlay-ui owns the visible window and mirrors hide
+    // back into SHM. In-process mode would deadlock (frozen game can't see
+    // the un-toggle), so it pauses cooperatively or not at all.
+    let pause_watch = super::freeze::watch_config(
+        ctx.pause_game_on_overlay,
+        super::env_builder::uses_gamescope(&command),
+        true,
+        ctx.overlay_shm.as_deref(),
+    );
+    if pause_watch.is_some() {
+        eprintln!("ira-pause: freeze watcher armed for '{}'", ctx.game_name);
+    }
     let mc = super::wrapper::MonitorContext {
         sender: ctx.sender.clone(),
         game_id,
@@ -370,6 +422,7 @@ pub fn launch_game(
         post_exit: launch.post_exit.clone(),
         working_dir: game_dir.clone(),
         log_file: log_path.clone(),
+        pause_watch,
     };
     std::thread::spawn(move || {
         // Held until monitoring ends: the pad stays native for exactly as
@@ -382,6 +435,30 @@ pub fn launch_game(
     }
 
     Ok(child_pid)
+}
+
+/// Cooperative-pause flag for our Goldberg fork: when the resolved
+/// pause-while-overlay-visible setting is on for a Goldberg-emulated game
+/// whose overlay SHM exists, the fork watches `overlay_visible` and posts
+/// `GameOverlayActivated_t` so the game pauses itself exactly as on real
+/// Steam. Returns the env pair to inject, or `None` when any precondition
+/// fails (other games have no fork to read the flag; without SHM there is
+/// no visibility signal to follow).
+pub(crate) fn gbe_pause_env(
+    pause_game_on_overlay: bool,
+    trophy_source: TrophySource,
+    overlay_shm: Option<&str>,
+) -> Option<(String, String)> {
+    if !pause_game_on_overlay {
+        return None;
+    }
+    if trophy_source != TrophySource::Gse {
+        return None;
+    }
+    if overlay_shm.is_none_or(|s| s.is_empty()) {
+        return None;
+    }
+    Some(("IRA_GBE_PAUSE_ON_OVERLAY".to_string(), "1".to_string()))
 }
 
 /// Run a pre-launch command synchronously via `sh -c`.
@@ -474,5 +551,42 @@ fn write_pre_launch_log(log_path: &str, out: &std::process::Output) {
         use std::io::Write;
         let _ = f.write_all(&out.stdout);
         let _ = f.write_all(&out.stderr);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gbe_pause_env_set_for_gse_with_overlay() {
+        // Arrange: opted-in Goldberg game with overlay SHM present.
+        // Act
+        let env = gbe_pause_env(true, TrophySource::Gse, Some("/ira_overlay_42"));
+        // Assert
+        assert_eq!(
+            env,
+            Some((
+                "IRA_GBE_PAUSE_ON_OVERLAY".to_string(),
+                "1".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_gbe_pause_env_unset_when_disabled() {
+        assert_eq!(gbe_pause_env(false, TrophySource::Gse, Some("/ira_overlay_42")), None);
+    }
+
+    #[test]
+    fn test_gbe_pause_env_unset_without_gse_or_shm() {
+        // Non-Goldberg games have no fork to read the flag…
+        assert_eq!(
+            gbe_pause_env(true, TrophySource::SteamNative, Some("/ira_overlay_42")),
+            None
+        );
+        assert_eq!(gbe_pause_env(true, TrophySource::Nge, Some("/ira_overlay_42")), None);
+        // …and without overlay SHM there is no visibility signal to follow.
+        assert_eq!(gbe_pause_env(true, TrophySource::Gse, None), None);
     }
 }

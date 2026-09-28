@@ -1,5 +1,6 @@
 pub mod emulator_saves;
 pub mod env_builder;
+pub mod freeze;
 pub mod game_saves;
 pub mod gpu;
 pub mod input_daemon;
@@ -11,4 +12,5 @@ pub mod wine_detect;
 pub mod wine_dlls;
 pub mod wine_launch;
 pub mod wrapper;
+pub use input_daemon::InputLaunch;
 pub use launch::*;

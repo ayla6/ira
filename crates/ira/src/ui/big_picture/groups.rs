@@ -244,6 +244,11 @@ impl GroupsGrid {
             gtk4::Orientation::Vertical,
             (8.0 * crate::ui::css::bp_scale()).round() as i32,
         );
+        // Centered, never stretched: the slot below requests a square but
+        // a wider flow column would otherwise fill-stretch it (and the
+        // homogeneous collage cells with it) into wide abominations.
+        // Centered tiles keep their square with even gutters instead.
+        tile_box.set_halign(gtk4::Align::Center);
         let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         slot.add_css_class(CSS_BP_GROUP_SLOT);
         slot.set_size_request(tile, tile);

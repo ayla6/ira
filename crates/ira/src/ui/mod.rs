@@ -3,7 +3,6 @@ mod achievement_view;
 mod auto_groups;
 pub mod big_picture;
 mod background;
-pub mod big_picture_font;
 mod auto_group_dialog;
 mod auto_group_editor;
 mod auto_group_values_page;

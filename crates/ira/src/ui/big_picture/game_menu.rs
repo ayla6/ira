@@ -60,9 +60,9 @@ impl GameMenu {
         }
         let panel = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         panel.add_css_class(CSS_BP_MENU_PANEL);
-        // Docked full-height on the right, Switch-options style.
+        // Docked full-height on the left, like the overlay sidebar.
         panel.add_css_class(CSS_BP_OPTION_PANEL);
-        panel.set_halign(gtk4::Align::End);
+        panel.set_halign(gtk4::Align::Start);
         panel.set_valign(gtk4::Align::Fill);
         // Reference 560px wide, re-scaled at every open so the panel keeps
         // its proportion of the screen (it reads bp_scale, which the
@@ -212,12 +212,7 @@ impl GameMenu {
                     .iter()
                     .map(|g| g.id)
                     .collect();
-                let header = gtk4::Label::new(Some(&game.name));
-                header.set_xalign(0.0);
-                header.set_wrap(true);
-                header.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-                header.add_css_class(CSS_BP_MENU_TITLE);
-                crate::ui::helpers::crisp_label(&header);
+                let header = ira_widgets::menu::menu_header(&game.name);
                 self.panel.append(&header);
 
                 let mut rows = Vec::new();
@@ -234,10 +229,7 @@ impl GameMenu {
             }
             MenuKind::Sort => {
                 let current = state.borrow().cfg.sort_mode;
-                let header = gtk4::Label::new(Some(&crate::tr!("Sort by")));
-                header.set_xalign(0.0);
-                header.add_css_class(CSS_BP_MENU_TITLE);
-                crate::ui::helpers::crisp_label(&header);
+                let header = ira_widgets::menu::menu_header(&crate::tr!("Sort by"));
                 self.panel.append(&header);
 
                 let mut rows = Vec::new();
@@ -250,10 +242,7 @@ impl GameMenu {
             }
             MenuKind::GroupOrder => {
                 let current = state.borrow().cfg.group_order;
-                let header = gtk4::Label::new(Some(&crate::tr!("Order groups by")));
-                header.set_xalign(0.0);
-                header.add_css_class(CSS_BP_MENU_TITLE);
-                crate::ui::helpers::crisp_label(&header);
+                let header = ira_widgets::menu::menu_header(&crate::tr!("Order groups by"));
                 self.panel.append(&header);
 
                 let mut rows = Vec::new();
@@ -264,14 +253,9 @@ impl GameMenu {
                 }
                 *self.rows.borrow_mut() = rows;
             }
-            MenuKind::ConfirmDelete { id, name } => {                let header = gtk4::Label::new(Some(
+            MenuKind::ConfirmDelete { id, name } => {                let header = ira_widgets::menu::menu_header(
                     &crate::tr!("Delete {}?").replacen("{}", &name, 1),
-                ));
-                header.set_xalign(0.0);
-                header.set_wrap(true);
-                header.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-                header.add_css_class(CSS_BP_MENU_TITLE);
-                crate::ui::helpers::crisp_label(&header);
+                );
                 self.panel.append(&header);
 
                 let mut rows = Vec::new();
@@ -286,25 +270,17 @@ impl GameMenu {
         }
     }
 
-    /// One row: the current sort and the groups the game belongs to wear
-    /// the accent instead of a checkmark glyph.
+    /// One row: the shared menu construction, plus this menu's selection
+    /// state and click handling. The current sort and the groups the game
+    /// belongs to wear the accent instead of a checkmark glyph.
     fn append_row(&self, state: &SharedState, text: &str, index: usize, active: bool) {
-        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-        row.add_css_class(CSS_BP_MENU_ROW);
+        let row = ira_widgets::menu::menu_row(text);
         if active {
             row.add_css_class(CSS_BP_MENU_ROW_ACTIVE);
         }
         if self.selection.get() == index {
             row.add_css_class(CSS_BP_MENU_ROW_SELECTED);
         }
-        let label = gtk4::Label::new(Some(text));
-        label.set_xalign(0.0);
-        // Long group names wrap; they never widen the panel.
-        label.set_wrap(true);
-        label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-        label.set_hexpand(true);
-        crate::ui::helpers::crisp_label(&label);
-        row.append(&label);
         let click_state = state.clone();
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |_, _, _, _| {

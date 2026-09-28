@@ -1,0 +1,11 @@
+[package]
+name = "ira-widgets"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_14"] }
+ira-input = { version = "0.1.0", path = "../input" }
+
+[lints]
+workspace = true

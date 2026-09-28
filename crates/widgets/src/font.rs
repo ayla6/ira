@@ -1,17 +1,15 @@
-//! The big-picture UI's font under test: embedded in the binary, registered as
-//! a fontconfig *application* font — private to this process, never
-//! installed into the user's font directories. Swap the `ACTIVE` block to
-//! try another candidate.
+//! The big-picture UI's font: embedded in the binary, registered as a
+//! fontconfig *application* font — private to the process, never installed
+//! into the user's font directories. Shared so the main app and the
+//! overlay render the same type.
 
-/// The family the big picture CSS currently uses, and its files (Regular first,
-/// then any weight companions). Candidates waiting their turn live in
-/// `assets/fonts/` unembedded: IBM_Plex_Sans_JP, Murecho, M_PLUS_2,
-/// M_PLUS_1.
+/// The family the big picture CSS uses, and its files (Regular first,
+/// then any weight companions).
 pub const ACTIVE: (&str, &[(&str, &[u8])]) = (
     "M PLUS 2",
     &[(
         "MPLUS2-VariableFont_wght.ttf",
-        include_bytes!("../../assets/fonts/M_PLUS_2/MPLUS2-VariableFont_wght.ttf"),
+        include_bytes!("../assets/fonts/M_PLUS_2/MPLUS2-VariableFont_wght.ttf"),
     )],
 );
 
@@ -24,7 +22,7 @@ mod fc {
     }
 
     #[link(name = "fontconfig")]
-    extern "C" {
+    unsafe extern "C" {
         pub fn FcConfigGetCurrent() -> *mut FcConfig;
         pub fn FcConfigAppFontAddFile(config: *mut FcConfig, file: *const c_char) -> i32;
     }
@@ -49,7 +47,7 @@ pub fn install() {
         return;
     };
     if std::fs::create_dir_all(&dir).is_err() {
-        eprintln!("ira: could not create the font cache dir {}", dir.display());
+        eprintln!("ira-widgets: could not create the font cache dir {}", dir.display());
         return;
     }
     unsafe {
@@ -57,7 +55,7 @@ pub fn install() {
         for (name, bytes) in ACTIVE.1 {
             let path = dir.join(name);
             if !path.exists() && std::fs::write(&path, bytes).is_err() {
-                eprintln!("ira: could not write the font to {}", path.display());
+                eprintln!("ira-widgets: could not write the font to {}", path.display());
                 continue;
             }
             let Ok(cpath) = std::ffi::CString::new(path.as_os_str().to_string_lossy().as_bytes())
@@ -65,7 +63,7 @@ pub fn install() {
                 continue;
             };
             if fc::FcConfigAppFontAddFile(config, cpath.as_ptr()) == 0 {
-                eprintln!("ira: fontconfig rejected {}", path.display());
+                eprintln!("ira-widgets: fontconfig rejected {}", path.display());
             }
         }
     }

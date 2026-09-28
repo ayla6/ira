@@ -361,8 +361,16 @@ pub fn load_ra_achievements_from_cache(save_dir: &str, game_id: &str) -> Vec<Mer
             } else {
                 String::new()
             };
+            // An earned achievement without its earned badge on disk shows
+            // the lock art rather than the generic emblem: partial syncs
+            // still read as designed instead of broken.
+            let icon = if earned_path.is_empty() {
+                locked_path.clone()
+            } else {
+                earned_path
+            };
             if earned {
-                (earned_path, locked_path)
+                (icon, locked_path)
             } else {
                 (locked_path.clone(), locked_path)
             }

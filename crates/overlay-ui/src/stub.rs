@@ -15,8 +15,8 @@ use wayland_protocols::xdg::shell::server::{
     xdg_positioner::XdgPositioner, xdg_surface::XdgSurface, xdg_toplevel::XdgToplevel,
     xdg_wm_base::XdgWmBase,
 };
-use wayland_server::backend::ObjectId;
 use wayland_server::Resource;
+use wayland_server::backend::ObjectId;
 use wayland_server::protocol::{
     wl_buffer::WlBuffer, wl_callback::WlCallback, wl_compositor::WlCompositor,
     wl_data_device::WlDataDevice, wl_data_device_manager::WlDataDeviceManager,
@@ -25,6 +25,39 @@ use wayland_server::protocol::{
     wl_shm_pool::WlShmPool, wl_surface::WlSurface, wl_touch::WlTouch,
 };
 use wayland_server::{Client, DataInit, Dispatch, Display, DisplayHandle, GlobalDispatch, New};
+
+macro_rules! empty_dispatch {
+    ($($ty:ty),*) => {
+        $(
+            impl Dispatch<$ty, ()> for StubState {
+                fn request(
+                    _state: &mut Self,
+                    _client: &Client,
+                    _resource: &$ty,
+                    _request: <$ty as wayland_server::Resource>::Request,
+                    _data: &(),
+                    _dh: &DisplayHandle,
+                    _data_init: &mut DataInit<'_, Self>,
+                ) {
+                }
+            }
+        )*
+    };
+}
+
+empty_dispatch!(
+    WlBuffer,
+    WlRegion,
+    WlCallback,
+    WlPointer,
+    WlKeyboard,
+    WlTouch,
+    WlOutput,
+    WlDataSource,
+    WlDataDevice,
+    XdgToplevel,
+    XdgPositioner
+);
 
 /// Virtual output size: covers the canvas max extent.
 const OUTPUT_W: i32 = ira_overlay_ipc::CANVAS_MAX_W as i32;
@@ -140,8 +173,7 @@ pub fn start() -> Option<String> {
     dh.create_global::<StubState, WlDataDeviceManager, _>(3, ());
     dh.create_global::<StubState, XdgWmBase, _>(3, ());
 
-    let socket =
-        wayland_server::ListeningSocket::bind_auto("ira-overlay", 0..99).ok()?;
+    let socket = wayland_server::ListeningSocket::bind_auto("ira-overlay", 0..99).ok()?;
     let name = socket.socket_name()?.to_string_lossy().into_owned();
     if name != "ira-overlay-0" {
         eprintln!(
@@ -359,45 +391,6 @@ impl Dispatch<WlShmPool, ()> for StubState {
     }
 }
 
-impl Dispatch<WlBuffer, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlBuffer,
-        _request: <WlBuffer as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
-    }
-}
-
-impl Dispatch<WlRegion, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlRegion,
-        _request: <WlRegion as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
-    }
-}
-
-impl Dispatch<WlCallback, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlCallback,
-        _request: <WlCallback as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
-    }
-}
-
 // ─── wl_seat (pointer only: the host injects pointer motion, buttons
 // and scroll; keyboard stays tier-1 via widget focus calls) ───
 
@@ -444,45 +437,6 @@ impl Dispatch<WlSeat, ()> for StubState {
     }
 }
 
-impl Dispatch<WlPointer, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlPointer,
-        _request: <WlPointer as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
-    }
-}
-
-impl Dispatch<WlKeyboard, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlKeyboard,
-        _request: <WlKeyboard as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
-    }
-}
-
-impl Dispatch<WlTouch, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlTouch,
-        _request: <WlTouch as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
-    }
-}
-
 // ─── wl_output ───
 
 impl GlobalDispatch<WlOutput, ()> for StubState {
@@ -509,19 +463,6 @@ impl GlobalDispatch<WlOutput, ()> for StubState {
         output.scale(1);
         output.mode(Mode::Current, OUTPUT_W, OUTPUT_H, 60000);
         output.done();
-    }
-}
-
-impl Dispatch<WlOutput, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlOutput,
-        _request: <WlOutput as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
     }
 }
 
@@ -560,32 +501,6 @@ impl Dispatch<WlDataDeviceManager, ()> for StubState {
             }
             _ => {}
         }
-    }
-}
-
-impl Dispatch<WlDataSource, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlDataSource,
-        _request: <WlDataSource as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
-    }
-}
-
-impl Dispatch<WlDataDevice, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &WlDataDevice,
-        _request: <WlDataDevice as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
     }
 }
 
@@ -671,34 +586,6 @@ impl Dispatch<XdgSurface, ObjectId> for StubState {
         data: &ObjectId,
     ) {
         state.surfaces.remove(data);
-    }
-}
-
-impl Dispatch<XdgToplevel, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &XdgToplevel,
-        _request: <XdgToplevel as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
-        // All toplevel requests (title, states, move/resize, minimize…)
-        // are no-ops: there is nothing to show.
-    }
-}
-
-impl Dispatch<XdgPositioner, ()> for StubState {
-    fn request(
-        _state: &mut Self,
-        _client: &Client,
-        _resource: &XdgPositioner,
-        _request: <XdgPositioner as wayland_server::Resource>::Request,
-        _data: &(),
-        _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, Self>,
-    ) {
     }
 }
 

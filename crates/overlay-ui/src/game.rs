@@ -6,7 +6,7 @@
 
 use std::sync::atomic::Ordering;
 
-use ira_overlay_ipc::{MappedShm, MAX_ACHIEVEMENTS};
+use ira_overlay_ipc::{MAX_ACHIEVEMENTS, MappedShm};
 
 #[derive(Clone)]
 pub struct AchData {
@@ -21,7 +21,6 @@ pub struct AchData {
 #[derive(Clone)]
 pub struct GameData {
     pub name: String,
-    pub kind: String,
     pub total: u32,
     pub unlocked: u32,
     pub playtime_seconds: u64,
@@ -30,16 +29,22 @@ pub struct GameData {
 
 /// Change-detection fingerprint: totals + playtime + notification index.
 /// The host rebuilds the widget tree only when this changes.
-pub type Fingerprint = (u32, u32, u32, u64);
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Fingerprint {
+    pub total: u32,
+    pub unlocked: u32,
+    pub notif: u32,
+    pub playtime: u64,
+}
 
 pub fn fingerprint(shm: &MappedShm) -> Fingerprint {
     let hdr = shm.header();
-    (
-        hdr.total_achievements,
-        hdr.unlocked_achievements,
-        hdr.notification_write_index.load(Ordering::SeqCst),
-        hdr.playtime_seconds,
-    )
+    Fingerprint {
+        total: hdr.total_achievements,
+        unlocked: hdr.unlocked_achievements,
+        notif: hdr.notification_write_index.load(Ordering::SeqCst),
+        playtime: hdr.playtime_seconds,
+    }
 }
 
 pub fn load(shm: &MappedShm) -> GameData {
@@ -60,7 +65,6 @@ pub fn load(shm: &MappedShm) -> GameData {
         .collect();
     GameData {
         name: cstr(&hdr.game_name),
-        kind: cstr(&hdr.game_kind),
         total: hdr.total_achievements,
         unlocked: hdr.unlocked_achievements,
         playtime_seconds: hdr.playtime_seconds,
@@ -72,14 +76,18 @@ impl GameData {
     pub fn progress_line(&self) -> String {
         let h = self.playtime_seconds / 3600;
         let m = (self.playtime_seconds % 3600) / 60;
-        format!("{} • {} / {} — {h}h {m}m", self.kind, self.unlocked, self.total)
+        // Translatable template: translators reorder the placeholders.
+        crate::tr!("{} / {} — {}h {}m")
+            .replacen("{}", &self.unlocked.to_string(), 1)
+            .replacen("{}", &self.total.to_string(), 1)
+            .replacen("{}", &h.to_string(), 1)
+            .replacen("{}", &m.to_string(), 1)
     }
 
     /// Mock data for `--mock` runs (no game SHM). Mirrors the spike fixture.
     pub fn mock() -> Self {
         Self {
             name: "Mock Game".to_string(),
-            kind: "gbe_steam".to_string(),
             total: 8,
             unlocked: 3,
             playtime_seconds: 5 * 3600 + 42 * 60,
@@ -168,7 +176,7 @@ mod tests {
     #[test]
     fn test_progress_line_format() {
         let data = GameData::mock();
-        assert_eq!(data.progress_line(), "gbe_steam • 3 / 8 — 5h 42m");
+        assert_eq!(data.progress_line(), "3 / 8 — 5h 42m");
     }
 
     #[test]

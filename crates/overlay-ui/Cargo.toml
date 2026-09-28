@@ -7,12 +7,17 @@ edition = "2024"
 adw = { version = "0.9", package = "libadwaita", features = ["v1_6", "v1_7"] }
 gdk4 = "0.11"
 gdkx11 = { version = "0.11", package = "gdk4-x11" }
+gettext-rs = { version = "0.7", features = ["gettext-system"] }
 gio = "0.22"
 glib = "0.22"
 graphene-rs = "0.22"
 gsk4 = "0.11"
 gtk4 = { version = "0.11", features = ["v4_14"] }
+ira-images = { version = "0.1.0", path = "../images" }
+ira-input = { version = "0.1.0", path = "../input" }
 ira-overlay-ipc = { version = "0.1.0", path = "../overlay-ipc" }
+ira-parser = { version = "0.1.0", path = "../parser" }
+ira-widgets = { version = "0.1.0", path = "../widgets" }
 libc = "0.2"
 wayland-protocols = { version = "0.32.13", features = ["server"] }
 wayland-server = "0.31.14"

@@ -9,39 +9,67 @@
 //! canvas `/ira_canvas_0`). The layer derives the same canvas path from the
 //! game header's `db_id`, so no extra env var is needed.
 
+mod chord;
 mod cursor;
+mod desktop;
+mod focus;
 mod game;
 mod gamescope;
+mod grab;
+mod i18n;
+mod keys;
+mod proc;
 mod render;
 mod stub;
 mod ui;
+mod widgets;
+mod xauth;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use gtk4::prelude::{ApplicationExt, ApplicationExtManual, GtkWindowExt, WidgetExt};
 use glib::object::Cast as _;
+use gtk4::prelude::{ApplicationExt, ApplicationExtManual, GtkWindowExt, WidgetExt};
 use ira_overlay_ipc::{
-    canvas_shm_path, fit_panel_size, CanvasAction, CanvasShm, MappedShm, CANVAS_VERSION,
+    CANVAS_VERSION, CanvasAction, CanvasCommand, CanvasShm, MappedShm, canvas_shm_path,
+    fit_panel_size,
 };
 
-use game::{fingerprint, Fingerprint};
-use render::{FrameRenderer, CANVAS_H, CANVAS_W};
+use game::{Fingerprint, fingerprint};
+use render::{CANVAS_H, CANVAS_W, FrameRenderer};
 use ui::{OverlayUi, UiEffect};
 
 struct State {
     canvas: CanvasShm,
     game: Option<MappedShm>,
-    ui: OverlayUi,
+    ui: Rc<RefCell<OverlayUi>>,
     renderer: Option<FrameRenderer>,
     window: gtk4::Window,
     cmd_read: u32,
-    last_fp: Fingerprint,
+    last_fp: Option<Fingerprint>,
     last_visible: bool,
     /// Last applied window size: the window follows the game extent.
     last_panel_size: (u32, u32),
+    /// X focus saved when the overlay stole it on show (0 = none saved).
+    focus_saved: u32,
+    /// Game window actually unmapped for deterministic unfocus (None when
+    /// nothing was unmapped). Tracked separately from `focus_saved`: a
+    /// self-steal (previous focus already ours) saves ourselves, which is
+    /// always viewable and must never count as "the game fought back".
+    unmapped_game: Option<u32>,
+    /// Settled-geometry logged for the current showing (reset on hide):
+    /// the show-edge measurements fire pre-layout and read zeros.
+    showgeom_logged: bool,
+    /// The game fought the unmap (remapped behind our back): stop trying
+    /// instead of fighting it forever.
+    unmap_retreat: bool,
+    /// Persistent focus connection (gamescope mode): owns X focus while
+    /// visible instead of reconnecting per steal.
+    focus_conn: Option<gamescope::FocusConn>,
+    /// Cached overlay X id (queried once the surface exists).
+    overlay_xid: Option<u32>,
     /// Last repaint (rate cap below).
     last_frame_render: std::time::Instant,
     /// Transition window end: fresh visual changes keep repainting
@@ -56,6 +84,11 @@ struct State {
     dirty: bool,
     frame_no: u64,
     gamescope: bool,
+    /// Footer glyph family last painted; the daemon publishes the
+    /// physical pad's family for the overlay to follow.
+    last_family: ira_input::ControllerFamily,
+    /// Desktop pointer reports (gamescope mode only).
+    input_rx: Option<std::sync::mpsc::Receiver<grab::PointerEvent>>,
 }
 
 /// Starts the stub compositor in injected mode. Returns the socket name
@@ -76,6 +109,32 @@ fn stub_or_none() -> Option<String> {
 
 fn main() {
     eprintln!("ira-overlay-ui: starting (canvas v{CANVAS_VERSION})");
+    // Build fingerprint: proves which binary a log came from, so stale
+    // builds are identifiable instead of debatable.
+    if let Ok(exe) = std::env::current_exe()
+        && let Ok(meta) = std::fs::metadata(&exe)
+        && let Ok(modified) = meta.modified()
+    {
+        eprintln!("ira-overlay-ui: host built at {modified:?}");
+    }
+    // Same catalog as the app, before GTK initializes text rendering.
+    i18n::init();
+    // Same type as big picture, before GTK initializes text rendering.
+    ira_widgets::font::install();
+    // Gamescope mode must live on the session's Xwayland server, not the
+    // inherited desktop display: gamescope only composites external planes
+    // from its own X server, and focus steal/restore below needs the same
+    // connection. Must precede any GTK/GDK use (the display is opened
+    // lazily on first use).
+    if gamescope::is_gamescope_mode() && std::env::var("IRA_OVERLAY_XWAYLAND_DISPLAY").is_err() {
+        match gamescope::discover_xwayland_display() {
+            Some(num) => {
+                eprintln!("ira-overlay-ui: using gamescope Xwayland display :{num}");
+                unsafe { std::env::set_var("DISPLAY", format!(":{num}")) };
+            }
+            None => eprintln!("ira-overlay-ui: no gamescope Xwayland found, keeping $DISPLAY"),
+        }
+    }
     // Injected mode renders on our own stub compositor: zero visible
     // output anywhere (snapshots require a mapped window).
     // Gamescope mode keeps its real window — the compositor is its display.
@@ -83,7 +142,9 @@ fn main() {
     // Mock flag is env, not argv: GTK/Adwaita claim unknown CLI flags.
     let mock_mode = std::env::var_os("IRA_OVERLAY_UI_MOCK").is_some();
     let (game, mock, db_id) = match std::env::var("IRA_OVERLAY_SHM") {
-        Ok(path) => match MappedShm::open(&path) {
+        // Read-write: the Hide path mirrors visibility into the game SHM
+        // (freeze watcher follows it); a read-only mapping aborts there.
+        Ok(path) => match MappedShm::open_rw(&path) {
             Ok(shm) => {
                 let db_id = shm.header().game_db_id;
                 eprintln!("ira-overlay-ui: game SHM '{path}' (db_id={db_id})");
@@ -113,20 +174,44 @@ fn main() {
     };
     canvas.init_header();
     eprintln!("ira-overlay-ui: canvas '{}'", canvas_shm_path(db_id));
+    // Single instance per game: a previous host (crashed sessions leave
+    // them behind) would composite a second, possibly frozen, plane over
+    // or under this one, making the overlay look dead to all input.
+    claim_host_lock(db_id);
 
-    let app = adw::Application::new(
-        Some("org.ira.OverlayUi"),
-        gio::ApplicationFlags::FLAGS_NONE,
+    // Desktop pointer + keyboard authority for gamescope mode (no
+    // /dev/input needed): the chord opens, nav keys and pointer buttons
+    // are stolen while visible and engaged. The :2 server delivers no
+    // input events to external clients, so this lives on the desktop
+    // display — passed explicitly, since this process inherits gamescope's
+    // DISPLAY. Dies with the process.
+    let input_rx = grab::start_desktop_input(
+        std::env::var("IRA_OVERLAY_SHM").ok(),
+        std::env::var("IRA_OVERLAY_DESKTOP_DISPLAY").ok(),
+        std::env::var("IRA_OVERLAY_DESKTOP_XAUTHORITY").ok(),
     );
+    // Session chord fallback: Shift+Tab on :2 costs nothing when that
+    // server is mute, and restores the toggle where it does deliver.
+    grab::start_chord_fallback(std::env::var("IRA_OVERLAY_SHM").ok());
+
+    let app = adw::Application::new(Some("org.ira.OverlayUi"), gio::ApplicationFlags::FLAGS_NONE);
     // connect_activate takes Fn: hand owned state over via take-once cells.
     let game = RefCell::new(Some(game));
     let mock = RefCell::new(mock);
     let canvas = RefCell::new(Some(canvas));
+    let input_rx = RefCell::new(input_rx);
     app.connect_activate(move |app| {
         let (Some(game), mock, Some(canvas)) = (game.take(), mock.take(), canvas.take()) else {
             return;
         };
-        activate(app, game, mock, canvas, stub_name.is_none());
+        activate(
+            app,
+            game,
+            mock,
+            canvas,
+            stub_name.is_none(),
+            input_rx.take(),
+        );
     });
     std::process::exit(i32::from(app.run()));
 }
@@ -151,11 +236,52 @@ fn publish_theme_cursor(canvas: &mut CanvasShm) {
     }
 }
 
+/// Lock file pinning one overlay host per game canvas.
+fn host_lock_path(db_id: i64) -> std::path::PathBuf {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+    dir.join(format!("ira-overlay-host-{db_id}.lock"))
+}
+
+/// Single instance per game canvas: reads the previous host's pid from
+/// the lock file and terminates it before claiming the lock. A leftover
+/// host composites a second plane (possibly a frozen frame) that makes
+/// the live overlay look dead to all input.
+fn claim_host_lock(db_id: i64) {
+    let path = host_lock_path(db_id);
+    if let Ok(text) = std::fs::read_to_string(&path)
+        && let Ok(pid) = text.trim().parse::<i32>()
+        && pid != std::process::id() as i32
+        && unsafe { libc::kill(pid, 0) } == 0
+    {
+        eprintln!("ira-overlay-ui: terminating stale host (pid={pid})");
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(2)
+            && unsafe { libc::kill(pid, 0) } == 0
+        {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    if let Err(e) = std::fs::write(&path, std::process::id().to_string()) {
+        eprintln!("ira-overlay-ui: cannot write host lock: {e}");
+    }
+}
+
 /// Display size published by Ira (`IRA_OVERLAY_SCREEN_W/H`), if any.
 fn screen_size_from_env() -> Option<(u32, u32)> {
     let w: u32 = std::env::var("IRA_OVERLAY_SCREEN_W").ok()?.parse().ok()?;
     let h: u32 = std::env::var("IRA_OVERLAY_SCREEN_H").ok()?.parse().ok()?;
     (w > 0 && h > 0).then_some((w, h))
+}
+
+/// Display size with the desktop thread's fallback: one truth for the env
+/// parsing (positive-only), separate defaults per caller.
+fn screen_size() -> (u32, u32) {
+    screen_size_from_env().unwrap_or((1920, 1080))
 }
 
 /// Builds the helper window + UI and starts the 30Hz frame loop.
@@ -166,28 +292,28 @@ fn activate(
     mock: Option<game::GameData>,
     mut canvas: CanvasShm,
     no_stub: bool,
+    input_rx: Option<std::sync::mpsc::Receiver<grab::PointerEvent>>,
 ) {
     adw::StyleManager::default().set_color_scheme(adw::ColorScheme::PreferDark);
     publish_theme_cursor(&mut canvas);
-    // Transparent window: the compositor (gamescope plane or Vulkan layer)
-    // blends the panel over the game; outside the widgets is see-through.
-    if let Some(display) = gdk4::Display::default() {
-        let css = gtk4::CssProvider::new();
-        css.load_from_string(
-            "window { background-color: transparent; } \
-             .ira-focused-row { background-color: alpha(@theme_fg_color, 0.10); border-radius: 9px; }",
-        );
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            &css,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
+    // Same stylesheet as big picture (1.0 = the 1080p reference): the
+    // overlay speaks the same visual language instead of a hand-rolled
+    // clone. Injected mode renders on our own stub compositor and stays
+    // un-dimmed: the renderer snapshots the window and the layer blends
+    // it over the game.
+    let gamescope = gamescope::is_gamescope_mode();
+    ira_widgets::style::install_bp_css(1.0);
 
     let window = gtk4::Window::new();
     window.set_application(Some(app));
-    window.set_title(Some("Ira Overlay"));
+    window.set_title(Some(&crate::tr!("Ira Overlay")));
     window.set_decorated(false);
+    if gamescope {
+        // Big-picture dim behind the content (same class as the app's
+        // menu sheets). Injected mode stays transparent for snapshot
+        // blending.
+        window.add_css_class(ira_widgets::style::CSS_BP_MENU_DIM);
+    }
     // Startup size from the display (published by Ira; inherited through
     // spawn) so the first frame is already right: fit the screen the same
     // way the per-tick resize does, defaulting to 512x800 without it.
@@ -199,7 +325,6 @@ fn activate(
         None => (CANVAS_W as i32, CANVAS_H as i32),
     };
     window.set_default_size(win_w, win_h);
-    let gamescope = gamescope::is_gamescope_mode();
     if !gamescope {
         // The injected helper is never user-facing: bury it below other
         // windows (a fullscreen game covers it regardless).
@@ -210,19 +335,40 @@ fn activate(
     let push_action = {
         let state = state.clone();
         Rc::new(move |act: CanvasAction| {
+            if act.kind == ira_overlay_ipc::ACT_EXIT_GAME {
+                // Exit Game: terminate the session leader; its cleanup
+                // reaps the game and this host with it. Best-effort:
+                // without a session ancestor there is nothing to exit
+                // here — but the action is still forwarded below, and the
+                // in-process layer terminates the game itself on receipt.
+                if let Some(pid) = proc::session_leader_pid() {
+                    eprintln!("ira-overlay-ui: exiting game (session leader pid={pid})");
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGTERM);
+                    }
+                } else {
+                    eprintln!("ira-overlay-ui: exit game requested, no session leader found");
+                }
+            }
             if let Some(s) = state.borrow_mut().as_mut() {
                 s.canvas.push_action(act);
             }
         })
     };
-    let mut ui = OverlayUi::new(push_action);
+    let hide_state = state.clone();
+    let on_hide = Rc::new(move || {
+        if let Some(s) = hide_state.borrow_mut().as_mut() {
+            apply_hide(s);
+        }
+    });
+    let ui = OverlayUi::new(push_action, on_hide, gamescope::is_gamescope_mode());
     let initial = match (&game, &mock) {
         (Some(shm), _) => game::load(shm),
         (None, Some(m)) => m.clone(),
         (None, None) => game::GameData::mock(),
     };
-    ui.rebuild(&initial);
-    window.set_child(Some(ui.root()));
+    ui.borrow_mut().rebuild(&initial);
+    window.set_child(Some(ui.borrow().root()));
     window.present();
 
     // The renderer needs the mapped surface; the window was just presented,
@@ -261,7 +407,7 @@ fn activate(
         renderer
     };
 
-    let last_fp = game.as_ref().map(fingerprint).unwrap_or((0, 0, 0, 0));
+    let last_fp = game.as_ref().map(fingerprint);
     // Gamescope starts hidden — the tick raises the window on toggle.
     // The injected helper must stay mapped (snapshots need its surface),
     // so it starts visible; mock runs have no SHM and start visible too.
@@ -279,6 +425,12 @@ fn activate(
         last_fp,
         last_visible,
         last_panel_size: (win_w as u32, win_h as u32),
+        focus_saved: 0,
+        unmapped_game: None,
+        showgeom_logged: false,
+        unmap_retreat: false,
+        focus_conn: None,
+        overlay_xid: None,
         last_frame_render: std::time::Instant::now(),
         tail_until: std::time::Instant::now(),
         last_render_ack: 0,
@@ -286,6 +438,8 @@ fn activate(
         dirty: true,
         frame_no: 0,
         gamescope,
+        last_family: ira_input::ControllerFamily::Generic,
+        input_rx,
     });
 
     glib::timeout_add_local(Duration::from_millis(4), move || {
@@ -327,87 +481,370 @@ fn pump_events() {
     }
 }
 
+/// The overlay window's X id, cached on first query (the surface only
+/// exists once mapped; querying every tick would re-downcast for free
+/// but the cache keeps the hot path to one focus roundtrip).
+fn overlay_xid(s: &mut State) -> Option<u32> {
+    if s.overlay_xid.is_none() {
+        s.overlay_xid = gamescope::x11_id(&s.window);
+    }
+    s.overlay_xid
+}
+
+/// Hides the overlay from any input path (gamepad Back, mouse click):
+/// canvas flag plus the game SHM mirror the freeze watcher follows.
+fn apply_hide(s: &mut State) {
+    s.canvas.header_mut().visible.store(0, Ordering::SeqCst);
+    // Mirror into the game SHM: the freeze watcher (and a thawed layer)
+    // follows overlay_visible, not the canvas flag. Idempotent with the
+    // layer's own mirror.
+    if let Some(shm) = &mut s.game {
+        shm.header_mut().overlay_visible.store(0, Ordering::SeqCst);
+        eprintln!("ira-overlay-ui: hide mirrored into game SHM");
+    }
+}
+
 fn tick(state: &Rc<RefCell<Option<State>>>) {
-    // Phase 1 (borrowed): drain commands and inject input synchronously.
-    // The borrow ends before the event pump below: pumped handlers
-    // (button clicks) push actions through this same state borrow.
-    let (pointer_input, moved, fresh) = {
+    // The host must never die with the plane up: a dead host leaves a
+    // frozen overlay composited (opacity stuck nonzero) while the daemon
+    // keeps believing it is visible (pad dead to the game). A panicking
+    // tick is logged and skipped instead of aborting the process.
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tick_inner(state))).is_err() {
+        eprintln!("ira-overlay-ui: tick panicked; skipping this frame");
+    }
+}
+
+/// Marks a repaint from the unborrowed apply path (no state borrow may
+/// be alive there: the UI callbacks borrow this same state).
+fn mark_dirty(state: &Rc<RefCell<Option<State>>>) {
+    if let Some(s) = state.borrow_mut().as_mut() {
+        s.dirty = true;
+    }
+}
+
+fn drain_pointer_events(s: &mut State) {
+    // Drain first: the receiver borrow must end before Hide handling
+    // reborrows the state below.
+    let events: Vec<grab::PointerEvent> = s
+        .input_rx
+        .as_ref()
+        .map(|rx| {
+            let mut drained = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                drained.push(event);
+            }
+            drained
+        })
+        .unwrap_or_default();
+    for event in events {
+        match event {
+            grab::PointerEvent::Move(x, y) => {
+                s.ui.borrow_mut().pointer_move(x, y);
+            }
+            grab::PointerEvent::Press(x, y, button) => {
+                s.ui.borrow_mut().pointer_press(x, y, button);
+            }
+            grab::PointerEvent::Release(x, y, button) => {
+                if s.ui.borrow_mut().pointer_release(x, y, button) == UiEffect::Hide {
+                    apply_hide(s);
+                }
+            }
+        }
+    }
+}
+
+/// Rebuilds widgets when the game fingerprint changed and repaints the
+/// footer when the controller family changed. Returns fresh (non-motion
+/// work happened: render now and open the transition window).
+fn refresh_game_data(s: &mut State) -> bool {
+    let Some(shm) = &s.game else {
+        return false;
+    };
+    let mut fresh = false;
+    let fp = fingerprint(shm);
+    if Some(fp) != s.last_fp {
+        s.ui.borrow_mut().rebuild(&game::load(shm));
+        s.last_fp = Some(fp);
+        s.dirty = true;
+        fresh = true;
+    }
+    // Footer glyphs follow the physical pad's family, published by
+    // the daemon; repainted only on change.
+    let family = ira_input::ControllerFamily::from_u32(
+        shm.header().controller_family.load(Ordering::SeqCst),
+    );
+    if family != s.last_family {
+        s.last_family = family;
+        s.ui.borrow_mut().rebuild_footer(family);
+    }
+    fresh
+}
+
+fn gamescope_show(s: &mut State) {
+    s.window.present();
+    // Opacity back up after the map: gamescope keys the
+    // plane off nonzero opacity, ignoring map state.
+    if let Some(xid) = gamescope::x11_id(&s.window)
+        && let Err(e) = gamescope::set_window_opacity(xid, gamescope::OPAQUE)
+    {
+        eprintln!("ira-overlay-ui: opacity restore failed: {e}");
+    }
+    eprintln!(
+        "ira-overlay-ui: showing overlay (mapped={} {}x{})",
+        s.window.is_mapped(),
+        s.window.width(),
+        s.window.height()
+    );
+    s.ui.borrow_mut().log_showgeom();
+    // Unmap FIRST, while the game still holds focus:
+    // the server emits FocusOut on the unmapped
+    // window, which is what focus-pausing games
+    // actually pause on. Stealing first would move
+    // focus away and the unmap would land silently.
+    // Guards: never the root/pointer-root ids, never
+    // our own window; errors just skip.
+    let xid = overlay_xid(s);
+    if s.focus_conn.is_none() {
+        s.focus_conn = gamescope::FocusConn::connect();
+    }
+    if let Some(conn) = s.focus_conn.as_ref() {
+        let prev = conn.current_focus();
+        if let Some(game) = prev
+            && game > 1
+            && Some(game) != xid
+            && !s.unmap_retreat
+        {
+            let (name, pid) = conn.window_info(game);
+            eprintln!("ira-overlay-ui: unmap target {game} name={name:?} pid={pid:?}");
+            match conn.unmap_window(game) {
+                Ok(()) => {
+                    eprintln!("ira-overlay-ui: unmapped game window {game} (unfocused)");
+                    s.unmapped_game = Some(game);
+                }
+                Err(e) => {
+                    eprintln!("ira-overlay-ui: game unmap skipped: {e}")
+                }
+            }
+        }
+        s.focus_saved = prev.filter(|&p| Some(p) != xid).unwrap_or(0);
+    }
+    // Then steal for determinism: an unmapped window
+    // cannot hold focus, and the steal covers the
+    // (unlikely) already-unmapped case too.
+    match (xid, s.focus_conn.as_ref()) {
+        (Some(xid), Some(conn)) => match conn.steal_focus(xid) {
+            Ok(prev) => {
+                eprintln!("ira-overlay-ui: stole X focus {prev} -> {xid}");
+                // A self-steal saves nothing: focus was
+                // already ours, so there is nothing to
+                // restore and nothing to unmap.
+                s.focus_saved = if prev == xid { 0 } else { prev };
+                // Verify it landed: gamescope refocuses
+                // the game behind our back, and a steal
+                // that never sticks is a lie in the log.
+                match conn.current_focus() {
+                    Some(f) if f == xid => {
+                        eprintln!("ira-overlay-ui: focus verified on overlay")
+                    }
+                    other => eprintln!(
+                        "ira-overlay-ui: focus steal did NOT stick \
+                         (now {other:?}); holding per tick"
+                    ),
+                }
+            }
+            Err(e) => eprintln!("ira-overlay-ui: focus steal failed: {e}"),
+        },
+        _ => eprintln!("ira-overlay-ui: focus steal skipped (no xid/conn)"),
+    }
+}
+
+fn gamescope_hide(s: &mut State) {
+    // Opacity to zero first: this is what drops the
+    // gamescope plane (unmap alone leaves a frozen
+    // frame composited). Then unmap and hand focus back —
+    // but only when focus is still ours: the user may
+    // have switched away meanwhile, and yanking focus
+    // back to a stale game window fights them.
+    if let Some(xid) = gamescope::x11_id(&s.window)
+        && let Err(e) = gamescope::set_window_opacity(xid, 0)
+    {
+        eprintln!("ira-overlay-ui: opacity zero failed: {e}");
+    } else {
+        eprintln!("ira-overlay-ui: hiding overlay");
+    }
+    s.window.set_visible(false);
+    s.showgeom_logged = false;
+    // Bring the game window back first, but only one we
+    // actually unmapped: remapping anything else (or a
+    // window gamescope already remapped) is pointless.
+    if let Some(game) = s.unmapped_game.take()
+        && let Some(conn) = s.focus_conn.as_ref()
+    {
+        match conn.map_window(game) {
+            Ok(()) => {
+                eprintln!("ira-overlay-ui: remapped game window {game}")
+            }
+            Err(e) => {
+                eprintln!("ira-overlay-ui: game remap failed: {e}")
+            }
+        }
+    }
+    if s.focus_saved != 0 {
+        let ours = overlay_xid(s);
+        let current = s.focus_conn.as_ref().and_then(|conn| conn.current_focus());
+        match (ours, current, s.focus_conn.as_ref()) {
+            (Some(ours), Some(current), Some(conn)) if ours == current => {
+                match conn.restore_focus(s.focus_saved) {
+                    Ok(()) => eprintln!("ira-overlay-ui: restored X focus to {}", s.focus_saved),
+                    Err(e) => eprintln!("ira-overlay-ui: focus restore failed: {e}"),
+                }
+            }
+            _ => eprintln!(
+                "ira-overlay-ui: focus moved on (now {current:?}); \
+                 leaving it instead of restoring {}",
+                s.focus_saved
+            ),
+        }
+        s.focus_saved = 0;
+    }
+}
+
+fn gamescope_hold(s: &mut State) {
+    // Settled geometry, once per showing: the show edge
+    // fires pre-layout (zeros), so wait for a real size.
+    if !s.showgeom_logged && s.window.width() > 0 {
+        s.showgeom_logged = true;
+        s.ui.borrow().log_showgeom();
+    }
+    // Hold focus every tick while visible: gamescope
+    // refocuses the game continuously, and a 120-frame
+    // cadence loses that race (the game never reads as
+    // unfocused). One query per tick on the kept
+    // connection; a steal only when it moved.
+    let xid = overlay_xid(s);
+    let current = s.focus_conn.as_ref().and_then(|conn| conn.current_focus());
+    if let (Some(xid), Some(conn)) = (xid, s.focus_conn.as_ref())
+        && current.is_some_and(|f| f != xid)
+    {
+        match conn.steal_focus(xid) {
+            Ok(prev) => {
+                // Throttled: at full war this fires every
+                // tick and buries the log.
+                static LAST_RETAKE_MS: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                if std::env::var_os("IRA_OVERLAY_DEBUG").is_some() {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u32)
+                        .unwrap_or(0);
+                    if now.wrapping_sub(LAST_RETAKE_MS.load(std::sync::atomic::Ordering::Relaxed))
+                        > 1000
+                    {
+                        LAST_RETAKE_MS.store(now, std::sync::atomic::Ordering::Relaxed);
+                        eprintln!("ira-overlay-ui: focus retaken from {prev}, stole back");
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("ira-overlay-ui: focus re-assert failed: {e}")
+            }
+        }
+    }
+    // Retreat check: if a window we unmapped is viewable
+    // again, something remapped it behind our back — stop
+    // unmapping instead of fighting it forever. Only the
+    // actually-unmapped window counts (never focus_saved,
+    // which may hold our own id after a self-steal).
+    if s.frame_no.is_multiple_of(30)
+        && !s.unmap_retreat
+        && let Some(game) = s.unmapped_game
+        && let Some(conn) = s.focus_conn.as_ref()
+        && conn.is_viewable(game).is_some_and(|v| v)
+    {
+        s.unmapped_game = None;
+        s.unmap_retreat = true;
+        eprintln!(
+            "ira-overlay-ui: game window remapped externally; \
+             unmap retired for this session (enable Pause game \
+             on overlay in the game settings for a guaranteed pause)"
+        );
+    }
+}
+
+fn handle_gamescope_visibility(s: &mut State) {
+    // Gamescope shows the window itself: follow the toggle the layer
+    // mirrors into the game SHM. Raising on show gives it input focus.
+    let Some(shm) = &s.game else {
+        return;
+    };
+    if !s.gamescope {
+        return;
+    }
+    let visible = shm.header().overlay_visible.load(Ordering::SeqCst) != 0;
+    if visible != s.last_visible {
+        s.window.set_visible(visible);
+        if visible {
+            gamescope_show(s);
+        } else {
+            gamescope_hide(s);
+        }
+        s.last_visible = visible;
+    } else if visible {
+        gamescope_hold(s);
+    }
+    // The pointer belongs to the overlay window itself now (real
+    // system cursor on real widgets): nothing to forward here.
+}
+
+fn drain_canvas(s: &mut State) -> (Rc<RefCell<OverlayUi>>, Vec<CanvasCommand>) {
+    let ui = s.ui.clone();
+    let (next, cmds) = s.canvas.drain_commands(s.cmd_read);
+    s.cmd_read = next;
+    // The layer publishes its swapchain extent; size the window from
+    // it so the panel grows and shrinks with the game. Unknown (0)
+    // keeps the startup default.
+    let sw = s.canvas.header().screen_w.load(Ordering::SeqCst);
+    let sh = s.canvas.header().screen_h.load(Ordering::SeqCst);
+    if sw > 0 && sh > 0 {
+        let want = fit_panel_size(sw, sh);
+        if want != s.last_panel_size {
+            s.last_panel_size = want;
+            s.window.set_default_size(want.0 as i32, want.1 as i32);
+        }
+    }
+    (ui, cmds)
+}
+
+fn tick_inner(state: &Rc<RefCell<Option<State>>>) {
+    // Phase 0 (borrowed): drain desktop pointer reports into the UI.
+    // Button releases that close mirror like a gamepad Back.
+    {
+        let mut guard = state.borrow_mut();
+        let Some(s) = guard.as_mut() else { return };
+        drain_pointer_events(s);
+    }
+    // Phase 1 (borrowed): data refresh, visibility handling, command
+    // drain. The borrow ends before commands are applied below: applying
+    // runs UI callbacks (screenshot/record pushes, click closes) that
+    // borrow this same state, and a nested borrow would abort the host.
+    let (ui, cmds, fresh) = {
         let mut guard = state.borrow_mut();
         let Some(s) = guard.as_mut() else { return };
 
         // Fresh (non-motion) work below marks `fresh`: it renders now and
         // opens the transition window for continuation frames.
-        let mut fresh = false;
-        if let Some(shm) = &s.game {
-            let fp = fingerprint(shm);
-            if fp != s.last_fp {
-                s.ui.rebuild(&game::load(shm));
-                s.last_fp = fp;
-                s.dirty = true;
-                fresh = true;
-            }
-            // Gamescope shows the window itself: follow the toggle the layer
-            // mirrors into the game SHM. Raising on show gives it input focus.
-            if s.gamescope {
-                let visible = shm.header().overlay_visible.load(Ordering::SeqCst) != 0;
-                if visible != s.last_visible {
-                    s.window.set_visible(visible);
-                    if visible {
-                        s.window.present();
-                    }
-                    s.last_visible = visible;
-                }
-            }
-        }
-
-        let (next, cmds) = s.canvas.drain_commands(s.cmd_read);
-        s.cmd_read = next;
-        // The layer publishes its swapchain extent; size the window from
-        // it so the panel grows and shrinks with the game. Unknown (0)
-        // keeps the startup default.
-        let sw = s.canvas.header().screen_w.load(Ordering::SeqCst);
-        let sh = s.canvas.header().screen_h.load(Ordering::SeqCst);
-        if sw > 0 && sh > 0 {
-            let want = fit_panel_size(sw, sh);
-            if want != s.last_panel_size {
-                s.last_panel_size = want;
-                s.window.set_default_size(want.0 as i32, want.1 as i32);
-            }
-        }
+        let fresh = refresh_game_data(s);
+        handle_gamescope_visibility(s);
+        let (ui, cmds) = drain_canvas(s);
         // Pointer injects straight into the compositor and dispatches
         // below in this same tick. Non-motion work renders immediately;
         // motion is noted for the repaint rule below.
-        let mut pointer_input = false;
-        let mut moved = false;
-        for cmd in cmds {
-            use ira_overlay_ipc::{CMD_MOUSE_DOWN, CMD_MOUSE_MOVE, CMD_MOUSE_UP};
-            match cmd.kind {
-                CMD_MOUSE_MOVE => {
-                    pointer_input = true;
-                    moved = true;
-                }
-                CMD_MOUSE_DOWN | CMD_MOUSE_UP => {
-                    pointer_input = true;
-                    s.dirty = true;
-                    fresh = true;
-                }
-                _ => {
-                    s.dirty = true;
-                    fresh = true;
-                }
-            }
-            match s.ui.apply(cmd) {
-                UiEffect::None => {}
-                UiEffect::Show => {
-                    s.canvas.header_mut().visible.store(1, Ordering::SeqCst);
-                }
-                UiEffect::Hide => {
-                    s.canvas.header_mut().visible.store(0, Ordering::SeqCst);
-                }
-            }
-        }
-        (pointer_input, moved, fresh)
+        (ui, cmds, fresh)
     };
+
+    // Phase 1b (unborrowed): classify and apply each command. No state
+    // borrow is alive here, so the UI callbacks below borrow freely.
+    let (fresh, pointer_input, moved) = apply_commands(state, &ui, cmds, fresh);
 
     // Phase 2 (unborrowed): dispatch the injected events synchronously so
     // the render below snapshots post-input state in the same tick.
@@ -416,6 +853,55 @@ fn tick(state: &Rc<RefCell<Option<State>>>) {
     }
 
     // Phase 3 (borrowed): render decision + render.
+    maybe_render(state, fresh, moved);
+}
+
+/// Applies drained layer commands to the widgets. Returns the updated
+/// (fresh, pointer_input, moved) flags for the render rule below.
+fn apply_commands(
+    state: &Rc<RefCell<Option<State>>>,
+    ui: &Rc<RefCell<OverlayUi>>,
+    cmds: Vec<CanvasCommand>,
+    mut fresh: bool,
+) -> (bool, bool, bool) {
+    use ira_overlay_ipc::{CMD_MOUSE_DOWN, CMD_MOUSE_MOVE, CMD_MOUSE_UP};
+    let mut pointer_input = false;
+    let mut moved = false;
+    for cmd in cmds {
+        match cmd.kind {
+            CMD_MOUSE_MOVE => {
+                pointer_input = true;
+                moved = true;
+            }
+            CMD_MOUSE_DOWN | CMD_MOUSE_UP => {
+                pointer_input = true;
+                fresh = true;
+                mark_dirty(state);
+            }
+            _ => {
+                fresh = true;
+                mark_dirty(state);
+            }
+        }
+        let effect = ui.borrow_mut().apply(cmd);
+        match effect {
+            UiEffect::None => {}
+            UiEffect::Show => {
+                if let Some(s) = state.borrow_mut().as_mut() {
+                    s.canvas.header_mut().visible.store(1, Ordering::SeqCst);
+                }
+            }
+            UiEffect::Hide => {
+                if let Some(s) = state.borrow_mut().as_mut() {
+                    apply_hide(s);
+                }
+            }
+        }
+    }
+    (fresh, pointer_input, moved)
+}
+
+fn maybe_render(state: &Rc<RefCell<Option<State>>>, fresh: bool, moved: bool) {
     let mut guard = state.borrow_mut();
     let Some(s) = guard.as_mut() else { return };
 
@@ -455,32 +941,13 @@ fn tick(state: &Rc<RefCell<Option<State>>>) {
     }
 
     if !s.gamescope && (s.dirty || s.frame_no == 0) {
-        if let Some(renderer) = &s.renderer {
-            // Snapshot the window itself at its allocation: a fixed-size
-            // snapshot of the smaller root box would stretch pixels away
-            // from layout (and input) coordinates.
-            match renderer.render(s.window.upcast_ref(), s.frame_no) {
-                Some((w, h, px)) => {
-                    if std::env::var_os("IRA_OVERLAY_DEBUG").is_some() {
-                        eprintln!("ira-overlay-ui: frame {} {w}x{h}", s.frame_no);
-                    }
-                    if let Err(e) = s.canvas.write_frame(w, h, &px) {
-                        eprintln!("ira-overlay-ui: write_frame failed: {e}");
-                    }
-                }
-                None => {
-                    if std::env::var_os("IRA_OVERLAY_DEBUG").is_some() {
-                        eprintln!("ira-overlay-ui: frame {} no pixels", s.frame_no);
-                    }
-                }
-            }
-        }
+        snapshot_frame(s);
         s.dirty = false;
     }
     // Post-map layout truth (rebuild runs pre-layout): logs button
     // bounds once real values exist. Change-gated inside.
     if s.frame_no == 2 {
-        s.ui.log_layout();
+        s.ui.borrow_mut().log_layout();
         if std::env::var_os("IRA_OVERLAY_DEBUG").is_some() {
             use gtk4::prelude::NativeExt as _;
             let (nx, ny) = s.window.surface_transform();
@@ -494,8 +961,32 @@ fn tick(state: &Rc<RefCell<Option<State>>>) {
     // Live system cursor (~2Hz): theme, size, hotspot and game customs
     // come from the server instead of the static file. Serial-gated, so
     // a static cursor costs one query per interval and nothing more.
-    if s.frame_no % 125 == 0 {
+    if s.frame_no.is_multiple_of(125) {
         poll_live_cursor(s);
     }
     s.frame_no += 1;
+}
+
+fn snapshot_frame(s: &mut State) {
+    let Some(renderer) = &s.renderer else {
+        return;
+    };
+    // Snapshot the window itself at its allocation: a fixed-size
+    // snapshot of the smaller root box would stretch pixels away
+    // from layout (and input) coordinates.
+    match renderer.render(s.window.upcast_ref(), s.frame_no) {
+        Some((w, h, px)) => {
+            if std::env::var_os("IRA_OVERLAY_DEBUG").is_some() {
+                eprintln!("ira-overlay-ui: frame {} {w}x{h}", s.frame_no);
+            }
+            if let Err(e) = s.canvas.write_frame(w, h, &px) {
+                eprintln!("ira-overlay-ui: write_frame failed: {e}");
+            }
+        }
+        None => {
+            if std::env::var_os("IRA_OVERLAY_DEBUG").is_some() {
+                eprintln!("ira-overlay-ui: frame {} no pixels", s.frame_no);
+            }
+        }
+    }
 }

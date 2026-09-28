@@ -38,7 +38,11 @@ pub fn parse_xcursor(data: &[u8]) -> Vec<CursorImage> {
     let ntoc = u32le(data, 12).unwrap_or(0) as usize;
     for i in 0..ntoc {
         let base = 16 + i * 12;
-        let (typ, subtype, pos) = match (u32le(data, base), u32le(data, base + 4), u32le(data, base + 8)) {
+        let (typ, subtype, pos) = match (
+            u32le(data, base),
+            u32le(data, base + 4),
+            u32le(data, base + 8),
+        ) {
             (Some(t), Some(s), Some(p)) => (t, s, p as usize),
             _ => continue,
         };
@@ -64,12 +68,7 @@ pub fn parse_xcursor(data: &[u8]) -> Vec<CursorImage> {
                 Some(v) => v,
                 None => break,
             };
-            let a = (argb >> 24) & 0xff;
-            // Straight ARGB → premultiplied RGBA.
-            pixels.push((((argb >> 16) & 0xff) * a / 255) as u8);
-            pixels.push((((argb >> 8) & 0xff) * a / 255) as u8);
-            pixels.push(((argb & 0xff) * a / 255) as u8);
-            pixels.push(a as u8);
+            pixels.extend_from_slice(&premult(argb));
         }
         if pixels.len() == count * 4 {
             out.push(CursorImage {
@@ -83,6 +82,17 @@ pub fn parse_xcursor(data: &[u8]) -> Vec<CursorImage> {
         let _ = subtype;
     }
     out
+}
+
+/// Straight ARGB → premultiplied RGBA.
+fn premult(argb: u32) -> [u8; 4] {
+    let a = (argb >> 24) & 0xff;
+    [
+        (((argb >> 16) & 0xff) * a / 255) as u8,
+        (((argb >> 8) & 0xff) * a / 255) as u8,
+        (((argb & 0xff) * a) / 255) as u8,
+        a as u8,
+    ]
 }
 
 /// Picks the smallest image at least `size` px, else the largest available.
@@ -130,7 +140,9 @@ fn inherits(theme: &str) -> Vec<String> {
         .iter()
         .map(|d| d.join(theme).join("index.theme"))
         .find(|p| p.is_file());
-    let text = path.and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let text = path
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default();
     let mut out = Vec::new();
     let mut in_icon_theme = false;
     for line in text.lines() {
@@ -138,7 +150,12 @@ fn inherits(theme: &str) -> Vec<String> {
         if line.starts_with('[') {
             in_icon_theme = line == "[Icon Theme]";
         } else if in_icon_theme && let Some(list) = line.strip_prefix("Inherits=") {
-            out.extend(list.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string));
+            out.extend(
+                list.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+            );
         }
     }
     out
@@ -252,11 +269,7 @@ fn parse_live_reply(reply: *const c_void) -> Option<(CursorImage, u32)> {
     let mut pixels = Vec::with_capacity(bytes);
     for p in 0..count {
         let argb = u32::from_le_bytes(px[p * 4..p * 4 + 4].try_into().ok()?);
-        let a = (argb >> 24) & 0xff;
-        pixels.push((((argb >> 16) & 0xff) * a / 255) as u8);
-        pixels.push((((argb >> 8) & 0xff) * a / 255) as u8);
-        pixels.push(((argb & 0xff) * a / 255) as u8);
-        pixels.push(a as u8);
+        pixels.extend_from_slice(&premult(argb));
     }
     Some((
         CursorImage {
@@ -278,8 +291,16 @@ pub fn load_live_cursor() -> Option<(CursorImage, u32)> {
         sym!(CELL_CONNECT, c"xcb_connect", XcbConnectFn),
         sym!(CELL_HAS_ERROR, c"xcb_connection_has_error", XcbHasErrorFn),
         sym!(CELL_DISCONNECT, c"xcb_disconnect", XcbDisconnectFn),
-        sym!(CELL_IMAGE, c"xcb_xfixes_get_cursor_image", XcbGetCursorImageFn),
-        sym!(CELL_REPLY, c"xcb_xfixes_get_cursor_image_reply", XcbGetCursorImageReplyFn),
+        sym!(
+            CELL_IMAGE,
+            c"xcb_xfixes_get_cursor_image",
+            XcbGetCursorImageFn
+        ),
+        sym!(
+            CELL_REPLY,
+            c"xcb_xfixes_get_cursor_image_reply",
+            XcbGetCursorImageReplyFn
+        ),
     ) else {
         return None;
     };
@@ -375,7 +396,7 @@ mod tests {
         assert_eq!(pick_image(&images, 16).unwrap().width, 16);
     }
 
-        #[test]
+    #[test]
     fn test_parse_accepts_fedora_image_tag() {
         // Fedora Adwaita files tag images 0xFFFD0002 with identical layout.
         let mut data = blob(&[(24, 24, 3, 1, vec![0xFFFFFFFF; 576])]);
@@ -383,7 +404,10 @@ mod tests {
         data[tag_pos..tag_pos + 4].copy_from_slice(&0xFFFD0002u32.to_le_bytes());
         let images = parse_xcursor(&data);
         assert_eq!(images.len(), 1);
-        assert_eq!((images[0].width, images[0].xhot, images[0].yhot), (24, 3, 1));
+        assert_eq!(
+            (images[0].width, images[0].xhot, images[0].yhot),
+            (24, 3, 1)
+        );
     }
 
     #[test]
@@ -395,12 +419,13 @@ mod tests {
             return;
         }
         let img = load_cursor("left_ptr", 24).expect("Adwaita left_ptr must parse");
-        assert!(img.width >= 16 && img.pixels.len() == img.width as usize * img.height as usize * 4);
+        assert!(
+            img.width >= 16 && img.pixels.len() == img.width as usize * img.height as usize * 4
+        );
     }
 
     #[test]
     fn test_cursor_size_bounds() {
-
         unsafe { std::env::set_var("XCURSOR_SIZE", "7") };
         assert_eq!(cursor_size(), 24);
         unsafe { std::env::set_var("XCURSOR_SIZE", "48") };

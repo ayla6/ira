@@ -1875,6 +1875,7 @@ dependencies = [
  "ira-parser",
  "ira-platforms",
  "ira-watcher",
+ "ira-widgets",
  "libadwaita",
  "libc",
  "opticaldiscs",
@@ -1947,6 +1948,7 @@ version = "0.1.0"
 dependencies = [
  "evdev",
  "ira-input-ipc",
+ "ira-overlay-ipc",
  "libc",
  "serde",
  "serde_json",
@@ -2021,12 +2023,17 @@ version = "0.1.0"
 dependencies = [
  "gdk4",
  "gdk4-x11",
+ "gettext-rs",
  "gio",
  "glib",
  "graphene-rs",
  "gsk4",
  "gtk4",
+ "ira-images",
+ "ira-input",
  "ira-overlay-ipc",
+ "ira-parser",
+ "ira-widgets",
  "libadwaita",
  "libc",
  "wayland-protocols",
@@ -2100,6 +2107,14 @@ dependencies = [
  "ira-models",
  "ira-parser",
  "notify",
+]
+
+[[package]]
+name = "ira-widgets"
+version = "0.1.0"
+dependencies = [
+ "gtk4",
+ "ira-input",
 ]
 
 [[package]]

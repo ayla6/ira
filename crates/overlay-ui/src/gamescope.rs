@@ -14,6 +14,69 @@ pub fn is_gamescope_mode() -> bool {
     std::env::var_os("IRA_OVERLAY_GAMESCOPE").is_some()
 }
 
+/// Picks the gamescope Xwayland display from connectable candidates:
+/// newest first (the just-launched session wins), ties broken by lowest
+/// number. Pure for testability; IO lives in `discover_xwayland_display`.
+fn pick_display(candidates: &[(u32, std::time::SystemTime)]) -> Option<u32> {
+    let mut best: Option<(u32, std::time::SystemTime)> = None;
+    for (num, time) in candidates {
+        let better = match best {
+            None => true,
+            Some((best_num, best_time)) => {
+                *time > best_time || (*time == best_time && *num < best_num)
+            }
+        };
+        if better {
+            best = Some((*num, *time));
+        }
+    }
+    best.map(|(num, _)| num)
+}
+
+/// Finds the gamescope Xwayland display for this host to live on. Nested
+/// gamescope serves its own X server (usually `:2`); inheriting the
+/// desktop `:0` leaves the overlay composited nowhere, buried under the
+/// fullscreen session window. Desktop `:0`/`:1` are never candidates (in
+/// an embedded session only `:0` exists and is kept). Returns `None` to
+/// keep the inherited `DISPLAY`.
+pub fn discover_xwayland_display() -> Option<u32> {
+    // Override for discovery (e.g. `:3`).
+    if let Ok(display) = std::env::var("IRA_OVERLAY_XWAYLAND_DISPLAY") {
+        return display
+            .trim_start_matches(':')
+            .parse()
+            .ok()
+            .filter(|num| *num > 1);
+    }
+    let mut candidates = Vec::new();
+    let entries = std::fs::read_dir("/tmp/.X11-unix").ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(num) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix('X'))
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        // Desktop servers live on :0/:1; embedded sessions have nothing
+        // else and keep the inherited display via the None below.
+        if num < 2 {
+            continue;
+        }
+        let path = format!("/tmp/.X11-unix/X{num}");
+        if std::os::unix::net::UnixStream::connect(&path).is_err() {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        candidates.push((num, modified));
+    }
+    pick_display(&candidates)
+}
+
 /// Pushes the injected-mode helper window out of the user's way: lowered in
 /// stacking order everywhere, and out of the taskbar/pager on X11. (GTK4
 /// dropped the old skip-taskbar/keep-below window hints.)
@@ -43,10 +106,27 @@ pub fn setup_external_overlay(window: &gtk4::Window) {
     } else {
         eprintln!("ira-overlay-ui: external overlay plane ready (xid={xid})");
     }
+    // Start fully hidden: gamescope paints the external plane whenever our
+    // opacity is nonzero and never checks map state on the paint path, so a
+    // merely unmapped window leaves a frozen frame on screen forever. The
+    // tick restores opacity on show. (Upstream notes opacity=0 as the hide
+    // signal for its own overlay planes.)
+    if let Err(e) = set_window_opacity(xid, 0) {
+        eprintln!("ira-overlay-ui: failed to zero initial opacity: {e}");
+    }
 }
 
-fn x11_id(window: &gtk4::Window) -> Option<u32> {
-    use glib::object::Cast as _;
+/// Opaque `_NET_WM_WINDOW_OPACITY`: gamescope's paint and focus paths key
+/// the external plane off nonzero opacity, ignoring unmap.
+pub const OPAQUE: u32 = 0xFFFF_FFFF;
+
+/// Signals (un)hidden to gamescope through the sanctioned channel: nonzero
+/// opacity paints the plane, zero drops it — independent of map state.
+pub(crate) fn set_window_opacity(xid: u32, opacity: u32) -> Result<(), String> {
+    set_cardinal(xid, b"_NET_WM_WINDOW_OPACITY", opacity)
+}
+
+pub(crate) fn x11_id(window: &gtk4::Window) -> Option<u32> {
     let surface = window.surface()?;
     let x11 = surface.downcast_ref::<gdkx11::X11Surface>()?;
     Some(x11.xid() as u32)
@@ -61,29 +141,14 @@ fn set_net_wm_state(xid: u32) -> Result<(), String> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
     let (conn, _) = x11rb::connect(None).map_err(|e| e.to_string())?;
-    let intern = |name: &[u8]| {
-        conn.intern_atom(false, name)
-            .map_err(|e| e.to_string())?
-            .reply()
-            .map_err(|e| e.to_string())
-            .map(|r| r.atom)
-    };
-    let state = intern(b"_NET_WM_STATE")?;
-    let skip_taskbar = intern(b"_NET_WM_STATE_SKIP_TASKBAR")?;
-    let skip_pager = intern(b"_NET_WM_STATE_SKIP_PAGER")?;
+    let state = intern(&conn, b"_NET_WM_STATE")?;
+    let skip_taskbar = intern(&conn, b"_NET_WM_STATE_SKIP_TASKBAR")?;
+    let skip_pager = intern(&conn, b"_NET_WM_STATE_SKIP_PAGER")?;
     let data = [skip_taskbar.to_ne_bytes(), skip_pager.to_ne_bytes()].concat();
-    conn.change_property(
-        PropMode::APPEND,
-        xid,
-        state,
-        AtomEnum::ATOM,
-        32,
-        2,
-        &data,
-    )
-    .map_err(|e| e.to_string())?
-    .check()
-    .map_err(|e| e.to_string())?;
+    conn.change_property(PropMode::APPEND, xid, state, AtomEnum::ATOM, 32, 2, &data)
+        .map_err(|e| e.to_string())?
+        .check()
+        .map_err(|e| e.to_string())?;
     conn.flush().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -92,12 +157,7 @@ fn set_cardinal(xid: u32, name: &[u8], value: u32) -> Result<(), String> {
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
     let (conn, _) = x11rb::connect(None).map_err(|e| e.to_string())?;
-    let atom = conn
-        .intern_atom(false, name)
-        .map_err(|e| e.to_string())?
-        .reply()
-        .map_err(|e| e.to_string())?
-        .atom;
+    let atom = intern(&conn, name)?;
     conn.change_property(
         PropMode::REPLACE,
         xid,
@@ -112,6 +172,150 @@ fn set_cardinal(xid: u32, name: &[u8], value: u32) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
     conn.flush().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn intern(conn: &x11rb::rust_connection::RustConnection, name: &[u8]) -> Result<u32, String> {
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    conn.intern_atom(false, name)
+        .map_err(|e| e.to_string())?
+        .reply()
+        .map_err(|e| e.to_string())
+        .map(|r| r.atom)
+}
+
+/// Persistent X connection for focus ownership. Gamescope never focuses
+/// external overlay planes itself (input/keyboard focus goes only to its
+/// internal overlay) and actively refocuses the game, so a visible overlay
+/// must hold focus itself: one connection kept for the session, one
+/// query per tick, one steal whenever the game retook it. Per-call
+/// connects were too slow to win that race and spammed connections.
+pub(crate) struct FocusConn {
+    conn: x11rb::rust_connection::RustConnection,
+}
+
+impl FocusConn {
+    /// Connects to the gamescope Xwayland server (`None` when unreachable;
+    /// callers treat that as "cannot own focus" and carry on).
+    pub(crate) fn connect() -> Option<Self> {
+        let (conn, _) = x11rb::connect(None).ok()?;
+        Some(Self { conn })
+    }
+
+    /// Current X input focus window, if queryable.
+    pub(crate) fn current_focus(&self) -> Option<u32> {
+        use x11rb::protocol::xproto::ConnectionExt as _;
+        self.conn
+            .get_input_focus()
+            .ok()?
+            .reply()
+            .ok()
+            .map(|reply| reply.focus)
+    }
+
+    /// Moves X input focus to the overlay window, returning the previously
+    /// focused window. Without this the game keeps focus under a visible
+    /// overlay and focus-pausing games never pause. Best-effort: any
+    /// failure just skips the steal.
+    pub(crate) fn steal_focus(&self, xid: u32) -> Result<u32, String> {
+        use x11rb::protocol::xproto::{ConnectionExt as _, InputFocus, Time};
+        let previous = self
+            .conn
+            .get_input_focus()
+            .map_err(|e| e.to_string())?
+            .reply()
+            .map_err(|e| e.to_string())?
+            .focus;
+        self.conn
+            .set_input_focus(InputFocus::PARENT, xid, Time::CURRENT_TIME)
+            .map_err(|e| e.to_string())?
+            .check()
+            .map_err(|e| e.to_string())?;
+        self.flush()?;
+        Ok(previous)
+    }
+
+    /// Restores X input focus saved by [`FocusConn::steal_focus`].
+    /// Best-effort like above.
+    pub(crate) fn restore_focus(&self, xid: u32) -> Result<(), String> {
+        use x11rb::protocol::xproto::{ConnectionExt as _, InputFocus, Time};
+        self.conn
+            .set_input_focus(InputFocus::PARENT, xid, Time::CURRENT_TIME)
+            .map_err(|e| e.to_string())?
+            .check()
+            .map_err(|e| e.to_string())?;
+        self.flush()?;
+        Ok(())
+    }
+
+    /// Unmaps a window (makes it unfocusable and invisible). Used on the
+    /// game window while the overlay is up: racing gamescope for X focus
+    /// never sticks, but an unmapped window cannot hold focus at all, so
+    /// focus-pausing games pause deterministically. The game process is
+    /// untouched (no signals); remap brings it back.
+    pub(crate) fn unmap_window(&self, xid: u32) -> Result<(), String> {
+        use x11rb::protocol::xproto::ConnectionExt as _;
+        self.conn
+            .unmap_window(xid)
+            .map_err(|e| e.to_string())?
+            .check()
+            .map_err(|e| e.to_string())?;
+        self.flush()?;
+        Ok(())
+    }
+
+    /// Remaps a window unmapped by [`FocusConn::unmap_window`].
+    pub(crate) fn map_window(&self, xid: u32) -> Result<(), String> {
+        use x11rb::protocol::xproto::ConnectionExt as _;
+        self.conn
+            .map_window(xid)
+            .map_err(|e| e.to_string())?
+            .check()
+            .map_err(|e| e.to_string())?;
+        self.flush()?;
+        Ok(())
+    }
+
+    fn flush(&self) -> Result<(), String> {
+        use x11rb::connection::Connection;
+        self.conn.flush().map_err(|e| e.to_string())
+    }
+
+    /// Whether the window is currently viewable (mapped). Lets the host
+    /// retreat if something (gamescope) remaps the game behind its back
+    /// instead of fighting it forever.
+    pub(crate) fn is_viewable(&self, xid: u32) -> Option<bool> {
+        use x11rb::protocol::xproto::{ConnectionExt as _, MapState};
+        let attrs = self.conn.get_window_attributes(xid).ok()?.reply().ok()?;
+        Some(attrs.map_state == MapState::VIEWABLE)
+    }
+
+    /// Identifies a window for the log: (window-manager name, owning pid).
+    /// Proves an unmap/steal target really is the game and not some helper
+    /// window that happened to hold focus.
+    pub(crate) fn window_info(&self, xid: u32) -> (Option<String>, Option<u32>) {
+        use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
+        let atom = |name: &[u8]| intern(&self.conn, name).ok();
+        let utf8 = atom(b"UTF8_STRING").unwrap_or(AtomEnum::STRING.into());
+        let name = atom(b"_NET_WM_NAME")
+            .and_then(|a| {
+                self.conn
+                    .get_property(false, xid, a, utf8, 0, 256)
+                    .ok()?
+                    .reply()
+                    .ok()
+            })
+            .and_then(|reply| String::from_utf8(reply.value8()?.collect()).ok());
+        let pid = atom(b"_NET_WM_PID").and_then(|a| {
+            self.conn
+                .get_property(false, xid, a, AtomEnum::CARDINAL, 0, 1)
+                .ok()?
+                .reply()
+                .ok()?
+                .value32()
+                .and_then(|mut values| values.next())
+        });
+        (name, pid)
+    }
 }
 
 #[cfg(test)]
@@ -129,5 +333,18 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("IRA_OVERLAY_GAMESCOPE", v) },
             None => unsafe { std::env::remove_var("IRA_OVERLAY_GAMESCOPE") },
         }
+    }
+
+    #[test]
+    fn test_pick_display_prefers_newest_then_lowest() {
+        use std::time::{Duration, UNIX_EPOCH};
+        // Arrange
+        let t0 = UNIX_EPOCH;
+        let t1 = UNIX_EPOCH + Duration::from_secs(10);
+        // Act + Assert: empty picks nothing, newest wins, ties go low.
+        assert_eq!(pick_display(&[]), None);
+        assert_eq!(pick_display(&[(2, t0)]), Some(2));
+        assert_eq!(pick_display(&[(2, t0), (3, t1)]), Some(3));
+        assert_eq!(pick_display(&[(3, t1), (2, t1)]), Some(2));
     }
 }

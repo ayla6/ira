@@ -40,6 +40,60 @@ pub enum ControllerFamily {
     Steam,
 }
 
+impl ControllerFamily {
+    /// Stable wire value for the game SHM family field.
+    pub fn as_u32(self) -> u32 {
+        match self {
+            ControllerFamily::Generic => 0,
+            ControllerFamily::Xbox => 1,
+            ControllerFamily::PlayStation => 2,
+            ControllerFamily::Nintendo => 3,
+            ControllerFamily::EightBitDo => 4,
+            ControllerFamily::Steam => 5,
+        }
+    }
+
+    /// Unknown values read back as Generic (never a wrong family's glyphs).
+    pub fn from_u32(value: u32) -> Self {
+        match value {
+            1 => ControllerFamily::Xbox,
+            2 => ControllerFamily::PlayStation,
+            3 => ControllerFamily::Nintendo,
+            4 => ControllerFamily::EightBitDo,
+            5 => ControllerFamily::Steam,
+            _ => ControllerFamily::Generic,
+        }
+    }
+}
+
+/// Family from vendor id + device name, shared by [`DeviceInfo::family`]
+/// and sessions that only carry the connect-time identity.
+pub fn family_for(vendor: u16, name: &str) -> ControllerFamily {
+    let name = name.to_ascii_lowercase();
+    if vendor == VENDOR_8BITDO || name.contains("8bitdo") {
+        ControllerFamily::EightBitDo
+    } else if vendor == 0x045e || name.contains("xbox") || name.contains("x-input") {
+        ControllerFamily::Xbox
+    } else if name.contains("playstation")
+        || name.contains("dualshock")
+        || name.contains("dualsense")
+        || name.contains("sony")
+        || vendor == 0x054c
+    {
+        ControllerFamily::PlayStation
+    } else if vendor == 0x057e
+        || name.contains("nintendo")
+        || name.contains("switch")
+        || name.contains("joy-con")
+    {
+        ControllerFamily::Nintendo
+    } else if vendor == 0x28de || name.contains("steam controller") {
+        ControllerFamily::Steam
+    } else {
+        ControllerFamily::Generic
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportedInputMode {
     XInput,
@@ -63,29 +117,7 @@ impl ReportedInputMode {
 
 impl DeviceInfo {
     pub fn family(&self) -> ControllerFamily {
-        let name = self.name.to_ascii_lowercase();
-        if self.vendor == VENDOR_8BITDO || name.contains("8bitdo") {
-            ControllerFamily::EightBitDo
-        } else if self.vendor == 0x045e || name.contains("xbox") || name.contains("x-input") {
-            ControllerFamily::Xbox
-        } else if name.contains("playstation")
-            || name.contains("dualshock")
-            || name.contains("dualsense")
-            || name.contains("sony")
-            || self.vendor == 0x054c
-        {
-            ControllerFamily::PlayStation
-        } else if self.vendor == 0x057e
-            || name.contains("nintendo")
-            || name.contains("switch")
-            || name.contains("joy-con")
-        {
-            ControllerFamily::Nintendo
-        } else if self.vendor == 0x28de || name.contains("steam controller") {
-            ControllerFamily::Steam
-        } else {
-            ControllerFamily::Generic
-        }
+        family_for(self.vendor, &self.name)
     }
 
     /// Whether this pad should use the Nintendo face-button layout before
@@ -383,16 +415,32 @@ impl PhysicalGamepad {
         if self.device.is_some() {
             return Ok(false);
         }
-        let Some(path) = discover_gamepads()
+        let candidates: Vec<PathBuf> = discover_gamepads()
             .into_iter()
-            .find(|device| same_device(&self.info, device))
+            .filter(|device| same_device(&self.info, device))
             .map(|device| device.path)
+            .collect();
+        // The node that just died sorts last: a re-enumerated pad usually
+        // appears on a fresh node while the stale one lingers, and
+        // reopening the dead path replays the same error. Same path still
+        // wins when nothing else matches (nodes come back at stable paths
+        // after a dongle reset).
+        let Some(path) = Self::prefer_fresh(candidates, &self.info.path)
+            .into_iter()
+            .next()
         else {
             return Ok(false);
         };
         let replacement = Self::open(path, false)?;
         *self = replacement;
         Ok(true)
+    }
+
+    /// Sorts same-identity candidate paths so a fresh node beats the one
+    /// that just died. Stable otherwise.
+    fn prefer_fresh(mut paths: Vec<PathBuf>, dead: &Path) -> Vec<PathBuf> {
+        paths.sort_by_key(|path| path == dead);
+        paths
     }
 
     pub fn fetch_events(&mut self) -> Result<Vec<InputEvent>, String> {
@@ -826,7 +874,7 @@ fn format_open_error(path: &Path, error: std::io::Error) -> String {
     )
 }
 
-fn is_ira_virtual_device(name: &str) -> bool {
+pub(crate) fn is_ira_virtual_device(name: &str) -> bool {
     name.starts_with("Ira Virtual ") || name.ends_with("(Ira)")
 }
 
@@ -903,6 +951,35 @@ mod tests {
         assert!(!is_dualsense_identity(0x054c, 0x09cc));
         assert!(!is_dualsense_identity(0x045e, 0x0ce6));
         assert!(!is_dualshock4_identity(0x0f0d, 0x00ee));
+    }
+
+    #[test]
+    fn test_family_wire_values_roundtrip_with_generic_fallback() {
+        use super::ControllerFamily;
+        // Arrange: every family plus garbage.
+        // Act + Assert: stable discriminants, unknown reads back Generic
+        // (never a wrong family's glyphs).
+        for (family, wire) in [
+            (ControllerFamily::Generic, 0),
+            (ControllerFamily::Xbox, 1),
+            (ControllerFamily::PlayStation, 2),
+            (ControllerFamily::Nintendo, 3),
+            (ControllerFamily::EightBitDo, 4),
+            (ControllerFamily::Steam, 5),
+        ] {
+            assert_eq!(family.as_u32(), wire);
+            assert_eq!(ControllerFamily::from_u32(wire), family);
+        }
+        assert_eq!(ControllerFamily::from_u32(99), ControllerFamily::Generic);
+        // Spot-check the shared detector backing DeviceInfo::family.
+        assert_eq!(
+            super::family_for(0x2dc8, "8BitDo Ultimate 2 Wireless"),
+            ControllerFamily::EightBitDo
+        );
+        assert_eq!(
+            super::family_for(0x045e, "Microsoft X-Box One pad"),
+            ControllerFamily::Xbox
+        );
     }
 
     fn test_pad() -> super::PhysicalGamepad {
@@ -1299,5 +1376,28 @@ mod tests {
         assert!(!synthesized_trigger_click(true, 0.35));
         // A noisy axis hovering in the band cannot re-click on its own.
         assert!(!synthesized_trigger_click(false, 0.4));
+    }
+
+    #[test]
+    fn test_prefer_fresh_sorts_dead_node_last() {
+        // Arrange: stale event16 plus live event17, event16 just died.
+        use super::PhysicalGamepad;
+        let dead = PathBuf::from("/dev/input/event16");
+        let paths = vec![dead.clone(), PathBuf::from("/dev/input/event17")];
+        // Act
+        let sorted = PhysicalGamepad::prefer_fresh(paths, &dead);
+        // Assert: fresh node first, dead node last (stable otherwise).
+        assert_eq!(
+            sorted,
+            vec![
+                PathBuf::from("/dev/input/event17"),
+                PathBuf::from("/dev/input/event16"),
+            ]
+        );
+        // A lone dead path still wins over nothing (stable-path resets).
+        assert_eq!(
+            PhysicalGamepad::prefer_fresh(vec![dead.clone()], &dead),
+            vec![dead]
+        );
     }
 }

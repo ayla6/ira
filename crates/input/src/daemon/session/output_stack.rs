@@ -99,6 +99,7 @@ pub(crate) fn build_virtual_stack(
     motion_allowed: bool,
     profile: &InputProfile,
     native_passthrough: bool,
+    mirror: Option<crate::MirroredIdentity>,
 ) -> VirtualStack {
     let keyboard = match create_keyboard(profile.keyboard_keycodes()) {
         Ok(keyboard) => keyboard,
@@ -135,7 +136,7 @@ pub(crate) fn build_virtual_stack(
         eprintln!("ira-input: uinput gamepad suppressed; the uhid controller is the controller");
         VirtualGamepad::shadow_only(backend)
     } else {
-        match VirtualGamepad::create_for_backend(backend) {
+        match VirtualGamepad::create_for_backend(backend, mirror) {
             Ok(virtual_gamepad) => virtual_gamepad,
             Err(error) => {
                 eprintln!(

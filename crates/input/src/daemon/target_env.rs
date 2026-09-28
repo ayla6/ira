@@ -120,7 +120,7 @@ pub(crate) fn target_env_for(
 
 pub(crate) fn sdl_mapping_for_backend(backend: VirtualGamepadBackend) -> Option<String> {
     match backend {
-        VirtualGamepadBackend::XInput => None,
+        VirtualGamepadBackend::XInput => Some(VirtualGamepad::xbox_sdl_mapping()),
         VirtualGamepadBackend::DirectInput => Some(VirtualGamepad::direct_input_sdl_mapping()),
         VirtualGamepadBackend::SwitchPro => Some(VirtualGamepad::switch_pro_sdl_mapping()),
         VirtualGamepadBackend::DualShock4 => Some(VirtualGamepad::dual_shock_4_sdl_mapping()),
@@ -384,6 +384,25 @@ mod tests {
         assert!(sdl_mapping_for_backend(VirtualGamepadBackend::SwitchPro)
             .unwrap()
             .starts_with("030000007e0500000920000011810000,"));
-        assert!(sdl_mapping_for_backend(VirtualGamepadBackend::XInput).is_none());
+    }
+
+    #[test]
+    fn test_xinput_env_maps_the_virtual_pad_and_hides_only_the_physical() {
+        // The virtual pad presents the canonical Xbox identity, so the
+        // physical pad's blacklist entry can never match it: SDL sees
+        // exactly one controller, mapped by the shipped Xbox mapping.
+        let envs = target_env_for(VirtualGamepadBackend::XInput, Some(0x2dc8), Some(0x6012), false);
+        assert!(envs.contains(&(
+            "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
+            "0x2dc8/0x6012".to_string()
+        )));
+        let mapping = envs
+            .iter()
+            .find(|(key, _)| key == "SDL_GAMECONTROLLERCONFIG")
+            .map(|(_, value)| value)
+            .expect("XInput env carries a mapping");
+        assert!(mapping.starts_with(
+            "030000005e0400008e02000014010000,Microsoft X-Box 360 pad,a:b0,b:b1"
+        ));
     }
 }

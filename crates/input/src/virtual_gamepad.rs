@@ -17,6 +17,15 @@ const RUMBLE_EFFECT_SLOTS: u32 = 4;
 const VIRTUAL_VENDOR: u16 = 0x045e;
 const VIRTUAL_PRODUCT: u16 = 0x028e;
 const VIRTUAL_VERSION: u16 = 0x0114;
+// The SDL mapping for the XInput virtual pad: the GUID SDL computes for
+// the Xbox 360 identity above (bus USB, ids little-endian, zero CRC), the
+// canonical name games show for it, and bindings matching the descriptor's
+// button order (face 0-3, shoulders 4-5, back/start/guide/sticks 6-10,
+// d-pad on hat 0, analog triggers on ABS_Z/ABS_RZ). Shipped explicitly
+// rather than trusted to SDL's builtin database, the twin precedent.
+const XINPUT_SDL_GUID: &str = "030000005e0400008e02000014010000";
+const XINPUT_SDL_NAME: &str = "Microsoft X-Box 360 pad";
+const XINPUT_SDL_BINDINGS: &str = "a:b0,b:b1,x:b2,y:b3,back:b6,guide:b8,start:b7,leftstick:b9,rightstick:b10,leftshoulder:b4,rightshoulder:b5,lefttrigger:a2,righttrigger:a5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,leftx:a0,lefty:a1,rightx:a3,righty:a4,platform:Linux";
 // Ira's private evdev identity: BUS_VIRTUAL plus the ASCII tag "IR" as VID.
 // This is not a USB allocation and must not be presented as one.
 const DIRECT_INPUT_VENDOR: u16 = 0x4952;
@@ -118,7 +127,7 @@ fn playback_command(
 
 impl VirtualGamepad {
     pub fn create() -> io::Result<Self> {
-        Self::create_for_backend(VirtualGamepadBackend::XInput)
+        Self::create_for_backend(VirtualGamepadBackend::XInput, None)
     }
 
     /// A backend with no kernel device: outputs land only in the pad shadow
@@ -134,15 +143,19 @@ impl VirtualGamepad {
         }
     }
 
-    pub fn create_for_backend(backend: VirtualGamepadBackend) -> io::Result<Self> {
+    pub fn create_for_backend(
+        backend: VirtualGamepadBackend,
+        mirror: Option<MirroredIdentity>,
+    ) -> io::Result<Self> {
         if backend == VirtualGamepadBackend::Dsu {
             return Ok(Self::shadow_only(backend));
         }
         let buttons = gamepad_buttons(backend);
         let rumble_effects: AttributeSet<FFEffectCode> =
             [FFEffectCode::FF_RUMBLE].into_iter().collect();
+        let name = device_name(backend, mirror.as_ref());
         let mut builder = VirtualDevice::builder()?
-            .name(device_name(backend))
+            .name(&name)
             .input_id(device_id(backend))
             .with_keys(&buttons)?
             .with_ff(&rumble_effects)?
@@ -279,6 +292,10 @@ impl VirtualGamepad {
             DIRECT_INPUT_NAME,
             DIRECT_INPUT_SDL_BINDINGS
         )
+    }
+
+    pub fn xbox_sdl_mapping() -> String {
+        format!("{XINPUT_SDL_GUID},{XINPUT_SDL_NAME},{XINPUT_SDL_BINDINGS}")
     }
 
     pub fn switch_pro_sdl_mapping() -> String {
@@ -495,7 +512,33 @@ fn sony_layout(backend: VirtualGamepadBackend) -> bool {
     )
 }
 
-fn device_name(backend: VirtualGamepadBackend) -> &'static str {
+/// Physical pad identity for the virtual device's UI-facing name, so
+/// controller lists and the UI treat it like the real controller. The
+/// kernel IDs never mirror: those are machine identity (SDL blacklists,
+/// GUID mappings, autoconfig), and mirroring them made the game confuse
+/// the virtual pad for the physical one — or hide it entirely. Applies
+/// to the virtualized backends (XInput, DirectInput); native twins
+/// already emulate real hardware.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MirroredIdentity {
+    pub name: String,
+    pub vendor: u16,
+    pub product: u16,
+    pub version: u16,
+}
+
+fn device_name(backend: VirtualGamepadBackend, mirror: Option<&MirroredIdentity>) -> String {
+    if let Some(mirror) = mirror.filter(|_| {
+        matches!(
+            backend,
+            VirtualGamepadBackend::XInput | VirtualGamepadBackend::DirectInput
+        )
+    }) {
+        // The "(Ira)" suffix is load-bearing, not decoration: virtual
+        // outputs must stay recognizable as such (twin precedent), or
+        // pad counters see the mirror as a second physical controller.
+        return format!("{} (Ira)", mirror.name);
+    }
     match backend {
         VirtualGamepadBackend::XInput => "Ira Virtual Xbox Controller",
         VirtualGamepadBackend::DirectInput => DIRECT_INPUT_NAME,
@@ -505,8 +548,13 @@ fn device_name(backend: VirtualGamepadBackend) -> &'static str {
         VirtualGamepadBackend::SteamInput => STEAM_INPUT_NAME,
         VirtualGamepadBackend::Dsu => "Ira DSU Controller",
     }
+    .to_string()
 }
 
+/// The kernel identity the game sees: always the backend's canonical
+/// one, never the physical pad's. The game must not treat the virtual
+/// pad like the real controller — shared VID/PID made SDL's
+/// physical-pad blacklist swallow the virtual pad too.
 fn device_id(backend: VirtualGamepadBackend) -> InputId {
     match backend {
         VirtualGamepadBackend::XInput => InputId::new(
@@ -904,9 +952,9 @@ mod tests {
 
     #[test]
     fn test_backend_identity_is_stable_and_distinct() {
-        assert_eq!(device_name(XInput), "Ira Virtual Xbox Controller");
+        assert_eq!(device_name(XInput, None), "Ira Virtual Xbox Controller");
         assert_eq!(
-            device_name(DirectInput),
+            device_name(DirectInput, None),
             "Ira Virtual DirectInput Controller"
         );
         assert_ne!(device_id(XInput), device_id(DirectInput));
@@ -919,8 +967,41 @@ mod tests {
             InputId::new(evdev::BusType::BUS_USB, 0x057e, 0x2009, 0x8111)
         );
         assert_eq!(
-            device_name(SwitchPro),
+            device_name(SwitchPro, None),
             "Ira Virtual Nintendo Switch Pro Controller"
+        );
+    }
+
+    #[test]
+    fn test_name_mirrors_but_ids_stay_canonical() {
+        // Arrange: an 8BitDo pad behind an Xbox virtual backend.
+        use super::MirroredIdentity;
+        let mirror = MirroredIdentity {
+            name: "8BitDo Ultimate 2 Wireless".to_string(),
+            vendor: 0x2dc8,
+            product: 0x6012,
+            version: 0x0114,
+        };
+        // Act + Assert: the UI-facing name treats it like the real pad
+        // (with the "(Ira)" suffix keeping it recognizable as virtual),
+        // while the kernel IDs stay the backend's canonical ones so the
+        // game never confuses it for the physical controller.
+        assert_eq!(
+            device_name(XInput, Some(&mirror)),
+            "8BitDo Ultimate 2 Wireless (Ira)"
+        );
+        assert_eq!(
+            device_id(XInput),
+            InputId::new(evdev::BusType::BUS_USB, 0x045e, 0x028e, 0x0114)
+        );
+        // Native twins keep emulating real hardware.
+        assert_eq!(
+            device_name(SwitchPro, None),
+            "Ira Virtual Nintendo Switch Pro Controller"
+        );
+        assert_eq!(
+            device_id(SwitchPro),
+            InputId::new(evdev::BusType::BUS_USB, 0x057e, 0x2009, 0x8111)
         );
     }
 
@@ -998,7 +1079,7 @@ mod tests {
             InputId::new(evdev::BusType::BUS_USB, 0x054c, 0x0ce6, 0x0111)
         );
         assert_eq!(
-            device_name(DualShock4),
+            device_name(DualShock4, None),
             "Sony Interactive Entertainment Wireless Controller"
         );
         assert!(VirtualGamepad::dual_shock_4_sdl_mapping().starts_with(
@@ -1070,7 +1151,7 @@ mod tests {
     fn test_direct_input_sdl_mapping_matches_identity() {
         assert!(VirtualGamepad::direct_input_sdl_mapping()
             .starts_with("0600f799524900000100000001000000,Ira Virtual DirectInput Controller,"));
-        assert_eq!(device_name(DirectInput), DIRECT_INPUT_NAME);
+        assert_eq!(device_name(DirectInput, None), DIRECT_INPUT_NAME);
         assert_eq!(
             device_id(DirectInput),
             InputId::new(
@@ -1083,11 +1164,24 @@ mod tests {
     }
 
     #[test]
+    fn test_xbox_sdl_mapping_matches_device_identity() {
+        // The mapping's GUID must equal what SDL computes for the uinput
+        // node (USB bus, 045e:028e, version), or SDL silently ignores it;
+        // the bindings must match the descriptor's button order.
+        let mapping = VirtualGamepad::xbox_sdl_mapping();
+        assert!(mapping.starts_with(
+            "030000005e0400008e02000014010000,Microsoft X-Box 360 pad,\
+             a:b0,b:b1,x:b2,y:b3,back:b6,guide:b8,start:b7"
+        ));
+        assert!(mapping.ends_with("platform:Linux"));
+    }
+
+    #[test]
     fn test_steam_input_matches_valve_identity_and_layout() {
         use crate::VirtualGamepadBackend::SteamInput;
         // The identity SDL special-cases as the Steam virtual gamepad; the
         // evdev name stays Ira-prefixed so the hub ignores our own pad.
-        assert_eq!(device_name(SteamInput), "Ira Virtual Steam Input Controller");
+        assert_eq!(device_name(SteamInput, None), "Ira Virtual Steam Input Controller");
         assert_eq!(
             device_id(SteamInput),
             InputId::new(evdev::BusType::BUS_USB, 0x28de, 0x11ff, 0x0100)

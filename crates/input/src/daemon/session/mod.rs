@@ -1,6 +1,9 @@
 mod devices;
 mod inputs;
+mod key_intercept;
 mod output_stack;
+mod overlay_nav;
+mod overlay_toggle;
 
 // The hub owns the physical side now; these device helpers are its tools.
 pub(crate) use devices::{
@@ -13,8 +16,11 @@ mod outputs;
 mod sensor;
 mod setup;
 
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+
+use crate::InputSource;
 
 use super::hub::{HubCommand, HubHandle, PadEvent};
 use super::{Arguments, SessionEvent, SteamWatcher};
@@ -26,10 +32,11 @@ use loop_io::{
     PROFILE_POLL_INTERVAL,
 };
 use outputs::{
-    attach_motion_outputs, emit_outputs, reload_profile, stop_child, LiveOutputs, OutputTargets,
+    attach_motion_outputs, emit_mapped, emit_outputs, rebuild_output_devices, reload_profile,
+    stop_child, LiveOutputs, OutputTargets,
 };
 use sensor::{forward_samples, process_tick, service_twin_events, tick_needed_for};
-use setup::{setup_session, SessionSetup};
+use setup::{mirror_identity, setup_session, SessionSetup};
 
 /// Park ceiling when no scheduled work needs a shorter deadline: pad events
 /// wake the channel instantly, so a long park only delays idle bookkeeping.
@@ -53,6 +60,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         motion_enabled,
         mut pad_vendor,
         mut pad_product,
+        mut mirror,
         mut tick_needed,
         mut report_rate,
         mut steam_watch,
@@ -80,6 +88,38 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
     };
     let mut hub_live = false;
     let mut pending: Vec<PadEvent> = Vec::new();
+    // Overlay toggle authority (gamescope/flatpak only): the daemon owns
+    // the physical pad, which is the only input path the sandboxed game
+    // cannot hide from. Silent unless the launcher armed it.
+    let mut overlay_toggle = overlay_toggle::OverlayToggle::arm(arguments.env.as_deref());
+    if overlay_toggle.is_some() {
+        eprintln!("ira-input: overlay toggle chord armed for session");
+    }
+    // Keyboard chord authority + interception (same marker): the X root
+    // grab cannot fire under gamescope, so the daemon owns keyboards the
+    // way it owns gamepads — grabbing and re-emitting while the game is
+    // focused, consuming only the chord. Unfocused it only snoops.
+    let mut key_intercept = key_intercept::KeyIntercept::arm(arguments.env.as_deref());
+    if key_intercept.is_some() {
+        eprintln!("ira-input: overlay keyboard intercept armed for session");
+        key_intercept::KeyIntercept::log_input_census();
+    }
+    // Last pass's overlay visibility, for the rising-edge release below.
+    let mut overlay_was_open = false;
+    // Buttons consumed by the overlay (toggle chord completions, any pad
+    // press while open): the game never saw their presses, so on close
+    // their releases must be swallowed too — otherwise closing with a
+    // held Guide/Enter leaks a phantom click into the game.
+    let mut consumed_while_open: HashSet<InputSource> = HashSet::new();
+    // Close-edge swallow set: physically-held-at-close buttons that were
+    // consumed (see above). Dropped until each reports release; innocent
+    // held-through buttons still hand back below.
+    let mut swallowed: HashSet<InputSource> = HashSet::new();
+    // Overlay gamepad navigation arms lazily: the host creates its canvas
+    // after the session starts, so early arms fail. Retried on cadence
+    // while visible instead of every pass.
+    let mut overlay_nav: Option<overlay_nav::OverlayNav> = None;
+    let mut nav_retry_at = Instant::now();
     // Motion samples queued since the last pass. Every sample must be
     // processed: dropping one stretches the next integration window over
     // its time and turns real micro-motion into phantom rotation.
@@ -181,6 +221,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                             pad: &mut pad_state,
                             pipeline: &mut pipeline,
                             motion_enabled,
+                            mirror: mirror.clone(),
                             native_passthrough,
                         };
                         if attach_motion_outputs(&mut outputs, &mut trace) {
@@ -194,6 +235,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     path,
                     vendor,
                     product,
+                    version,
                 } => {
                     pad_vendor = vendor;
                     pad_product = product;
@@ -213,8 +255,46 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                         vendor,
                         product,
                     );
+                    // A new physical identity means new glyphs: rebuild the
+                    // virtual gamepad so it mirrors this pad. Same-pad
+                    // reconnects compare equal and skip the swap (no flap).
+                    let connected_mirror = mirror_identity(&Some((
+                        name.clone(),
+                        path.clone(),
+                        vendor,
+                        product,
+                        version,
+                    )));
+                    if connected_mirror != mirror {
+                        mirror = connected_mirror;
+                        let mut outputs = LiveOutputs {
+                            mapper: &mut mapper,
+                            gamepad: &mut virtual_gamepad,
+                            keyboard: &mut keyboard,
+                            mouse: &mut mouse,
+                            pad: &mut pad_state,
+                            pipeline: &mut pipeline,
+                            motion_enabled,
+                            mirror: mirror.clone(),
+                            native_passthrough,
+                        };
+                        rebuild_output_devices(&mut outputs, &mut trace);
+                        eprintln!(
+                            "ira-input: virtual gamepad now mirrors {vendor:04x}:{product:04x}"
+                        );
+                    }
                     pipeline.last_sensor_us = None;
                     report_rate.reset();
+                    // Footer glyphs follow the physical pad, not the
+                    // virtual backend.
+                    if let Some(toggle) = overlay_toggle.as_ref() {
+                        toggle.publish_family(crate::family_for(vendor, &name));
+                    }
+                    // Fresh physical state: buttons held while (re)connecting
+                    // are grip, not toggle intent (settle window).
+                    if let Some(toggle) = overlay_toggle.as_mut() {
+                        toggle.note_connect();
+                    }
                     if let Some(events) = &arguments.events {
                         let _ = events.send(SessionEvent::Controller {
                             connected: true,
@@ -245,8 +325,42 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                         );
                     }
                 }
-                PadEvent::Live => hub_live = true,
+                PadEvent::Live { pressed } => {
+                    hub_live = true;
+                    // Reconcile across the routing gap: anything the mapper
+                    // holds but the pad reports up lost its release to a
+                    // focus flap or reconnect — emit real releases now
+                    // instead of sticking it forever.
+                    let missing = inputs::releases_for_missing(
+                        mapper.held_buttons(),
+                        &pressed.into_iter().collect(),
+                        now_us(),
+                    );
+                    if !missing.is_empty() {
+                        eprintln!(
+                            "ira-input: session {} reconciled {} stuck output(s) on resume",
+                            arguments.session_id,
+                            missing.len()
+                        );
+                    }
+                    for event in missing {
+                        if let Err(error) = emit_mapped(
+                            &mut mapper,
+                            OutputTargets {
+                                gamepad: &mut virtual_gamepad,
+                                keyboard: keyboard.as_mut(),
+                                mouse: mouse.as_mut(),
+                                pad: &mut pad_state,
+                            },
+                            event,
+                            &mut trace,
+                        ) {
+                            eprintln!("ira-input: failed to emit reconciled release: {error}");
+                        }
+                    }
+                }
                 PadEvent::Frozen => {
+                    eprintln!("ira-input: session {} frozen", arguments.session_id);
                     if hub_live {
                         hub_live = false;
                         if let Err(error) = release_outputs(
@@ -273,7 +387,174 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
             }
         }
 
-        let paused = paused_for_focus || !hub_live;
+        let unfocused_or_dead = paused_for_focus || !hub_live;
+        // Overlay toggle pre-pass: extract and swallow chord completions
+        // before anything else sees them, then flip. Runs even when paused
+        // so the chord always reaches the overlay.
+        if let Some(toggle) = overlay_toggle.as_mut() {
+            let mut fired = false;
+            pending.retain_mut(|event| {
+                let PadEvent::Input(input) = event else {
+                    return true;
+                };
+                match toggle.filter(input) {
+                    overlay_toggle::ToggleAction::Forward => true,
+                    overlay_toggle::ToggleAction::Swallow => false,
+                    overlay_toggle::ToggleAction::Fire => {
+                        fired = true;
+                        // The completing press is consumed here, never
+                        // forwarded: a close on this finger must swallow
+                        // its release too.
+                        consumed_while_open.insert(input.source);
+                        false
+                    }
+                }
+            });
+            if fired {
+                match toggle.flip() {
+                    Some(visible) => {
+                        eprintln!("ira-input: overlay toggle flipped overlay to {visible}")
+                    }
+                    None => eprintln!("ira-input: overlay toggle debounced"),
+                }
+            }
+        }
+        // Keyboard chord intercept: same flip, distinct log so the path is
+        // traceable. Focus-gated (grabbed only while the game is focused);
+        // the previous pass's visibility switches forwarding to consuming.
+        if let Some(intercept) = key_intercept.as_mut() {
+            if intercept.poll(!paused_for_focus, overlay_was_open) {
+                match intercept.flip() {
+                    Some(visible) => {
+                        eprintln!("ira-input: key intercept flipped overlay to {visible}")
+                    }
+                    None => eprintln!("ira-input: key intercept debounced"),
+                }
+            }
+        }
+        // While the overlay is up the game gets no pad input at all (its
+        // own menu must not open under the overlay). Rising edge releases
+        // everything held so nothing sticks.
+        let overlay_open = overlay_toggle
+            .as_ref()
+            .is_some_and(|toggle| toggle.is_visible());
+        if overlay_open && !overlay_was_open {
+            if let Err(error) = release_outputs(
+                &mut mapper,
+                &mut virtual_gamepad,
+                &mut keyboard,
+                &mut mouse,
+                &mut pad_state,
+                &mut trace,
+            ) {
+                eprintln!("ira-input: failed to release outputs for overlay: {error}");
+            }
+        }
+        // Falling edge: split held buttons into the consumed (swallow
+        // until release — the game never saw their presses) and the
+        // innocent held-through (hand back, so they don't stay dead).
+        // Sticks self-heal on their next deflection either way.
+        if !overlay_open && overlay_was_open {
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            hub.send(HubCommand::GetPressed { reply: reply_tx });
+            if let Ok(pressed) = reply_rx.recv_timeout(Duration::from_millis(200)) {
+                swallowed = pressed
+                    .iter()
+                    .filter(|source| {
+                        matches!(source, InputSource::Button(_))
+                            && consumed_while_open.contains(*source)
+                    })
+                    .copied()
+                    .collect();
+                if !swallowed.is_empty() {
+                    eprintln!(
+                        "ira-input: swallowing {} held button(s) on close until release",
+                        swallowed.len()
+                    );
+                }
+                let handed: HashSet<InputSource> =
+                    pressed.iter().copied().collect::<HashSet<_>>()
+                        .difference(&swallowed)
+                        .copied()
+                        .collect();
+                let mut handed_back = 0;
+                for event in inputs::presses_for_held(
+                    mapper.held_buttons(),
+                    &handed,
+                    now_us(),
+                ) {
+                    handed_back += 1;
+                    if let Err(error) = emit_mapped(
+                        &mut mapper,
+                        OutputTargets {
+                            gamepad: &mut virtual_gamepad,
+                            keyboard: keyboard.as_mut(),
+                            mouse: mouse.as_mut(),
+                            pad: &mut pad_state,
+                        },
+                        event,
+                        &mut trace,
+                    ) {
+                        eprintln!("ira-input: failed to emit hand-back press: {error}");
+                    }
+                }
+                if handed_back > 0 {
+                    eprintln!("ira-input: handed back {handed_back} held button(s) on close");
+                }
+            }
+            consumed_while_open.clear();
+        }
+        overlay_was_open = overlay_open;
+        // Swallow-upon-release: consumed buttons held through the close
+        // edge never reach the game (neither press nor release) until
+        // each reports up. Runs open or closed so releases landing inside
+        // the blackout still retire their button instead of sticking it.
+        if !swallowed.is_empty() {
+            pending.retain(|event| {
+                let PadEvent::Input(input) = event else {
+                    return true;
+                };
+                if !swallowed.contains(&input.source) {
+                    return true;
+                }
+                if inputs::is_release(&input.source, input.value) {
+                    swallowed.remove(&input.source);
+                }
+                false
+            });
+        }
+        // Overlay navigation (gamescope/flatpak only): the in-process
+        // layer path is dead in the sandbox, so the daemon translates pad
+        // presses to canvas commands while visible. Everything is still
+        // dropped below — the game never sees it.
+        if overlay_open {
+            if overlay_nav.is_none()
+                && nav_retry_at.elapsed() >= Duration::from_secs(1)
+            {
+                nav_retry_at = Instant::now();
+                overlay_nav = overlay_nav::OverlayNav::arm(arguments.env.as_deref());
+                if overlay_nav.is_some() {
+                    eprintln!("ira-input: overlay navigation armed for session");
+                }
+            }
+            if let Some(nav) = overlay_nav.as_mut() {
+                for event in pending.iter() {
+                    if let PadEvent::Input(input) = event {
+                        // Any pad press while open is consumed here (even
+                        // taps the navigator ignores): holding it through
+                        // the close must swallow, never hand back.
+                        if matches!(input.source, InputSource::Button(_)) && input.value > 0.5
+                        {
+                            consumed_while_open.insert(input.source);
+                        }
+                        nav.feed(input);
+                    }
+                }
+                // Held directions auto-repeat like Big Picture.
+                nav.poll_repeat();
+            }
+        }
+        let paused = unfocused_or_dead || overlay_open;
         let result = if paused {
             // Frozen or unfocused: the hub forwards no inputs, and anything
             // already queued is stale — drop it along with motion samples.
@@ -423,6 +704,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                             pad: &mut pad_state,
                             pipeline: &mut pipeline,
                             motion_enabled,
+                            mirror: mirror.clone(),
                             native_passthrough,
                         };
                         reload_profile(&mut outputs, monitor.path(), &mut trace)

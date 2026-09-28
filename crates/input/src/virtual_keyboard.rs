@@ -36,4 +36,24 @@ impl VirtualKeyboard {
         let input = InputEvent::new(EventType::KEY.0, *keycode, i32::from(*pressed));
         self.device.emit(&[input])
     }
+
+    /// A re-emission keyboard declaring every Linux keycode: for
+    /// intercept-style forwarding, where any key may need a 1:1 copy.
+    /// Bounded by `KEY_MAX` (0x2FF) — evdev's key set holds exactly 768
+    /// bits and panics on anything past index 767.
+    pub fn create_all_keys() -> io::Result<Self> {
+        Self::create(1..=0x2FF)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_all_keys_stays_within_evdev_bound() {
+        // Regression: an unbounded range panicked inside evdev's 768-bit
+        // key set and took the whole session down with it.
+        assert!(VirtualKeyboard::create_all_keys().is_ok());
+    }
 }

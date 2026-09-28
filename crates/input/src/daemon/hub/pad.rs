@@ -99,7 +99,7 @@ impl PhysicalPad {
     /// motion source, the Switch-protocol takeover, and rumble. The pad is
     /// grabbed only when sessions are subscribed: an idle hub must leave
     /// the controller to the desktop.
-    pub(super) fn try_open(&mut self, grab: bool) -> Option<(String, String, u16, u16)> {
+    pub(super) fn try_open(&mut self, grab: bool) -> Option<(String, String, u16, u16, u16)> {
         // The motion probe below races udev and SDL's first enumeration;
         // schedule retries so a lost race heals itself while the pad stays
         // connected.
@@ -150,6 +150,7 @@ impl PhysicalPad {
             info.path.display().to_string(),
             info.vendor,
             info.product,
+            info.version,
         ))
     }
 

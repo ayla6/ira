@@ -2,7 +2,7 @@ use std::io::BufRead;
 
 use std::sync::mpsc::Receiver;
 
-use crate::{MappingEngine, ReportRateEstimator, VirtualGamepad, VirtualKeyboard, VirtualMouse};
+use crate::{MappingEngine, MirroredIdentity, ReportRateEstimator, VirtualGamepad, VirtualKeyboard, VirtualMouse};
 
 use super::devices::{
     apply_controller_deadzone, is_real_profile, load_profile_or_default, make_gyro_processor,
@@ -36,6 +36,9 @@ pub(crate) struct SessionSetup {
     pub(crate) motion_enabled: bool,
     pub(crate) pad_vendor: u16,
     pub(crate) pad_product: u16,
+    /// Physical pad identity the virtual gamepad mirrors, so games pick
+    /// glyphs for the real controller. Refreshed on (re)connect.
+    pub(crate) mirror: Option<MirroredIdentity>,
     pub(crate) tick_needed: bool,
     pub(crate) report_rate: ReportRateEstimator,
     pub(crate) steam_watch: Option<SteamWatcher>,
@@ -180,8 +183,23 @@ fn pump_output<R: std::io::Read + Send + 'static>(
     }
 }
 
-pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, String> {
+/// Physical pad identity for the virtual gamepad to mirror (glyphs,
+/// SDL mappings). `None` while no pad is up; the session refreshes it on
+/// every (re)connect.
+pub(crate) fn mirror_identity(
+    pad: &Option<(String, String, u16, u16, u16)>,
+) -> Option<MirroredIdentity> {
+    pad.as_ref().map(
+        |(name, _, vendor, product, version)| MirroredIdentity {
+            name: name.clone(),
+            vendor: *vendor,
+            product: *product,
+            version: *version,
+        },
+    )
+}
 
+pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, String> {
     let trace = TraceState::new(arguments.trace);
     // A broken profile or unavailable uinput must never keep the game from
     // starting: degrade to the builtin layout, or to shadow-only devices,
@@ -237,7 +255,7 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     let native_passthrough = native_passthrough_for(
         mapper.profile().backend,
         snapshot.switch_protocol,
-        snapshot.pad.as_ref().map(|(_, _, vendor, product)| (*vendor, *product)),
+        snapshot.pad.as_ref().map(|(_, _, vendor, product, _)| (*vendor, *product)),
     );
     if native_passthrough {
         eprintln!(
@@ -253,11 +271,12 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         arguments.motion_port != Some(0),
         mapper.profile(),
         native_passthrough,
+        mirror_identity(&snapshot.pad),
     );
     let (pad_vendor, pad_product) = snapshot
         .pad
         .as_ref()
-        .map(|(_, _, vendor, product)| (*vendor, *product))
+        .map(|(_, _, vendor, product, _)| (*vendor, *product))
         .unwrap_or((0, 0));
     let gyro_processor = make_gyro_processor(
         mapper.profile(),
@@ -292,14 +311,20 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     let child = spawn_session_child(
         arguments,
         &mapper,
-        snapshot.pad.as_ref().map(|(_, _, vendor, product)| (*vendor, *product)),
+        snapshot.pad.as_ref().map(|(_, _, vendor, product, _)| (*vendor, *product)),
         native_passthrough,
     );
     let pad_state = crate::PadState::default();
     let schedule = LoopSchedule::new();
     // Pause injection while the game window is unfocused (alt-tab). Without
     // an X server to ask, the watcher cannot exist and input stays active.
-    let focus = if arguments.pause_unfocused {
+    // Sessions where the daemon owns the overlay toggle (gamescope,
+    // flatpak) never get a watcher: their game lives on an inner Xwayland
+    // server or inside the sandbox, invisible from the desktop display the
+    // watcher asks — it would read "unfocused" for the entire session and
+    // the pad would drive the overlay yet never the game. Overlay
+    // visibility already gates input there.
+    let focus = if focus_watcher_allowed(arguments.pause_unfocused, arguments.env.as_deref()) {
         child
             .as_ref()
             .and_then(|child| crate::FocusWatcher::for_child(child.id()))
@@ -365,6 +390,7 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         motion_enabled: stack.motion_enabled,
         pad_vendor,
         pad_product,
+        mirror: mirror_identity(&snapshot.pad),
         tick_needed,
         report_rate,
         steam_watch,
@@ -376,6 +402,20 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         cursor_watcher,
         cursor_visible,
     })
+}
+
+/// Whether the session gets an X focus watcher: only when unfocused
+/// pausing is wanted AND the game is observable from this display. The
+/// daemon-toggle marker means gamescope/flatpak, where the game is not.
+fn focus_watcher_allowed(
+    pause_unfocused: bool,
+    env: Option<&[(String, String)]>,
+) -> bool {
+    pause_unfocused
+        && !env.is_some_and(|vars| {
+            vars.iter()
+                .any(|(k, v)| k == ira_overlay_ipc::DAEMON_TOGGLE_ENV && v == "1")
+        })
 }
 
 /// Parks on the profile watcher's inotify descriptor and pushes a wake into
@@ -401,6 +441,7 @@ fn profile_wake_pump(fd: libc::c_int, events: std::sync::mpsc::Sender<PadEvent>)
 #[cfg(test)]
 mod tests {
     use super::child_env_overrides;
+    use super::focus_watcher_allowed;
     use super::native_passthrough_for;
     use crate::profile::VirtualGamepadBackend as Backend;
 
@@ -437,6 +478,20 @@ mod tests {
             child_env_overrides(None, &target),
             vec![("SDL_JOYSTICK_HIDAPI", "0")]
         );
+    }
+
+    #[test]
+    fn test_focus_watcher_allowed_skips_daemon_toggle_sessions() {
+        let marker = vec![(ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(), "1".to_string())];
+        // Gamescope/flatpak: the game is unobservable from the desktop
+        // display, so no watcher even when pausing is wanted.
+        assert!(!focus_watcher_allowed(true, Some(&marker)));
+        // Ordinary launches keep the watcher when pausing is wanted…
+        assert!(focus_watcher_allowed(true, None));
+        assert!(focus_watcher_allowed(true, Some(&[])));
+        // …and never when pausing is off.
+        assert!(!focus_watcher_allowed(false, None));
+        assert!(!focus_watcher_allowed(false, Some(&marker)));
     }
 
     #[test]

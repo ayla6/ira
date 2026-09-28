@@ -18,6 +18,9 @@ pub(crate) struct LiveOutputs<'a> {
     pub(crate) pad: &'a mut crate::PadState,
     pub(crate) pipeline: &'a mut SensorPipeline,
     pub(crate) motion_enabled: bool,
+    /// Physical pad identity the virtual gamepad mirrors (glyphs); cloned
+    /// into every rebuild so the identity survives stack swaps.
+    pub(crate) mirror: Option<crate::MirroredIdentity>,
     /// The session passes the physical pad through untouched; rebuilds keep
     /// the passthrough decision instead of materializing virtual devices.
     pub(crate) native_passthrough: bool,
@@ -84,6 +87,7 @@ fn rebuild_output_stack(
         outputs.motion_enabled,
         outputs.mapper.profile(),
         outputs.native_passthrough,
+        outputs.mirror.clone(),
     );
     *outputs.gamepad = stack.gamepad;
     *outputs.keyboard = stack.keyboard;
@@ -103,12 +107,13 @@ fn rebuild_output_stack(
 /// Rebuilds every virtual output device for the profile now in the mapper,
 /// releasing the outgoing devices' held outputs first. The mapper itself is
 /// untouched.
-fn rebuild_output_devices(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState) {
+pub(crate) fn rebuild_output_devices(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState) {
     let stack = super::output_stack::build_virtual_stack(
         outputs.pipeline.motion_alive(),
         outputs.motion_enabled,
         outputs.mapper.profile(),
         outputs.native_passthrough,
+        outputs.mirror.clone(),
     );
     emit_outputs(
         outputs.mapper.reset(),

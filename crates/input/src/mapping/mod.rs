@@ -255,6 +255,20 @@ impl MappingEngine {
         output
     }
 
+    /// Button sources currently held above threshold, for state
+    /// reconciliation: after a routing gap (focus flap, reconnect) the hub
+    /// reports the physical pressed set and the session releases anything
+    /// held here but up out there. Axes are level-semantic and stay as-is.
+    pub fn held_buttons(&self) -> Vec<InputSource> {
+        self.values
+            .iter()
+            .filter(|(source, value)| {
+                **value > BUTTON_THRESHOLD && matches!(source, InputSource::Button(_))
+            })
+            .map(|(source, _)| *source)
+            .collect()
+    }
+
     pub(crate) fn toggle_activations(&mut self, source: InputSource) {
         let set_toggle = self
             .profile
@@ -607,5 +621,24 @@ mod tests {
                 value: 0.0,
             }]
         );
+    }
+
+    #[test]
+    fn test_held_buttons_reports_only_buttons_above_threshold() {
+        // Arrange: A held, B tapped-and-released, stick deflected.
+        let mut engine = MappingEngine::new(button_profile(
+            GamepadButton::A,
+            OutputAction::GamepadButton(GamepadButton::A),
+        ))
+        .unwrap();
+        engine.process(event(InputSource::Button(GamepadButton::A), 1.0));
+        engine.process(event(InputSource::Button(GamepadButton::B), 1.0));
+        engine.process(event(InputSource::Button(GamepadButton::B), 0.0));
+        engine.process(event(InputSource::Axis(GamepadAxis::LeftX), 0.8));
+        // Act
+        let mut held = engine.held_buttons();
+        held.sort_by_key(|source| format!("{source:?}"));
+        // Assert: only the held button; released B and the axis excluded.
+        assert_eq!(held, vec![InputSource::Button(GamepadButton::A)]);
     }
 }

@@ -7,13 +7,13 @@
 mod holds;
 mod pad;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
-use crate::{InputEvent, PhysicalGamepad, RumbleCommand, SensorSample};
+use crate::{InputEvent, InputSource, PhysicalGamepad, RumbleCommand, SensorSample};
 
 use super::session::{now_us, open_rumble};
 use super::signals::STOP_REQUESTED;
@@ -57,11 +57,17 @@ pub(crate) enum PadEvent {
         path: String,
         vendor: u16,
         product: u16,
+        version: u16,
     },
-    /// This session lost focus routing: release held outputs.
+    /// This session lost focus routing or the physical pad disconnected:
+    /// release held outputs (the virtual pad would otherwise freeze with
+    /// buttons held) and drop stale queued input.
     Frozen,
-    /// This session regained focus routing.
-    Live,
+    /// This session (re)gained focus routing, carrying the physical button
+    /// pressed set: the session releases anything its mapper holds but the
+    /// pad reports up, reconciling state lost across the routing gap
+    /// (focus flap mid-hold, reconnect) instead of sticking it forever.
+    Live { pressed: Vec<InputSource> },
     /// Session-local wake: the profile watcher thread signals a save. The
     /// hub never sends this variant.
     ProfileChanged,
@@ -78,7 +84,7 @@ pub(crate) enum PadEvent {
 #[derive(Debug, Clone)]
 pub(crate) struct PadSnapshot {
     pub(crate) motion: bool,
-    pub(crate) pad: Option<(String, String, u16, u16)>,
+    pub(crate) pad: Option<(String, String, u16, u16, u16)>,
     /// The open pad answers the Switch controller protocol directly.
     pub(crate) switch_protocol: bool,
 }
@@ -101,6 +107,12 @@ pub(crate) enum HubCommand {
     Focus { id: u64, focused: bool },
     /// Rumble from a session; only the routed session's commands play.
     Rumble { id: u64, command: RumbleCommand },
+    /// Physical button pressed set, for overlay-close hand-back: buttons
+    /// held through the overlay's input blackout need re-presses, since
+    /// no edges arrive while held.
+    GetPressed {
+        reply: Sender<HashSet<InputSource>>,
+    },
     /// Server-routed layout switch for one session, regardless of focus.
     ReloadProfile { id: u64, path: PathBuf },
     /// Ask one session to finish cleanly (a desktop-default session being
@@ -155,6 +167,14 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
     let mut focus_counter: u64 = 0;
     let mut routed: Option<u64> = None;
     let mut pending_stops: HashMap<u64, Instant> = HashMap::new();
+    // Physical button pressed set, tracked across every batch the hub
+    // reads (routed or drained): sessions reconcile against it on `Live`.
+    // Buttons only — axes are level-semantic and need no reconciliation.
+    let mut pressed: HashSet<InputSource> = HashSet::new();
+    // Last session that held routing: releases arriving with no target
+    // are forwarded here (best-effort) instead of dropped, so a release
+    // landing in a focus gap cannot stick a button forever.
+    let mut last_live: Option<u64> = None;
 
     loop {
         if STOP_REQUESTED.load(Ordering::Relaxed) {
@@ -167,6 +187,7 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
             &mut pad,
             &routed,
             &mut pending_stops,
+            &pressed,
         ) {
             // Every handle is gone: a standalone session finished and its
             // private hub has no reason to outlive it.
@@ -183,6 +204,12 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
         {
             eprintln!("hub: controller disconnected");
             let _ = controller_events.send((false, String::new(), String::new()));
+            // The routed session would otherwise keep its virtual outputs
+            // frozen in the last held state: endless held buttons with no
+            // physical pad left to release them. Physical truth clears too:
+            // the next `Live` reconciles against an empty set.
+            notify_disconnect(&routes, &routed);
+            pressed.clear();
             pad.drop_pad();
         }
         // While any session claims the pad, the physical controller's
@@ -214,7 +241,7 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
         pad.set_sibling_holds(subscribed && any_claiming);
         if pad.gamepad.is_none() && pad.reconnect_at.elapsed() >= RECONNECT_INTERVAL {
             pad.reconnect_at = Instant::now();
-            if let Some((name, path, vendor, product)) = pad.try_open(subscribed) {
+            if let Some((name, path, vendor, product, version)) = pad.try_open(subscribed) {
                 let _ = controller_events.send((true, name.clone(), path.clone()));
                 // Sessions that subscribed before the pad existed (the normal
                 // case: opening the pad probes the motion source for ~200 ms)
@@ -225,8 +252,13 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
                         path: path.clone(),
                         vendor,
                         product,
+                        version,
                     });
                 }
+                // Resume the routed session: the disconnect above froze it
+                // (releasing stuck outputs), and retarget stays silent here
+                // because the routing target never changed.
+                notify_reconnect(&routes, &routed, &pressed);
                 broadcast_motion(&routes, pad.motion_alive());
             }
         }
@@ -242,14 +274,14 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
             pad.retry_motion(&routes);
         }
         if subscribed && pad.gamepad.is_some() {
-            read_pad(&mut pad, &routes, &routed);
+            read_pad(&mut pad, &routes, &routed, &mut pressed, &last_live);
         } else if let Some(switch) = pad.switch_hidraw.as_mut() {
             // A Switch-protocol takeover needs its periodic servicing even
             // while nothing is routed; that path reads hidraw passively, so
             // the desktop's evdev view of the pad is unaffected.
             switch.service();
         }
-        retarget(&mut routes, &mut routed);
+        retarget(&mut routes, &mut routed, &pressed, &mut last_live);
         park(&pad, subscribed);
     }
 }
@@ -290,8 +322,14 @@ fn park(pad: &PhysicalPad, subscribed: bool) {
 }
 
 /// Applies routing changes: the session that gains focus routing gets
-/// `Live`, the one that loses it gets `Frozen`.
-fn retarget(routes: &mut HashMap<u64, RouteEntry>, routed: &mut Option<u64>) {
+/// `Live` (with the physical pressed set for reconciliation), the one that
+/// loses it gets `Frozen`.
+fn retarget(
+    routes: &mut HashMap<u64, RouteEntry>,
+    routed: &mut Option<u64>,
+    pressed: &HashSet<InputSource>,
+    last_live: &mut Option<u64>,
+) {
     let target = pick_target(routes);
     if target == *routed {
         return;
@@ -303,10 +341,39 @@ fn retarget(routes: &mut HashMap<u64, RouteEntry>, routed: &mut Option<u64>) {
     }
     if let Some(new) = target {
         if let Some(entry) = routes.get_mut(&new) {
-            let _ = entry.events.send(PadEvent::Live);
+            let _ = entry.events.send(PadEvent::Live {
+                pressed: pressed.iter().copied().collect(),
+            });
         }
+        *last_live = Some(new);
     }
     *routed = target;
+}
+
+/// Freezes the routed session on physical disconnect so it releases held
+/// outputs and drops stale input. No-op when nothing is routed.
+fn notify_disconnect(routes: &HashMap<u64, RouteEntry>, routed: &Option<u64>) {
+    let Some(id) = routed else { return };
+    if let Some(entry) = routes.get(id) {
+        let _ = entry.events.send(PadEvent::Frozen);
+    }
+}
+
+/// Resumes the routed session on (re)connect: the disconnect froze it, and
+/// retarget stays silent because the routing target never changed. Carries
+/// the physical pressed set like a routing `Live`. No-op when nothing is
+/// routed.
+fn notify_reconnect(
+    routes: &HashMap<u64, RouteEntry>,
+    routed: &Option<u64>,
+    pressed: &HashSet<InputSource>,
+) {
+    let Some(id) = routed else { return };
+    if let Some(entry) = routes.get(id) {
+        let _ = entry.events.send(PadEvent::Live {
+            pressed: pressed.iter().copied().collect(),
+        });
+    }
 }
 
 /// The focused session wins (most recently focused on ties); a lone
@@ -339,6 +406,7 @@ fn drain_commands(
     pad: &mut PhysicalPad,
     routed: &Option<u64>,
     pending_stops: &mut HashMap<u64, Instant>,
+    pressed: &HashSet<InputSource>,
 ) -> bool {
     pending_stops.retain(|_, requested_at| requested_at.elapsed() < PENDING_STOP_TTL);
     loop {
@@ -391,6 +459,7 @@ fn drain_commands(
                             info.path.display().to_string(),
                             info.vendor,
                             info.product,
+                            info.version,
                         )
                     }),
                 };
@@ -403,6 +472,7 @@ fn drain_commands(
                         path: info.path.display().to_string(),
                         vendor: info.vendor,
                         product: info.product,
+                        version: info.version,
                     });
                 }
                 // Only after the handshake: the session's setup is still
@@ -427,6 +497,9 @@ fn drain_commands(
                 if *routed == Some(id) {
                     play_rumble(pad, command);
                 }
+            }
+            Ok(HubCommand::GetPressed { reply }) => {
+                let _ = reply.send(pressed.clone());
             }
             Ok(HubCommand::ReloadProfile { id, path }) => {
                 if let Some(entry) = routes.get(&id) {
@@ -458,7 +531,17 @@ fn play_rumble(pad: &mut PhysicalPad, command: RumbleCommand) {
 
 /// Reads everything the physical pad currently offers and forwards it to the
 /// routed session: evdev or Switch-protocol events, then motion samples.
-fn read_pad(pad: &mut PhysicalPad, routes: &HashMap<u64, RouteEntry>, routed: &Option<u64>) {
+/// Physical button truth is tracked on every batch — routed or drained —
+/// for `Live` reconciliation. Releases arriving with no routing target go
+/// to the last live session instead of the void: a press it mapped must
+/// not lose its release to a focus gap and stick forever.
+fn read_pad(
+    pad: &mut PhysicalPad,
+    routes: &HashMap<u64, RouteEntry>,
+    routed: &Option<u64>,
+    pressed: &mut HashSet<InputSource>,
+    last_live: &Option<u64>,
+) {
     // Fail-safe for the Switch hidraw takeover: a pad that streamed once and
     // went silent must not starve every session of input.
     if pad
@@ -478,17 +561,23 @@ fn read_pad(pad: &mut PhysicalPad, routes: &HashMap<u64, RouteEntry>, routed: &O
     }
     let Some(target) = routed.and_then(|id| routes.get(&id)) else {
         // Nobody is routed: drain so the fd never pins POLLIN, but nothing
-        // is mapped anywhere.
+        // is mapped anywhere — except releases, which the last live
+        // session may still be waiting for.
         if let Some(switch) = pad.switch_hidraw.as_mut() {
-            let _ = switch.take_events();
+            forward_releases(switch.take_events(), routes, last_live, pressed);
         } else if let Some(gamepad) = pad.gamepad.as_mut() {
-            let _ = gamepad.fetch_events();
+            match gamepad.fetch_events() {
+                Ok(batch) => forward_releases(batch, routes, last_live, pressed),
+                Err(error) => eprintln!("hub: failed to read controller: {error}"),
+            }
         }
         return;
     };
     let events = &target.events;
     if let Some(switch) = pad.switch_hidraw.as_mut() {
-        for event in switch.take_events() {
+        let batch: Vec<InputEvent> = switch.take_events();
+        track_presses(&batch, pressed);
+        for event in batch {
             let _ = events.send(PadEvent::Input(event));
         }
         if let Some(sample) = switch.take_sample(now_us()) {
@@ -497,6 +586,7 @@ fn read_pad(pad: &mut PhysicalPad, routes: &HashMap<u64, RouteEntry>, routed: &O
     } else if let Some(gamepad) = pad.gamepad.as_mut() {
         match gamepad.fetch_events() {
             Ok(batch) => {
+                track_presses(&batch, pressed);
                 for event in batch {
                     let _ = events.send(PadEvent::Input(event));
                 }
@@ -515,6 +605,44 @@ fn read_pad(pad: &mut PhysicalPad, routes: &HashMap<u64, RouteEntry>, routed: &O
                 pad.sensor = None;
                 broadcast_motion(routes, pad.motion_alive());
             }
+        }
+    }
+}
+
+/// Records the physical button pressed set from one batch. Buttons only:
+/// axes are level-semantic and need no reconciliation. Mirrors the mapping
+/// engine's button edge (`BUTTON_THRESHOLD`).
+fn track_presses(batch: &[InputEvent], pressed: &mut HashSet<InputSource>) {
+    for event in batch {
+        if !matches!(event.source, InputSource::Button(_)) {
+            continue;
+        }
+        if event.value > 0.5 {
+            pressed.insert(event.source);
+        } else {
+            pressed.remove(&event.source);
+        }
+    }
+}
+
+/// Tracks physical truth, then forwards release edges to the last live
+/// session and drops the rest. Best-effort: a gone session drops its copy.
+fn forward_releases(
+    batch: Vec<InputEvent>,
+    routes: &HashMap<u64, RouteEntry>,
+    last_live: &Option<u64>,
+    pressed: &mut HashSet<InputSource>,
+) {
+    track_presses(&batch, pressed);
+    let Some(id) = last_live else {
+        return;
+    };
+    let Some(entry) = routes.get(id) else {
+        return;
+    };
+    for event in batch {
+        if matches!(event.source, InputSource::Button(_)) && event.value <= 0.5 {
+            let _ = entry.events.send(PadEvent::Input(event));
         }
     }
 }
@@ -540,6 +668,23 @@ mod tests {
             focus_seq,
             passthrough: false,
         }
+    }
+
+    fn routed_entry() -> (HashMap<u64, RouteEntry>, Option<u64>, Receiver<PadEvent>) {
+        let (tx, rx) = channel();
+        let mut routes = HashMap::new();
+        routes.insert(
+            7,
+            RouteEntry {
+                events: tx,
+                focused: true,
+                live_always: false,
+                always_claims_focus: false,
+                focus_seq: 1,
+                passthrough: false,
+            },
+        );
+        (routes, Some(7), rx)
     }
 
     #[test]
@@ -583,5 +728,129 @@ mod tests {
         routes.insert(1, entry(false, true, 0));
         routes.insert(2, entry(false, false, 0));
         assert_eq!(pick_target(&routes), None);
+    }
+
+    #[test]
+    fn test_disconnect_freezes_the_routed_session() {
+        // Arrange: one routed session with a live receiver.
+        let (routes, routed, rx) = routed_entry();
+        // Act
+        notify_disconnect(&routes, &routed);
+        // Assert: it is told to release held outputs.
+        assert!(
+            matches!(rx.try_recv(), Ok(PadEvent::Frozen)),
+            "routed session must freeze on disconnect"
+        );
+    }
+
+    #[test]
+    fn test_disconnect_with_nothing_routed_sends_nothing() {
+        // Arrange: no routing target.
+        let (routes, _, rx) = routed_entry();
+        let empty: HashSet<InputSource> = HashSet::new();
+        // Act: no panic, no event.
+        notify_disconnect(&routes, &None);
+        notify_reconnect(&routes, &None, &empty);
+        // Assert
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_reconnect_resumes_the_routed_session() {
+        // Arrange
+        let (routes, routed, rx) = routed_entry();
+        let empty: HashSet<InputSource> = HashSet::new();
+        // Act
+        notify_reconnect(&routes, &routed, &empty);
+        // Assert: retarget stays silent on reconnect (target unchanged),
+        // so the hub must resume the session explicitly.
+        assert!(
+            matches!(rx.try_recv(), Ok(PadEvent::Live { .. })),
+            "routed session must resume on reconnect"
+        );
+    }
+
+    #[test]
+    fn test_retarget_live_carries_physical_pressed_set() {
+        // Arrange: session 7 focused and unrouted, A physically held.
+        let (mut routes, _, rx) = routed_entry();
+        let mut routed = None;
+        let pressed: HashSet<InputSource> =
+            [crate::InputSource::Button(crate::GamepadButton::A)]
+                .into_iter()
+                .collect();
+        let mut last_live = None;
+        // Act
+        retarget(&mut routes, &mut routed, &pressed, &mut last_live);
+        // Assert: routed with the pressed set for reconciliation.
+        assert_eq!(routed, Some(7));
+        assert_eq!(last_live, Some(7));
+        match rx.try_recv() {
+            Ok(PadEvent::Live { pressed: got }) => {
+                assert_eq!(
+                    got,
+                    vec![crate::InputSource::Button(crate::GamepadButton::A)]
+                );
+            }
+            other => panic!("expected Live with pressed set, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_drain_forwards_releases_to_last_live_session() {
+        // Arrange: last live session 7 with a receiver; batch holds a
+        // press, a release, and axis noise.
+        let (routes, _, rx) = routed_entry();
+        let last_live = Some(7);
+        let mut pressed: HashSet<InputSource> =
+            [crate::InputSource::Button(crate::GamepadButton::A)]
+                .into_iter()
+                .collect();
+        let batch = vec![
+            InputEvent {
+                source: crate::InputSource::Button(crate::GamepadButton::B),
+                value: 1.0,
+                timestamp_us: 0,
+            },
+            InputEvent {
+                source: crate::InputSource::Button(crate::GamepadButton::A),
+                value: 0.0,
+                timestamp_us: 1,
+            },
+            InputEvent {
+                source: crate::InputSource::Axis(crate::GamepadAxis::LeftX),
+                value: 0.5,
+                timestamp_us: 2,
+            },
+        ];
+        // Act
+        forward_releases(batch, &routes, &last_live, &mut pressed);
+        // Assert: only the release is forwarded; truth tracked (B held, A up).
+        match rx.try_recv() {
+            Ok(PadEvent::Input(event)) => {
+                assert_eq!(event.source, crate::InputSource::Button(crate::GamepadButton::A));
+                assert_eq!(event.value, 0.0);
+            }
+            other => panic!("expected the release forwarded, got {other:?}"),
+        }
+        assert!(rx.try_recv().is_err());
+        assert!(pressed.contains(&crate::InputSource::Button(crate::GamepadButton::B)));
+        assert!(!pressed.contains(&crate::InputSource::Button(crate::GamepadButton::A)));
+    }
+
+    #[test]
+    fn test_drain_without_last_live_tracks_truth_and_drops() {
+        // Arrange: nobody ever routed.
+        let routes: HashMap<u64, RouteEntry> = HashMap::new();
+        let mut pressed = HashSet::new();
+        let batch = vec![InputEvent {
+            source: crate::InputSource::Button(crate::GamepadButton::A),
+            value: 1.0,
+            timestamp_us: 0,
+        }];
+        // Act: no panic, nothing sent anywhere.
+        forward_releases(batch, &routes, &None, &mut pressed);
+        // Assert: truth still tracked for the next `Live`.
+        assert!(pressed.contains(&crate::InputSource::Button(crate::GamepadButton::A)));
     }
 }

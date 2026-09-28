@@ -21,7 +21,7 @@ pub use calibration::{
 pub use gyro::{GyroProcessingOptions, GyroProcessor, GyroRates};
 pub use mapping::{InputEvent, MappingEngine, OutputEvent};
 pub use physical::{
-    discover_gamepads, discover_gamepads_including_virtual, is_virtual_gamepad,
+    discover_gamepads, discover_gamepads_including_virtual, family_for, is_virtual_gamepad,
     pad_status_summary, ControllerFamily, DeviceInfo, PhysicalGamepad, ReportedInputMode,
     TWIN_UNIQ_PREFIX,
 };
@@ -66,6 +66,6 @@ pub mod steam;
 pub mod vdf;
 pub use sensor::{discover_sdl_gamepads, Sdl3SensorBackend, SdlGamepadInfo, SensorSample};
 pub use vdf::{import_vdf, import_vdf_file, ImportReport};
-pub use virtual_gamepad::VirtualGamepad;
+pub use virtual_gamepad::{MirroredIdentity, VirtualGamepad};
 pub use virtual_keyboard::VirtualKeyboard;
 pub use virtual_mouse::VirtualMouse;

@@ -76,6 +76,11 @@ pub struct ConsoleConfig {
     /// Shared layout used for this console before a game-specific layout.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub controller_profile: String,
+    /// Pause the game while Ira's overlay is visible (`None` = inherit the
+    /// global `pause_game_on_overlay`). Cooperative via the Goldberg fork
+    /// for emulated games, process-group freeze in external-host mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_game_on_overlay: Option<bool>,
 }
 
 impl Default for ConsoleConfig {
@@ -87,11 +92,12 @@ impl Default for ConsoleConfig {
             fullscreen: None,
             controller_mode: None,
             controller_profile: String::new(),
+            pause_game_on_overlay: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemDefaults {
     #[serde(default)]
     pub gamemode: bool,
@@ -269,6 +275,19 @@ pub struct Config {
     /// The virtual controller type comes from the selected layout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wine_controller_mode: Option<ControllerInputMode>,
+    /// Pause Wine games while Ira's overlay is visible (`None` = inherit
+    /// the global `pause_game_on_overlay`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wine_pause_game_on_overlay: Option<bool>,
+    /// Pause native Linux games while Ira's overlay is visible (`None` =
+    /// inherit the global `pause_game_on_overlay`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linux_pause_game_on_overlay: Option<bool>,
+    /// Pause games while Ira's overlay is visible. Off by default: freezing
+    /// is unsafe for online games and fragile engines, so this is opt-in
+    /// per platform or per game.
+    #[serde(default)]
+    pub pause_game_on_overlay: bool,
     #[serde(default)]
     pub default_api_emu_version: String,
     /// Remembered auto-add emulator choice. `None` = ask every time,
@@ -380,6 +399,9 @@ impl Default for Config {
             linux_controller_mode: None,
             wine_controller_profile: String::new(),
             wine_controller_mode: None,
+            wine_pause_game_on_overlay: None,
+            linux_pause_game_on_overlay: None,
+            pause_game_on_overlay: false,
             default_api_emu_version: String::new(),
             auto_emu_install: None,
             centralize_game_saves: true,
@@ -529,6 +551,7 @@ static EMPTY_CONSOLE: ConsoleConfig = ConsoleConfig {
     fullscreen: None,
     controller_mode: None,
     controller_profile: String::new(),
+    pause_game_on_overlay: None,
 };
 
 /// Trim whitespace, drop empties, dedupe, and convert to paths in order.
@@ -658,8 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn test_console_fullscreen_resolution() {
-        // Inherit on desktop follows the global default.
+    fn test_console_fullscreen_resolution() {        // Inherit on desktop follows the global default.
         let cfg = Config {
             default_fullscreen: true,
             ..Default::default()
@@ -679,6 +701,49 @@ mod tests {
         assert!(!overridden.console_fullscreen("gba", false));
         overridden.console_mut("gba").fullscreen = Some(true);
         assert!(overridden.console_fullscreen("gba", false));
+    }
+
+    #[test]
+    fn test_pause_game_on_overlay_defaults_off() {
+        // Arrange: fresh config and a legacy config without the key.
+        let cfg = Config::default();
+        let legacy: Config = serde_json::from_str(r#"{}"#).unwrap();
+        // Assert: safe default — no pausing unless opted in.
+        assert!(!cfg.pause_game_on_overlay);
+        assert!(!legacy.pause_game_on_overlay);
+    }
+
+    #[test]
+    fn test_pause_game_on_overlay_platform_overrides_default_to_inherit() {
+        let cfg = Config::default();
+        assert_eq!(cfg.wine_pause_game_on_overlay, None);
+        assert_eq!(cfg.linux_pause_game_on_overlay, None);
+        assert_eq!(cfg.console("gba").pause_game_on_overlay, None);
+    }
+
+    #[test]
+    fn test_pause_game_on_overlay_resolution() {
+        use ira_models::resolve_pause_game_on_overlay;
+        // Platform override beats the global default…
+        assert!(resolve_pause_game_on_overlay(
+            None,
+            Config::default().wine_pause_game_on_overlay,
+            true
+        ));
+        // …and the console override resolves the same way.
+        let mut cfg = Config::default();
+        cfg.console_mut("gba").pause_game_on_overlay = Some(true);
+        assert!(resolve_pause_game_on_overlay(
+            None,
+            cfg.console("gba").pause_game_on_overlay,
+            false
+        ));
+        // Game level wins over everything.
+        assert!(!resolve_pause_game_on_overlay(
+            Some(false),
+            Some(true),
+            true
+        ));
     }
 
     #[test]

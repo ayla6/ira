@@ -50,6 +50,11 @@ pub struct GameLaunchConfig {
     /// Pause ira-input while the game window is unfocused (None = enabled).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_pause_unfocused: Option<bool>,
+    /// Pause the game while Ira's overlay is visible: freeze the process
+    /// group (gamescope/external-host mode) or cooperatively pause via the
+    /// Goldberg fork (emulated Steam games). None = inherit platform/global.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_game_on_overlay: Option<bool>,
     // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamemode: Option<bool>,
@@ -368,7 +373,6 @@ mod tests {
         let cleared = per_game.merge_with_default(&default);
         assert_eq!(cleared.denuvo_api, "");
     }
-
     #[test]
     fn test_game_launch_config_serde_roundtrip() {
         let cfg = GameLaunchConfig {
@@ -380,5 +384,18 @@ mod tests {
         let deserialized: GameLaunchConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.exe, "/home/user/game.exe");
         assert_eq!(deserialized.args, "-foo bar");
+    }
+
+    #[test]
+    fn test_pause_game_on_overlay_defaults_to_inherit() {
+        // Arrange: fresh config, no pause preference stored.
+        let cfg = GameLaunchConfig::default();
+        // Assert: None = inherit the platform/global setting.
+        assert_eq!(cfg.pause_game_on_overlay, None);
+        // Old configs without the key omit it on write and load as inherit.
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert!(json.get("pause_game_on_overlay").is_none());
+        let legacy: GameLaunchConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(legacy.pause_game_on_overlay, None);
     }
 }

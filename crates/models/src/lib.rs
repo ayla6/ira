@@ -15,6 +15,7 @@ mod group;
 mod kind;
 pub mod launch_config;
 mod message;
+pub mod pause;
 pub mod ratings;
 pub mod session;
 mod group_order;
@@ -45,6 +46,7 @@ pub use group_by::GroupBy;
 pub use kind::*;
 pub use launch_config::{ControllerInputMode, GameLaunchConfig, WineConfig, WineProfile, GPU_AUTO};
 pub use message::{AppMessage, AppSender};
+pub use pause::resolve_pause_game_on_overlay;
 pub use session::PlaySession;
 pub use group_order::GroupOrder;
 pub use screenscraper::{

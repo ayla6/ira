@@ -325,9 +325,15 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     // the pad would drive the overlay yet never the game. Overlay
     // visibility already gates input there.
     let focus = if focus_watcher_allowed(arguments.pause_unfocused, arguments.env.as_deref()) {
+        let exe_name = arguments
+            .command
+            .first()
+            .and_then(|cmd| std::path::Path::new(cmd).file_name())
+            .and_then(|name| name.to_str())
+            .map(str::to_string);
         child
             .as_ref()
-            .and_then(|child| crate::FocusWatcher::for_child(child.id()))
+            .and_then(|child| crate::FocusWatcher::for_child(child.id(), exe_name.as_deref()))
     } else {
         None
     };

@@ -39,6 +39,11 @@ pub struct FocusWatcher {
     conn: RustConnection,
     root: Window,
     child_pid: u32,
+    /// Basename of the launched executable: secondary ownership signal for
+    /// windows whose process escaped the descendant tree (double-fork
+    /// reparenting, launcher wrappers). Matching comms fail open toward
+    /// focused, so this only ever rescues false-unfocused readings.
+    exe_name: Option<String>,
     active_atom: u32,
     pid_atom: u32,
     transient_atom: u32,
@@ -59,7 +64,7 @@ struct TreeCache {
 impl FocusWatcher {
     /// None when there is no X server to ask; callers treat that as
     /// always-focused.
-    pub fn for_child(child_pid: u32) -> Option<Self> {
+    pub fn for_child(child_pid: u32, exe_name: Option<&str>) -> Option<Self> {
         let (conn, screen) = RustConnection::connect(None).ok()?;
         let root = conn.setup().roots.get(screen).map(|screen| screen.root)?;
         let atom = |name: &[u8]| -> Option<u32> {
@@ -79,6 +84,7 @@ impl FocusWatcher {
             xres,
             root,
             child_pid,
+            exe_name: exe_name.map(|name| name.to_string()),
             tree: std::cell::RefCell::new(TreeCache {
                 at: Instant::now() - TREE_REFRESH,
                 pids: HashSet::new(),
@@ -146,13 +152,17 @@ impl FocusWatcher {
     }
 
     /// Whether `window` — or an ancestor in its transient chain — is owned
-    /// by a game process. The hop limit keeps a WM-supplied chain loop from
-    /// spinning forever.
+    /// by a game process: inside the descendant tree, or carrying the
+    /// launched executable's name when the process escaped it. The hop
+    /// limit keeps a WM-supplied chain loop from spinning forever.
     fn window_pid_in_tree(&self, window: Window, pids: &HashSet<u32>, depth: usize) -> bool {
         if depth > MAX_PARENT_HOPS {
             return false;
         }
         if self.window_pid(window).is_some_and(|pid| pids.contains(&pid)) {
+            return true;
+        }
+        if self.window_comm_matches_exe(window) {
             return true;
         }
         match self.transient_parent(window) {
@@ -162,6 +172,21 @@ impl FocusWatcher {
             _ => false,
         }
     }
+
+    /// Whether the window's owning process runs the launched executable,
+    /// regardless of where it sits in the process tree. Catches games the
+    /// descendant walk cannot see (reparented to init, launcher wrappers);
+    /// None exe name disables it.
+    fn window_comm_matches_exe(&self, window: Window) -> bool {
+        let pid = self.window_pid(window);
+        let comm = pid.and_then(|pid| {
+            std::fs::read_to_string(format!("/proc/{pid}/comm"))
+                .ok()
+                .map(|comm| comm.trim().to_string())
+        });
+        comm_matches_exe(comm.as_deref(), self.exe_name.as_deref())
+    }
+
 
     /// The window manager's managed X11 clients.
     fn client_windows(&self) -> Vec<Window> {
@@ -251,6 +276,13 @@ impl FocusWatcher {
     }
 }
 
+/// Pure core of the exe-name fallback: a resolved comm matches a
+/// configured exe basename. Fails closed toward unfocused on any
+/// missing piece.
+fn comm_matches_exe(comm: Option<&str>, exe: Option<&str>) -> bool {
+    matches!((comm, exe), (Some(comm), Some(exe)) if comm == exe)
+}
+
 /// Whether `window` falls inside an X client's allocated resource range.
 /// Resource ids are `base | (index & mask)`, so masking the low bits off
 /// must yield the base again.
@@ -330,7 +362,7 @@ fn parse_stat_ppid(stat: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{client_owns_window, descendant_set, is_focused, parse_stat_ppid};
+    use super::{client_owns_window, comm_matches_exe, descendant_set, is_focused, parse_stat_ppid};
 
     #[test]
     fn test_client_owns_window_matches_resource_ranges() {
@@ -377,5 +409,14 @@ mod tests {
         assert!(!is_focused(false, true, true));
         // Desktop active with a Wayland-native game: unobservable, stay live.
         assert!(is_focused(false, true, false));
+    }
+
+    #[test]
+    fn test_comm_matches_exe_needs_both_sides() {
+        assert!(comm_matches_exe(Some("retroarch"), Some("retroarch")));
+        assert!(!comm_matches_exe(Some("retroarch"), Some("mgba")));
+        assert!(!comm_matches_exe(Some("retroarch"), None));
+        assert!(!comm_matches_exe(None, Some("retroarch")));
+        assert!(!comm_matches_exe(None, None));
     }
 }

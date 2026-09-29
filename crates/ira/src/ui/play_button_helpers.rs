@@ -311,6 +311,7 @@ fn spawn_and_monitor(
     cmd: &[String],
     env: &[(String, String)],
     err_label: &str,
+    desktop_hold: Option<ira_launcher::input_daemon::DaemonClient>,
 ) -> Result<(), String> {
     let log_path = ira_launcher::wrapper::game_log_path(ctx.save_dir, ctx.game_id);
     match ira_launcher::wrapper::spawn_game(cmd, env, None, Some(&log_path)) {
@@ -319,12 +320,25 @@ fn spawn_and_monitor(
             ctx.running_games.lock().unwrap().insert(ctx.game_id, pid);
             let mc = monitor_context(ctx, cmd, env, true);
             std::thread::spawn(move || {
+                // Held until monitoring ends: the pad stays native for
+                // exactly as long as the game lives.
+                let _desktop_hold = desktop_hold;
                 ira_launcher::wrapper::monitor_process(child, pid, mc);
             });
             Ok(())
         }
         Err(e) => Err(format!("Failed to launch {}: {}", err_label, e)),
     }
+}
+
+/// The bypass-path hold matching the PC launcher: a game that does not run
+/// its input through the daemon must not be remapped underneath by the
+/// daemon's idle desktop session, or "remapping: disabled" looks ignored
+/// and the virtual pad stays visible. `None` when the broker owns the pad.
+fn bypass_desktop_hold(mode: ControllerInputMode) -> Option<ira_launcher::input_daemon::DaemonClient> {
+    (mode != ControllerInputMode::Enabled)
+        .then(ira_launcher::input_daemon::hold_desktop_for_game)
+        .flatten()
 }
 
 /// Fullscreen for an emulator launch: the configured value, forced on
@@ -679,7 +693,8 @@ pub(super) fn launch_retro(
         return Ok(());
     }
     wrap_emulator_input(ctx, &mut cmd, &input)?;
-    spawn_and_monitor(ctx, &cmd, &env, ctx.game_name)
+    let desktop_hold = bypass_desktop_hold(input.mode);
+    spawn_and_monitor(ctx, &cmd, &env, ctx.game_name, desktop_hold)
 }
 
 /// Per-game override, then the integration-global setting. `None` means no
@@ -774,7 +789,8 @@ fn launch_emulator(
         return Ok(());
     }
     wrap_emulator_input(ctx, &mut cmd, &input)?;
-    spawn_and_monitor(ctx, &cmd, &env, label)
+    let desktop_hold = bypass_desktop_hold(input.mode);
+    spawn_and_monitor(ctx, &cmd, &env, label, desktop_hold)
 }
 
 pub(super) fn launch_ps4(
@@ -1054,7 +1070,7 @@ pub(super) fn launch_steam(ctx: &LaunchCtx, app_id: &str) -> Result<bool, String
             ["--steam-app-id".to_string(), app_id.to_string()],
         );
         let env = std::env::vars().collect::<Vec<_>>();
-        spawn_and_monitor(ctx, &cmd, &env, "Steam game")?;
+        spawn_and_monitor(ctx, &cmd, &env, "Steam game", None)?;
         return Ok(true);
     }
     let env = std::env::vars().collect::<Vec<_>>();

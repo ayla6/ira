@@ -240,7 +240,7 @@ fn monitor_context(
     let external = ira_launcher::env_builder::uses_gamescope(cmd)
         || super::big_picture::running_in_gamescope();
     let owned = ctx.game_kind != ira_models::GameKind::Steam;
-    let pause_watch = ira_launcher::freeze::watch_config(pause, external, owned, shm);
+    let pause_watch = ira_launcher::freeze::watch_config(pause, external, owned, shm, ctx.game_id);
     ira_launcher::wrapper::MonitorContext {
         sender: ctx.sender.clone(),
         game_id: ctx.game_id,

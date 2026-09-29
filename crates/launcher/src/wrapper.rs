@@ -401,10 +401,9 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
     // group id is the child's pid (spawn_game makes it a group leader).
     // Daemon sessions never reach this monitor, so their pids stay ours.
     let freeze_exit = Arc::new(AtomicBool::new(false));
-    let freeze_handle = ctx.pause_watch.as_ref().map(|cfg| {
+    let freeze_handle = ctx.pause_watch.clone().map(|cfg| {
         let exit = freeze_exit.clone();
-        let shm_name = cfg.shm_name.clone();
-        std::thread::spawn(move || super::freeze::watch(&shm_name, child_pid, exit))
+        std::thread::spawn(move || super::freeze::watch(&cfg, child_pid, exit))
     });
 
     loop {

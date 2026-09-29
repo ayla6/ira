@@ -405,6 +405,7 @@ pub fn launch_game(
         super::env_builder::uses_gamescope(&command),
         true,
         ctx.overlay_shm.as_deref(),
+        ctx.game_id,
     );
     if pause_watch.is_some() {
         eprintln!("ira-pause: freeze watcher armed for '{}'", ctx.game_name);

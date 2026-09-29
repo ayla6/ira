@@ -439,9 +439,12 @@ fn launch_game_with_disc(
             &global_shadps4_exe,
             &game_path,
             cfg_clone.console_fullscreen("ps4", in_big_picture),
-            cfg_clone.console("ps4").controller_mode,
-            (!cfg_clone.console("ps4").controller_profile.is_empty())
-                .then_some(cfg_clone.console("ps4").controller_profile.as_str()),
+            play_button_helpers::ConsoleInput {
+                mode: cfg_clone.console("ps4").controller_mode,
+                profile: (!cfg_clone.console("ps4").controller_profile.is_empty())
+                    .then_some(cfg_clone.console("ps4").controller_profile.as_str()),
+                pause_unfocused: cfg_clone.console("ps4").input_pause_unfocused,
+            },
         )?;
     } else if kind == ira_models::GameKind::Ps3 {
         play_button_helpers::launch_ps3(
@@ -450,9 +453,12 @@ fn launch_game_with_disc(
             &global_rpcs3_exe,
             &game_path,
             cfg_clone.console_fullscreen("ps3", in_big_picture),
-            cfg_clone.console("ps3").controller_mode,
-            (!cfg_clone.console("ps3").controller_profile.is_empty())
-                .then_some(cfg_clone.console("ps3").controller_profile.as_str()),
+            play_button_helpers::ConsoleInput {
+                mode: cfg_clone.console("ps3").controller_mode,
+                profile: (!cfg_clone.console("ps3").controller_profile.is_empty())
+                    .then_some(cfg_clone.console("ps3").controller_profile.as_str()),
+                pause_unfocused: cfg_clone.console("ps3").input_pause_unfocused,
+            },
         )?;
     } else if kind == ira_models::GameKind::PsVita {
         play_button_helpers::launch_vita3k(
@@ -460,9 +466,12 @@ fn launch_game_with_disc(
             &global_vita3k_exe,
             &game_path,
             cfg_clone.console_fullscreen("psvita", in_big_picture),
-            cfg_clone.console("psvita").controller_mode,
-            (!cfg_clone.console("psvita").controller_profile.is_empty())
-                .then_some(cfg_clone.console("psvita").controller_profile.as_str()),
+            play_button_helpers::ConsoleInput {
+                mode: cfg_clone.console("psvita").controller_mode,
+                profile: (!cfg_clone.console("psvita").controller_profile.is_empty())
+                    .then_some(cfg_clone.console("psvita").controller_profile.as_str()),
+                pause_unfocused: cfg_clone.console("psvita").input_pause_unfocused,
+            },
         )?;
     } else if kind == ira_models::GameKind::WiiU {
         play_button_helpers::launch_cemu(
@@ -471,9 +480,12 @@ fn launch_game_with_disc(
             &global_cemu_exe,
             &game_path,
             cfg_clone.console_fullscreen("wiiu", in_big_picture),
-            cfg_clone.console("wiiu").controller_mode,
-            (!cfg_clone.console("wiiu").controller_profile.is_empty())
-                .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
+            play_button_helpers::ConsoleInput {
+                mode: cfg_clone.console("wiiu").controller_mode,
+                profile: (!cfg_clone.console("wiiu").controller_profile.is_empty())
+                    .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
+                pause_unfocused: cfg_clone.console("wiiu").input_pause_unfocused,
+            },
         )?;
     } else if kind == ira_models::GameKind::ThreeDS {
         play_button_helpers::launch_azahar(
@@ -482,9 +494,12 @@ fn launch_game_with_disc(
             &global_azahar_exe,
             &game_path,
             cfg_clone.console_fullscreen("3ds", in_big_picture),
-            cfg_clone.console("3ds").controller_mode,
-            (!cfg_clone.console("3ds").controller_profile.is_empty())
-                .then_some(cfg_clone.console("3ds").controller_profile.as_str()),
+            play_button_helpers::ConsoleInput {
+                mode: cfg_clone.console("3ds").controller_mode,
+                profile: (!cfg_clone.console("3ds").controller_profile.is_empty())
+                    .then_some(cfg_clone.console("3ds").controller_profile.as_str()),
+                pause_unfocused: cfg_clone.console("3ds").input_pause_unfocused,
+            },
         )?;
     } else if kind == ira_models::GameKind::Steam {
         let result = play_button_helpers::launch_steam(&ctx, &app_id);

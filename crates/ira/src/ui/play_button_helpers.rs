@@ -372,6 +372,7 @@ fn build_emulator_env_and_wrap(
     cmd: &mut Vec<String>,
     console_mode: Option<ControllerInputMode>,
     console_profile: Option<&str>,
+    console_pause_unfocused: Option<bool>,
 ) -> Result<(Vec<(String, String)>, EmulatorInput), String> {
     let mut env = ira_launcher::env_builder::clean_parent_env();
 
@@ -458,7 +459,10 @@ fn build_emulator_env_and_wrap(
     let input = EmulatorInput {
         mode: input_mode,
         profile: input_profile,
-        pause_unfocused: launch.input_pause_unfocused.unwrap_or(true),
+        pause_unfocused: launch
+            .input_pause_unfocused
+            .or(console_pause_unfocused)
+            .unwrap_or(true),
     };
 
     Ok((env, input))
@@ -688,6 +692,7 @@ pub(super) fn launch_retro(
         &mut cmd,
         cc.controller_mode,
         (!cc.controller_profile.is_empty()).then_some(cc.controller_profile.as_str()),
+        cc.input_pause_unfocused,
     )?;
     if try_daemon_handoff(ctx, &cmd, &env, &input)? {
         return Ok(());
@@ -760,6 +765,7 @@ pub(super) struct EmulatorLaunchOpts<'a> {
     pub fullscreen: bool,
     pub console_mode: Option<ControllerInputMode>,
     pub console_profile: Option<&'a str>,
+    pub console_pause_unfocused: Option<bool>,
 }
 
 fn launch_emulator(
@@ -775,6 +781,7 @@ fn launch_emulator(
         fullscreen,
         console_mode,
         console_profile,
+        console_pause_unfocused,
     } = opts;
     // A gamescope wrap or session needs the emulator fullscreen even for
     // users who prefer windowed launches (see `emulator_fullscreen`).
@@ -784,7 +791,13 @@ fn launch_emulator(
         &args,
         Some(std::path::Path::new(game_path)),
     );
-    let (env, input) = build_emulator_env_and_wrap(ctx, &mut cmd, console_mode, console_profile)?;
+    let (env, input) = build_emulator_env_and_wrap(
+        ctx,
+        &mut cmd,
+        console_mode,
+        console_profile,
+        console_pause_unfocused,
+    )?;
     if try_daemon_handoff(ctx, &cmd, &env, &input)? {
         return Ok(());
     }
@@ -793,15 +806,27 @@ fn launch_emulator(
     spawn_and_monitor(ctx, &cmd, &env, label, desktop_hold)
 }
 
+/// Console-wide input overrides saved for one emulator: the broker mode,
+/// the layout profile, and the focus-pause fallback beneath per-game config.
+pub(super) struct ConsoleInput<'a> {
+    pub mode: Option<ControllerInputMode>,
+    pub profile: Option<&'a str>,
+    pub pause_unfocused: Option<bool>,
+}
+
 pub(super) fn launch_ps4(
     ctx: &LaunchCtx,
     per_game_version: &str,
     global_shadps4_exe: &str,
     game_path: &str,
     fullscreen: bool,
-    console_mode: Option<ControllerInputMode>,
-    console_profile: Option<&str>,
+    input: ConsoleInput<'_>,
 ) -> Result<(), String> {
+    let ConsoleInput {
+        mode: console_mode,
+        profile: console_profile,
+        pause_unfocused: console_pause_unfocused,
+    } = input;
     let exe = ira_platforms::ps4::resolve_shadps4_executable(per_game_version, global_shadps4_exe);
     if !ira_platforms::ps4::shadps4_executable_available(&exe) {
         return Err(format!(
@@ -819,6 +844,7 @@ pub(super) fn launch_ps4(
             fullscreen,
             console_mode,
             console_profile,
+            console_pause_unfocused,
         },
     )
 }
@@ -829,9 +855,13 @@ pub(super) fn launch_ps3(
     global_rpcs3_exe: &str,
     game_path: &str,
     fullscreen: bool,
-    console_mode: Option<ControllerInputMode>,
-    console_profile: Option<&str>,
+    input: ConsoleInput<'_>,
 ) -> Result<(), String> {
+    let ConsoleInput {
+        mode: console_mode,
+        profile: console_profile,
+        pause_unfocused: console_pause_unfocused,
+    } = input;
     let exe = resolve_emulator_exe(per_game_emu, global_rpcs3_exe)
         .ok_or_else(|| format!("No emulator configured for {}", ctx.game_name))?;
     // RPCS3 parses option flags until the positional game path, so the
@@ -847,6 +877,7 @@ pub(super) fn launch_ps3(
             fullscreen,
             console_mode,
             console_profile,
+            console_pause_unfocused,
         },
     )
 }
@@ -856,9 +887,13 @@ pub(super) fn launch_vita3k(
     global_executable: &str,
     game_path: &str,
     fullscreen: bool,
-    console_mode: Option<ControllerInputMode>,
-    console_profile: Option<&str>,
+    input: ConsoleInput<'_>,
 ) -> Result<(), String> {
+    let ConsoleInput {
+        mode: console_mode,
+        profile: console_profile,
+        pause_unfocused: console_pause_unfocused,
+    } = input;
     let exe = resolve_emulator_exe("", global_executable)
         .ok_or_else(|| format!("No emulator configured for {}", ctx.game_name))?;
     launch_emulator(
@@ -872,6 +907,7 @@ pub(super) fn launch_vita3k(
             fullscreen,
             console_mode,
             console_profile,
+            console_pause_unfocused,
         },
     )
 }
@@ -882,9 +918,13 @@ pub(super) fn launch_cemu(
     global_executable: &str,
     game_path: &str,
     fullscreen: bool,
-    console_mode: Option<ControllerInputMode>,
-    console_profile: Option<&str>,
+    input: ConsoleInput<'_>,
 ) -> Result<(), String> {
+    let ConsoleInput {
+        mode: console_mode,
+        profile: console_profile,
+        pause_unfocused: console_pause_unfocused,
+    } = input;
     let exe = resolve_emulator_exe(per_game_emu, global_executable)
         .ok_or_else(|| format!("No emulator configured for {}", ctx.game_name))?;
     launch_emulator(
@@ -898,6 +938,7 @@ pub(super) fn launch_cemu(
             fullscreen,
             console_mode,
             console_profile,
+            console_pause_unfocused,
         },
     )
 }
@@ -908,9 +949,13 @@ pub(super) fn launch_azahar(
     global_executable: &str,
     game_path: &str,
     fullscreen: bool,
-    console_mode: Option<ControllerInputMode>,
-    console_profile: Option<&str>,
+    input: ConsoleInput<'_>,
 ) -> Result<(), String> {
+    let ConsoleInput {
+        mode: console_mode,
+        profile: console_profile,
+        pause_unfocused: console_pause_unfocused,
+    } = input;
     let exe = resolve_emulator_exe(per_game_emu, global_executable)
         .ok_or_else(|| format!("No emulator configured for {}", ctx.game_name))?;
     // Azahar takes the ROM or installed title content file positionally.
@@ -925,6 +970,7 @@ pub(super) fn launch_azahar(
             fullscreen,
             console_mode,
             console_profile,
+            console_pause_unfocused,
         },
     )
 }
@@ -1008,7 +1054,7 @@ pub(super) fn launch_emulator_no_game(
 
     let mut cmd = ira_platforms::emulator_detect::build_command_with_filesystem(&exe, &[], None);
     let (env, emu_input) =
-        build_emulator_env_and_wrap(ctx, &mut cmd, input.0, input.1.as_deref())?;
+        build_emulator_env_and_wrap(ctx, &mut cmd, input.0, input.1.as_deref(), input.2)?;
     let desktop_hold = ira_launcher::input_daemon::desktop_hold_if_disabled(emu_input.mode);
     ira_launcher::wrapper::spawn_detached(
         &cmd,
@@ -1024,11 +1070,12 @@ pub(super) fn launch_emulator_no_game(
 fn console_controller_input(
     cfg: &Config,
     console_id: &str,
-) -> (Option<ControllerInputMode>, Option<String>) {
+) -> (Option<ControllerInputMode>, Option<String>, Option<bool>) {
     let cc = cfg.console(console_id);
     (
         cc.controller_mode,
-        (!cc.controller_profile.is_empty()).then_some(cc.controller_profile.clone()),
+        (!cc.controller_profile.is_empty()).then(|| cc.controller_profile.clone()),
+        cc.input_pause_unfocused,
     )
 }
 

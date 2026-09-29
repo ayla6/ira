@@ -28,6 +28,13 @@ pub(super) struct ConsoleProfileWidgets {
     pub console_id: String,
     pub mode: Rc<RefCell<Option<ControllerInputMode>>>,
     pub profile_path: Rc<RefCell<Option<std::path::PathBuf>>>,
+    pub pause_unfocused: Rc<RefCell<Option<bool>>>,
+}
+
+struct ConsoleRowsParams {
+    console_id: String,
+    label: String,
+    show_pause_unfocused: bool,
 }
 
 /// The settings host (an `adw::Window` since the settings dialog became
@@ -46,8 +53,11 @@ pub(super) fn add_pc_profile_group(
     let widget = add_console_remapping_rows(
         &group,
         cfg,
-        config_id.to_string(),
-        label.to_string(),
+        ConsoleRowsParams {
+            console_id: config_id.to_string(),
+            label: label.to_string(),
+            show_pause_unfocused: false,
+        },
         &parent,
         &cfg.save_dir,
         registry,
@@ -156,8 +166,11 @@ pub(super) fn add_console_profile_group(
     let widget = add_console_remapping_rows(
         &group,
         cfg,
-        console_id.to_string(),
-        label.to_string(),
+        ConsoleRowsParams {
+            console_id: console_id.to_string(),
+            label: label.to_string(),
+            show_pause_unfocused: true,
+        },
         &parent,
         save_dir,
         registry,
@@ -169,12 +182,16 @@ pub(super) fn add_console_profile_group(
 fn add_console_remapping_rows(
     group: &adw::PreferencesGroup,
     cfg: &Config,
-    console_id: String,
-    label: String,
+    params: ConsoleRowsParams,
     parent: &gtk4::Widget,
     save_dir: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
 ) -> ConsoleProfileWidgets {
+    let ConsoleRowsParams {
+        console_id,
+        label,
+        show_pause_unfocused,
+    } = params;
     let mode = Rc::new(RefCell::new(cfg.console(&console_id).controller_mode));
     let mode_row = adw::ComboRow::new();
     mode_row.set_title(&crate::tr!("Input remapping"));
@@ -196,6 +213,28 @@ fn add_console_remapping_rows(
         *mode_for_selection.borrow_mut() = input_mode_from_index(row.selected());
     });
     group.add(&mode_row);
+
+    let pause_unfocused = Rc::new(RefCell::new(cfg.console(&console_id).input_pause_unfocused));
+    if show_pause_unfocused {
+        let pause_row = adw::SwitchRow::builder()
+            .title(crate::tr!("Pause when the game loses focus"))
+            .subtitle(crate::tr!(
+                "Suspend controller input and gyro while another window is focused"
+            ))
+            .active(
+                cfg.console(&console_id)
+                    .input_pause_unfocused
+                    .unwrap_or(true),
+            )
+            .build();
+        {
+            let pause_cell = pause_unfocused.clone();
+            pause_row.connect_active_notify(move |row| {
+                *pause_cell.borrow_mut() = Some(row.is_active());
+            });
+        }
+        group.add(&pause_row);
+    }
 
     let profile_row = adw::ComboRow::new();
     profile_row.set_title(&crate::tr!("Layout"));
@@ -315,6 +354,7 @@ fn add_console_remapping_rows(
         console_id,
         mode,
         profile_path,
+        pause_unfocused,
     }
 }
 

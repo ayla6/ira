@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-28 20:27-0300\n"
+"POT-Creation-Date: 2026-09-29 01:33-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -789,7 +789,7 @@ msgstr ""
 #: crates/ira/src/ui/big_picture/disc_picker.rs:277
 #: crates/ira/src/ui/disc_picker.rs:132
 #: crates/ira/src/ui/image_manager.rs:1042
-#: crates/ira/src/ui/play_button.rs:817
+#: crates/ira/src/ui/play_button.rs:832
 #, rust-format
 msgid "Disc {}"
 msgstr ""
@@ -822,7 +822,7 @@ msgstr ""
 #: crates/ira/src/ui/group_dialog.rs:113
 #: crates/ira/src/ui/input_output_keys.rs:104
 #: crates/ira/src/ui/input_output_keys.rs:219
-#: crates/ira/src/ui/input_profile_settings.rs:966
+#: crates/ira/src/ui/input_profile_settings.rs:1006
 #: crates/ira/src/ui/installer_add_dialog.rs:799
 #: crates/ira/src/ui/play_history.rs:275
 #: crates/ira/src/ui/profile_dialog.rs:201
@@ -1118,34 +1118,36 @@ msgid "Start from scratch for this game only"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:354
-#: crates/ira/src/ui/input_profile_settings.rs:180
+#: crates/ira/src/ui/input_profile_settings.rs:197
 msgid "Input remapping"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:356
-#: crates/ira/src/ui/input_profile_settings.rs:187
-#: crates/ira/src/ui/input_profile_settings.rs:360
+#: crates/ira/src/ui/input_profile_settings.rs:204
+#: crates/ira/src/ui/input_profile_settings.rs:400
 msgid "Inherit"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:357
-#: crates/ira/src/ui/input_profile_settings.rs:188
-#: crates/ira/src/ui/input_profile_settings.rs:594
-#: crates/ira/src/ui/input_profile_settings.rs:704
+#: crates/ira/src/ui/input_profile_settings.rs:205
+#: crates/ira/src/ui/input_profile_settings.rs:634
+#: crates/ira/src/ui/input_profile_settings.rs:744
 msgid "Disabled"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:358
-#: crates/ira/src/ui/input_profile_settings.rs:189
+#: crates/ira/src/ui/input_profile_settings.rs:206
 #: crates/ira/src/ui/wine_config_widget.rs:430
 msgid "Enabled"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:368
+#: crates/ira/src/ui/input_profile_settings.rs:220
 msgid "Pause when the game loses focus"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:370
+#: crates/ira/src/ui/input_profile_settings.rs:222
 msgid "Suspend controller input and gyro while another window is focused"
 msgstr ""
 
@@ -1154,7 +1156,7 @@ msgid "Current layout"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:422
-#: crates/ira/src/ui/input_profile_settings.rs:903
+#: crates/ira/src/ui/input_profile_settings.rs:943
 #: crates/ira/src/ui/profile_dialog.rs:160
 #: crates/ira/src/ui/profile_dialog.rs:249
 #: crates/ira/src/ui/wine_profile_picker.rs:66
@@ -1163,7 +1165,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_controller.rs:425
 #: crates/ira/src/ui/edit_game_controller.rs:459
-#: crates/ira/src/ui/input_profile_settings.rs:904
+#: crates/ira/src/ui/input_profile_settings.rs:944
 #: crates/ira/src/ui/profile_dialog.rs:187
 #: crates/ira/src/ui/profile_dialog.rs:199
 msgid "Delete profile"
@@ -1433,14 +1435,14 @@ msgid "Synopsis"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:27
-#: crates/ira/src/ui/settings_dialog_console.rs:529
+#: crates/ira/src/ui/settings_dialog_console.rs:530
 #: crates/ira/src/ui/settings_dialog.rs:180
 #: crates/ira/src/ui/settings_dialog.rs:201
 msgid "In-game overlay"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:28
-#: crates/ira/src/ui/settings_dialog_console.rs:530
+#: crates/ira/src/ui/settings_dialog_console.rs:531
 #: crates/ira/src/ui/settings_dialog.rs:181
 #: crates/ira/src/ui/settings_dialog.rs:202
 msgid "Achievements, screenshots, and recording"
@@ -1820,7 +1822,7 @@ msgid "Performance overlay"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:71
-#: crates/ira/src/ui/settings_dialog_console.rs:535
+#: crates/ira/src/ui/settings_dialog_console.rs:536
 #: crates/ira/src/ui/settings_dialog.rs:186
 #: crates/ira/src/ui/settings_dialog.rs:207
 #: crates/ira/src/ui/settings_pages.rs:319
@@ -1828,7 +1830,7 @@ msgid "Gamescope"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:72
-#: crates/ira/src/ui/settings_dialog_console.rs:536
+#: crates/ira/src/ui/settings_dialog_console.rs:537
 #: crates/ira/src/ui/settings_dialog.rs:187
 #: crates/ira/src/ui/settings_dialog.rs:208
 #: crates/ira/src/ui/settings_pages.rs:320
@@ -2109,7 +2111,7 @@ msgid "View log"
 msgstr ""
 
 #: crates/ira/src/ui/game_header.rs:329
-#: crates/ira/src/ui/play_button.rs:999
+#: crates/ira/src/ui/play_button.rs:1014
 msgid "Open emulator without game"
 msgstr ""
 
@@ -2392,14 +2394,14 @@ msgid "SGDB…"
 msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:440
-#: crates/ira/src/ui/settings_dialog_console.rs:184
-#: crates/ira/src/ui/settings_dialog_console.rs:423
+#: crates/ira/src/ui/settings_dialog_console.rs:185
+#: crates/ira/src/ui/settings_dialog_console.rs:424
 msgid "PS4"
 msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:441
-#: crates/ira/src/ui/settings_dialog_console.rs:183
-#: crates/ira/src/ui/settings_dialog_console.rs:414
+#: crates/ira/src/ui/settings_dialog_console.rs:184
+#: crates/ira/src/ui/settings_dialog_console.rs:415
 msgid "PS3"
 msgstr ""
 
@@ -2408,8 +2410,8 @@ msgid "3DS"
 msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:443
-#: crates/ira/src/ui/settings_dialog_console.rs:188
-#: crates/ira/src/ui/settings_dialog_console.rs:441
+#: crates/ira/src/ui/settings_dialog_console.rs:189
+#: crates/ira/src/ui/settings_dialog_console.rs:442
 msgid "Wii U"
 msgstr ""
 
@@ -2813,9 +2815,9 @@ msgstr ""
 #: crates/ira/src/ui/input_output_keys.rs:232
 #: crates/ira/src/ui/input_output_keys.rs:371
 #: crates/ira/src/ui/play_button.rs:44
-#: crates/ira/src/ui/play_button.rs:726
-#: crates/ira/src/ui/play_button.rs:783
-#: crates/ira/src/ui/play_button.rs:883
+#: crates/ira/src/ui/play_button.rs:741
+#: crates/ira/src/ui/play_button.rs:798
+#: crates/ira/src/ui/play_button.rs:898
 msgid "Stop"
 msgstr ""
 
@@ -4154,13 +4156,13 @@ msgid "Import layout"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_preview.rs:205
-#: crates/ira/src/ui/input_profile_settings.rs:201
+#: crates/ira/src/ui/input_profile_settings.rs:240
 msgid "Layout"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_preview.rs:209
 #: crates/ira/src/ui/input_profile_search_filters.rs:111
-#: crates/ira/src/ui/input_profile_settings.rs:155
+#: crates/ira/src/ui/input_profile_settings.rs:165
 #: crates/ira/src/ui/settings_dialog_pages.rs:282
 msgid "Controller"
 msgstr ""
@@ -4343,7 +4345,7 @@ msgid "Only layouts published for this game"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_search.rs:97
-#: crates/ira/src/ui/input_profile_settings.rs:816
+#: crates/ira/src/ui/input_profile_settings.rs:856
 msgid "Import layout from Steam"
 msgstr ""
 
@@ -4397,89 +4399,89 @@ msgstr ""
 msgid "over {parent}"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:94
+#: crates/ira/src/ui/input_profile_settings.rs:104
 #: crates/ira/src/ui/settings_dialog_pages.rs:355
 msgid "Profiles"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:106
+#: crates/ira/src/ui/input_profile_settings.rs:116
 msgid "Controller defaults"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:184
+#: crates/ira/src/ui/input_profile_settings.rs:201
 msgid ""
 "Whether the input broker runs; the virtual controller type comes from the "
 "selected layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:224
+#: crates/ira/src/ui/input_profile_settings.rs:263
 msgid "Edit layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:351
+#: crates/ira/src/ui/input_profile_settings.rs:391
 msgid "Create new profile..."
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:483
+#: crates/ira/src/ui/input_profile_settings.rs:523
 msgid "No controllers detected"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:530
+#: crates/ira/src/ui/input_profile_settings.rs:570
 msgid "Edit controller mapping"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:596
+#: crates/ira/src/ui/input_profile_settings.rs:636
 msgid "Default layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:726
+#: crates/ira/src/ui/input_profile_settings.rs:766
 msgid "Input virtualization disabled"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:727
+#: crates/ira/src/ui/input_profile_settings.rs:767
 msgid "Virtual XInput layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:728
+#: crates/ira/src/ui/input_profile_settings.rs:768
 msgid "Virtual DirectInput layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:730
+#: crates/ira/src/ui/input_profile_settings.rs:770
 msgid "Nintendo Switch Pro Controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:732
+#: crates/ira/src/ui/input_profile_settings.rs:772
 msgid "DualShock 4 Controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:733
+#: crates/ira/src/ui/input_profile_settings.rs:773
 msgid "DualSense Controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:734
+#: crates/ira/src/ui/input_profile_settings.rs:774
 msgid "Steam Input Controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:735
+#: crates/ira/src/ui/input_profile_settings.rs:775
 msgid "DSU (cemuhook) controller layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:738
+#: crates/ira/src/ui/input_profile_settings.rs:778
 #, rust-format
 msgid "{} | Linux reports {}"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:850
+#: crates/ira/src/ui/input_profile_settings.rs:890
 #: crates/ira/src/ui/profile_dialog.rs:63
 #: crates/ira/src/ui/profile_dialog.rs:251
 msgid "Create profile"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:964
+#: crates/ira/src/ui/input_profile_settings.rs:1004
 msgid "Delete layout"
 msgstr ""
 
-#: crates/ira/src/ui/input_profile_settings.rs:965
+#: crates/ira/src/ui/input_profile_settings.rs:1005
 msgid "This removes the game layout from Ira."
 msgstr ""
 
@@ -5043,19 +5045,19 @@ msgid ""
 "Start {name} without loading a game, using the current controller mapping"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:538
+#: crates/ira/src/ui/play_button.rs:553
 msgid "Stop the running game before opening its emulator"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:777
+#: crates/ira/src/ui/play_button.rs:792
 msgid "Select disc"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:877
+#: crates/ira/src/ui/play_button.rs:892
 msgid "Select variant"
 msgstr ""
 
-#: crates/ira/src/ui/play_button.rs:929
+#: crates/ira/src/ui/play_button.rs:944
 msgid "Base game"
 msgstr ""
 
@@ -5369,53 +5371,53 @@ msgstr ""
 msgid "Select a core for this console"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:185
-#: crates/ira/src/ui/settings_dialog_console.rs:432
+#: crates/ira/src/ui/settings_dialog_console.rs:186
+#: crates/ira/src/ui/settings_dialog_console.rs:433
 msgid "PS Vita"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:191
-#: crates/ira/src/ui/settings_dialog_console.rs:450
+#: crates/ira/src/ui/settings_dialog_console.rs:192
+#: crates/ira/src/ui/settings_dialog_console.rs:451
 msgid "Nintendo 3DS"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:209
+#: crates/ira/src/ui/settings_dialog_console.rs:210
 msgid "Empty platforms"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:231
+#: crates/ira/src/ui/settings_dialog_console.rs:232
 msgid "Loading emulator settings"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:279
+#: crates/ira/src/ui/settings_dialog_console.rs:280
 msgid "ROM formats"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:281
+#: crates/ira/src/ui/settings_dialog_console.rs:282
 msgid "Compressed Switch ROMs"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:283
+#: crates/ira/src/ui/settings_dialog_console.rs:284
 msgid ""
 "Scan .nsz/.xcz files as Switch games — needs an emulator that plays "
 "compressed dumps"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:523
+#: crates/ira/src/ui/settings_dialog_console.rs:524
 #: crates/ira/src/ui/settings_pages.rs:121
 msgid "Start games in fullscreen"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:524
+#: crates/ira/src/ui/settings_dialog_console.rs:525
 msgid "Launch the emulator in fullscreen mode"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:541
+#: crates/ira/src/ui/settings_dialog_console.rs:542
 #: crates/ira/src/ui/settings_pages.rs:873
 msgid "Pause while overlay is visible"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_console.rs:542
+#: crates/ira/src/ui/settings_dialog_console.rs:543
 msgid "Freeze the game (gamescope) while the overlay is up"
 msgstr ""
 
@@ -6591,7 +6593,7 @@ msgstr ""
 msgid "{} / {} — {}h {}m"
 msgstr ""
 
-#: crates/overlay-ui/src/main.rs:309
+#: crates/overlay-ui/src/main.rs:305
 msgid "Ira Overlay"
 msgstr ""
 

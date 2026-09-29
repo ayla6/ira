@@ -142,6 +142,7 @@ pub(super) fn apply_console_settings(cfg: &mut Config, pages: &ConsoleSettingsWi
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_default();
+        console.input_pause_unfocused = *widget.pause_unfocused.borrow();
     }
 }
 

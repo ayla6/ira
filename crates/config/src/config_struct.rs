@@ -76,6 +76,10 @@ pub struct ConsoleConfig {
     /// Shared layout used for this console before a game-specific layout.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub controller_profile: String,
+    /// Pause controller input and gyro when another window is focused
+    /// (`None` = inherit the per-game default, on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_pause_unfocused: Option<bool>,
     /// Pause the game while Ira's overlay is visible (`None` = inherit the
     /// global `pause_game_on_overlay`). Cooperative via the Goldberg fork
     /// for emulated games, process-group freeze in external-host mode.
@@ -92,6 +96,7 @@ impl Default for ConsoleConfig {
             fullscreen: None,
             controller_mode: None,
             controller_profile: String::new(),
+            input_pause_unfocused: None,
             pause_game_on_overlay: None,
         }
     }
@@ -551,6 +556,7 @@ static EMPTY_CONSOLE: ConsoleConfig = ConsoleConfig {
     fullscreen: None,
     controller_mode: None,
     controller_profile: String::new(),
+    input_pause_unfocused: None,
     pause_game_on_overlay: None,
 };
 

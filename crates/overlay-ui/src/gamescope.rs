@@ -183,12 +183,11 @@ fn intern(conn: &x11rb::rust_connection::RustConnection, name: &[u8]) -> Result<
         .map(|r| r.atom)
 }
 
-/// Persistent X connection for focus ownership. Gamescope never focuses
-/// external overlay planes itself (input/keyboard focus goes only to its
-/// internal overlay) and actively refocuses the game, so a visible overlay
-/// must hold focus itself: one connection kept for the session, one
-/// query per tick, one steal whenever the game retook it. Per-call
-/// connects were too slow to win that race and spammed connections.
+/// Persistent X connection for unmap/remap/focus queries. Gamescope never
+/// focuses external overlay planes itself and re-asserts the game on every
+/// commit, so steals never stick (and are not attempted); an unmapped game
+/// window drops out of the focus list instead. One connection kept for the
+/// session: per-call connects were slow and spammed connections.
 pub(crate) struct FocusConn {
     conn: x11rb::rust_connection::RustConnection,
 }
@@ -210,41 +209,6 @@ impl FocusConn {
             .reply()
             .ok()
             .map(|reply| reply.focus)
-    }
-
-    /// Moves X input focus to the overlay window, returning the previously
-    /// focused window. Without this the game keeps focus under a visible
-    /// overlay and focus-pausing games never pause. Best-effort: any
-    /// failure just skips the steal.
-    pub(crate) fn steal_focus(&self, xid: u32) -> Result<u32, String> {
-        use x11rb::protocol::xproto::{ConnectionExt as _, InputFocus, Time};
-        let previous = self
-            .conn
-            .get_input_focus()
-            .map_err(|e| e.to_string())?
-            .reply()
-            .map_err(|e| e.to_string())?
-            .focus;
-        self.conn
-            .set_input_focus(InputFocus::PARENT, xid, Time::CURRENT_TIME)
-            .map_err(|e| e.to_string())?
-            .check()
-            .map_err(|e| e.to_string())?;
-        self.flush()?;
-        Ok(previous)
-    }
-
-    /// Restores X input focus saved by [`FocusConn::steal_focus`].
-    /// Best-effort like above.
-    pub(crate) fn restore_focus(&self, xid: u32) -> Result<(), String> {
-        use x11rb::protocol::xproto::{ConnectionExt as _, InputFocus, Time};
-        self.conn
-            .set_input_focus(InputFocus::PARENT, xid, Time::CURRENT_TIME)
-            .map_err(|e| e.to_string())?
-            .check()
-            .map_err(|e| e.to_string())?;
-        self.flush()?;
-        Ok(())
     }
 
     /// Unmaps a window (makes it unfocusable and invisible). Used on the

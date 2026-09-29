@@ -52,12 +52,8 @@ struct State {
     last_visible: bool,
     /// Last applied window size: the window follows the game extent.
     last_panel_size: (u32, u32),
-    /// X focus saved when the overlay stole it on show (0 = none saved).
-    focus_saved: u32,
     /// Game window actually unmapped for deterministic unfocus (None when
-    /// nothing was unmapped). Tracked separately from `focus_saved`: a
-    /// self-steal (previous focus already ours) saves ourselves, which is
-    /// always viewable and must never count as "the game fought back".
+    /// nothing was unmapped).
     unmapped_game: Option<u32>,
     /// Settled-geometry logged for the current showing (reset on hide):
     /// the show-edge measurements fire pre-layout and read zeros.
@@ -425,7 +421,6 @@ fn activate(
         last_fp,
         last_visible,
         last_panel_size: (win_w as u32, win_h as u32),
-        focus_saved: 0,
         unmapped_game: None,
         showgeom_logged: false,
         unmap_retreat: false,
@@ -596,11 +591,12 @@ fn gamescope_show(s: &mut State) {
         s.window.height()
     );
     s.ui.borrow_mut().log_showgeom();
-    // Unmap FIRST, while the game still holds focus:
-    // the server emits FocusOut on the unmapped
-    // window, which is what focus-pausing games
-    // actually pause on. Stealing first would move
-    // focus away and the unmap would land silently.
+    // Unmap the game window while the overlay is up: an unmapped window
+    // drops out of the compositor's focus list, which is what
+    // focus-pausing games actually pause on. (No XSetInputFocus steal:
+    // gamescope re-asserts its own focus choice every commit, so steals
+    // never stick — input already arrives out-of-band via the grab
+    // threads, and pausing is the freeze feature's job.)
     // Guards: never the root/pointer-root ids, never
     // our own window; errors just skip.
     let xid = overlay_xid(s);
@@ -626,45 +622,13 @@ fn gamescope_show(s: &mut State) {
                 }
             }
         }
-        s.focus_saved = prev.filter(|&p| Some(p) != xid).unwrap_or(0);
-    }
-    // Then steal for determinism: an unmapped window
-    // cannot hold focus, and the steal covers the
-    // (unlikely) already-unmapped case too.
-    match (xid, s.focus_conn.as_ref()) {
-        (Some(xid), Some(conn)) => match conn.steal_focus(xid) {
-            Ok(prev) => {
-                eprintln!("ira-overlay-ui: stole X focus {prev} -> {xid}");
-                // A self-steal saves nothing: focus was
-                // already ours, so there is nothing to
-                // restore and nothing to unmap.
-                s.focus_saved = if prev == xid { 0 } else { prev };
-                // Verify it landed: gamescope refocuses
-                // the game behind our back, and a steal
-                // that never sticks is a lie in the log.
-                match conn.current_focus() {
-                    Some(f) if f == xid => {
-                        eprintln!("ira-overlay-ui: focus verified on overlay")
-                    }
-                    other => eprintln!(
-                        "ira-overlay-ui: focus steal did NOT stick \
-                         (now {other:?}); holding per tick"
-                    ),
-                }
-            }
-            Err(e) => eprintln!("ira-overlay-ui: focus steal failed: {e}"),
-        },
-        _ => eprintln!("ira-overlay-ui: focus steal skipped (no xid/conn)"),
     }
 }
 
 fn gamescope_hide(s: &mut State) {
     // Opacity to zero first: this is what drops the
     // gamescope plane (unmap alone leaves a frozen
-    // frame composited). Then unmap and hand focus back —
-    // but only when focus is still ours: the user may
-    // have switched away meanwhile, and yanking focus
-    // back to a stale game window fights them.
+    // frame composited). Then remap the game window we unmapped.
     if let Some(xid) = gamescope::x11_id(&s.window)
         && let Err(e) = gamescope::set_window_opacity(xid, 0)
     {
@@ -689,24 +653,6 @@ fn gamescope_hide(s: &mut State) {
             }
         }
     }
-    if s.focus_saved != 0 {
-        let ours = overlay_xid(s);
-        let current = s.focus_conn.as_ref().and_then(|conn| conn.current_focus());
-        match (ours, current, s.focus_conn.as_ref()) {
-            (Some(ours), Some(current), Some(conn)) if ours == current => {
-                match conn.restore_focus(s.focus_saved) {
-                    Ok(()) => eprintln!("ira-overlay-ui: restored X focus to {}", s.focus_saved),
-                    Err(e) => eprintln!("ira-overlay-ui: focus restore failed: {e}"),
-                }
-            }
-            _ => eprintln!(
-                "ira-overlay-ui: focus moved on (now {current:?}); \
-                 leaving it instead of restoring {}",
-                s.focus_saved
-            ),
-        }
-        s.focus_saved = 0;
-    }
 }
 
 fn gamescope_hold(s: &mut State) {
@@ -716,45 +662,10 @@ fn gamescope_hold(s: &mut State) {
         s.showgeom_logged = true;
         s.ui.borrow().log_showgeom();
     }
-    // Hold focus every tick while visible: gamescope
-    // refocuses the game continuously, and a 120-frame
-    // cadence loses that race (the game never reads as
-    // unfocused). One query per tick on the kept
-    // connection; a steal only when it moved.
-    let xid = overlay_xid(s);
-    let current = s.focus_conn.as_ref().and_then(|conn| conn.current_focus());
-    if let (Some(xid), Some(conn)) = (xid, s.focus_conn.as_ref())
-        && current.is_some_and(|f| f != xid)
-    {
-        match conn.steal_focus(xid) {
-            Ok(prev) => {
-                // Throttled: at full war this fires every
-                // tick and buries the log.
-                static LAST_RETAKE_MS: std::sync::atomic::AtomicU32 =
-                    std::sync::atomic::AtomicU32::new(0);
-                if std::env::var_os("IRA_OVERLAY_DEBUG").is_some() {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u32)
-                        .unwrap_or(0);
-                    if now.wrapping_sub(LAST_RETAKE_MS.load(std::sync::atomic::Ordering::Relaxed))
-                        > 1000
-                    {
-                        LAST_RETAKE_MS.store(now, std::sync::atomic::Ordering::Relaxed);
-                        eprintln!("ira-overlay-ui: focus retaken from {prev}, stole back");
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("ira-overlay-ui: focus re-assert failed: {e}")
-            }
-        }
-    }
     // Retreat check: if a window we unmapped is viewable
     // again, something remapped it behind our back — stop
     // unmapping instead of fighting it forever. Only the
-    // actually-unmapped window counts (never focus_saved,
-    // which may hold our own id after a self-steal).
+    // actually-unmapped window counts.
     if s.frame_no.is_multiple_of(30)
         && !s.unmap_retreat
         && let Some(game) = s.unmapped_game

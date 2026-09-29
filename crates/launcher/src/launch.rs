@@ -285,11 +285,19 @@ pub fn launch_game(
             // appears seconds later flipped the button back to "Play"
             // mid-launch.
             ctx.running_games.lock().unwrap().insert(ctx.game_id, 0);
-            if ctx.pause_game_on_overlay {
-                eprintln!(
-                    "ira-pause: freeze skipped for '{}': the input daemon owns the game process",
-                    ctx.game_name
-                );
+            // Daemon-supervised launches arm the freezer backend only: the
+            // daemon owns the pid, so the SIGSTOP fallback stays forbidden
+            // (signals from outside could race session teardown). The
+            // freezer sends no signals, and fatal signals still land on
+            // frozen tasks, so teardown is unaffected.
+            let pause_watch = super::freeze::watch_config_daemon(
+                ctx.pause_game_on_overlay,
+                super::env_builder::uses_gamescope(&command),
+                ctx.overlay_shm.as_deref(),
+                ctx.game_id,
+            );
+            if pause_watch.is_some() {
+                eprintln!("ira-pause: freeze watcher armed for '{}'", ctx.game_name);
             }
             let mc = super::wrapper::MonitorContext {
                 sender: ctx.sender.clone(),
@@ -305,9 +313,7 @@ pub fn launch_game(
                 working_dir: game_dir.clone(),
                 // Daemon sessions pump output over IPC; nothing to tail.
                 log_file: String::new(),
-                // The daemon supervises the pid; freezing from outside
-                // could race its session teardown, so never watch here.
-                pause_watch: None,
+                pause_watch,
             };
             std::thread::spawn(move || super::wrapper::monitor_session(client, mc));
             if let Some(host) = host_child {

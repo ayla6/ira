@@ -540,6 +540,12 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
     let log_buf = get_game_log(game_id);
     log_launch_header(&ctx, &log_buf, "Started via the input daemon");
 
+    // Freeze watcher: spawned once the daemon reports the real pid. No
+    // thaw_group here — that helper signals process groups, and daemon
+    // pids are not ours to signal; the watcher thaws its own scope on
+    // shutdown and thaw needs no group kill.
+    let freeze_exit = Arc::new(AtomicBool::new(false));
+    let mut freeze_handle: Option<std::thread::JoinHandle<()>> = None;
     let mut child_pid: Option<i32> = None;
     let result = client.wait_session(|event| match event {
         Event::SessionStarted { child_pid: pid, .. } => {
@@ -559,6 +565,14 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
                     "daemon owns the overlay toggle chord (marker in session env)".to_string(),
                 );
             }
+            if freeze_handle.is_none() {
+                if let Some(cfg) = ctx.pause_watch.clone() {
+                    let exit = freeze_exit.clone();
+                    freeze_handle = Some(std::thread::spawn(move || {
+                        super::freeze::watch(&cfg, pid, exit)
+                    }));
+                }
+            }
         }
         Event::Output { line, .. } => log_buf.lock().unwrap().push(line),
         Event::Controller {
@@ -569,7 +583,7 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
             let message = if connected {
                 format!("Controller connected: {name} ({path})")
             } else {
-                format!("Controller disconnected: {name}")
+                format!("Controller disconnected: {name} ({path})")
             };
             log_buf.lock().unwrap().push(message);
         }
@@ -579,8 +593,16 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
                 .unwrap()
                 .push(format!("Controller profile reloaded: {path}"));
         }
-        Event::SessionEnded { .. } => {}
+        Event::SessionEnded { .. } => {
+            freeze_exit.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
     });
+    // Stop the watcher first and let it thaw: finalize must never meet a
+    // frozen game. No group thaw here — daemon pids are not ours to signal.
+    freeze_exit.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(handle) = freeze_handle {
+        let _ = handle.join();
+    }
     let exit_code = match result {
         Ok(code) => Some(code),
         Err(error) => {

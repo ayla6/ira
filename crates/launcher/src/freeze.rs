@@ -25,6 +25,12 @@ pub struct FreezeCfg {
     pub shm_name: String,
     /// Database game id: names the cgroup scope (`ira-game-<id>`).
     pub game_id: i64,
+    /// Whether the SIGSTOP walk may run. True where we own the pid
+    /// (wrapper launches); false where the daemon supervises it — signals
+    /// from outside could race session teardown, so there it is freezer
+    /// or nothing. Thaw always falls back to targeted SIGCONT: continue
+    /// cannot stop anything, so it stays safe everywhere.
+    pub signals_allowed: bool,
 }
 
 /// One game launch's cgroup scope: `ira-game-<id>` under our own slice.
@@ -128,8 +134,10 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// Decides whether a launch earns a freeze watcher. Pure for testability:
 /// enabled = resolved 3-level setting; external = gamescope/external-host
 /// overlay (un-toggle survives); owned_pid = we spawned the process group
-/// (excludes Steam launches and daemon placeholders); shm = visibility
-/// signal exists.
+/// (excludes Steam launches and daemon placeholders — and selects the
+/// SIGSTOP fallback: the daemon supervises its own pids, so from outside
+/// only the signal-free freezer may touch them); shm = visibility signal
+/// exists.
 pub fn watch_config(
     enabled: bool,
     external: bool,
@@ -144,6 +152,24 @@ pub fn watch_config(
     Some(FreezeCfg {
         shm_name: shm.to_string(),
         game_id,
+        signals_allowed: owned_pid,
+    })
+}
+
+/// Daemon-supervised variant: the daemon owns the pid, so the SIGSTOP
+/// fallback is forbidden outright — freezer or nothing. Same visibility
+/// preconditions otherwise. Safe where the wrapper path is: the freezer
+/// sends no signals, so there is no stop/continue traffic to race
+/// session teardown, and fatal signals still land on frozen tasks.
+pub fn watch_config_daemon(enabled: bool, external: bool, shm: Option<&str>, game_id: i64) -> Option<FreezeCfg> {
+    if !(enabled && external) {
+        return None;
+    }
+    let shm = shm.filter(|s| !s.is_empty())?;
+    Some(FreezeCfg {
+        shm_name: shm.to_string(),
+        game_id,
+        signals_allowed: false,
     })
 }
 
@@ -265,10 +291,11 @@ fn apply(root: i32, freeze: bool) -> usize {
 
 /// Stops (`freeze = true`) or continues the freezable set: one scope
 /// write when the cgroup backend is up, otherwise the SIGSTOP/SIGCONT
-/// walk. The scope is created lazily on the first freeze edge (no
-/// spawn-path side effects for games that never pause) and reused after;
-/// creation failure degrades to signals once, loudly. Returns how many
-/// processes were migrated/signaled.
+/// walk where allowed. The scope is created lazily on the first freeze
+/// edge (no spawn-path side effects for games that never pause) and
+/// reused after; creation failure degrades once, loudly. Thaw always
+/// falls back to targeted SIGCONT. Returns how many processes were
+/// migrated/signaled.
 fn freeze_with(cfg: &FreezeCfg, root_pid: i32, scope: &mut Option<Scope>, freeze: bool) -> usize {
     if scope.is_none() && freeze {
         match Scope::create(cfg.game_id, root_pid) {
@@ -280,22 +307,28 @@ fn freeze_with(cfg: &FreezeCfg, root_pid: i32, scope: &mut Option<Scope>, freeze
             }
         }
     }
-    let Some(scope) = scope else {
-        return apply(root_pid, freeze);
-    };
-    // Migrate the current tree so late spawns join the scope (children
-    // born inside inherit it and need no migration), then freeze once.
-    let mut n = 0;
-    for pid in freeze_set(root_pid) {
-        if scope.migrate(pid).is_ok() {
-            n += 1;
+    if let Some(scope) = scope {
+        // Migrate the current tree so late spawns join the scope (children
+        // born inside inherit it and need no migration), then freeze once.
+        let mut n = 0;
+        for pid in freeze_set(root_pid) {
+            if scope.migrate(pid).is_ok() {
+                n += 1;
+            }
+        }
+        match scope.set_frozen(freeze) {
+            Ok(()) => return n,
+            Err(e) => eprintln!("ira-pause: scope freeze failed ({e}), falling back"),
         }
     }
-    if let Err(e) = scope.set_frozen(freeze) {
-        eprintln!("ira-pause: scope freeze failed ({e}), falling back to signals");
-        return apply(root_pid, freeze);
+    // Thaw always falls back to targeted SIGCONT: continue cannot stop
+    // anything, so it stays safe even where STOP is forbidden. Freezing
+    // without a scope needs the signal walk, which daemon trees forbid.
+    if cfg.signals_allowed || !freeze {
+        apply(root_pid, freeze)
+    } else {
+        0
     }
-    n
 }
 
 /// Idempotent resume for a possibly-frozen launch. Best-effort group CONT
@@ -380,6 +413,27 @@ mod tests {
         assert!(watch_config(true, true, false, Some("/ira_overlay_7"), 7).is_none());
         assert!(watch_config(true, true, true, None, 7).is_none());
         assert!(watch_config(true, true, true, Some(""), 7).is_none());
+    }
+
+    #[test]
+    fn test_watch_config_owned_pid_selects_signal_fallback() {
+        // Wrapper launches own the pid: signals allowed.
+        let cfg = watch_config(true, true, true, Some("/ira_overlay_7"), 7).unwrap();
+        assert!(cfg.signals_allowed);
+        assert_eq!(cfg.game_id, 7);
+    }
+
+    #[test]
+    fn test_watch_config_daemon_forbids_signals() {
+        // Arrange: daemon-supervised launch, same visibility gates.
+        // Act + Assert: arms without pid ownership, but never signals.
+        let cfg = watch_config_daemon(true, true, Some("/ira_overlay_7"), 7).unwrap();
+        assert!(!cfg.signals_allowed);
+        assert_eq!(cfg.shm_name, "/ira_overlay_7");
+        assert!(watch_config_daemon(false, true, Some("/ira_overlay_7"), 7).is_none());
+        assert!(watch_config_daemon(true, false, Some("/ira_overlay_7"), 7).is_none());
+        assert!(watch_config_daemon(true, true, None, 7).is_none());
+        assert!(watch_config_daemon(true, true, Some(""), 7).is_none());
     }
 
     #[test]

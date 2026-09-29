@@ -13,9 +13,9 @@
 //! game could never receive the un-toggle hotkey again (deadlock), so those
 //! games pause cooperatively (Goldberg fork) or not at all.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
 /// What the watcher needs. Built by the caller only when freezing is both
 /// enabled and safe; presence of this struct is the freeze permit.
@@ -61,7 +61,37 @@ impl Scope {
         // game would launch already stopped with nobody scheduled to thaw.
         let _ = scope.write_frozen(false);
         scope.migrate(pid)?;
+        // Evict strays: a reused scope can hold processes from a previous
+        // launch that no longer belong to this tree (e.g. a session
+        // leader migrated before it was excluded). They move back to the
+        // parent; anything still in the tree stays.
+        scope.evict_strays(&freeze_set(pid));
         Ok(scope)
+    }
+
+    /// Moves scope members that are not in `keep` back to the parent
+    /// cgroup. Best-effort per pid; returns the evicted comms for logging.
+    fn evict_strays(&self, keep: &[i32]) -> Vec<String> {
+        let mut evicted = Vec::new();
+        let Some(parent) = self.dir.parent() else {
+            return evicted;
+        };
+        let target = parent.join("cgroup.procs");
+        for member in self.members() {
+            if keep.contains(&member) {
+                continue;
+            }
+            if std::fs::write(&target, member.to_string()).is_ok() {
+                evicted.push(
+                    comm_of(member)
+                        .map_or_else(|| member.to_string(), |c| format!("{c}({member})")),
+                );
+            }
+        }
+        if !evicted.is_empty() {
+            eprintln!("ira-pause: evicted strays [{}]", evicted.join(" "));
+        }
+        evicted
     }
 
     /// Moves one pid into the scope. Children born inside inherit it, so
@@ -81,8 +111,11 @@ impl Scope {
     }
 
     fn write_frozen(&self, frozen: bool) -> Result<(), String> {
-        std::fs::write(self.dir.join("cgroup.freeze"), if frozen { "1" } else { "0" })
-            .map_err(|e| format!("scope freeze write failed: {e}"))
+        std::fs::write(
+            self.dir.join("cgroup.freeze"),
+            if frozen { "1" } else { "0" },
+        )
+        .map_err(|e| format!("scope freeze write failed: {e}"))
     }
 
     fn wait_frozen(&self, want: bool) -> Result<(), String> {
@@ -98,12 +131,19 @@ impl Scope {
     /// Reads the kernel's frozen state (not our last write — the truth).
     pub fn is_frozen(&self) -> bool {
         std::fs::read_to_string(self.dir.join("cgroup.events"))
-            .map(|events| {
-                events
-                    .lines()
-                    .any(|line| line.trim() == "frozen 1")
-            })
+            .map(|events| events.lines().any(|line| line.trim() == "frozen 1"))
             .unwrap_or(false)
+    }
+
+    /// Pids currently in the scope (one per line in cgroup.procs).
+    pub fn members(&self) -> Vec<i32> {
+        std::fs::read_to_string(self.dir.join("cgroup.procs"))
+            .map(|list| {
+                list.split_whitespace()
+                    .filter_map(|pid| pid.parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -161,7 +201,12 @@ pub fn watch_config(
 /// preconditions otherwise. Safe where the wrapper path is: the freezer
 /// sends no signals, so there is no stop/continue traffic to race
 /// session teardown, and fatal signals still land on frozen tasks.
-pub fn watch_config_daemon(enabled: bool, external: bool, shm: Option<&str>, game_id: i64) -> Option<FreezeCfg> {
+pub fn watch_config_daemon(
+    enabled: bool,
+    external: bool,
+    shm: Option<&str>,
+    game_id: i64,
+) -> Option<FreezeCfg> {
     if !(enabled && external) {
         return None;
     }
@@ -204,12 +249,28 @@ fn comm_of(pid: i32) -> Option<String> {
     Some(stat[start + 1..end].to_string())
 }
 
-/// Processes that must never freeze: the gamescope compositor (input to
-/// everything flows through it) and Ira's overlay host (it owns the
-/// un-toggle while visible). Everyone else under the launch — game, Wine
-/// services, wrapper shells — freezes and thaws as a unit.
+/// Processes that must never freeze. The walk roots at the session leader,
+/// so besides the game tree it also reaches session infrastructure — and
+/// freezing any of that breaks the session instead of pausing the game:
+/// - `gamescope*`: the compositor itself, under whatever name it runs
+///   (`gamescope`, `gamescope-wl`, …). Freezing it stops all presents and
+///   kills every session connection — which reads as both "game
+///   destroyed" and "UI paused". Prefix-matched on purpose.
+/// - `gamescopereaper`: owns session teardown; a frozen reaper cannot reap.
+/// - `Xwayland`: the session's display server.
+/// - `xdg-dbus-proxy` / `dbus-proxy`: sandboxed portals; freezing stalls
+///   file dialogs and saves instead of the game.
+/// - `ira-overlay-ui`: owns the un-toggle while visible.
+/// - Everyone else under the launch — game, Wine services, wrapper shells,
+///   flatpak/bwrap plumbing — freezes and thaws as a unit.
 fn freeze_excluded(comm: &str) -> bool {
-    matches!(comm, "gamescope" | "ira-overlay-ui")
+    comm == "gamescope"
+        || comm == "gamescopereaper"
+        || comm.starts_with("gamescope-")
+        || matches!(
+            comm,
+            "Xwayland" | "xdg-dbus-proxy" | "dbus-proxy" | "ira-overlay-ui"
+        )
 }
 
 /// Direct children of `pid` via `/proc/<pid>/task/*/children`.
@@ -219,7 +280,10 @@ fn proc_children(pid: i32) -> Vec<i32> {
     if let Ok(tasks) = std::fs::read_dir(&task_dir) {
         for task in tasks.flatten() {
             if let Ok(data) = std::fs::read_to_string(task.path().join("children")) {
-                children.extend(data.split_whitespace().filter_map(|s| s.parse::<i32>().ok()));
+                children.extend(
+                    data.split_whitespace()
+                        .filter_map(|s| s.parse::<i32>().ok()),
+                );
             }
         }
     }
@@ -293,41 +357,63 @@ fn apply(root: i32, freeze: bool) -> usize {
 /// write when the cgroup backend is up, otherwise the SIGSTOP/SIGCONT
 /// walk where allowed. The scope is created lazily on the first freeze
 /// edge (no spawn-path side effects for games that never pause) and
-/// reused after; creation failure degrades once, loudly. Thaw always
-/// falls back to targeted SIGCONT. Returns how many processes were
-/// migrated/signaled.
-fn freeze_with(cfg: &FreezeCfg, root_pid: i32, scope: &mut Option<Scope>, freeze: bool) -> usize {
+/// reused after; creation failure degrades once, loudly.
+///
+/// Migration runs only when `migrate` is set (edges, plus a slow cadence
+/// while held): every `cgroup.procs` write can block on an
+/// uninterruptible task, so the 250ms hold loop must not sweep. Thaw
+/// always falls back to targeted SIGCONT.
+///
+/// Edge outcome logging lives with the callers (`log_scope`), so the
+/// hold stays silent.
+fn freeze_with(
+    cfg: &FreezeCfg,
+    root_pid: i32,
+    scope: &mut Option<Scope>,
+    freeze: bool,
+    migrate: bool,
+) {
     if scope.is_none() && freeze {
         match Scope::create(cfg.game_id, root_pid) {
             Ok(s) => {
                 *scope = Some(s);
             }
-            Err(e) => {
+            Err(e) if cfg.signals_allowed => {
                 eprintln!("ira-pause: {e}; SIGSTOP fallback for {}", cfg.shm_name);
+            }
+            Err(e) => {
+                eprintln!("ira-pause: {e}; pausing unavailable for {}", cfg.shm_name);
             }
         }
     }
     if let Some(scope) = scope {
-        // Migrate the current tree so late spawns join the scope (children
-        // born inside inherit it and need no migration), then freeze once.
-        let mut n = 0;
-        for pid in freeze_set(root_pid) {
-            if scope.migrate(pid).is_ok() {
-                n += 1;
+        if migrate {
+            // Migrate the current tree so late spawns join the scope
+            // (children born inside inherit it and need no migration).
+            for pid in freeze_set(root_pid) {
+                let _ = scope.migrate(pid);
             }
         }
         match scope.set_frozen(freeze) {
-            Ok(()) => return n,
+            Ok(()) => return,
             Err(e) => eprintln!("ira-pause: scope freeze failed ({e}), falling back"),
         }
     }
-    // Thaw always falls back to targeted SIGCONT: continue cannot stop
-    // anything, so it stays safe even where STOP is forbidden. Freezing
-    // without a scope needs the signal walk, which daemon trees forbid.
     if cfg.signals_allowed || !freeze {
-        apply(root_pid, freeze)
-    } else {
-        0
+        apply(root_pid, freeze);
+    }
+}
+
+/// One terse line per edge: member count plus the kernel's own frozen
+/// state — not a migrated count, which never measured the thaw.
+fn log_scope(what: &str, scope: &Option<Scope>) {
+    match scope {
+        Some(scope) => eprintln!(
+            "ira-pause: {what} scope ({} members, frozen={})",
+            scope.members().len(),
+            scope.is_frozen(),
+        ),
+        None => eprintln!("ira-pause: {what} via signals"),
     }
 }
 
@@ -364,6 +450,12 @@ pub fn watch(cfg: &FreezeCfg, root_pid: i32, exit: Arc<AtomicBool>) {
     // The cgroup scope lives here (created lazily on the first freeze
     // edge) and drops at shutdown, removing its directory when empty.
     let mut scope: Option<Scope> = None;
+    // Last tree→scope migration: the hold loop re-sweeps on a slow
+    // cadence instead of every poll, because each cgroup.procs write can
+    // block on an uninterruptible task and must never stall the 250ms
+    // watcher. Wine services spawning mid-visibility join on the next
+    // sweep at the latest.
+    let mut last_sweep = Instant::now();
     use std::sync::atomic::Ordering;
     let mut was_visible = false;
     loop {
@@ -377,25 +469,33 @@ pub fn watch(cfg: &FreezeCfg, root_pid: i32, exit: Arc<AtomicBool>) {
             // would trap the game (notably its Alt+F4). Clear it once,
             // loudly; the thaw below follows on this same pass.
             shm.header().overlay_visible.store(0, Ordering::SeqCst);
-            eprintln!("ira-pause: overlay host gone with flag up; cleared for {}", cfg.shm_name);
+            eprintln!(
+                "ira-pause: overlay host gone with flag up; cleared for {}",
+                cfg.shm_name
+            );
             visible = false;
         }
         if visible && !was_visible {
-            let n = freeze_with(cfg, root_pid, &mut scope, true);
-            eprintln!("ira-pause: froze {n} game processes (overlay shown)");
+            freeze_with(cfg, root_pid, &mut scope, true, true);
+            last_sweep = Instant::now();
+            log_scope("froze", &scope);
         } else if visible {
             // Hold the freeze across spawns: Wine services start lazily.
-            freeze_with(cfg, root_pid, &mut scope, true);
+            let sweep = last_sweep.elapsed() >= Duration::from_secs(5);
+            freeze_with(cfg, root_pid, &mut scope, true, sweep);
+            if sweep {
+                last_sweep = Instant::now();
+            }
         } else if was_visible {
-            let n = freeze_with(cfg, root_pid, &mut scope, false);
-            eprintln!("ira-pause: thawed {n} game processes (overlay hidden)");
+            freeze_with(cfg, root_pid, &mut scope, false, false);
+            log_scope("thawed", &scope);
         }
         was_visible = visible;
         std::thread::sleep(POLL_INTERVAL);
     }
     if was_visible {
-        let n = freeze_with(cfg, root_pid, &mut scope, false);
-        eprintln!("ira-pause: thawed {n} game processes on watcher shutdown");
+        freeze_with(cfg, root_pid, &mut scope, false, false);
+        log_scope("thawed on watcher shutdown", &scope);
     }
 }
 
@@ -461,9 +561,17 @@ mod tests {
     #[test]
     fn test_freeze_exclusions() {
         assert!(freeze_excluded("gamescope"));
+        assert!(freeze_excluded("gamescope-wl"));
+        assert!(freeze_excluded("gamescopereaper"));
+        assert!(freeze_excluded("Xwayland"));
+        assert!(freeze_excluded("xdg-dbus-proxy"));
+        assert!(freeze_excluded("dbus-proxy"));
         assert!(freeze_excluded("ira-overlay-ui"));
         assert!(!freeze_excluded("wine"));
         assert!(!freeze_excluded("MyGame.exe"));
+        assert!(!freeze_excluded("retroarch"));
+        assert!(!freeze_excluded("bwrap"));
+        assert!(!freeze_excluded("flatpak"));
         assert!(!freeze_excluded("sh"));
     }
 
@@ -547,6 +655,43 @@ mod tests {
     /// with a leftover directory.
     fn test_scope_id() -> i64 {
         -(std::process::id() as i64)
+    }
+
+    #[test]
+    fn test_scope_evicts_non_tree_strays() {
+        // Same skip contract: needs a real cgroup.
+        let mut keeper = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("test needs sleep");
+        let mut stray = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("test needs sleep");
+        let keeper_pid = keeper.id() as i32;
+        let stray_pid = stray.id() as i32;
+        let Ok(scope) = Scope::create(test_scope_id() - 2, keeper_pid) else {
+            eprintln!("skipping: no writable cgroup here");
+            let _ = keeper.kill();
+            let _ = keeper.wait();
+            let _ = stray.kill();
+            let _ = stray.wait();
+            return;
+        };
+        // Arrange: a stray migrated in behind the keeper's back (what a
+        // poisoned reused scope looks like).
+        scope.migrate(stray_pid).expect("migrate must write");
+        assert!(scope.members().contains(&stray_pid));
+        // Act: evict everything outside the fresh tree.
+        let evicted = scope.evict_strays(&[keeper_pid]);
+        // Assert: the stray left, the keeper stayed, both alive.
+        assert!(!scope.members().contains(&stray_pid));
+        assert!(scope.members().contains(&keeper_pid));
+        assert!(evicted.iter().any(|e| e.contains(&stray_pid.to_string())));
+        let _ = keeper.kill();
+        let _ = keeper.wait();
+        let _ = stray.kill();
+        let _ = stray.wait();
     }
 
     /// A fake scope root (plain tmpdir): file plumbing works, kernel

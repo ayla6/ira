@@ -65,8 +65,10 @@ impl MappingEngine {
                 SourceMode::Joystick(settings) => {
                     // Dpad-as-joystick: the four d-pad buttons compose into
                     // stick deflection, for games and menus that only read
-                    // the stick. The directions' own command bindings stay
-                    // live alongside it.
+                    // the stick. The directions' discrete bindings stay
+                    // silent while this mode owns the group (see
+                    // `dpad_group_owned`): a live copy alongside the stick
+                    // output would double-drive anything reading both.
                     if matches!(source, InputSource::Button(button) if button.is_dpad()) {
                         if applied_dpad_group {
                             continue;
@@ -687,8 +689,9 @@ mod tests {
     #[test]
     fn test_dpad_joystick_mode_deflects_the_stick() {
         // Steam's dpad-as-joystick: a Joystick mode on a d-pad direction
-        // composes the four buttons into stick deflection, while the
-        // directions' own commands stay live.
+        // composes the four buttons into stick deflection, and the
+        // directions' own commands stay silent — one press must not drive
+        // both the buttons and the stick.
         let profile = InputProfile {
             action_sets: vec![ActionSet {
                 name: "Default".to_string(),
@@ -705,17 +708,12 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        // The direction's own command fires right with the press.
-        assert!(engine
-            .process(stick(InputSource::Button(GamepadButton::DpadUp), 1.0))
-            .iter()
-            .any(|event| matches!(
-                event,
-                OutputEvent::GamepadButton {
-                    button: GamepadButton::DpadUp,
-                    pressed: true
-                }
-            )));
+        // The direction's own command stays silent with the press…
+        assert_eq!(
+            engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 1.0)),
+            Vec::new()
+        );
+        // …while the stick deflects on the tick.
         let events = engine.tick(1_000);
         assert!(events.iter().any(|event| matches!(
             event,
@@ -723,6 +721,10 @@ mod tests {
                 axis: GamepadAxis::LeftY,
                 value: -1.0
             }
+        )));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadButton { .. }
         )));
         // Left alone composes onto the horizontal axis.
         engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 0.0));
@@ -738,6 +740,61 @@ mod tests {
         // Releasing the last held direction zeroes the deflection.
         engine.process(stick(InputSource::Button(GamepadButton::DpadLeft), 0.0));
         let events = engine.tick(3_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftX,
+                value: 0.0
+            }
+        )));
+    }
+
+    #[test]
+    fn test_dpad_joystick_mode_silences_the_whole_group() {
+        // Group ownership: the Joystick mode sits on DpadUp, but DpadLeft's
+        // own binding must stay silent too — otherwise that direction alone
+        // double-drives (discrete copy plus the composed stick).
+        let profile = InputProfile {
+            action_sets: vec![ActionSet {
+                name: "Default".to_string(),
+                inputs: vec![
+                    InputMapping {
+                        mode: Some(SourceMode::Joystick(JoystickSettings::new(
+                            crate::profile::StickOutput::Left,
+                        ))),
+                        ..InputMapping::simple(
+                            InputSource::Button(GamepadButton::DpadUp),
+                            OutputAction::GamepadButton(GamepadButton::DpadUp),
+                        )
+                    },
+                    InputMapping::simple(
+                        InputSource::Button(GamepadButton::DpadLeft),
+                        OutputAction::Keyboard { keycode: 17 },
+                    ),
+                ],
+            }],
+            ..InputProfile::default()
+        };
+        let mut engine = MappingEngine::new(profile).unwrap();
+        // The non-carrier direction's binding stays silent…
+        assert_eq!(
+            engine.process(stick(InputSource::Button(GamepadButton::DpadLeft), 1.0)),
+            Vec::new()
+        );
+        // …while it still composes into the stick deflection.
+        let events = engine.tick(1_000);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftX,
+                value: -1.0
+            }
+        )));
+        assert_eq!(
+            engine.process(stick(InputSource::Button(GamepadButton::DpadLeft), 0.0)),
+            Vec::new()
+        );
+        let events = engine.tick(2_000);
         assert!(events.iter().any(|event| matches!(
             event,
             OutputEvent::GamepadAxis {

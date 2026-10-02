@@ -171,13 +171,15 @@ impl MappingEngine {
         // only refreshes which rates the output paths see.
         self.refresh_gyro_effective(0.0);
         let mut output = Vec::new();
-        // Steam's dpad "None": the group's inert marker silences the four
-        // directions' own bindings entirely.
-        let dpad_disabled = matches!(
+        // Steam's dpad group ownership: when the group carries an output
+        // mode of its own, the four directions' discrete bindings stay
+        // silent — otherwise every tap drives both the buttons and the mode
+        // output (one press, two inputs, the mode copy a tick late).
+        let dpad_owned = matches!(
             event.source,
             InputSource::Button(button) if button.is_dpad()
-        ) && self.dpad_group_disabled();
-        if !dpad_disabled {
+        ) && self.dpad_group_owned();
+        if !dpad_owned {
             output.extend(self.run_activators(event.source, event.value, event.timestamp_us));
         }
         output.extend(self.axis_direction_activators(&event));
@@ -185,13 +187,29 @@ impl MappingEngine {
         output
     }
 
-    /// Whether the d-pad group carries the inert None marker: the Dpad mode
-    /// on the group's canonical mapping.
-    fn dpad_group_disabled(&self) -> bool {
-        matches!(
-            self.resolve_mapping(InputSource::Button(GamepadButton::DpadUp)),
-            Some(mapping) if matches!(mapping.mode, Some(SourceMode::Dpad { .. }))
-        )
+    /// Whether the d-pad group is owned by an output mode of its own: the
+    /// inert `Dpad` marker (Steam's dpad "None") or a `Joystick` mode
+    /// (dpad-as-joystick). Either way the four directions' discrete bindings
+    /// stay silent while the mode carries the output — a live discrete copy
+    /// alongside the mode output double-drives anything reading both.
+    fn dpad_group_owned(&self) -> bool {
+        [
+            GamepadButton::DpadUp,
+            GamepadButton::DpadDown,
+            GamepadButton::DpadLeft,
+            GamepadButton::DpadRight,
+        ]
+        .iter()
+        .any(|button| {
+            matches!(
+                self.resolve_mapping(InputSource::Button(*button)),
+                Some(mapping)
+                    if matches!(
+                        mapping.mode,
+                        Some(SourceMode::Dpad { .. }) | Some(SourceMode::Joystick(_))
+                    )
+            )
+        })
     }
 
     /// Direction halves of an axis event: a binding on an `AxisDirection`

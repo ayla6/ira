@@ -218,27 +218,57 @@ pub fn poll() {
         }
     }
 
-    let fds = GAMEPAD_FDS.lock().unwrap();
-    if fds.is_empty() {
-        return;
-    }
-
     let mut buf = [0u8; std::mem::size_of::<InputEvent>() * MAX_EVENTS_PER_READ];
-    for &fd in &*fds {
-        loop {
-            let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut _, buf.len()) };
-            if n <= 0 {
-                break;
-            }
+    // Fds that errored with anything but EAGAIN: unplugged pads whose node
+    // is gone. They are closed and removed below — keeping them would poll
+    // a dead descriptor forever with its buttons stuck held.
+    let mut dead = Vec::new();
+    {
+        let fds = GAMEPAD_FDS.lock().unwrap();
+        if fds.is_empty() {
+            return;
+        }
+        for &fd in &*fds {
+            loop {
+                let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut _, buf.len()) };
+                if n == 0 {
+                    break;
+                }
+                if n < 0 {
+                    let errno = unsafe { *libc::__errno_location() };
+                    if errno != libc::EAGAIN && errno != libc::EINTR {
+                        dead.push(fd);
+                    }
+                    break;
+                }
 
-            let count = (n as usize) / std::mem::size_of::<InputEvent>();
-            for i in 0..count {
-                let ev = unsafe {
-                    &*(buf.as_ptr().add(i * std::mem::size_of::<InputEvent>()) as *const InputEvent)
-                };
-                handle_event(ev);
+                let count = (n as usize) / std::mem::size_of::<InputEvent>();
+                for i in 0..count {
+                    let ev = unsafe {
+                        &*(buf.as_ptr().add(i * std::mem::size_of::<InputEvent>())
+                            as *const InputEvent)
+                    };
+                    handle_event(ev);
+                }
             }
         }
+    }
+    if !dead.is_empty() {
+        let mut fds = GAMEPAD_FDS.lock().unwrap();
+        for fd in &dead {
+            unsafe { libc::close(*fd) };
+        }
+        fds.retain(|fd| !dead.contains(fd));
+        // A dead pad's releases never arrive: its chord bits would stick
+        // forever and poison every later hotkey match, so clear them. The
+        // next presses start clean.
+        PRESSED_BUTTONS.store(0, Ordering::Relaxed);
+        TOGGLE_PENDING.store(false, Ordering::Relaxed);
+        HAT_X.store(0, Ordering::Relaxed);
+        HAT_Y.store(0, Ordering::Relaxed);
+        // Reopen whatever replaced it without waiting for inotify (a
+        // same-node reconnect produces no create/delete events).
+        RESCAN_TIMER.store(RESCAN_DELAY, Ordering::Relaxed);
     }
 }
 

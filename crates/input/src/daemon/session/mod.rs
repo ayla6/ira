@@ -402,10 +402,23 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     overlay_toggle::ToggleAction::Swallow => false,
                     overlay_toggle::ToggleAction::Fire => {
                         fired = true;
-                        // The completing press is consumed here, never
+                        // The completing release is consumed here, never
                         // forwarded: a close on this finger must swallow
-                        // its release too.
+                        // its press too — except the press was already
+                        // swallowed when it armed the pending chord.
                         consumed_while_open.insert(input.source);
+                        false
+                    }
+                    overlay_toggle::ToggleAction::FireScreenshot => {
+                        if toggle.push_screenshot() {
+                            consumed_while_open.insert(input.source);
+                        }
+                        false
+                    }
+                    overlay_toggle::ToggleAction::FireRecord => {
+                        if toggle.push_record_toggle() {
+                            consumed_while_open.insert(input.source);
+                        }
                         false
                     }
                 }

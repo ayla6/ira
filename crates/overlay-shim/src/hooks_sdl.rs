@@ -29,7 +29,13 @@ const SDL_JOYBUTTONUP: u32 = 0x604;
 // SDL2 controller button codes (same in SDL3)
 const BTN_A: u8 = 0;
 const BTN_B: u8 = 1;
+const BTN_X: u8 = 2;
+const BTN_Y: u8 = 3;
+const BTN_BACK: u8 = 4;
 const BTN_GUIDE: u8 = 5;
+const BTN_START: u8 = 6;
+const BTN_LEFTSTICK: u8 = 7;
+const BTN_RIGHTSTICK: u8 = 8;
 const BTN_LEFTSHOULDER: u8 = 9;
 const BTN_RIGHTSHOULDER: u8 = 10;
 const BTN_DPAD_UP: u8 = 11;
@@ -198,9 +204,19 @@ fn handle_button_release(button: u8) -> bool {
 }
 
 fn button_mask(button: u8) -> Option<u32> {
+    // B never reaches here: it is the hardcoded Big Picture back action
+    // above, so chords containing B cannot be expressed on the SDL path
+    // (the evdev fallback covers them in non-SDL games). Triggers have no
+    // SDL button codes at all (axes only) — same limitation.
     let evdev = match button {
         BTN_A => 0x130,
+        BTN_X => 0x132,
+        BTN_Y => 0x133,
+        BTN_BACK => 0x13a,
         BTN_GUIDE => 0x13c,
+        BTN_START => 0x13b,
+        BTN_LEFTSTICK => 0x13d,
+        BTN_RIGHTSTICK => 0x13e,
         BTN_LEFTSHOULDER => 0x136,
         BTN_RIGHTSHOULDER => 0x137,
         BTN_DPAD_UP => 0x220,

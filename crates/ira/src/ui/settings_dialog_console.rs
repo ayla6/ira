@@ -181,9 +181,14 @@ pub(super) fn register_console_pages(
 
     for def in ira_models::all_consoles() {
         if def.id == "psp" {
-            register_lazy_console_page(sidebar, stack, &crate::tr!("PS3"), "ps3");
-            register_lazy_console_page(sidebar, stack, &crate::tr!("PS4"), "ps4");
-            register_lazy_console_page(sidebar, stack, &crate::tr!("PS Vita"), "psvita");
+            register_lazy_console_page(sidebar, stack, &crate::tr!("PlayStation 3"), "ps3");
+            register_lazy_console_page(sidebar, stack, &crate::tr!("PlayStation 4"), "ps4");
+            register_lazy_console_page(
+                sidebar,
+                stack,
+                &crate::tr!("PlayStation Vita"),
+                "psvita",
+            );
         }
         if def.id == "wii" {
             register_lazy_console_page(sidebar, stack, &crate::tr!("Wii U"), "wiiu");
@@ -198,11 +203,11 @@ pub(super) fn register_console_pages(
         if rom_platforms_with_games.contains(def.id) {
             sidebar.append(&settings_sidebar_row(
                 "games-symbolic",
-                def.display_name,
+                def.short_name(),
                 &page_id,
             ));
         } else {
-            empty_platforms.push((def.display_name.to_string(), page_id.clone()));
+            empty_platforms.push((def.short_name().to_string(), page_id.clone()));
         }
         add_console_loading_page(stack, &page_id);
     }

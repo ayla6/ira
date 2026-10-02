@@ -1197,6 +1197,11 @@ fn build_cell(state: &SharedState) -> gtk4::Widget {
     overlay.set_overflow(gtk4::Overflow::Visible);
     let pic = gtk4::Picture::new();
     pic.set_content_fit(gtk4::ContentFit::Cover);
+    // Square tiles over portrait fallback art: GTK sizes a Picture to
+    // its paintable's natural size unless it may shrink, so the tile
+    // measured 381px tall in its 240px allocation — once per visible
+    // tile, every layout. Same pattern as the group collage cells.
+    pic.set_can_shrink(true);
     pic.add_css_class(CSS_GAME_COVER_PIC);
     overlay.set_child(Some(&pic));
 

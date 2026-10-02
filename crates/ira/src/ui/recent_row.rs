@@ -157,6 +157,11 @@ pub(super) fn build_cover(
     let pic = gtk4::Picture::new();
     pic.set_content_fit(gtk4::ContentFit::Cover);
     pic.set_size_request(w, h);
+    // Square capsules over portrait art measure taller than their
+    // allocation without this (see the big-picture grid cells).
+    if square {
+        pic.set_can_shrink(true);
+    }
     pic.add_css_class(CSS_GAME_COVER_PIC);
     if !image_path.is_empty() {
         if square {

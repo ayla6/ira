@@ -159,10 +159,10 @@ fn build_sgdb_asset_card(
         }
     });
 
-    // Wrapped and tagged by author and style so a filter click can pluck
-    // exactly these widgets out of their containers without rebuilding
-    // anything, and an unfilter click can re-evaluate each card (art that
-    // is still style-filtered stays dim). Split with tag_author/tag_style.
+    // Wrapped and tagged by author and style so a filter click can dim
+    // exactly these widgets in place without rebuilding anything, and
+    // an unfilter click can re-evaluate each card (art that is still
+    // style-filtered stays dim). Split with tag_author/tag_style.
     let flow_child = gtk4::FlowBoxChild::new();
     flow_child.set_widget_name(&widget_tag(&a.author, &a.style));
     flow_child.set_child(Some(&card));
@@ -347,12 +347,12 @@ impl SgdbPickerCtx {
         }
     }
 
-    /// Hide one author's art: persist the choice, then pluck exactly that
-    /// author's card and row widgets out of their containers — no rebuild,
-    /// so loaded thumbnails and the scroll position stay untouched. The
-    /// store keeps its indices, and append/full rebuild skip filtered
-    /// authors and styles while the show-filtered toggle is off, so future
-    /// pages stay consistent.
+    /// Dim one author's art in place: persist the choice, then dim
+    /// exactly that author's cards and rows where they stand and flip
+    /// their eye buttons to the unfilter state — no rebuild, no reorder,
+    /// so loaded thumbnails and the scroll position stay untouched and
+    /// the art stays visible, just transparent. The store keeps its
+    /// order; later pages render dimmed through the normal path.
     fn filter_author(&self, author: &str, steam64: &str) {
         if let Some(persist) = &self.filter_user {
             persist(author.to_string(), steam64.to_string());
@@ -365,15 +365,25 @@ impl SgdbPickerCtx {
         while let Some(w) = child {
             child = w.next_sibling();
             if tag_author(&w.widget_name()) == author {
-                flow.remove(&w);
+                self.dim_card(&w);
             }
         }
         let mut child = list_view.first_child();
         while let Some(w) = child {
             child = w.next_sibling();
             if tag_author(&w.widget_name()) == author {
-                list_view.remove(&w);
+                self.dim_card(&w);
             }
+        }
+    }
+
+    /// Dim one card-or-row and flip its eye button to the unfilter
+    /// state: the mirror of [`Self::undim_card`] on the same widgets.
+    fn dim_card(&self, widget: &gtk4::Widget) {
+        widget.add_css_class(CSS_SGDB_DIMMED);
+        if let Some(btn) = find_filter_button(widget) {
+            btn.set_icon_name("eye-open-negative-filled-symbolic");
+            btn.set_tooltip_text(Some(&crate::tr!("Show art by this author")));
         }
     }
 

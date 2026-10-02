@@ -458,7 +458,6 @@ impl PhysicalGamepad {
             Drained,
             WouldBlock,
             Gone,
-            Failed(String),
         }
         let outcome = match device.fetch_events() {
             Ok(events) => {
@@ -467,27 +466,27 @@ impl PhysicalGamepad {
                 }
                 FetchOutcome::Drained
             }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                FetchOutcome::WouldBlock
+            Err(error) if is_transient_read_error(&error) => FetchOutcome::WouldBlock,
+            // Any other read error means the node is dead or unusable
+            // (ENODEV on unplug, EIO on flaky Bluetooth, …). The old code
+            // only recognized a Gone subset and kept polling dead fds
+            // forever: no disconnect was reported, the pressed set stuck,
+            // and the virtual pad screamed the last state at the game.
+            // Dropping here reports the disconnect so the hub freezes the
+            // session, clears truth, and reconnects on cadence.
+            Err(error) => {
+                eprintln!(
+                    "ira-input: controller {} disconnected (read failed: {error}); \
+                     continuing without physical input",
+                    self.info.path.display()
+                );
+                FetchOutcome::Gone
             }
-            Err(ref error) if device_gone(error) => FetchOutcome::Gone,
-            Err(error) => FetchOutcome::Failed(error.to_string()),
         };
         match outcome {
             FetchOutcome::Drained | FetchOutcome::WouldBlock => self.device = Some(device),
             FetchOutcome::Gone => {
-                eprintln!(
-                    "ira-input: controller {} disconnected; continuing without physical input",
-                    self.info.path.display()
-                );
                 close_disconnected_device(device);
-            }
-            FetchOutcome::Failed(error) => {
-                self.device = Some(device);
-                return Err(format!(
-                    "failed reading {}: {error}",
-                    self.info.path.display()
-                ));
             }
         }
         Ok(result)
@@ -675,11 +674,12 @@ fn poll_timeout_ms(timeout: Option<Duration>) -> libc::c_int {
         .min(libc::c_int::MAX as u128) as libc::c_int
 }
 
-fn device_gone(error: &std::io::Error) -> bool {
-    matches!(
-        error.raw_os_error(),
-        Some(libc::ENODEV | libc::ENXIO | libc::EBADF)
-    )
+/// Whether an evdev read error is transient (no data right now, or a
+/// signal interrupted the read): the device stays open. Anything else —
+/// unplug, I/O failure, stale descriptor — is a disconnect.
+fn is_transient_read_error(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::WouldBlock
+        || error.raw_os_error() == Some(libc::EINTR)
 }
 
 fn same_device(left: &DeviceInfo, right: &DeviceInfo) -> bool {
@@ -926,11 +926,11 @@ pub(crate) fn is_dualsense_identity(vendor: u16, product: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        button_layout, device_gone, is_dualsense_identity, is_dualshock4_identity,
-        is_ira_virtual_device, is_virtual_gamepad, map_button, map_button_for_device,
-        normalize_signed, normalize_trigger, pad_status_summary, poll_timeout_ms, same_device,
-        swap_face_buttons, synthesized_trigger_click, ButtonLayout, ControllerFamily, DeviceInfo,
-        ReportedInputMode,
+        button_layout, is_dualsense_identity, is_dualshock4_identity,
+        is_ira_virtual_device, is_transient_read_error, is_virtual_gamepad, map_button,
+        map_button_for_device, normalize_signed, normalize_trigger, pad_status_summary,
+        poll_timeout_ms, same_device, swap_face_buttons, synthesized_trigger_click, ButtonLayout,
+        ControllerFamily, DeviceInfo, ReportedInputMode,
     };
     use crate::hid_8bitdo::{is_ultimate_2, VENDOR_8BITDO, ULTIMATE_2_WIRELESS};
     use crate::GamepadButton;
@@ -980,6 +980,21 @@ mod tests {
             super::family_for(0x045e, "Microsoft X-Box One pad"),
             ControllerFamily::Xbox
         );
+    }
+
+    /// One fabricated controller identity for pure-function tests. These
+    /// never touch hardware — they only feed name/vendor/product matching.
+    fn fake_device(name: &str, vendor: u16, product: u16) -> DeviceInfo {
+        DeviceInfo {
+            path: PathBuf::from("/dev/input/event0"),
+            name: name.to_string(),
+            vendor,
+            product,
+            version: 0,
+            has_evdev_gyro: false,
+            uniq: String::new(),
+            supported_buttons: Vec::new(),
+        }
     }
 
     fn test_pad() -> super::PhysicalGamepad {
@@ -1181,49 +1196,24 @@ mod tests {
     }
 
     #[test]
-    fn test_controller_family_identifies_reported_brand() {
-        let device = DeviceInfo {
-            path: PathBuf::from("/dev/input/event0"),
-            name: "8BitDo Ultimate Controller".to_string(),
-            vendor: 0,
-            product: 0,
-            version: 0,
-            has_evdev_gyro: false,
-            uniq: String::new(),
-            supported_buttons: Vec::new(),
-        };
-        assert_eq!(device.family(), ControllerFamily::EightBitDo);
-    }
-
-    #[test]
-    fn test_controller_family_identifies_vendor() {
-        let device = DeviceInfo {
-            path: PathBuf::from("/dev/input/event0"),
-            name: "Wireless Gamepad".to_string(),
-            vendor: 0x2dc8,
-            product: 0,
-            version: 0,
-            has_evdev_gyro: false,
-            uniq: String::new(),
-            supported_buttons: Vec::new(),
-        };
-        assert_eq!(device.family(), ControllerFamily::EightBitDo);
+    fn test_controller_family_identifies_eightbitdo() {
+        // By brand name alone and by vendor id alone.
+        assert_eq!(
+            fake_device("8BitDo Ultimate Controller", 0, 0).family(),
+            ControllerFamily::EightBitDo
+        );
+        assert_eq!(
+            fake_device("Wireless Gamepad", 0x2dc8, 0).family(),
+            ControllerFamily::EightBitDo
+        );
     }
 
     #[test]
     fn test_virtual_gamepads_count_as_their_source() {
-        fn device(name: &str, vendor: u16, product: u16, uniq: &str) -> DeviceInfo {
-            DeviceInfo {
-                path: PathBuf::from("/dev/input/event0"),
-                name: name.to_string(),
-                vendor,
-                product,
-                version: 0,
-                has_evdev_gyro: false,
-                uniq: uniq.to_string(),
-                supported_buttons: Vec::new(),
-            }
-        }
+        let device = |name: &str, vendor: u16, product: u16, uniq: &str| DeviceInfo {
+            uniq: uniq.to_string(),
+            ..fake_device(name, vendor, product)
+        };
         // uinput pads by name, uhid twins by serial.
         let physical = device("8BitDo Ultimate 2 Wireless", 0x2dc8, 0x6012, "");
         assert!(!is_virtual_gamepad(&physical));
@@ -1266,31 +1256,17 @@ mod tests {
 
     #[test]
     fn test_reported_input_mode_prefers_explicit_direct_input_name() {
-        let device = DeviceInfo {
-            path: PathBuf::from("/dev/input/event0"),
-            name: "8BitDo Controller (DInput)".to_string(),
-            vendor: VENDOR_8BITDO,
-            product: ULTIMATE_2_WIRELESS,
-            version: 0,
-            has_evdev_gyro: false,
-            uniq: String::new(),
-            supported_buttons: Vec::new(),
-        };
+        let device = fake_device("8BitDo Controller (DInput)", VENDOR_8BITDO, ULTIMATE_2_WIRELESS);
         assert_eq!(device.reported_input_mode(), ReportedInputMode::DirectInput);
     }
 
     #[test]
     fn test_reported_input_mode_identifies_ultimate_2_xinput_layout() {
-        let device = DeviceInfo {
-            path: PathBuf::from("/dev/input/event0"),
-            name: "8BitDo Ultimate 2 Wireless Controller for PC".to_string(),
-            vendor: VENDOR_8BITDO,
-            product: ULTIMATE_2_WIRELESS,
-            version: 0,
-            has_evdev_gyro: false,
-            uniq: String::new(),
-            supported_buttons: Vec::new(),
-        };
+        let device = fake_device(
+            "8BitDo Ultimate 2 Wireless Controller for PC",
+            VENDOR_8BITDO,
+            ULTIMATE_2_WIRELESS,
+        );
         assert_eq!(device.reported_input_mode(), ReportedInputMode::XInput);
     }
 
@@ -1305,16 +1281,7 @@ mod tests {
 
     #[test]
     fn test_same_device_matches_identity() {
-        let left = DeviceInfo {
-            path: PathBuf::from("/dev/input/event0"),
-            name: "Controller".to_string(),
-            vendor: 1,
-            product: 2,
-            version: 3,
-            has_evdev_gyro: false,
-            uniq: String::new(),
-            supported_buttons: Vec::new(),
-        };
+        let left = fake_device("Controller", 1, 2);
         let right = DeviceInfo {
             path: PathBuf::from("/dev/input/event9"),
             ..left.clone()
@@ -1323,11 +1290,20 @@ mod tests {
     }
 
     #[test]
-    fn test_device_gone_matches_removed_evdev_errors() {
-        assert!(device_gone(&std::io::Error::from_raw_os_error(
-            libc::ENODEV
+    fn test_transient_read_errors_keep_the_device() {
+        assert!(is_transient_read_error(&std::io::Error::from(
+            std::io::ErrorKind::WouldBlock
         )));
-        assert!(!device_gone(&std::io::Error::from_raw_os_error(libc::EIO)));
+        assert!(is_transient_read_error(&std::io::Error::from_raw_os_error(
+            libc::EINTR
+        )));
+        // Unplug and I/O failures are disconnects, never transient.
+        assert!(!is_transient_read_error(
+            &std::io::Error::from_raw_os_error(libc::ENODEV)
+        ));
+        assert!(!is_transient_read_error(&std::io::Error::from_raw_os_error(
+            libc::EIO
+        )));
     }
 
     #[test]

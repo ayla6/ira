@@ -204,67 +204,89 @@ fn setup_gamepad(
     let default = default.to_string();
     let capturing = Rc::new(RefCell::new(false));
     let pressed = Rc::new(RefCell::new(Vec::<String>::new()));
-    let timeout_id = Rc::new(RefCell::new(None::<glib::SourceId>));
+    let first_press = Rc::new(RefCell::new(None::<std::time::Instant>));
+    // Invariant: `poll_id` holds `Some` if and only if the poll source is
+    // alive. The poll callback clears it to `None` before returning `Break`
+    // (a returned `Break` destroys the source, so calling `remove()` on it
+    // afterwards would panic). Manual stops `take()` + `remove()` only when
+    // `Some`, so `remove()` is only ever called on a live source.
+    let poll_id = Rc::new(RefCell::new(None::<glib::SourceId>));
 
     let btn_c = btn.clone();
     let capturing_c = capturing.clone();
-    let pressed_c = pressed;
-    let timeout_c = timeout_id.clone();
+    let pressed_c = pressed.clone();
+    let first_press_c = first_press.clone();
+    let poll_c = poll_id.clone();
     let value_c = value.clone();
     let reset_c = reset.clone();
     let default_c = default.clone();
     btn.connect_clicked(move |_| {
         if *capturing_c.borrow() {
-            stop_gamepad_capture(&capturing_c, &timeout_c);
+            stop_gamepad_capture(&capturing_c, &poll_c);
             update_gp_label(&btn_c, &value_c.borrow());
         } else {
             *capturing_c.borrow_mut() = true;
             pressed_c.borrow_mut().clear();
+            *first_press_c.borrow_mut() = None;
             btn_c.set_label("…");
             btn_c.set_tooltip_text(Some(&crate::tr!(
                 "Press gamepad button — right-click to cancel"
             )));
             reset_c.set_visible(false);
 
+            // Scan immediately so a pad that's already plugged in works on
+            // the first tick instead of after the first 1s rescan window.
+            ensure_gamepad_fds();
+
             let btn_cc = btn_c.clone();
             let capturing_cc = capturing_c.clone();
             let pressed_cc = pressed_c.clone();
-            let timeout_cc = timeout_c.clone();
+            let first_press_cc = first_press_c.clone();
+            let poll_cc = poll_c.clone();
             let value_cc = value_c.clone();
             let reset_cc = reset_c.clone();
             let default_cc = default_c.clone();
             let tick = std::cell::Cell::new(0u64);
+            let start = std::time::Instant::now();
             let id = glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
                 if !*capturing_cc.borrow() {
+                    *poll_cc.borrow_mut() = None;
+                    return glib::ControlFlow::Break;
+                }
+                // Bound capture sessions so a destroyed dialog can't leave a
+                // poll source running forever.
+                if start.elapsed() > std::time::Duration::from_secs(60) {
+                    *capturing_cc.borrow_mut() = false;
+                    *poll_cc.borrow_mut() = None;
+                    update_gp_label(&btn_cc, &value_cc.borrow());
                     return glib::ControlFlow::Break;
                 }
                 tick.set(tick.get() + 1);
                 if let Some(name) = poll_gamepad_buttons(tick.get()) {
-                    let mut p = pressed_cc.borrow_mut();
-                    if !p.contains(&name) {
-                        p.push(name);
+                    {
+                        let mut p = pressed_cc.borrow_mut();
+                        if !p.contains(&name) {
+                            p.push(name);
+                        }
                     }
-                    let pressed_cc2 = pressed_cc.clone();
-                    let btn_cc2 = btn_cc.clone();
-                    let capturing_cc2 = capturing_cc.clone();
-                    let value_cc2 = value_cc.clone();
-                    let reset_cc2 = reset_cc.clone();
-                    let default_cc2 = default_cc.clone();
-                    let id2 =
-                        glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
-                            let captured = pressed_cc2.borrow().clone();
-                            let combo = captured.join("+");
-                            *value_cc2.borrow_mut() = combo.clone();
-                            update_gp_label(&btn_cc2, &combo);
-                            reset_cc2.set_visible(combo != default_cc2);
-                            *capturing_cc2.borrow_mut() = false;
-                            glib::ControlFlow::Break
-                        });
-                    *timeout_cc.borrow_mut() = Some(id2);
+                    if first_press_cc.borrow().is_none() {
+                        *first_press_cc.borrow_mut() = Some(std::time::Instant::now());
+                    }
+                }
+                if let Some(t0) = *first_press_cc.borrow() {
+                    if t0.elapsed() >= std::time::Duration::from_millis(300) {
+                        let combo = pressed_cc.borrow().join("+");
+                        *value_cc.borrow_mut() = combo.clone();
+                        update_gp_label(&btn_cc, &combo);
+                        reset_cc.set_visible(combo != default_cc);
+                        *capturing_cc.borrow_mut() = false;
+                        *poll_cc.borrow_mut() = None;
+                        return glib::ControlFlow::Break;
+                    }
                 }
                 glib::ControlFlow::Continue
             });
-            *timeout_c.borrow_mut() = Some(id);
+            *poll_c.borrow_mut() = Some(id);
         }
     });
 
@@ -273,12 +295,12 @@ fn setup_gamepad(
     btn.add_controller(right_click.clone());
     let btn_c = btn.clone();
     let capturing_c = capturing;
-    let timeout_c = timeout_id;
+    let poll_c = poll_id;
     let value_c = value.clone();
     let reset_c = reset.clone();
     let default_c = default.clone();
     right_click.connect_pressed(move |_, _, _, _| {
-        stop_gamepad_capture(&capturing_c, &timeout_c);
+        stop_gamepad_capture(&capturing_c, &poll_c);
         *value_c.borrow_mut() = String::new();
         update_gp_label(&btn_c, "");
         reset_c.set_visible(default_c.is_empty());
@@ -295,10 +317,10 @@ fn setup_gamepad(
 
 fn stop_gamepad_capture(
     capturing: &Rc<RefCell<bool>>,
-    timeout: &Rc<RefCell<Option<glib::SourceId>>>,
+    poll_id: &Rc<RefCell<Option<glib::SourceId>>>,
 ) {
     *capturing.borrow_mut() = false;
-    if let Some(id) = timeout.borrow_mut().take() {
+    if let Some(id) = poll_id.borrow_mut().take() {
         id.remove();
     }
 }
@@ -323,32 +345,36 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-fn poll_gamepad_buttons(tick: u64) -> Option<String> {
-    // One directory rescan per second of ticks picks up new devices.
-    if tick.is_multiple_of(20) {
-        if let Ok(entries) = std::fs::read_dir("/dev/input") {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                if !name.to_string_lossy().starts_with("event") {
-                    continue;
-                }
-                if let Ok(path) =
-                    std::ffi::CString::new(entry.path().to_string_lossy().as_bytes())
-                {
-                    EVENT_FDS.with(|cache| {
-                        let mut fds = cache.borrow_mut();
-                        if !fds.iter().any(|(known, _)| *known == path) {
-                            let fd = unsafe {
-                                libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK)
-                            };
-                            if fd >= 0 {
-                                fds.push((path, fd));
-                            }
+fn ensure_gamepad_fds() {
+    if let Ok(entries) = std::fs::read_dir("/dev/input") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if !name.to_string_lossy().starts_with("event") {
+                continue;
+            }
+            if let Ok(path) = std::ffi::CString::new(entry.path().to_string_lossy().as_bytes())
+            {
+                EVENT_FDS.with(|cache| {
+                    let mut fds = cache.borrow_mut();
+                    if !fds.iter().any(|(known, _)| *known == path) {
+                        let fd =
+                            unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
+                        if fd >= 0 {
+                            fds.push((path, fd));
                         }
-                    });
-                }
+                    }
+                });
             }
         }
+    }
+}
+
+fn poll_gamepad_buttons(tick: u64) -> Option<String> {
+    // One directory rescan per second of ticks picks up late-plugged pads.
+    // `ensure_gamepad_fds` is also called once when capture starts so the
+    // first second of ticks already sees plugged-in pads.
+    if tick.is_multiple_of(20) {
+        ensure_gamepad_fds();
     }
 
     let mut found: Option<String> = None;
@@ -359,12 +385,18 @@ fn poll_gamepad_buttons(tick: u64) -> Option<String> {
             }
             let mut buf = [0u8; 24 * 16]; // up to 16 events
             let n = unsafe { libc::read(*fd, buf.as_mut_ptr() as *mut _, buf.len()) };
-            if n <= 0 {
-                // -1 is both "no data" (EAGAIN — normal, keep) and
-                // "device went away" (drop it).
-                let keep =
-                    unsafe { *libc::__errno_location() } == libc::EAGAIN;
-                return keep;
+            if n < 0 {
+                // EAGAIN/EWOULDBLOCK is "no data" — normal, keep the fd.
+                // Anything else (ENODEV, EIO, …) means the device went away.
+                let errno = unsafe { *libc::__errno_location() };
+                if errno == libc::EAGAIN {
+                    return true;
+                }
+                unsafe { libc::close(*fd) };
+                return false;
+            }
+            if n == 0 {
+                return true;
             }
             let count = (n as usize) / 24;
             for i in 0..count {

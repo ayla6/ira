@@ -619,7 +619,6 @@ fn release_date_row(
 
     let pick = Rc::new(super::date_pick::DatePick::new(release_date));
     pick.set_tooltip(&crate::tr!("Pick or type a date"));
-    let popover = pick.popover();
     {
         let slot = slot.clone();
         let (state, game, win) = (state.clone(), game.clone(), win.clone());
@@ -633,7 +632,6 @@ fn release_date_row(
                 m.release_date = stored.clone();
                 m.release_timestamp = ira_db::scraper_release_timestamp(&stored);
             });
-            popover.popdown();
             refresh_rows(&state, &game, &win, &slot);
             }
         });

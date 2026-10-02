@@ -50,11 +50,17 @@ impl DatePick {
         entry.set_tooltip_text(Some(&crate::tr!(
             "Type the date — the calendar follows along"
         )));
-        entry.set_text(initial);
 
+        // While true, calendar moves are echoes of typing, not picks: the
+        // day-selected handler must not write back into the entry. Its
+        // rewrite would fight the typist (a bare "1998" becomes
+        // "1998-01-01" mid-typing) and nests a set_text inside the entry's
+        // own user action, which is what GTK warns about.
+        let echo = Rc::new(RefCell::new(false));
         {
             let typed = typed.clone();
             let calendar = calendar.clone();
+            let echo = echo.clone();
             // Every keystroke re-parses: a good shape selects its day in
             // the calendar (the feedback that says the date was
             // understood), a bad one flags the entry red.
@@ -72,7 +78,9 @@ impl DatePick {
                             0,
                             0.0,
                         ) {
+                            *echo.borrow_mut() = true;
                             calendar.select_day(&preset);
+                            *echo.borrow_mut() = false;
                         }
                     }
                     None if text.is_empty() => {
@@ -86,13 +94,21 @@ impl DatePick {
                 }
             });
         }
+        // Seed through the same path as typing (after the handler is
+        // connected), so a saved date lands in `typed`, the error flag
+        // and the calendar — an edit dialog shows its stored From/To
+        // instead of "Any time".
+        entry.set_text(initial);
         {
             // Picking a day fills the entry — unless the entry is what
-            // moved the calendar, whose echoed text would fight the
-            // typist.
+            // moved the calendar (see `echo` above).
             let entry = entry.clone();
             let typed = typed.clone();
+            let echo = echo.clone();
             calendar.connect_day_selected(move |calendar| {
+                if *echo.borrow() {
+                    return;
+                }
                 let iso = calendar.date().format("%Y-%m-%d").map(|s| s.to_string());
                 let Ok(iso) = iso else { return };
                 if super::edit_game_scraper::parse_typed_date(&entry.text())
@@ -137,10 +153,25 @@ impl DatePick {
         let on_clear: ActionSlot = Rc::new(RefCell::new(None));
         {
             let on_apply = on_apply.clone();
+            let popover = popover.clone();
+            // Apply fires the owner's action and closes the popover; the
+            // typed date is already current from typing.
             apply_btn.connect_clicked(move |_| {
                 if let Some(f) = on_apply.borrow().as_ref() {
                     f();
                 }
+                popover.popdown();
+            });
+        }
+        {
+            // Enter in the entry is Apply.
+            let on_apply = on_apply.clone();
+            let popover = popover.clone();
+            entry.connect_activate(move |_| {
+                if let Some(f) = on_apply.borrow().as_ref() {
+                    f();
+                }
+                popover.popdown();
             });
         }
         {
@@ -178,8 +209,8 @@ impl DatePick {
             .expect("DatePick popover")
     }
 
-    /// The Apply button's action. The popover stays open unless the
-    /// callback closes it.
+    /// The Apply button's action (Enter in the entry does the same).
+    /// The popover closes after the callback runs.
     pub fn on_apply(&self, f: impl Fn() + 'static) {
         *self.on_apply.borrow_mut() = Some(Rc::new(f));
     }

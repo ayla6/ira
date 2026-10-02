@@ -156,13 +156,23 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
             GroupSelection::AllGames => crate::tr!("All games"),
             GroupSelection::Uncategorized => crate::tr!("Uncategorized"),
             GroupSelection::Derived(name) => name.clone(),
-            GroupSelection::Collection(id) => state
-                .borrow()
-                .groups
-                .iter()
-                .find(|g| g.id == *id)
-                .map(|g| g.name.clone())
-                .unwrap_or_else(|| crate::tr!("All games")),
+            GroupSelection::Collection(id) => {
+                // Manual groups live in `groups`, auto groups under their
+                // negated ids in `auto_groups` — missing the second table
+                // is why auto groups all read "All games".
+                let s = state.borrow();
+                s.groups
+                    .iter()
+                    .find(|g| g.id == *id)
+                    .map(|g| g.name.clone())
+                    .or_else(|| {
+                        s.auto_groups
+                            .iter()
+                            .find(|g| g.id == *id)
+                            .map(|g| g.name.clone())
+                    })
+                    .unwrap_or_else(|| crate::tr!("All games"))
+            }
         }
     };
 

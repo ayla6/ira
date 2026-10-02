@@ -104,7 +104,11 @@ impl AutoCriterion {
                     if v.eq_ignore_ascii_case(STEAM_EMULATED_VALUE) {
                         return game.trophy_source == TrophySource::Gse;
                     }
+                    // The display name, or the raw id for values saved
+                    // before the friendly names ("Wine" still matches
+                    // wine games now shown as Windows).
                     v.eq_ignore_ascii_case(console.trim())
+                        || v.eq_ignore_ascii_case(&game.platform_id)
                 })
             }
             // ISO dates and bare years compare correctly as strings —
@@ -302,26 +306,26 @@ mod tests {
         let ctx = AutoGroupContext::default();
         let rule = AutoCriterion {
             dimension: AutoDimension::Console,
-            values: vec!["SNES".into()],
+            values: vec!["Super Nintendo Entertainment System".into()],
             ..Default::default()
         };
         assert!(rule.matches(&g, &ctx));
         // The console name really is what the platform resolves to.
         assert_eq!(
             find_console("snes").map(|c| c.display_name.to_string()),
-            Some("SNES".to_string())
+            Some("Super Nintendo Entertainment System".to_string())
         );
     }
 
     #[test]
-    fn test_auto_console_matches_pc_platforms_by_raw_id() {
-        // PC platforms are not in the console table: the matcher falls
-        // back to the raw platform id, case-insensitively, which is what
-        // the autogroup picker offers for Linux, Wine, Steam and GOG.
+    fn test_auto_console_matches_pc_platforms_by_display_name() {
+        // PC platforms are not in the console table: the matcher takes
+        // the friendly display name, which is what the autogroup picker
+        // offers for Linux, Windows, Steam and GOG.
         let ctx = AutoGroupContext::default();
         for (platform, value) in [
             ("linux", "Linux"),
-            ("wine", "Wine"),
+            ("wine", "Windows"),
             ("steam", "Steam"),
             ("gog", "GOG"),
         ] {
@@ -334,6 +338,21 @@ mod tests {
             };
             assert!(rule.matches(&g, &ctx), "{value} matches {platform}");
         }
+    }
+
+    #[test]
+    fn test_auto_console_still_matches_legacy_wine_value() {
+        // Groups saved before the friendly names used "Wine": they keep
+        // matching wine games now shown as Windows.
+        let ctx = AutoGroupContext::default();
+        let mut g = game();
+        g.platform_id = "wine".to_string();
+        let rule = AutoCriterion {
+            dimension: AutoDimension::Console,
+            values: vec!["Wine".to_string()],
+            ..Default::default()
+        };
+        assert!(rule.matches(&g, &ctx));
     }
 
     #[test]

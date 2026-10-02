@@ -217,15 +217,16 @@ fn dimension_menus(state: &SharedState) -> ValueMenus {
             // PC platforms are not consoles — the models console table
             // drives ROM scanning and emulator settings and must stay
             // console-only — but the Console matcher falls back to the
-            // raw platform id, so offering these values just works. The
-            // match folds case, hence the display capitalisation; "Wine"
-            // (not "Windows") because the platform id is `wine`. Steam
-            // (Emulated) is Goldberg games, matched on the GSE trophy
-            // source instead of any platform.
+            // friendly platform name, so offering these values just
+            // works. The match folds case, hence the display
+            // capitalisation; "Windows" (not "Wine") because the
+            // platform id `wine` shows as Windows. Steam (Emulated) is
+            // Goldberg games, matched on the GSE trophy source instead
+            // of any platform.
             .chain(
                 [
                     "Linux",
-                    "Wine",
+                    "Windows",
                     "Steam",
                     "GOG",
                     ira_models::STEAM_EMULATED_VALUE,

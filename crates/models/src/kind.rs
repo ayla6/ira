@@ -53,9 +53,9 @@ impl GameKind {
         match self {
             GameKind::Wine => "Windows",
             GameKind::Linux => "Linux",
-            GameKind::Ps4 => "PS4",
-            GameKind::Ps3 => "PS3",
-            GameKind::PsVita => "PS Vita",
+            GameKind::Ps4 => "PlayStation 4",
+            GameKind::Ps3 => "PlayStation 3",
+            GameKind::PsVita => "PlayStation Vita",
             GameKind::WiiU => "Wii U",
             GameKind::ThreeDS => "Nintendo 3DS",
             GameKind::Switch => "Nintendo Switch",
@@ -281,9 +281,9 @@ mod tests {
     fn test_kind_display_name_all() {
         assert_eq!(GameKind::Wine.display_name(), "Windows");
         assert_eq!(GameKind::Linux.display_name(), "Linux");
-        assert_eq!(GameKind::Ps4.display_name(), "PS4");
-        assert_eq!(GameKind::Ps3.display_name(), "PS3");
-        assert_eq!(GameKind::PsVita.display_name(), "PS Vita");
+        assert_eq!(GameKind::Ps4.display_name(), "PlayStation 4");
+        assert_eq!(GameKind::Ps3.display_name(), "PlayStation 3");
+        assert_eq!(GameKind::PsVita.display_name(), "PlayStation Vita");
         assert_eq!(GameKind::WiiU.display_name(), "Wii U");
         assert_eq!(GameKind::ThreeDS.display_name(), "Nintendo 3DS");
         assert_eq!(GameKind::Switch.display_name(), "Nintendo Switch");

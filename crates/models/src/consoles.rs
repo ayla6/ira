@@ -20,6 +20,17 @@ impl ConsoleDef {
         !matches!(self.id, "ps3" | "ps4" | "psvita" | "wiiu")
     }
 
+    /// The compact name for space-constrained lists (the settings
+    /// sidebar): the abbreviations for the two long Nintendo titles,
+    /// the display name everywhere else.
+    pub fn short_name(&self) -> &'static str {
+        match self.id {
+            "nes" => "NES",
+            "snes" => "SNES",
+            _ => self.display_name,
+        }
+    }
+
     /// Everything a hidden search should match for this console: the
     /// display name, the id, and the aliases, lowercased with all
     /// whitespace dropped, so queries match regardless of spacing
@@ -467,6 +478,20 @@ mod tests {
             assert!(hay.contains(&name), "{}", c.id);
             assert!(hay.contains(c.id), "{}", c.id);
         }
+    }
+
+    #[test]
+    fn test_short_name_abbreviates_only_the_long_titles() {
+        assert_eq!(find_console("nes").unwrap().short_name(), "NES");
+        assert_eq!(find_console("snes").unwrap().short_name(), "SNES");
+        assert_eq!(
+            find_console("gba").unwrap().short_name(),
+            "Game Boy Advance"
+        );
+        assert_eq!(
+            find_console("psx").unwrap().short_name(),
+            "PlayStation 1"
+        );
     }
 
     #[test]

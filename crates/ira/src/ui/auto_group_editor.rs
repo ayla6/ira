@@ -96,6 +96,15 @@ impl GroupsUi {
                 }
             }
         }
+        if inner.borrow().groups.is_empty() {
+            // A fresh dialog starts with one group holding one rule —
+            // the shape every usable group needs anyway, so creating
+            // one no longer starts from a dead end.
+            add_group_card(menus, &inner, values_page, &group_box, None, state);
+            if let Some((_, collector)) = inner.borrow().groups.last().cloned() {
+                collector.add_rule(None);
+            }
+        }
 
         Self {
             root,
@@ -168,6 +177,7 @@ impl GroupCollector {
             existing,
             &self.values_page,
             &self.state,
+            &self.rules,
         );
         self.rules.borrow_mut().push(editor);
     }
@@ -243,6 +253,7 @@ impl CriterionEditor {
         initial: Option<&AutoCriterion>,
         values_page: &Rc<ValuesPage>,
         state: &super::state::SharedState,
+        rules: &Rc<RefCell<Vec<CriterionEditor>>>,
     ) -> Self {
         let initial = initial.cloned().unwrap_or_default();
 
@@ -276,12 +287,21 @@ impl CriterionEditor {
         card.add(add_rule_row);
 
         {
+            // The trash button drops the rows from the card AND the
+            // editor from the group's registry, so a deleted rule is
+            // gone from the saved tree too — rows alone only hide it
+            // until the next collect.
             let card = card.clone();
             let rows = rows.clone();
+            let marker = dimension.clone();
+            let rules = rules.clone();
             remove.connect_clicked(move |_| {
                 for row in &rows {
                     card.remove(row);
                 }
+                rules
+                    .borrow_mut()
+                    .retain(|editor| editor.dimension != marker);
             });
         }
 

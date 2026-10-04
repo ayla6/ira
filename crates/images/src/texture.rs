@@ -30,7 +30,10 @@ pub fn texture_for(path: &str) -> Option<Texture> {
             insert_texture(path, t);
             Some(cloned)
         }
-        Err(_) => None,
+        Err(e) => {
+            eprintln!("texture_for: failed to decode {}: {}", path, e);
+            None
+        }
     }
 }
 
@@ -60,6 +63,12 @@ pub fn set_picture_contain(pic: &gtk4::Picture, path: &str, max_h: i32) {
     if let Some(t) = texture_for(path) {
         pic.set_paintable(Some(&t));
     }
+    configure_contain_picture(pic, max_h);
+}
+
+/// Shared contain-fit layout for cover/logo pictures, used by the sync and
+/// async `set_picture_contain` variants so the two can't drift apart.
+pub(crate) fn configure_contain_picture(pic: &gtk4::Picture, max_h: i32) {
     pic.set_content_fit(gtk4::ContentFit::Contain);
     pic.set_halign(gtk4::Align::Start);
     pic.set_valign(gtk4::Align::Center);

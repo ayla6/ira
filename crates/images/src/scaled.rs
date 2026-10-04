@@ -123,19 +123,20 @@ fn cover_rect(tex_w: f64, tex_h: f64, w: f64, h: f64) -> (f64, f64, f64, f64) {
 }
 
 impl ScaledPaintable {
-    pub fn new(texture: &Texture, width: i32, height: i32) -> Self {        let obj = glib::Object::new::<Self>();
-        obj.imp().texture.replace(Some(texture.clone()));
+    fn with_texture(texture: Option<Texture>, width: i32, height: i32) -> Self {
+        let obj = glib::Object::new::<Self>();
+        obj.imp().texture.replace(texture);
         obj.imp().width.set(width);
         obj.imp().height.set(height);
         obj
     }
 
+    pub fn new(texture: &Texture, width: i32, height: i32) -> Self {
+        Self::with_texture(Some(texture.clone()), width, height)
+    }
+
     pub fn new_empty(width: i32, height: i32) -> Self {
-        let obj = glib::Object::new::<Self>();
-        obj.imp().texture.replace(None);
-        obj.imp().width.set(width);
-        obj.imp().height.set(height);
-        obj
+        Self::with_texture(None, width, height)
     }
 }
 
@@ -149,7 +150,10 @@ mod tests {
 
     #[test]
     fn test_cover_rect_exact_fit_is_identity() {
-        assert_eq!(cover_rect(100.0, 200.0, 100.0, 200.0), (0.0, 0.0, 100.0, 200.0));
+        assert_eq!(
+            cover_rect(100.0, 200.0, 100.0, 200.0),
+            (0.0, 0.0, 100.0, 200.0)
+        );
     }
 
     #[test]

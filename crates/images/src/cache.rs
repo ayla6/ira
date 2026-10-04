@@ -187,8 +187,12 @@ impl TextureCache {
 /// Byte-capped cache for the pixbuf wrappers (header/editor logos). No entry
 /// cap: a library's logos must all stay warm so switching games is instant.
 /// Wrappers share the decoded byte buffer with the texture cache.
+/// Eviction is LRU, mirroring [`TextureCache`], so a burst of fresh logos
+/// never evicts the currently visible one.
 pub(crate) struct PixbufCache {
     map: HashMap<String, gtk4::gdk_pixbuf::Pixbuf>,
+    order: HashMap<String, u64>,
+    counter: u64,
     total_bytes: usize,
     max_bytes: usize,
 }
@@ -201,13 +205,20 @@ impl PixbufCache {
     pub(crate) fn new(max_bytes: usize) -> Self {
         Self {
             map: HashMap::new(),
+            order: HashMap::new(),
+            counter: 0,
             total_bytes: 0,
             max_bytes,
         }
     }
 
-    pub(crate) fn get(&self, path: &str) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
-        self.map.get(path).cloned()
+    pub(crate) fn get(&mut self, path: &str) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
+        if let Some(pb) = self.map.get(path) {
+            self.counter += 1;
+            self.order.insert(path.to_string(), self.counter);
+            return Some(pb.clone());
+        }
+        None
     }
 
     pub(crate) fn insert(&mut self, path: &str, pb: gtk4::gdk_pixbuf::Pixbuf) {
@@ -216,29 +227,44 @@ impl PixbufCache {
             self.total_bytes = self.total_bytes.saturating_sub(Self::pixbuf_bytes(old));
         }
         while self.total_bytes + bytes > self.max_bytes && !self.map.is_empty() {
-            if let Some(key) = self.map.keys().next().cloned() {
-                if let Some(old) = self.map.remove(&key) {
-                    self.total_bytes = self.total_bytes.saturating_sub(Self::pixbuf_bytes(&old));
+            let lru_key = self
+                .order
+                .iter()
+                .min_by_key(|(_, &time)| time)
+                .map(|(k, _)| k.clone());
+            match lru_key {
+                Some(key) => {
+                    if let Some(old) = self.map.remove(&key) {
+                        self.total_bytes =
+                            self.total_bytes.saturating_sub(Self::pixbuf_bytes(&old));
+                    }
+                    self.order.remove(&key);
                 }
+                None => break,
             }
         }
         self.total_bytes += bytes;
+        self.counter += 1;
         self.map.insert(path.to_string(), pb);
+        self.order.insert(path.to_string(), self.counter);
     }
 
     pub(crate) fn remove(&mut self, path: &str) {
         if let Some(old) = self.map.remove(path) {
             self.total_bytes = self.total_bytes.saturating_sub(Self::pixbuf_bytes(&old));
         }
+        self.order.remove(path);
     }
 
     pub(crate) fn retain(&mut self, keep: &HashSet<String>) {
         self.map.retain(|path, _| keep.contains(path));
+        self.order.retain(|path, _| keep.contains(path));
         self.total_bytes = self.map.values().map(Self::pixbuf_bytes).sum();
     }
 
     pub(crate) fn clear(&mut self) {
         self.map.clear();
+        self.order.clear();
         self.total_bytes = 0;
     }
 }
@@ -248,6 +274,9 @@ impl PixbufCache {
 pub(crate) fn insert_texture(path: &str, texture: Texture) {
     let w = texture.width();
     let h = texture.height();
+    // A path re-decoded at a different size must not leave a stale entry in
+    // its old tier shadowing the fresh one — evict everywhere first.
+    remove_texture(path);
     if w <= ICON_MAX_DIM as i32 && h <= ICON_MAX_DIM as i32 {
         ICON_CACHE.with(|cell| cell.borrow_mut().insert(path, texture));
     } else if (w as u64) * (h as u64) > HERO_MIN_PIXELS {
@@ -255,6 +284,15 @@ pub(crate) fn insert_texture(path: &str, texture: Texture) {
     } else {
         TEXTURE_CACHE.with(|cell| cell.borrow_mut().insert(path, texture));
     }
+}
+
+/// Drop a path from every texture tier. Single place that knows the tier
+/// list, so `insert_texture` and `invalidate_texture` can't drift apart when
+/// tiers change.
+pub(crate) fn remove_texture(path: &str) {
+    TEXTURE_CACHE.with(|cell| cell.borrow_mut().remove(path));
+    HERO_CACHE.with(|cell| cell.borrow_mut().remove(path));
+    ICON_CACHE.with(|cell| cell.borrow_mut().remove(path));
 }
 
 pub(crate) fn get_texture(path: &str) -> Option<Texture> {
@@ -287,9 +325,7 @@ pub fn trim_image_caches(protected: &HashSet<String>) {
 
 pub fn invalidate_texture(path: &str) {
     let _s = info_span!("invalidate_texture", path).entered();
-    TEXTURE_CACHE.with(|cell| cell.borrow_mut().remove(path));
-    HERO_CACHE.with(|cell| cell.borrow_mut().remove(path));
-    ICON_CACHE.with(|cell| cell.borrow_mut().remove(path));
+    remove_texture(path);
     PIXBUF_CACHE.with(|cell| cell.borrow_mut().remove(path));
     PENDING_LOADS.with(|cell| cell.borrow_mut().remove(path));
     PENDING_PIXBUFS.with(|cell| cell.borrow_mut().remove(path));
@@ -425,5 +461,57 @@ mod tests {
         assert!(get_texture("drop-icon.png").is_none());
         assert!(get_texture("drop-cover.jpg").is_none());
         assert!(get_texture("drop-hero.jpg").is_none());
+    }
+
+    fn logo_pixbuf() -> gtk4::gdk_pixbuf::Pixbuf {
+        gtk4::gdk_pixbuf::Pixbuf::new(gtk4::gdk_pixbuf::Colorspace::Rgb, true, 8, 100, 100)
+            .expect("test pixbuf allocates")
+    }
+
+    #[test]
+    fn test_pixbuf_cache_roundtrip() {
+        let cache = &mut PixbufCache::new(1024 * 1024);
+        cache.insert("logo.png", logo_pixbuf());
+        assert!(cache.get("logo.png").is_some());
+        assert!(cache.get("missing.png").is_none());
+    }
+
+    #[test]
+    fn test_pixbuf_cache_evicts_lru_when_full() {
+        // 100×100 RGBA ≈ 40KB; a 80KB cap holds two. Touching "a" must keep
+        // it warm so the third insert evicts untouched "b".
+        let one = PixbufCache::pixbuf_bytes(&logo_pixbuf());
+        let cache = &mut PixbufCache::new(one * 2);
+        cache.insert("a", logo_pixbuf());
+        cache.insert("b", logo_pixbuf());
+        assert!(cache.get("a").is_some());
+        cache.insert("c", logo_pixbuf());
+        assert!(cache.get("a").is_some());
+        assert!(cache.get("b").is_none());
+        assert!(cache.get("c").is_some());
+    }
+
+    #[test]
+    fn test_pixbuf_cache_reinsert_does_not_inflate_total_bytes() {
+        let cache = &mut PixbufCache::new(1024 * 1024);
+        cache.insert("a", logo_pixbuf());
+        let bytes_after_first = cache.total_bytes;
+        cache.insert("a", logo_pixbuf());
+        assert_eq!(cache.total_bytes, bytes_after_first);
+        assert_eq!(cache.map.len(), 1);
+    }
+
+    #[test]
+    fn test_insert_texture_replaces_stale_tier_entry() {
+        // Same path re-decoded at a different size must be reachable at its
+        // new tier, with no stale entry shadowing it in the old tier.
+        clear_all();
+        insert_texture("art.png", icon_texture());
+        assert!(ICON_CACHE.with(|c| c.borrow().map.contains_key("art.png")));
+        insert_texture("art.png", hero_texture());
+        assert!(HERO_CACHE.with(|c| c.borrow().map.contains_key("art.png")));
+        assert!(!ICON_CACHE.with(|c| c.borrow().map.contains_key("art.png")));
+        assert!(get_texture("art.png").is_some());
+        clear_all();
     }
 }

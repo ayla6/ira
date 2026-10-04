@@ -14,14 +14,13 @@ pub fn pixbuf_for(path: &str) -> Option<Pixbuf> {
     if path.is_empty() {
         return None;
     }
-    if let Some(pb) = PIXBUF_CACHE.with(|cell| cell.borrow().get(path)) {
+    if let Some(pb) = PIXBUF_CACHE.with(|cell| cell.borrow_mut().get(path)) {
         return Some(pb);
     }
     match Pixbuf::from_file(path) {
         Ok(pb) => {
-            let cloned = pb.clone();
-            cache_pixbuf(path, &cloned);
-            Some(cloned)
+            cache_pixbuf(path, &pb);
+            Some(pb)
         }
         Err(e) => {
             eprintln!("pixbuf_for: failed to decode {}: {}", path, e);
@@ -39,7 +38,7 @@ where
         callback(None);
         return;
     }
-    if let Some(pb) = PIXBUF_CACHE.with(|cell| cell.borrow().get(&path)) {
+    if let Some(pb) = PIXBUF_CACHE.with(|cell| cell.borrow_mut().get(&path)) {
         callback(Some(pb));
         return;
     }

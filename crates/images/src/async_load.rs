@@ -1,7 +1,7 @@
 use crate::cache::{
     insert_texture, DecodeResult, DECODE_POOL_SIZE, PENDING_LOADS, PENDING_PIXBUFS,
 };
-use crate::texture::cached_texture;
+use crate::texture::{cached_texture, configure_contain_picture};
 use gdk4::{MemoryFormat, MemoryTexture, Texture};
 use gtk4::gdk_pixbuf::{Colorspace, Pixbuf};
 use gtk4::prelude::*;
@@ -39,7 +39,9 @@ impl Eq for DecodeJob {}
 
 impl PartialEq for DecodeJob {
     fn eq(&self, other: &Self) -> bool {
-        self.priority == other.priority && self.seq == other.seq && self.path == other.path
+        // Consistent with `Ord`, which only orders by priority+seq: `seq` is
+        // unique per job, so it alone identifies the job.
+        self.priority == other.priority && self.seq == other.seq
     }
 }
 
@@ -119,57 +121,79 @@ thread_local! {
     static DRAIN_ACTIVE: Cell<bool> = const { Cell::new(false) };
 }
 
+/// Deliver one finished decode: wrap the owned pixel buffer once and hand the
+/// shared `Bytes` to every queued texture/pixbuf callback. Moving `pixels`
+/// in (instead of cloning) saves a full-frame memcpy per image.
+fn deliver_decode_result(path: String, result: Option<(Vec<u8>, u32, u32)>) {
+    let texture_callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path));
+    let pixbuf_callbacks = PENDING_PIXBUFS.with(|cell| cell.borrow_mut().remove(&path));
+    // One decoded byte buffer, shared by both wrappers: the texture
+    // and the pixbuf each just refcount the same `Bytes`, so the
+    // pixbuf path adds no pixel data of its own.
+    let (texture, pixbuf) = match result {
+        Some((pixels, w, h)) => {
+            let bytes = glib::Bytes::from_owned(pixels);
+            let texture = MemoryTexture::new(
+                w as i32,
+                h as i32,
+                MemoryFormat::R8g8b8a8,
+                &bytes,
+                (w * 4) as usize,
+            )
+            .upcast::<Texture>();
+            let pixbuf = Pixbuf::from_bytes(
+                &bytes,
+                Colorspace::Rgb,
+                true,
+                8,
+                w as i32,
+                h as i32,
+                (w * 4) as i32,
+            );
+            (Some(texture), Some(pixbuf))
+        }
+        None => (None, None),
+    };
+    if let Some(ref t) = texture {
+        insert_texture(&path, t.clone());
+    }
+    if let Some(ref pb) = pixbuf {
+        crate::pixbuf::cache_pixbuf(&path, pb);
+    }
+    if let Some(callbacks) = texture_callbacks {
+        for cb in callbacks {
+            cb(texture.clone());
+        }
+    }
+    if let Some(callbacks) = pixbuf_callbacks {
+        for cb in callbacks {
+            cb(pixbuf.clone());
+        }
+    }
+}
+
+/// Wake every queued callback with `None`: the decode pool is gone, so no
+/// late result will ever arrive for them.
+fn fail_all_pending() {
+    let all_textures: Vec<_> = PENDING_LOADS.with(|cell| cell.borrow_mut().drain().collect());
+    for (_, cbs) in all_textures {
+        for cb in cbs {
+            cb(None);
+        }
+    }
+    let all_pixbufs: Vec<_> = PENDING_PIXBUFS.with(|cell| cell.borrow_mut().drain().collect());
+    for (_, cbs) in all_pixbufs {
+        for cb in cbs {
+            cb(None);
+        }
+    }
+}
+
 fn drain_results() -> glib::ControlFlow {
     let infra = decode_infra();
     loop {
         match infra.result_rx.lock().unwrap().try_recv() {
-            Ok((path, result)) => {
-                let texture_callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path));
-                let pixbuf_callbacks = PENDING_PIXBUFS.with(|cell| cell.borrow_mut().remove(&path));
-                // One decoded byte buffer, shared by both wrappers: the texture
-                // and the pixbuf each just refcount the same `Bytes`, so the
-                // pixbuf path adds no pixel data of its own.
-                let (texture, pixbuf) = match result.as_ref() {
-                    Some((pixels, w, h)) => {
-                        let bytes = glib::Bytes::from_owned(pixels.clone());
-                        let texture = MemoryTexture::new(
-                            *w as i32,
-                            *h as i32,
-                            MemoryFormat::R8g8b8a8,
-                            &bytes,
-                            (*w * 4) as usize,
-                        )
-                        .upcast::<Texture>();
-                        let pixbuf = Pixbuf::from_bytes(
-                            &bytes,
-                            Colorspace::Rgb,
-                            true,
-                            8,
-                            *w as i32,
-                            *h as i32,
-                            (*w * 4) as i32,
-                        );
-                        (Some(texture), Some(pixbuf))
-                    }
-                    None => (None, None),
-                };
-                if let Some(ref t) = texture {
-                    insert_texture(&path, t.clone());
-                }
-                if let Some(ref pb) = pixbuf {
-                    crate::pixbuf::cache_pixbuf(&path, pb);
-                }
-                if let Some(callbacks) = texture_callbacks {
-                    for cb in callbacks {
-                        cb(texture.clone());
-                    }
-                }
-                if let Some(callbacks) = pixbuf_callbacks {
-                    for cb in callbacks {
-                        cb(pixbuf.clone());
-                    }
-                }
-            }
+            Ok((path, result)) => deliver_decode_result(path, result),
             Err(TryRecvError::Empty) => {
                 let has_pending = PENDING_LOADS.with(|cell| !cell.borrow().is_empty())
                     || PENDING_PIXBUFS.with(|cell| !cell.borrow().is_empty());
@@ -180,20 +204,7 @@ fn drain_results() -> glib::ControlFlow {
                 return glib::ControlFlow::Break;
             }
             Err(TryRecvError::Disconnected) => {
-                let all_textures: Vec<_> =
-                    PENDING_LOADS.with(|cell| cell.borrow_mut().drain().collect());
-                for (_, cbs) in all_textures {
-                    for cb in cbs {
-                        cb(None);
-                    }
-                }
-                let all_pixbufs: Vec<_> =
-                    PENDING_PIXBUFS.with(|cell| cell.borrow_mut().drain().collect());
-                for (_, cbs) in all_pixbufs {
-                    for cb in cbs {
-                        cb(None);
-                    }
-                }
+                fail_all_pending();
                 DRAIN_ACTIVE.with(|a| a.set(false));
                 return glib::ControlFlow::Break;
             }
@@ -286,10 +297,5 @@ pub fn set_picture_contain_async(pic: &gtk4::Picture, path: &str, max_h: i32) {
             }
         });
     }
-    pic.set_content_fit(gtk4::ContentFit::Contain);
-    pic.set_halign(gtk4::Align::Start);
-    pic.set_valign(gtk4::Align::Center);
-    if max_h > 0 {
-        pic.set_height_request(max_h);
-    }
+    configure_contain_picture(pic, max_h);
 }

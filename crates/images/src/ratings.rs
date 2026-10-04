@@ -5,18 +5,30 @@
 //! gdk-pixbuf on demand. Pairs without a bundled mark — boards the
 //! assets don't cover — simply render as text.
 
+use gdk4::Texture;
+use gdk_pixbuf::Pixbuf;
+use gio::MemoryInputStream;
+use glib::Bytes;
+
 /// The mark for a stored board+value pair, rendered to fit `size`
 /// pixels. `None` for pairs without a bundled mark, or when no SVG
 /// loader is installed for gdk-pixbuf.
-pub fn rating_texture(kind: &str, value: &str, size: i32) -> Option<gdk4::Texture> {
+pub fn rating_texture(kind: &str, value: &str, size: i32) -> Option<Texture> {
+    if size <= 0 {
+        return None;
+    }
+    // Unknown pairs and uncovered boards are expected — the caller renders
+    // those as text, so no log. Only a rasterization failure is unexpected.
     let slug = ira_models::ratings::rating_slug(kind, value)?;
     let bytes = svg_bytes(&slug)?;
-    let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_static(bytes));
-    let pixbuf = gdk_pixbuf::Pixbuf::from_stream_at_scale(
-        &stream, size, size, true, gio::Cancellable::NONE,
-    )
-    .ok()?;
-    Some(gdk4::Texture::for_pixbuf(&pixbuf))
+    let stream = MemoryInputStream::from_bytes(&Bytes::from_static(bytes));
+    match Pixbuf::from_stream_at_scale(&stream, size, size, true, gio::Cancellable::NONE) {
+        Ok(pixbuf) => Some(Texture::for_pixbuf(&pixbuf)),
+        Err(e) => {
+            eprintln!("rating_texture: failed to rasterize {slug}: {e}");
+            None
+        }
+    }
 }
 
 /// The bundled SVG for an asset slug, if there is one.
@@ -95,5 +107,23 @@ fn svg_bytes(slug: &str) -> Option<&'static [u8]> {
         "usk-18" => Some(include_bytes!("../assets/ratings/usk-18.svg") as &[u8]),
         "usk-6" => Some(include_bytes!("../assets/ratings/usk-6.svg") as &[u8]),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::svg_bytes;
+
+    #[test]
+    fn test_svg_bytes_known_slug_returns_svg() {
+        let bytes = svg_bytes("pegi-12").expect("bundled pegi-12 mark");
+        assert!(!bytes.is_empty());
+        assert!(bytes.windows(4).any(|w| w == b"<svg"));
+    }
+
+    #[test]
+    fn test_svg_bytes_unknown_slug_returns_none() {
+        assert!(svg_bytes("no-such-board").is_none());
+        assert!(svg_bytes("").is_none());
     }
 }

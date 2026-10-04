@@ -16,7 +16,10 @@
 use std::ffi::c_void;
 use std::sync::OnceLock;
 
-use ira_overlay_ipc::InputEventRaw;
+use ira_overlay_ipc::{
+    InputEventRaw, EVT_KEY_PRESS, EVT_KEY_RELEASE, EVT_MOUSE_DOWN, EVT_MOUSE_MOVE, EVT_MOUSE_UP,
+    EVT_SCROLL,
+};
 
 use crate::state;
 
@@ -200,45 +203,10 @@ unsafe fn maybe_consume_event(ev: *mut c_void) -> bool {
     false
 }
 
-/// Hotkey match shared with the XCB backend via `state::match_hotkey`.
+/// Hotkey match shared with the XCB backend via `state::handle_hotkey`.
 /// Returns true when the event was a hotkey (consumed).
 unsafe fn check_hotkey(ev: *mut c_void) -> bool {
-    use crate::state::HotkeyAction;
-    let mods = read_state(ev);
-    let keycode = read_detail(ev);
-    match state::match_hotkey(mods, keycode) {
-        // Keyboard toggle is always ours: no other authority handles
-        // keyboard chords (the daemon only sees gamepads), in gamescope or
-        // out. The game keeps focus under gamescope's external overlay, so
-        // this is also the un-toggle path there.
-        Some(HotkeyAction::Toggle) => {
-            if state::toggle_edge(keycode) {
-                state::toggle_visible();
-            }
-            true
-        }
-        Some(HotkeyAction::Screenshot) => {
-            state::push_event(InputEventRaw {
-                event_type: 5, // screenshot request
-                x: 0,
-                y: 0,
-                button: 0,
-                keycode: 0,
-            });
-            true
-        }
-        Some(HotkeyAction::Record) => {
-            state::push_event(InputEventRaw {
-                event_type: 6, // recording toggle
-                x: 0,
-                y: 0,
-                button: 0,
-                keycode: 0,
-            });
-            true
-        }
-        None => false,
-    }
+    state::handle_hotkey(read_state(ev), read_detail(ev))
 }
 
 unsafe fn consume_visible(event_type: i32, ev: *mut c_void) -> bool {
@@ -247,7 +215,7 @@ unsafe fn consume_visible(event_type: i32, ev: *mut c_void) -> bool {
             let (x, y) = read_xy(ev);
             state::set_mouse_pos(x, y);
             state::push_event(InputEventRaw {
-                event_type: 0,
+                event_type: EVT_MOUSE_MOVE,
                 x,
                 y,
                 button: 0,
@@ -263,7 +231,7 @@ unsafe fn consume_visible(event_type: i32, ev: *mut c_void) -> bool {
             if button == 4 || button == 5 {
                 let delta = if button == 4 { -1 } else { 1 };
                 state::push_event(InputEventRaw {
-                    event_type: 7,
+                    event_type: EVT_SCROLL,
                     x: 0,
                     y: delta,
                     button,
@@ -272,7 +240,7 @@ unsafe fn consume_visible(event_type: i32, ev: *mut c_void) -> bool {
                 return true;
             }
             state::push_event(InputEventRaw {
-                event_type: 1,
+                event_type: EVT_MOUSE_DOWN,
                 x,
                 y,
                 button,
@@ -288,7 +256,7 @@ unsafe fn consume_visible(event_type: i32, ev: *mut c_void) -> bool {
                 return true;
             }
             state::push_event(InputEventRaw {
-                event_type: 2,
+                event_type: EVT_MOUSE_UP,
                 x,
                 y,
                 button,
@@ -299,7 +267,7 @@ unsafe fn consume_visible(event_type: i32, ev: *mut c_void) -> bool {
         KEYPRESS => {
             let keycode = read_detail(ev);
             state::push_event(InputEventRaw {
-                event_type: 3,
+                event_type: EVT_KEY_PRESS,
                 x: 0,
                 y: 0,
                 button: 0,
@@ -310,7 +278,7 @@ unsafe fn consume_visible(event_type: i32, ev: *mut c_void) -> bool {
         KEYRELEASE => {
             let keycode = read_detail(ev);
             state::push_event(InputEventRaw {
-                event_type: 4,
+                event_type: EVT_KEY_RELEASE,
                 x: 0,
                 y: 0,
                 button: 0,

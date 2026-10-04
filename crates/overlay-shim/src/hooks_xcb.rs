@@ -28,7 +28,10 @@
 use std::ffi::c_void;
 use std::sync::OnceLock;
 
-use ira_overlay_ipc::InputEventRaw;
+use ira_overlay_ipc::{
+    InputEventRaw, EVT_KEY_PRESS, EVT_KEY_RELEASE, EVT_MOUSE_DOWN, EVT_MOUSE_MOVE, EVT_MOUSE_UP,
+    EVT_SCROLL,
+};
 
 use crate::state;
 
@@ -122,9 +125,9 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
     let event_type = xcb_response_type(ev);
 
     // Always check for hotkeys, even when overlay is hidden.
-    // Shared policy with the X11 backend via state::match_hotkey.
+    // Shared policy with the X11 backend via state::handle_hotkey.
     if event_type == XCB_KEY_PRESS
-        && check_hotkey(xcb_state(ev) as u32, xcb_detail(ev) as u32)
+        && state::handle_hotkey(xcb_state(ev) as u32, xcb_detail(ev) as u32)
     {
         return true;
     }
@@ -143,117 +146,89 @@ unsafe fn maybe_consume_xcb_event(ev: *mut c_void) -> bool {
     // When overlay is visible, consume all mouse and keyboard events,
     // in any mode (see hooks_x11).
     if state::is_visible() {
-        match event_type {
-            XCB_MOTION_NOTIFY => {
-                let (x, y) = xcb_event_xy(ev);
-                state::set_mouse_pos(x as i32, y as i32);
-                state::push_event(InputEventRaw {
-                    event_type: 0,
-                    x: x as i32,
-                    y: y as i32,
-                    button: 0,
-                    keycode: 0,
-                });
-                return true;
-            }
-            XCB_BUTTON_PRESS => {
-                let (x, y) = xcb_event_xy(ev);
-                let button = xcb_detail(ev);
-                if button == XCB_BUTTON_INDEX_4 || button == XCB_BUTTON_INDEX_5 {
-                    let delta = if button == XCB_BUTTON_INDEX_4 { -1 } else { 1 };
-                    state::push_event(InputEventRaw {
-                        event_type: 7,
-                        x: 0,
-                        y: delta,
-                        button: button as u32,
-                        keycode: 0,
-                    });
-                    return true;
-                }
-                state::push_event(InputEventRaw {
-                    event_type: 1,
-                    x: x as i32,
-                    y: y as i32,
-                    button: button as u32,
-                    keycode: 0,
-                });
-                return true;
-            }
-            XCB_BUTTON_RELEASE => {
-                let (x, y) = xcb_event_xy(ev);
-                let button = xcb_detail(ev);
-                if button == XCB_BUTTON_INDEX_4 || button == XCB_BUTTON_INDEX_5 {
-                    return true;
-                }
-                state::push_event(InputEventRaw {
-                    event_type: 2,
-                    x: x as i32,
-                    y: y as i32,
-                    button: button as u32,
-                    keycode: 0,
-                });
-                return true;
-            }
-            XCB_KEY_PRESS => {
-                let keycode = xcb_detail(ev) as u32;
-                state::push_event(InputEventRaw {
-                    event_type: 3,
-                    x: 0,
-                    y: 0,
-                    button: 0,
-                    keycode,
-                });
-                return true;
-            }
-            XCB_KEY_RELEASE => {
-                let keycode = xcb_detail(ev) as u32;
-                state::push_event(InputEventRaw {
-                    event_type: 4,
-                    x: 0,
-                    y: 0,
-                    button: 0,
-                    keycode,
-                });
-                return true;
-            }
-            _ => {}
-        }
+        return consume_xcb_visible(event_type, ev);
     }
 
     false
 }
 
-fn check_hotkey(mods: u32, keycode: u32) -> bool {
-    use crate::state::HotkeyAction;
-    match state::match_hotkey(mods, keycode) {
-        // Keyboard toggle is always ours: see hooks_x11.
-        Some(HotkeyAction::Toggle) => {
-            if state::toggle_edge(keycode) {
-                state::toggle_visible();
+/// Consumes mouse/keyboard events while visible. Split from the dispatch
+/// above so neither function exceeds the soft line cap.
+unsafe fn consume_xcb_visible(event_type: u8, ev: *mut c_void) -> bool {
+    match event_type {
+        XCB_MOTION_NOTIFY => {
+            let (x, y) = xcb_event_xy(ev);
+            state::set_mouse_pos(x as i32, y as i32);
+            state::push_event(InputEventRaw {
+                event_type: EVT_MOUSE_MOVE,
+                x: x as i32,
+                y: y as i32,
+                button: 0,
+                keycode: 0,
+            });
+            true
+        }
+        XCB_BUTTON_PRESS => {
+            let (x, y) = xcb_event_xy(ev);
+            let button = xcb_detail(ev);
+            if button == XCB_BUTTON_INDEX_4 || button == XCB_BUTTON_INDEX_5 {
+                let delta = if button == XCB_BUTTON_INDEX_4 { -1 } else { 1 };
+                state::push_event(InputEventRaw {
+                    event_type: EVT_SCROLL,
+                    x: 0,
+                    y: delta,
+                    button: button as u32,
+                    keycode: 0,
+                });
+                return true;
             }
-            true
-        }
-        Some(HotkeyAction::Screenshot) => {
             state::push_event(InputEventRaw {
-                event_type: 5,
-                x: 0,
-                y: 0,
-                button: 0,
+                event_type: EVT_MOUSE_DOWN,
+                x: x as i32,
+                y: y as i32,
+                button: button as u32,
                 keycode: 0,
             });
             true
         }
-        Some(HotkeyAction::Record) => {
+        XCB_BUTTON_RELEASE => {
+            let (x, y) = xcb_event_xy(ev);
+            let button = xcb_detail(ev);
+            if button == XCB_BUTTON_INDEX_4 || button == XCB_BUTTON_INDEX_5 {
+                return true;
+            }
             state::push_event(InputEventRaw {
-                event_type: 6,
-                x: 0,
-                y: 0,
-                button: 0,
+                event_type: EVT_MOUSE_UP,
+                x: x as i32,
+                y: y as i32,
+                button: button as u32,
                 keycode: 0,
             });
             true
         }
-        None => false,
+        XCB_KEY_PRESS => {
+            let keycode = xcb_detail(ev) as u32;
+            state::push_event(InputEventRaw {
+                event_type: EVT_KEY_PRESS,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode,
+            });
+            true
+        }
+        XCB_KEY_RELEASE => {
+            let keycode = xcb_detail(ev) as u32;
+            state::push_event(InputEventRaw {
+                event_type: EVT_KEY_RELEASE,
+                x: 0,
+                y: 0,
+                button: 0,
+                keycode,
+            });
+            true
+        }
+        _ => false,
     }
 }
 

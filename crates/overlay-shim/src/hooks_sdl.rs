@@ -16,7 +16,10 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
-use ira_overlay_ipc::{gamepad_button_mask_from_evdev, InputEventRaw, ShmHeader};
+use ira_overlay_ipc::{
+    gamepad_button_mask_from_evdev, InputEventRaw, ShmHeader, EVT_KEY_PRESS, EVT_SCROLL,
+    EVT_SCREENSHOT, EVT_TOGGLE_RECORD,
+};
 
 use crate::state;
 
@@ -117,12 +120,12 @@ fn handle_button(button: u8) -> bool {
     let (toggle, screenshot, record) = state::gamepad_hotkeys();
     if held == screenshot {
         TOGGLE_PENDING.store(false, Ordering::Relaxed);
-        state::push_event(capture_event(5));
+        state::push_event(capture_event(EVT_SCREENSHOT));
         return true;
     }
     if held == record {
         TOGGLE_PENDING.store(false, Ordering::Relaxed);
-        state::push_event(capture_event(6));
+        state::push_event(capture_event(EVT_TOGGLE_RECORD));
         return true;
     }
     if held == toggle {
@@ -169,7 +172,7 @@ fn scroll_event(button: u8) -> Option<InputEventRaw> {
         _ => return None,
     };
     Some(InputEventRaw {
-        event_type: 7,
+        event_type: EVT_SCROLL,
         x: 0,
         y: delta,
         button: 0,
@@ -179,7 +182,7 @@ fn scroll_event(button: u8) -> Option<InputEventRaw> {
 
 fn key_event(keycode: u32) -> InputEventRaw {
     InputEventRaw {
-        event_type: 3,
+        event_type: EVT_KEY_PRESS,
         x: 0,
         y: 0,
         button: 0,
@@ -208,21 +211,37 @@ fn button_mask(button: u8) -> Option<u32> {
     // above, so chords containing B cannot be expressed on the SDL path
     // (the evdev fallback covers them in non-SDL games). Triggers have no
     // SDL button codes at all (axes only) — same limitation.
+    //
+    // Evdev codes (linux/input-event-codes.h) for the shared chord table.
+    const EVDEV_SOUTH: u16 = 0x130;
+    const EVDEV_WEST: u16 = 0x132;
+    const EVDEV_NORTH: u16 = 0x133;
+    const EVDEV_BACK: u16 = 0x13a;
+    const EVDEV_GUIDE: u16 = 0x13c;
+    const EVDEV_START: u16 = 0x13b;
+    const EVDEV_THUMBL: u16 = 0x13d;
+    const EVDEV_THUMBR: u16 = 0x13e;
+    const EVDEV_TL: u16 = 0x136;
+    const EVDEV_TR: u16 = 0x137;
+    const EVDEV_DPAD_UP: u16 = 0x220;
+    const EVDEV_DPAD_DOWN: u16 = 0x221;
+    const EVDEV_DPAD_LEFT: u16 = 0x222;
+    const EVDEV_DPAD_RIGHT: u16 = 0x223;
     let evdev = match button {
-        BTN_A => 0x130,
-        BTN_X => 0x132,
-        BTN_Y => 0x133,
-        BTN_BACK => 0x13a,
-        BTN_GUIDE => 0x13c,
-        BTN_START => 0x13b,
-        BTN_LEFTSTICK => 0x13d,
-        BTN_RIGHTSTICK => 0x13e,
-        BTN_LEFTSHOULDER => 0x136,
-        BTN_RIGHTSHOULDER => 0x137,
-        BTN_DPAD_UP => 0x220,
-        BTN_DPAD_DOWN => 0x221,
-        BTN_DPAD_LEFT => 0x222,
-        BTN_DPAD_RIGHT => 0x223,
+        BTN_A => EVDEV_SOUTH,
+        BTN_X => EVDEV_WEST,
+        BTN_Y => EVDEV_NORTH,
+        BTN_BACK => EVDEV_BACK,
+        BTN_GUIDE => EVDEV_GUIDE,
+        BTN_START => EVDEV_START,
+        BTN_LEFTSTICK => EVDEV_THUMBL,
+        BTN_RIGHTSTICK => EVDEV_THUMBR,
+        BTN_LEFTSHOULDER => EVDEV_TL,
+        BTN_RIGHTSHOULDER => EVDEV_TR,
+        BTN_DPAD_UP => EVDEV_DPAD_UP,
+        BTN_DPAD_DOWN => EVDEV_DPAD_DOWN,
+        BTN_DPAD_LEFT => EVDEV_DPAD_LEFT,
+        BTN_DPAD_RIGHT => EVDEV_DPAD_RIGHT,
         _ => return None,
     };
     gamepad_button_mask_from_evdev(evdev)

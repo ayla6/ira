@@ -1,7 +1,7 @@
 //! Frame capture — staging buffers, lifecycle, and public API.
 //!
 //! Split by responsibility (one job per file, no "and"):
-//! - `vk.rs`: present-thread record path (`capture`, readback polling,
+//! - `record.rs`: present-thread record path (`capture`, readback polling,
 //!   GPU resource construction).
 //! - `threads.rs`: readback/encode threads, ffmpeg pipes, recording and
 //!   replay-buffer control.
@@ -151,16 +151,28 @@ fn stop_recording(reason: &str) {
 
 /// Defers every live allocation (free list, in-flight receives, and the
 /// intermediate image) for destruction once the GPU is done with it.
-fn defer_all(state: &mut State) {
-    while let Ok(staging) = state.free_rx.try_recv() {
+/// Takes field pieces (not `&mut State`) so `destroy` can reuse it after
+/// the thread handles have been moved out by `join`.
+fn defer_buffers(
+    free_rx: &Receiver<StagingBuffer>,
+    free: &mut Vec<StagingBuffer>,
+    intermediate: &mut Option<IntermediateImage>,
+) {
+    while let Ok(staging) = free_rx.try_recv() {
         DEFERRED_BUFFERS.lock().unwrap().push(staging);
     }
-    for staging in state.free.drain(..) {
+    for staging in free.drain(..) {
         DEFERRED_BUFFERS.lock().unwrap().push(staging);
     }
-    if let Some(img) = state.intermediate.take() {
+    if let Some(img) = intermediate.take() {
         DEFERRED_IMAGES.lock().unwrap().push(img);
     }
+}
+
+/// Defers every live allocation (free list, in-flight receives, and the
+/// intermediate image) for destruction once the GPU is done with it.
+fn defer_all(state: &mut State) {
+    defer_buffers(&state.free_rx, &mut state.free, &mut state.intermediate);
 }
 
 /// Tears down the live capture state for a resize: defers allocations,
@@ -297,20 +309,12 @@ pub fn destroy(fns: DeviceFns, device: vk::Device) {
     let _ = state.readback_handle.join();
     let _ = state.encode_handle.join();
 
-    // Collect every allocation into deferred (disjoint field moves — the
-    // thread handles above already moved out).
+    // Collect every allocation into deferred via the shared helper, then
+    // drain in-flight frames (teardown-only: the device is going away).
+    defer_buffers(&state.free_rx, &mut state.free, &mut state.intermediate);
     let mut deferred = DEFERRED_BUFFERS.lock().unwrap();
-    while let Ok(staging) = state.free_rx.try_recv() {
-        deferred.push(staging);
-    }
-    for staging in state.free.drain(..) {
-        deferred.push(staging);
-    }
     for frame in state.pending.drain(..) {
         deferred.push(frame.staging);
-    }
-    if let Some(img) = state.intermediate.take() {
-        DEFERRED_IMAGES.lock().unwrap().push(img);
     }
     drop(deferred);
 

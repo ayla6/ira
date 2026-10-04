@@ -52,35 +52,27 @@ pub(super) fn recording_settings() -> RecordingSettings {
     }
 }
 
-pub(super) fn recording_args(
-    source_width: u32,
-    source_height: u32,
-    encoder: VideoEncoder,
-    quality: RecordingQuality,
-    format: RecordingFormat,
-    output: &Path,
-) -> Vec<String> {
-    let (width, height, fps, bitrate) = quality.params();
-    let vaapi = encoder == VideoEncoder::Vaapi && format != RecordingFormat::Webm;
-    let codec = if format == RecordingFormat::Webm {
-        "libvpx-vp9"
-    } else {
-        encoder.ffmpeg_codec()
-    };
+fn scale_filter(width: u32, height: u32, vaapi: bool) -> String {
     let mut filter = format!(
         "scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
     );
     if vaapi {
         filter.push_str(",format=nv12,hwupload");
     }
+    filter
+}
 
-    let mut args = vec!["-y".to_string()];
-    if vaapi {
-        args.extend([
-            "-vaapi_device".to_string(),
-            vaapi_device().to_string_lossy().into_owned(),
-        ]);
-    }
+/// Raw-video stdin preamble shared by recording and replay pipes:
+/// `-f rawvideo … -vf <filter> -c:v … -b:v … -r …`.
+fn push_raw_input(
+    args: &mut Vec<String>,
+    source_width: u32,
+    source_height: u32,
+    filter: String,
+    codec: &str,
+    bitrate: u32,
+    fps: u32,
+) {
     args.extend([
         "-f".to_string(),
         "rawvideo".to_string(),
@@ -100,6 +92,47 @@ pub(super) fn recording_args(
         format!("{bitrate}M"),
         "-r".to_string(),
         fps.to_string(),
+    ]);
+}
+
+fn push_vaapi_device(args: &mut Vec<String>) {
+    args.extend([
+        "-vaapi_device".to_string(),
+        vaapi_device().to_string_lossy().into_owned(),
+    ]);
+}
+
+pub(super) fn recording_args(
+    source_width: u32,
+    source_height: u32,
+    encoder: VideoEncoder,
+    quality: RecordingQuality,
+    format: RecordingFormat,
+    output: &Path,
+) -> Vec<String> {
+    let (width, height, fps, bitrate) = quality.params();
+    let vaapi = encoder == VideoEncoder::Vaapi && format != RecordingFormat::Webm;
+    let codec = if format == RecordingFormat::Webm {
+        "libvpx-vp9"
+    } else {
+        encoder.ffmpeg_codec()
+    };
+    let filter = scale_filter(width, height, vaapi);
+
+    let mut args = vec!["-y".to_string()];
+    if vaapi {
+        push_vaapi_device(&mut args);
+    }
+    push_raw_input(
+        &mut args,
+        source_width,
+        source_height,
+        filter,
+        codec,
+        bitrate,
+        fps,
+    );
+    args.extend([
         "-f".to_string(),
         ffmpeg_muxer(format).to_string(),
         "-loglevel".to_string(),
@@ -125,39 +158,22 @@ pub(super) fn replay_args(
 ) -> Vec<String> {
     let (width, height, fps, bitrate) = quality.params();
     let vaapi = encoder == VideoEncoder::Vaapi;
-    let mut filter = format!(
-        "scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
-    );
-    if vaapi {
-        filter.push_str(",format=nv12,hwupload");
-    }
+    let filter = scale_filter(width, height, vaapi);
 
     let mut args = vec!["-y".to_string()];
     if vaapi {
-        args.extend([
-            "-vaapi_device".to_string(),
-            vaapi_device().to_string_lossy().into_owned(),
-        ]);
+        push_vaapi_device(&mut args);
     }
-    args.extend([
-        "-f".to_string(),
-        "rawvideo".to_string(),
-        "-pixel_format".to_string(),
-        "rgba".to_string(),
-        "-video_size".to_string(),
-        format!("{source_width}x{source_height}"),
-        "-use_wallclock_as_timestamps".to_string(),
-        "1".to_string(),
-        "-i".to_string(),
-        "-".to_string(),
-        "-vf".to_string(),
+    push_raw_input(
+        &mut args,
+        source_width,
+        source_height,
         filter,
-        "-c:v".to_string(),
-        encoder.ffmpeg_codec().to_string(),
-        "-b:v".to_string(),
-        format!("{bitrate}M"),
-        "-r".to_string(),
-        fps.to_string(),
+        encoder.ffmpeg_codec(),
+        bitrate,
+        fps,
+    );
+    args.extend([
         "-g".to_string(),
         (fps * REPLAY_SEGMENT_SECONDS).to_string(),
         "-keyint_min".to_string(),

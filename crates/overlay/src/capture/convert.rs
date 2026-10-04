@@ -27,17 +27,17 @@ unsafe fn read_pixels_fallback(frame: &PendingFrame) -> Vec<u8> {
     let bpp = super::src_bpp(frame.src_format) as usize;
     let src_size = w * h * bpp;
 
-    let mut local = vec![0u8; src_size];
-    unsafe { std::ptr::copy_nonoverlapping(frame.staging.ptr, local.as_mut_ptr(), src_size) };
+    // The fence already signaled (readback thread), so the GPU is done;
+    // HOST_COHERENT staging needs no flush — convert in place without an
+    // intermediate copy.
+    let src = unsafe { std::slice::from_raw_parts(frame.staging.ptr, src_size) };
 
     match frame.src_format {
-        vk::Format::B8G8R8A8_UNORM | vk::Format::B8G8R8A8_SRGB => convert_8bpp(&local, w, h, true),
-        vk::Format::R8G8B8A8_UNORM | vk::Format::R8G8B8A8_SRGB => convert_8bpp(&local, w, h, false),
-        vk::Format::R16G16B16A16_SFLOAT | vk::Format::R16G16B16A16_UNORM => {
-            convert_f16(&local, w, h)
-        }
+        vk::Format::B8G8R8A8_UNORM | vk::Format::B8G8R8A8_SRGB => convert_8bpp(src, w, h, true),
+        vk::Format::R8G8B8A8_UNORM | vk::Format::R8G8B8A8_SRGB => convert_8bpp(src, w, h, false),
+        vk::Format::R16G16B16A16_SFLOAT | vk::Format::R16G16B16A16_UNORM => convert_f16(src, w, h),
         vk::Format::A2B10G10R10_UNORM_PACK32 | vk::Format::A2R10G10B10_UNORM_PACK32 => {
-            convert_10bpp(&local, w, h, frame.src_format)
+            convert_10bpp(src, w, h, frame.src_format)
         }
         // Unknown formats stage nothing usable; the empty frame is dropped
         // by the readback thread before it can reach an encoder.

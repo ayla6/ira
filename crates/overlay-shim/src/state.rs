@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use ira_overlay_ipc::{InputEventRaw, MappedShm, ShmHeader};
+use ira_overlay_ipc::{InputEventRaw, MappedShm, ShmHeader, EVT_SCREENSHOT, EVT_TOGGLE_RECORD};
 
 pub static OVERLAY_VISIBLE: AtomicBool = AtomicBool::new(false);
 static VISIBILITY_INITIALIZED: AtomicBool = AtomicBool::new(false);
@@ -57,6 +57,14 @@ pub fn push_event(event: InputEventRaw) {
     if let Ok(mut q) = INPUT_QUEUE.lock() {
         q.push(event);
     }
+}
+
+/// Pushes a payload-free event (hotkeys): screenshot, record toggle.
+pub fn push_simple(event_type: u32) {
+    push_event(InputEventRaw {
+        event_type,
+        ..Default::default()
+    });
 }
 
 pub fn drain_events(out: &mut [InputEventRaw]) -> usize {
@@ -225,6 +233,30 @@ pub fn match_hotkey(mods: u32, x11_keycode: u32) -> Option<HotkeyAction> {
         return Some(HotkeyAction::Record);
     }
     None
+}
+
+/// Shared keyboard-hotkey policy for the X11 and XCB backends (identical
+/// side effects, different wire layouts). Returns true when consumed.
+/// Keyboard toggle is always ours: no other authority handles keyboard
+/// chords (the daemon only sees gamepads), in gamescope or out.
+pub fn handle_hotkey(mods: u32, x11_keycode: u32) -> bool {
+    match match_hotkey(mods, x11_keycode) {
+        Some(HotkeyAction::Toggle) => {
+            if toggle_edge(x11_keycode) {
+                toggle_visible();
+            }
+            true
+        }
+        Some(HotkeyAction::Screenshot) => {
+            push_simple(EVT_SCREENSHOT);
+            true
+        }
+        Some(HotkeyAction::Record) => {
+            push_simple(EVT_TOGGLE_RECORD);
+            true
+        }
+        None => false,
+    }
 }
 
 fn with_shm<T>(default: T, f: impl FnOnce(&ShmHeader) -> T) -> T {

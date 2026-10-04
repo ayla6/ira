@@ -191,6 +191,23 @@ fn copy_region(extent: vk::Extent2D) -> vk::BufferImageCopy {
         })
 }
 
+/// Barrier moving the swapchain image into TRANSFER_SRC_OPTIMAL.
+/// Shared by the blit and direct-copy record paths.
+fn src_to_transfer_barrier(
+    src_image: vk::Image,
+    color_sub: vk::ImageSubresourceRange,
+) -> vk::ImageMemoryBarrier<'static> {
+    vk::ImageMemoryBarrier::default()
+        .old_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+        .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+        .src_access_mask(vk::AccessFlags::NONE)
+        .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(src_image)
+        .subresource_range(color_sub)
+}
+
 /// Records the blit path: swapchain → intermediate RGBA → staging buffer.
 unsafe fn record_blit(
     fns: DeviceFns,
@@ -201,15 +218,7 @@ unsafe fn record_blit(
     extent: vk::Extent2D,
     color_sub: vk::ImageSubresourceRange,
 ) {
-    let src_barrier = vk::ImageMemoryBarrier::default()
-        .old_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-        .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
-        .src_access_mask(vk::AccessFlags::NONE)
-        .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
-        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .image(src_image)
-        .subresource_range(color_sub);
+    let src_barrier = src_to_transfer_barrier(src_image, color_sub);
     let dst_barrier = vk::ImageMemoryBarrier::default()
         .old_layout(vk::ImageLayout::UNDEFINED)
         .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
@@ -296,15 +305,7 @@ unsafe fn record_copy(
     extent: vk::Extent2D,
     color_sub: vk::ImageSubresourceRange,
 ) {
-    let src_barrier = vk::ImageMemoryBarrier::default()
-        .old_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-        .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
-        .src_access_mask(vk::AccessFlags::NONE)
-        .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
-        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .image(src_image)
-        .subresource_range(color_sub);
+    let src_barrier = src_to_transfer_barrier(src_image, color_sub);
     cmd_barrier(
         fns,
         cmd,

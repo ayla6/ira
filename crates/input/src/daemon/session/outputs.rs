@@ -89,15 +89,7 @@ fn rebuild_output_stack(
         outputs.native_passthrough,
         outputs.mirror.clone(),
     );
-    *outputs.gamepad = stack.gamepad;
-    *outputs.keyboard = stack.keyboard;
-    *outputs.mouse = stack.mouse;
-    outputs.pipeline.motion = stack.motion;
-    outputs.pipeline.motion_device = stack.motion_device;
-    outputs.pipeline.ds4_hid = stack.ds4_hid;
-    outputs.pipeline.dualsense_hid = stack.dualsense_hid;
-    outputs.pipeline.switch_pro_hid = stack.switch_pro_hid;
-    outputs.pipeline.imu_hid = stack.imu_hid;
+    install_stack(outputs, stack);
     eprintln!(
         "ira-input: controller kind changed; the game sees a new {:?} controller",
         outputs.mapper.profile().backend
@@ -128,6 +120,12 @@ pub(crate) fn rebuild_output_devices(outputs: &mut LiveOutputs<'_>, trace: &mut 
     .unwrap_or_else(|error| {
         eprintln!("ira-input: failed to release outputs before the controller swap: {error}")
     });
+    install_stack(outputs, stack);
+}
+
+/// Swaps the live virtual devices for a freshly built stack, keeping the
+/// mapper itself untouched.
+fn install_stack(outputs: &mut LiveOutputs<'_>, stack: super::output_stack::VirtualStack) {
     *outputs.gamepad = stack.gamepad;
     *outputs.keyboard = stack.keyboard;
     *outputs.mouse = stack.mouse;

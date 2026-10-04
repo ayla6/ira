@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 
 use ira_overlay_ipc::{
     canvas_shm_path, CanvasAction, CanvasShm, MappedShm, ACT_SCREENSHOT, ACT_TOGGLE_RECORD,
-    DAEMON_TOGGLE_ENV, GAMEPAD_A, GAMEPAD_B, GAMEPAD_DPAD_DOWN, GAMEPAD_DPAD_LEFT,
+    GAMEPAD_A, GAMEPAD_B, GAMEPAD_DPAD_DOWN, GAMEPAD_DPAD_LEFT,
     GAMEPAD_DPAD_RIGHT, GAMEPAD_DPAD_UP, GAMEPAD_GUIDE, GAMEPAD_L1, GAMEPAD_L2, GAMEPAD_L3,
     GAMEPAD_R1, GAMEPAD_R2, GAMEPAD_R3, GAMEPAD_SELECT, GAMEPAD_START, GAMEPAD_X, GAMEPAD_Y,
 };
@@ -66,20 +66,10 @@ impl OverlayToggle {
     /// game SHM to decode the chords. Silent `None` otherwise. The mapping
     /// is kept so firing flips it directly — no IPC round trip.
     pub(crate) fn arm(env: Option<&[(String, String)]>) -> Option<Self> {
-        let env = env?;
-        if !env
-            .iter()
-            .any(|(k, v)| k == DAEMON_TOGGLE_ENV && v == "1")
-        {
-            return None;
-        }
-        let shm_name = env
-            .iter()
-            .find(|(k, _)| k == "IRA_OVERLAY_SHM")
-            .map(|(_, v)| v.as_str())?;
+        let shm_name = super::daemon_toggle_shm_name(env)?;
         // Read-write: firing flips the flag through this same mapping, and
         // a read-only mapping would segfault on the atomic write.
-        let shm = MappedShm::open_rw(shm_name).ok()?;
+        let shm = MappedShm::open_rw(&shm_name).ok()?;
         let (toggle, screenshot, record) = shm.header().gamepad_hotkeys();
         if toggle == 0 {
             return None;
@@ -279,6 +269,7 @@ fn mask_of(button: GamepadButton) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ira_overlay_ipc::DAEMON_TOGGLE_ENV;
 
     fn press(button: GamepadButton, value: f32) -> InputEvent {
         InputEvent {

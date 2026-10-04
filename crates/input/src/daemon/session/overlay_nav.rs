@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use ira_overlay_ipc::{
     canvas_shm_path, CanvasCommand, CanvasShm, MappedShm, CMD_ACTIVATE, CMD_BACK, CMD_NAV_DOWN,
-    CMD_NAV_LEFT, CMD_NAV_RIGHT, CMD_NAV_UP, DAEMON_TOGGLE_ENV,
+    CMD_NAV_LEFT, CMD_NAV_RIGHT, CMD_NAV_UP,
 };
 
 use crate::{AxisDirection, GamepadAxis, GamepadButton, InputEvent, InputSource};
@@ -26,12 +26,8 @@ const STICK_PRESS: f32 = 0.6;
 const STICK_RELEASE: f32 = 0.4;
 
 /// What one navigation press does. Pure mapping, tested below.
-enum NavAction {
-    Push(CanvasCommand),
-}
-
-fn action_for_source(source: InputSource) -> Option<NavAction> {
-    let nav = |kind| Some(NavAction::Push(CanvasCommand::nav(kind)));
+fn command_for_source(source: InputSource) -> Option<CanvasCommand> {
+    let nav = |kind| Some(CanvasCommand::nav(kind));
     match source {
         InputSource::Button(button) => match button {
             GamepadButton::DpadUp => nav(CMD_NAV_UP),
@@ -41,8 +37,8 @@ fn action_for_source(source: InputSource) -> Option<NavAction> {
             GamepadButton::A => nav(CMD_ACTIVATE),
             // Back out one screen (submenu → menu, menu → close, decided host-side).
             GamepadButton::B => nav(CMD_BACK),
-            GamepadButton::LeftShoulder => Some(NavAction::Push(CanvasCommand::scroll(-1.0))),
-            GamepadButton::RightShoulder => Some(NavAction::Push(CanvasCommand::scroll(1.0))),
+            GamepadButton::LeftShoulder => Some(CanvasCommand::scroll(-1.0)),
+            GamepadButton::RightShoulder => Some(CanvasCommand::scroll(1.0)),
             _ => None,
         },
         InputSource::AxisDirection { axis, direction } => match (axis, direction) {
@@ -138,18 +134,8 @@ impl OverlayNav {
     /// for the canvas path). Silent `None` until the host created its
     /// canvas (callers retry lazily).
     pub(crate) fn arm(env: Option<&[(String, String)]>) -> Option<Self> {
-        let env = env?;
-        if !env
-            .iter()
-            .any(|(k, v)| k == DAEMON_TOGGLE_ENV && v == "1")
-        {
-            return None;
-        }
-        let shm_name = env
-            .iter()
-            .find(|(k, _)| k == "IRA_OVERLAY_SHM")
-            .map(|(_, v)| v.as_str())?;
-        let shm = MappedShm::open(shm_name).ok()?;
+        let shm_name = super::daemon_toggle_shm_name(env)?;
+        let shm = MappedShm::open(&shm_name).ok()?;
         let canvas = CanvasShm::open_rw(&canvas_shm_path(shm.header().game_db_id)).ok()?;
         Some(Self {
             canvas,
@@ -190,7 +176,7 @@ impl OverlayNav {
     }
 
     fn act(&mut self, source: InputSource) {
-        if let Some(NavAction::Push(cmd)) = action_for_source(source) {
+        if let Some(cmd) = command_for_source(source) {
             self.canvas.push_command(cmd);
         }
     }
@@ -208,7 +194,7 @@ impl OverlayNav {
         }
         self.last_repeat = now;
         for source in due {
-            if let Some(NavAction::Push(cmd)) = action_for_source(source) {
+            if let Some(cmd) = command_for_source(source) {
                 self.canvas.push_command(cmd);
             }
         }
@@ -220,57 +206,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_action_for_covers_layer_nav_mapping() {
+    fn test_command_for_covers_layer_nav_mapping() {
         // Same vocabulary as the in-process layer evdev path.
         let btn = InputSource::Button;
         assert!(matches!(
-            action_for_source(btn(GamepadButton::DpadUp)),
-            Some(NavAction::Push(cmd)) if cmd.kind == CMD_NAV_UP
+            command_for_source(btn(GamepadButton::DpadUp)),
+            Some(cmd) if cmd.kind == CMD_NAV_UP
         ));
         assert!(matches!(
-            action_for_source(btn(GamepadButton::DpadDown)),
-            Some(NavAction::Push(cmd)) if cmd.kind == CMD_NAV_DOWN
+            command_for_source(btn(GamepadButton::DpadDown)),
+            Some(cmd) if cmd.kind == CMD_NAV_DOWN
         ));
         assert!(matches!(
-            action_for_source(btn(GamepadButton::DpadLeft)),
-            Some(NavAction::Push(cmd)) if cmd.kind == CMD_NAV_LEFT
+            command_for_source(btn(GamepadButton::DpadLeft)),
+            Some(cmd) if cmd.kind == CMD_NAV_LEFT
         ));
         assert!(matches!(
-            action_for_source(btn(GamepadButton::DpadRight)),
-            Some(NavAction::Push(cmd)) if cmd.kind == CMD_NAV_RIGHT
+            command_for_source(btn(GamepadButton::DpadRight)),
+            Some(cmd) if cmd.kind == CMD_NAV_RIGHT
         ));
         assert!(matches!(
-            action_for_source(btn(GamepadButton::A)),
-            Some(NavAction::Push(cmd)) if cmd.kind == CMD_ACTIVATE
+            command_for_source(btn(GamepadButton::A)),
+            Some(cmd) if cmd.kind == CMD_ACTIVATE
         ));
         // B backs out one screen (submenu → menu, menu → close).
         assert!(matches!(
-            action_for_source(btn(GamepadButton::B)),
-            Some(NavAction::Push(cmd)) if cmd.kind == CMD_BACK
+            command_for_source(btn(GamepadButton::B)),
+            Some(cmd) if cmd.kind == CMD_BACK
         ));
-        assert!(matches!(
-            action_for_source(btn(GamepadButton::LeftShoulder)),
-            Some(NavAction::Push(_))
-        ));
-        assert!(matches!(
-            action_for_source(btn(GamepadButton::RightShoulder)),
-            Some(NavAction::Push(_))
-        ));
+        assert!(command_for_source(btn(GamepadButton::LeftShoulder)).is_some());
+        assert!(command_for_source(btn(GamepadButton::RightShoulder)).is_some());
         // Guide stays the daemon toggle's (never navigation).
-        assert!(action_for_source(btn(GamepadButton::Guide)).is_none());
-        assert!(action_for_source(btn(GamepadButton::Start)).is_none());
+        assert!(command_for_source(btn(GamepadButton::Guide)).is_none());
+        assert!(command_for_source(btn(GamepadButton::Start)).is_none());
         // Left stick mirrors the dpad; right stick stays out of menus.
         use AxisDirection::{Negative, Positive};
         let dir = |axis, direction| InputSource::AxisDirection { axis, direction };
         assert!(matches!(
-            action_for_source(dir(GamepadAxis::LeftX, Negative)),
-            Some(NavAction::Push(cmd)) if cmd.kind == CMD_NAV_LEFT
+            command_for_source(dir(GamepadAxis::LeftX, Negative)),
+            Some(cmd) if cmd.kind == CMD_NAV_LEFT
         ));
         assert!(matches!(
-            action_for_source(dir(GamepadAxis::LeftY, Positive)),
-            Some(NavAction::Push(cmd)) if cmd.kind == CMD_NAV_DOWN
+            command_for_source(dir(GamepadAxis::LeftY, Positive)),
+            Some(cmd) if cmd.kind == CMD_NAV_DOWN
         ));
-        assert!(action_for_source(dir(GamepadAxis::RightX, Positive)).is_none());
+        assert!(command_for_source(dir(GamepadAxis::RightX, Positive)).is_none());
     }
 
     #[test]

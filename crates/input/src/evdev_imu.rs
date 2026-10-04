@@ -181,14 +181,16 @@ impl EvdevImu {
     /// batches in a single drain collapse to the newest values; callers poll
     /// at report rate anyway.
     pub fn read(&mut self, fallback_timestamp_us: u64) -> Result<Option<SensorSample>, String> {
-        let events = self
+        // Iterated directly: the events are owned values, and the axis state
+        // they update lives in disjoint fields, so no buffering allocation
+        // is needed on this per-report-rate path.
+        let mut timestamp_us = None;
+        let mut updated = false;
+        for event in self
             .device
             .fetch_events()
             .map_err(|error| format!("failed reading IMU node: {error}"))?
-            .collect::<Vec<_>>();
-        let mut timestamp_us = None;
-        let mut updated = false;
-        for event in events {
+        {
             if let evdev::EventSummary::AbsoluteAxis(_, code, value) = event.destructure() {
                 let slot = match code {
                     AbsoluteAxisCode::ABS_X => Some((&mut self.accel_raw, 0)),

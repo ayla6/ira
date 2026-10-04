@@ -4,7 +4,7 @@
 
 use super::activators::{push_release_of, ActivatorRunner};
 use super::{MappingEngine, OutputEvent, BUTTON_THRESHOLD};
-use crate::profile::{ChordMode, InputMapping, ModeShift, OutputAction};
+use crate::profile::{ChordMode, InputMapping, InputSource, ModeShift, OutputAction};
 
 impl MappingEngine {
     /// The mapping that currently applies to `source`: active layers
@@ -74,11 +74,12 @@ impl MappingEngine {
             match action {
                 OutputAction::SwitchActionSet(index) => self.switch_action_set(*index),
                 OutputAction::EnableLayer { layer, mode } => {
-                    if *mode == ChordMode::Toggle && self.toggled_layers.contains(layer) {
-                        self.toggled_layers.retain(|candidate| candidate != layer);
-                        self.release_all_activator_states();
-                    } else if *mode == ChordMode::Toggle {
-                        self.toggled_layers.push(*layer);
+                    if *mode == ChordMode::Toggle {
+                        if self.toggled_layers.contains(layer) {
+                            self.toggled_layers.retain(|candidate| candidate != layer);
+                        } else {
+                            self.toggled_layers.push(*layer);
+                        }
                         self.release_all_activator_states();
                     }
                     // Hold layers evaluate from button state in
@@ -183,8 +184,6 @@ impl MappingEngine {
         outputs
     }
 }
-
-use crate::profile::InputSource;
 
 /// Mode shifts replace the mapping's mode and activators while held.
 fn effective_mapping(
@@ -444,7 +443,6 @@ mod tests {
                 pressed: true
             }
         )));
-        let _ = GamepadAxis::LeftX;
     }
 
     #[test]

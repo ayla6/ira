@@ -57,53 +57,46 @@ pub fn parse_arguments() -> Result<Arguments, String> {
         }
         match argument.as_str() {
             "--device" => {
-                arguments.device = Some(PathBuf::from(
-                    values
-                        .next()
-                        .ok_or_else(|| "--device requires a path".to_string())?,
-                ));
+                arguments.device = Some(PathBuf::from(take_arg(
+                    &mut values,
+                    "--device requires a path",
+                )?));
             }
             "--profile" => {
-                arguments.profile = Some(PathBuf::from(
-                    values
-                        .next()
-                        .ok_or_else(|| "--profile requires a path".to_string())?,
-                ));
+                arguments.profile = Some(PathBuf::from(take_arg(
+                    &mut values,
+                    "--profile requires a path",
+                )?));
             }
             "--calibration" => {
-                arguments.calibration =
-                    Some(PathBuf::from(values.next().ok_or_else(|| {
-                        "--calibration requires a path".to_string()
-                    })?));
+                arguments.calibration = Some(PathBuf::from(take_arg(
+                    &mut values,
+                    "--calibration requires a path",
+                )?));
             }
             "--steam-app-id" => {
-                arguments.steam_app_id = Some(
-                    values
-                        .next()
-                        .ok_or_else(|| "--steam-app-id requires an ID".to_string())?,
-                );
+                arguments.steam_app_id = Some(take_arg(
+                    &mut values,
+                    "--steam-app-id requires an ID",
+                )?);
             }
             "--pause-unfocused" => arguments.pause_unfocused = true,
             "--motion-port" => {
-                let raw = values
-                    .next()
-                    .ok_or_else(|| "--motion-port requires a port number".to_string())?;
+                let raw = take_arg(&mut values, "--motion-port requires a port number")?;
                 arguments.motion_port = Some(
                     raw.parse()
                         .map_err(|_| format!("--motion-port expects a number, got {raw}"))?,
                 );
             }
             "--vdf-import" => {
-                let input = PathBuf::from(
-                    values
-                        .next()
-                        .ok_or_else(|| "--vdf-import requires an input .vdf path".to_string())?,
-                );
-                let output = PathBuf::from(
-                    values
-                        .next()
-                        .ok_or_else(|| "--vdf-import requires an output .json path".to_string())?,
-                );
+                let input = PathBuf::from(take_arg(
+                    &mut values,
+                    "--vdf-import requires an input .vdf path",
+                )?);
+                let output = PathBuf::from(take_arg(
+                    &mut values,
+                    "--vdf-import requires an output .json path",
+                )?);
                 arguments.vdf_import = Some((input, output));
             }
             "--list" => arguments.list = true,
@@ -122,4 +115,22 @@ pub fn parse_arguments() -> Result<Arguments, String> {
         }
     }
     Ok(arguments)
+}
+
+/// The value following a flag that needs one, with the flag's own error
+/// message when nothing follows.
+fn take_arg(values: &mut impl Iterator<Item = String>, message: &str) -> Result<String, String> {
+    values.next().ok_or_else(|| message.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_arg;
+
+    #[test]
+    fn test_take_arg_reads_the_next_value() {
+        let mut values = vec!["path".to_string()].into_iter();
+        assert_eq!(take_arg(&mut values, "missing").unwrap(), "path");
+        assert_eq!(take_arg(&mut values, "needs a path"), Err("needs a path".to_string()));
+    }
 }

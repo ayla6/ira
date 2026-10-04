@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Version 2 changed the default deadzone source from raw passthrough to
 /// the per-controller calibration. `validate` rejects other versions; old
@@ -1079,6 +1080,13 @@ impl Default for InputProfile {
 }
 
 impl InputProfile {
+    /// Parse a profile from JSON. Files written by older Ira versions are
+    /// not migrated; unknown fields are ignored and missing ones take their
+    /// serde defaults, and `validate` rejects versions it cannot read.
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        serde_json::from_str(json).map_err(|error| format!("invalid profile: {error}"))
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.version != PROFILE_VERSION {
             return Err(format!(
@@ -1102,15 +1110,14 @@ impl InputProfile {
                 ));
             }
         }
+        let mut set_names = HashSet::with_capacity(self.action_sets.len());
         for (set_index, set) in self.action_sets.iter().enumerate() {
             if set.name.trim().is_empty() {
                 return Err(format!("action set {set_index} needs a name"));
             }
             // Layers are parented by name, so duplicate names would make
             // "which set does this layer belong to" ambiguous.
-            if self.action_sets.iter().any(|other| {
-                other.name == set.name && !std::ptr::eq(other, set)
-            }) {
+            if !set_names.insert(set.name.as_str()) {
                 return Err(format!(
                     "action set {set_index}: the name '{}' is used twice",
                     set.name
@@ -1134,11 +1141,7 @@ impl InputProfile {
             }
         }
         for (layer_index, layer) in self.action_layers.iter().enumerate() {
-            if !self
-                .action_sets
-                .iter()
-                .any(|set| set.name == layer.parent_set)
-            {
+            if !set_names.contains(layer.parent_set.as_str()) {
                 return Err(format!(
                     "action layer {layer_index} references unknown parent set '{}'",
                     layer.parent_set
@@ -1209,9 +1212,7 @@ impl InputProfile {
 
     /// Every output fired by any activator anywhere in the profile.
     pub fn all_activator_outputs(&self) -> impl Iterator<Item = &OutputAction> {
-        let mut outputs: Vec<&OutputAction> = Vec::new();
-        for input in self
-            .action_sets
+        self.action_sets
             .iter()
             .flat_map(|set| set.inputs.iter())
             .chain(
@@ -1219,17 +1220,15 @@ impl InputProfile {
                     .iter()
                     .flat_map(|layer| layer.inputs.iter()),
             )
-        {
-            for activator in input.activators.iter().chain(
-                input
-                    .mode_shifts
-                    .iter()
-                    .flat_map(|shift| shift.activators.iter()),
-            ) {
-                outputs.extend(activator.outputs.iter());
-            }
-        }
-        outputs.into_iter()
+            .flat_map(|input| {
+                input.activators.iter().chain(
+                    input
+                        .mode_shifts
+                        .iter()
+                        .flat_map(|shift| shift.activators.iter()),
+                )
+            })
+            .flat_map(|activator| activator.outputs.iter())
     }
 
     pub fn default_gamepad() -> Self {

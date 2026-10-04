@@ -401,10 +401,11 @@ fn hat_value(state: [bool; 4], horizontal: bool) -> i32 {
 }
 
 fn direct_input_sdl_guid() -> String {
+    let crc = sdl_crc16(DIRECT_INPUT_NAME.as_bytes());
     format!(
         "0600{:02x}{:02x}{:02x}{:02x}0000{:02x}{:02x}0000{:02x}{:02x}0000",
-        sdl_crc16(DIRECT_INPUT_NAME.as_bytes()) as u8,
-        (sdl_crc16(DIRECT_INPUT_NAME.as_bytes()) >> 8) as u8,
+        crc as u8,
+        (crc >> 8) as u8,
         DIRECT_INPUT_VENDOR as u8,
         (DIRECT_INPUT_VENDOR >> 8) as u8,
         DIRECT_INPUT_PRODUCT as u8,

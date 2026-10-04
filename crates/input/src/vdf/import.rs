@@ -26,6 +26,26 @@ impl ImportReport {
     }
 }
 
+/// Read and import the VDF file at `path`; used by the CLI.
+pub fn import_vdf_file(
+    path: &std::path::Path,
+) -> Result<(crate::InputProfile, ImportReport), String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    import_vdf(&text)
+}
+
+/// Human-readable source name for warnings.
+fn source_debug_name(source: crate::InputSource) -> String {
+    match source {
+        crate::InputSource::Button(button) => format!("button {button:?}"),
+        crate::InputSource::Axis(axis) => format!("axis {axis:?}"),
+        crate::InputSource::AxisDirection { axis, direction } => {
+            format!("axis {axis:?} {direction:?}")
+        }
+    }
+}
+
 /// Import one Steam `controller_mappings` VDF document.
 pub fn import_vdf(text: &str) -> Result<(InputProfile, ImportReport), String> {
     let top = parse_vdf(text)?;
@@ -132,7 +152,7 @@ fn dedupe_inputs(set: &mut ActionSet, report: &mut ImportReport) {
         if seen.contains(&mapping.source) {
             report.warn(format!(
                 "duplicate binding for {} kept from the earlier group",
-                super::source_debug_name(mapping.source)
+                source_debug_name(mapping.source)
             ));
             false
         } else {
@@ -590,7 +610,7 @@ fn xinput_button(arg: &str) -> Option<OutputAction> {
 }
 
 /// Physical region names from `group_source_bindings` to sources.
-pub(crate) fn source_from_region(region: &str) -> Option<GamepadButton> {
+fn source_from_region(region: &str) -> Option<GamepadButton> {
     match region {
         "left_trigger" => Some(GamepadButton::LeftTrigger),
         "right_trigger" => Some(GamepadButton::RightTrigger),
@@ -834,5 +854,48 @@ mod tests {
         };
         assert!((settings.processing.deadzone_inner - 7199.0 / 32767.0).abs() < 0.001);
         assert_eq!(settings.processing.deadzone, crate::profile::StickDeadzone::Custom);
+    }
+
+    #[test]
+    fn test_parse_binding_maps_verbs_to_outputs() {
+        assert_eq!(
+            super::parse_binding("xinput_button A"),
+            Some(crate::profile::OutputAction::GamepadButton(
+                crate::profile::GamepadButton::A
+            ))
+        );
+        assert_eq!(
+            super::parse_binding("key_press W"),
+            Some(crate::profile::OutputAction::Keyboard { keycode: 17 })
+        );
+        assert_eq!(
+            super::parse_binding("mouse_button LEFT"),
+            Some(crate::profile::OutputAction::MouseButton(
+                crate::profile::MouseButton::Left
+            ))
+        );
+        assert!(super::parse_binding("unknown_verb foo").is_none());
+        assert!(super::parse_binding("bareword").is_none());
+    }
+
+    #[test]
+    fn test_evdev_keycode_covers_letters_and_arrows() {
+        assert_eq!(super::evdev_keycode("W"), Some(17));
+        assert_eq!(super::evdev_keycode("SPACE"), Some(57));
+        assert_eq!(super::evdev_keycode("UP"), Some(103));
+        assert_eq!(super::evdev_keycode("NOT_A_KEY"), None);
+    }
+
+    #[test]
+    fn test_source_from_region_maps_controller_regions() {
+        assert_eq!(
+            super::source_from_region("left_trigger"),
+            Some(crate::profile::GamepadButton::LeftTrigger)
+        );
+        assert_eq!(
+            super::source_from_region("dpad"),
+            Some(crate::profile::GamepadButton::DpadUp)
+        );
+        assert_eq!(super::source_from_region("touchpad"), None);
     }
 }

@@ -20,12 +20,7 @@ pub(crate) struct ProfileMonitor {
 
 impl ProfileMonitor {
     pub(crate) fn new(path: PathBuf) -> Self {
-        let parent = path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let parent = if parent.as_os_str().is_empty() {
-            PathBuf::from(".")
-        } else {
-            parent
-        };
+        let parent = parent_of(&path);
         let filename = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -65,14 +60,9 @@ impl ProfileMonitor {
     /// switch itself counts as a pending change, so the session reloads
     /// from the new path on its next pass.
     pub(crate) fn retarget(&mut self, path: &Path) {
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        let parent = if parent.as_os_str().is_empty() {
-            Path::new(".")
-        } else {
-            parent
-        };
+        let parent = parent_of(path);
         self.path = path.to_path_buf();
-        self.parent = parent.to_path_buf();
+        self.parent = parent;
         self.filename = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -181,8 +171,18 @@ impl Drop for ProfileMonitor {
     }
 }
 
-fn parse_inotify_buffer(buffer: &[u8]) -> Vec<ParsedEvent> {
-    let header = std::mem::size_of::<libc::inotify_event>();
+/// The directory a profile path is watched in: bare filenames watch the
+/// current directory.
+fn parent_of(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or(Path::new("."));
+    if parent.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        parent.to_path_buf()
+    }
+}
+
+fn parse_inotify_buffer(buffer: &[u8]) -> Vec<ParsedEvent> {    let header = std::mem::size_of::<libc::inotify_event>();
     let mut events = Vec::new();
     let mut offset = 0;
     while offset + header <= buffer.len() {
@@ -223,6 +223,15 @@ mod tests {
         bytes.extend_from_slice(&(name.len() as u32).to_ne_bytes());
         bytes.extend_from_slice(name.as_bytes());
         bytes
+    }
+
+    #[test]
+    fn test_parent_of_points_bare_filenames_at_the_working_dir() {
+        assert_eq!(parent_of(Path::new("profile.json")), PathBuf::from("."));
+        assert_eq!(
+            parent_of(Path::new("/etc/ira/profile.json")),
+            PathBuf::from("/etc/ira")
+        );
     }
 
     #[test]

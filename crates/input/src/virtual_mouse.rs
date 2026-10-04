@@ -80,25 +80,27 @@ impl VirtualMouse {
     /// arrived in the same tick reach the game as a single synchronized
     /// batch instead of one SYN_REPORT per axis.
     pub fn flush(&mut self) -> io::Result<()> {
-        let mut reports = Vec::with_capacity(4);
+        // Deltas first: an idle pass must not heap-allocate the batch it
+        // then throws away — flush runs every loop pass.
         let x = take_delta(&mut self.pending_x);
+        let y = take_delta(&mut self.pending_y);
+        let wheel = take_delta(&mut self.pending_wheel);
+        let wheel_x = take_delta(&mut self.pending_wheel_x);
+        if x == 0 && y == 0 && wheel == 0 && wheel_x == 0 {
+            return Ok(());
+        }
+        let mut reports = Vec::with_capacity(4);
         if x != 0 {
             reports.push(relative(RelativeAxisCode::REL_X, x));
         }
-        let y = take_delta(&mut self.pending_y);
         if y != 0 {
             reports.push(relative(RelativeAxisCode::REL_Y, y));
         }
-        let wheel = take_delta(&mut self.pending_wheel);
         if wheel != 0 {
             reports.push(relative(RelativeAxisCode::REL_WHEEL, wheel));
         }
-        let wheel_x = take_delta(&mut self.pending_wheel_x);
         if wheel_x != 0 {
             reports.push(relative(RelativeAxisCode::REL_HWHEEL, wheel_x));
-        }
-        if reports.is_empty() {
-            return Ok(());
         }
         self.device.emit(&reports)
     }

@@ -308,11 +308,12 @@ impl SwitchHidrawPad {
             }
             self.prev_buttons = buttons;
         }
+        let (left_raw, right_raw) = (stick_raw(report, 6), stick_raw(report, 9));
         let axes = [
-            decoded_axis(GamepadAxis::LeftX, stick_raw(report, 6).0),
-            decoded_axis(GamepadAxis::LeftY, stick_raw(report, 6).1),
-            decoded_axis(GamepadAxis::RightX, stick_raw(report, 9).0),
-            decoded_axis(GamepadAxis::RightY, stick_raw(report, 9).1),
+            decoded_axis(GamepadAxis::LeftX, left_raw.0),
+            decoded_axis(GamepadAxis::LeftY, left_raw.1),
+            decoded_axis(GamepadAxis::RightX, right_raw.0),
+            decoded_axis(GamepadAxis::RightY, right_raw.1),
         ];
         for (index, value) in axes.into_iter().enumerate() {
             if (value - self.prev_axes[index]).abs() > 0.001 {

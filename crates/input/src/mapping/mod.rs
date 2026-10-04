@@ -287,9 +287,10 @@ impl MappingEngine {
             .collect()
     }
 
-    pub(crate) fn toggle_activations(&mut self, source: InputSource) {
-        let set_toggle = self
-            .profile
+    /// Every input mapping in the profile: active sets plus layers.
+    /// Toggle scans need the whole profile, not just the active set.
+    fn all_profile_inputs(&self) -> impl Iterator<Item = &crate::profile::InputMapping> {
+        self.profile
             .action_sets
             .iter()
             .flat_map(|set| set.inputs.iter())
@@ -299,7 +300,10 @@ impl MappingEngine {
                     .iter()
                     .flat_map(|layer| layer.inputs.iter()),
             )
-            .any(|input| {
+    }
+
+    pub(crate) fn toggle_activations(&mut self, source: InputSource) {
+        let set_toggle = self.all_profile_inputs().any(|input| {
                 input.activators.iter().any(|activator| {
                     matches!(&activator.activation, Activation::Toggle(activator) if *activator == source)
                 })
@@ -314,16 +318,7 @@ impl MappingEngine {
             *enabled = !*enabled;
         }
         let chords: Vec<Vec<InputSource>> = self
-            .profile
-            .action_sets
-            .iter()
-            .flat_map(|set| set.inputs.iter())
-            .chain(
-                self.profile
-                    .action_layers
-                    .iter()
-                    .flat_map(|layer| layer.inputs.iter()),
-            )
+            .all_profile_inputs()
             .flat_map(|input| input.activators.iter())
             .filter_map(|activator| match &activator.activation {
                 Activation::Chord { sources, mode }

@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use evdev::{Device, EventSummary, KeyCode};
-use ira_overlay_ipc::{KbdChord, MappedShm, DAEMON_TOGGLE_ENV};
+use ira_overlay_ipc::{KbdChord, MappedShm};
 
 use crate::physical::is_ira_virtual_device;
 use crate::{OutputEvent, VirtualKeyboard};
@@ -63,18 +63,8 @@ impl KeyIntercept {
     /// toggle, same SHM mapping (read-write: firing flips through it).
     /// Silent `None` otherwise.
     pub(crate) fn arm(env: Option<&[(String, String)]>) -> Option<Self> {
-        let env = env?;
-        if !env
-            .iter()
-            .any(|(k, v)| k == DAEMON_TOGGLE_ENV && v == "1")
-        {
-            return None;
-        }
-        let shm_name = env
-            .iter()
-            .find(|(k, _)| k == "IRA_OVERLAY_SHM")
-            .map(|(_, v)| v.as_str())?;
-        let shm = MappedShm::open_rw(shm_name).ok()?;
+        let shm_name = super::daemon_toggle_shm_name(env)?;
+        let shm = MappedShm::open_rw(&shm_name).ok()?;
         let (key, mods, _, _, _, _) = shm.header().hotkeys();
         let forward = match VirtualKeyboard::create_all_keys() {
             Ok(keyboard) => Some(keyboard),

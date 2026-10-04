@@ -233,8 +233,11 @@ fn send_twins(
     accel: [f32; 3],
     timestamp_us: u64,
 ) {
+    // SDL's PS5 driver passes axes through untouched like its DS4 one,
+    // so the source SDL frame goes on the wire verbatim. Both twins share
+    // the one frame: shaping is pure, so computing it once is identical.
+    let hid_frame = crate::sensor_to_motion(shaped(gyro), accel, timestamp_us);
     if pipeline.ds4_hid.is_some() {
-        let hid_frame = crate::sensor_to_motion(shaped(gyro), accel, timestamp_us);
         let ds4 = pipeline.ds4_hid.as_mut().unwrap();
         if let Err(error) = ds4.send_state(targets.pad, &hid_frame) {
             eprintln!("ira-input: virtual DS4 stopped: {error}");
@@ -242,9 +245,6 @@ fn send_twins(
         }
     }
     if pipeline.dualsense_hid.is_some() {
-        // SDL's PS5 driver passes axes through untouched like its DS4 one,
-        // so the source SDL frame goes on the wire verbatim.
-        let hid_frame = crate::sensor_to_motion(shaped(gyro), accel, timestamp_us);
         let dualsense = pipeline.dualsense_hid.as_mut().unwrap();
         if let Err(error) = dualsense.send_state(targets.pad, &hid_frame) {
             eprintln!("ira-input: virtual DualSense stopped: {error}");

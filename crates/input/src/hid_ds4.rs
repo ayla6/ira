@@ -292,8 +292,7 @@ impl Ds4UhidDevice {
             return self.service();
         }
         self.last_state = Some(stable);
-        self.device
-            .send_input_report(&usb_state_report(pad, sample, sample.timestamp_us))?;
+        self.device.send_input_report(&report)?;
         self.service()
     }
 

@@ -44,18 +44,14 @@ impl InputProfile {
             return;
         }
         let name = self.action_sets.remove(index).name;
-        let mut original_index = 0;
         let mut removed_layers = Vec::new();
-        self.action_layers.retain(|layer| {
-            let remove = layer.parent_set == name;
-            if remove {
-                removed_layers.push(original_index);
-            } else {
-                original_index += 1;
+        for (layer_index, layer) in self.action_layers.iter().enumerate() {
+            if layer.parent_set == name {
+                removed_layers.push(layer_index);
             }
-            !remove
-        });
-        let removed_layers = removed_layers;
+        }
+        self.action_layers
+            .retain(|layer| layer.parent_set != name);
         self.for_every_output(&mut |output| match output {
             OutputAction::SwitchActionSet(target) => {
                 if *target == index {

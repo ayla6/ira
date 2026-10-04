@@ -10,8 +10,8 @@ use crate::physical::{ButtonLayout, button_layout};
 use crate::{DeviceInfo, PhysicalGamepad, PhysicalRumble, SwitchHidrawPad};
 
 use super::super::session::{
-    apply_controller_layout, open_sensor, probe_sensor, reconnect_gamepad, resolved_layout_for,
-    GyroSource,
+    apply_controller_layout, open_rumble, open_sensor, probe_sensor, reconnect_gamepad,
+    resolved_layout_for, GyroSource,
 };
 use super::holds::SiblingHolds;
 use super::{broadcast_motion, RouteEntry};
@@ -204,82 +204,6 @@ impl PhysicalPad {
         self.motion_retry_at = Instant::now();
         self.motion_retry_delay = MOTION_RETRY_START;
     }
-}
-
-/// Opens the physical side of rumble passthrough. Failure reasons are logged
-/// exactly once here; a missing handle afterwards simply means "no rumble"
-/// and every forwarded command is skipped.
-fn open_rumble(
-    gamepad: Option<&PhysicalGamepad>,
-    enabled: bool,
-) -> Option<crate::PhysicalRumble> {
-    if !enabled {
-        return None;
-    }
-    let info = gamepad?.info();
-    let path = info.path.clone();
-    match crate::PhysicalRumble::open(&path) {
-        Ok(rumble) => Some(rumble),
-        Err(primary_error) => match ff_sibling_node(info, &path) {
-            Some(sibling) => {
-                eprintln!(
-                    "ira-input: {primary_error}; using rumble on {} instead",
-                    sibling.display()
-                );
-                match crate::PhysicalRumble::open(&sibling) {
-                    Ok(rumble) => Some(rumble),
-                    Err(error) => {
-                        eprintln!("ira-input: {error}");
-                        None
-                    }
-                }
-            }
-            None => match crate::PhysicalRumble::open_vendor_hidraw(
-                &path,
-                info.vendor,
-                info.product,
-            ) {
-                Ok(rumble) => {
-                    eprintln!(
-                        "ira-input: {primary_error}; replaying rumble through the 8BitDo \
-                         hidraw protocol instead"
-                    );
-                    Some(rumble)
-                }
-                Err(error) => {
-                    eprintln!("{primary_error}");
-                    eprintln!("ira-input: {error}");
-                    None
-                }
-            },
-        },
-    }
-}
-
-/// Finds another evdev node of the same physical controller that does
-/// declare FF_RUMBLE. Pads with the classic Linux dual-node split often
-/// keep force feedback off the node SDL picks as the gamepad.
-fn ff_sibling_node(info: &crate::DeviceInfo, skip: &std::path::Path) -> Option<PathBuf> {
-    for entry in std::fs::read_dir("/dev/input").ok()?.flatten() {
-        let name = entry.file_name();
-        if !name.to_string_lossy().starts_with("event") || entry.path() == skip {
-            continue;
-        }
-        let Ok(device) = evdev::Device::open(entry.path()) else {
-            continue;
-        };
-        let id = device.input_id();
-        if id.vendor() != info.vendor || id.product() != info.product {
-            continue;
-        }
-        let has_ff = device
-            .supported_ff()
-            .is_some_and(|effects| effects.contains(evdev::FFEffectCode::FF_RUMBLE));
-        if has_ff {
-            return Some(entry.path());
-        }
-    }
-    None
 }
 
 fn next_retry_delay(delay: Duration) -> Duration {

@@ -779,9 +779,20 @@ impl Drop for UnsubscribeOnDrop<'_> {
     }
 }
 
-
-
-fn release_outputs(
+/// The overlay SHM name when the session runs under daemon-owned overlay
+/// control (gamescope/flatpak marker from the launcher). The gamepad
+/// toggle, keyboard intercept, and overlay navigation all arm from the
+/// same marker plus mapping; `None` otherwise.
+pub(crate) fn daemon_toggle_shm_name(env: Option<&[(String, String)]>) -> Option<String> {
+    let env = env?;
+    env.iter()
+        .any(|(key, value)| key == ira_overlay_ipc::DAEMON_TOGGLE_ENV && value == "1")
+        .then(|| {
+            env.iter()
+                .find(|(key, _)| key == "IRA_OVERLAY_SHM")
+                .map(|(_, name)| name.clone())
+        })?
+}fn release_outputs(
     mapper: &mut crate::MappingEngine,
     virtual_gamepad: &mut crate::VirtualGamepad,
     keyboard: &mut Option<crate::VirtualKeyboard>,
@@ -799,4 +810,30 @@ fn release_outputs(
         },
         trace,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::daemon_toggle_shm_name;
+
+    #[test]
+    fn test_daemon_toggle_shm_name_needs_marker_and_mapping() {
+        assert_eq!(daemon_toggle_shm_name(None), None);
+        assert_eq!(daemon_toggle_shm_name(Some(&[])), None);
+        let marked = vec![(ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(), "1".to_string())];
+        assert_eq!(daemon_toggle_shm_name(Some(&marked)), None);
+        let armed = vec![
+            (ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(), "1".to_string()),
+            ("IRA_OVERLAY_SHM".to_string(), "/ira_overlay_1".to_string()),
+        ];
+        assert_eq!(
+            daemon_toggle_shm_name(Some(&armed)),
+            Some("/ira_overlay_1".to_string())
+        );
+        let off = vec![
+            (ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(), "0".to_string()),
+            ("IRA_OVERLAY_SHM".to_string(), "/ira_overlay_1".to_string()),
+        ];
+        assert_eq!(daemon_toggle_shm_name(Some(&off)), None);
+    }
 }

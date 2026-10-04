@@ -116,8 +116,6 @@ pub(crate) fn target_env_for(
     envs
 }
 
-
-
 pub(crate) fn sdl_mapping_for_backend(backend: VirtualGamepadBackend) -> Option<String> {
     match backend {
         VirtualGamepadBackend::XInput => Some(VirtualGamepad::xbox_sdl_mapping()),

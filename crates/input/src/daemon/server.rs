@@ -613,17 +613,12 @@ fn stop_running_sessions(sessions: &mut Vec<SessionHandle>) {
     STOP_REQUESTED.store(true, Ordering::Relaxed);
     let deadline = Instant::now() + SESSION_STOP_PATIENCE;
     while !sessions.is_empty() && Instant::now() < deadline {
-        let mut finished = false;
-        for session in sessions.iter_mut() {
-            if session.done.try_recv().is_ok() {
-                finished = true;
-            }
+        // One drain per pass: a finished session's done message is consumed
+        // here, removing it; the rest keep running until the deadline.
+        sessions.retain(|session| session.done.try_recv().is_err());
+        if !sessions.is_empty() {
+            std::thread::sleep(Duration::from_millis(50));
         }
-        if finished {
-            sessions.retain(|session| session.done.try_recv().is_err());
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
     }
     if !sessions.is_empty() {
         eprintln!("ira-input: sessions did not acknowledge shutdown in time");

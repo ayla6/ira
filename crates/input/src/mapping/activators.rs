@@ -99,6 +99,39 @@ pub(super) fn push_release_of(output: &OutputAction, outputs: &mut Vec<OutputEve
     }
 }
 
+/// Pushes a single press of `output`: discrete presses become events,
+/// engine-internal actions land in `internal`, axes have no discrete press.
+pub(super) fn push_press_of(
+    output: &OutputAction,
+    outputs: &mut Vec<OutputEvent>,
+    internal: &mut Vec<OutputAction>,
+) {
+    match output {
+        OutputAction::GamepadButton(button) => outputs.push(OutputEvent::GamepadButton {
+            button: *button,
+            pressed: true,
+        }),
+        OutputAction::Keyboard { keycode } => outputs.push(OutputEvent::Key {
+            keycode: *keycode,
+            pressed: true,
+        }),
+        OutputAction::MouseButton(button) => outputs.push(OutputEvent::MouseButton {
+            button: *button,
+            pressed: true,
+        }),
+        OutputAction::WheelClick { axis, amount } => outputs.push(OutputEvent::WheelClick {
+            axis: *axis,
+            amount: *amount,
+        }),
+        OutputAction::SwitchActionSet(_)
+        | OutputAction::EnableLayer { .. }
+        | OutputAction::ModeShiftActivate { .. } => {
+            internal.push(output.clone());
+        }
+        OutputAction::GamepadAxis(_) | OutputAction::MouseAxis(_) => {}
+    }
+}
+
 /// Trait-abstracted evaluator so the engine can drive it without lending
 /// itself out twice: the caller provides activation gating and the engine
 /// applies internal actions as they fire.
@@ -220,10 +253,11 @@ impl<'a> ActivatorRunner<'a> {
             }
             return;
         }
+        let has_double = self.has_double();
         for (index, activator) in self.mapping.activators.iter().enumerate() {
             match activator.kind {
                 ActivatorKind::StartPress => self.fire(activator, state, index),
-                ActivatorKind::FullPress if !self.has_double() => {
+                ActivatorKind::FullPress if !has_double => {
                     // With a double-press activator present the click must
                     // wait out the window; otherwise it fires on press.
                     self.fire(activator, state, index);
@@ -231,7 +265,7 @@ impl<'a> ActivatorRunner<'a> {
                 _ => {}
             }
         }
-        if self.has_double() {
+        if has_double {
             state.click_pending = true;
         }
     }
@@ -318,48 +352,21 @@ impl<'a> ActivatorRunner<'a> {
                 // press stays put and is released when the input releases.
                 for output in &activator.outputs {
                     match output {
-                        OutputAction::GamepadButton(button) => {
-                            self.outcome.outputs.push(OutputEvent::GamepadButton {
-                                button: *button,
-                                pressed: true,
-                            });
-                            self.outcome.outputs.push(OutputEvent::GamepadButton {
-                                button: *button,
-                                pressed: false,
-                            });
+                        OutputAction::GamepadButton(_)
+                        | OutputAction::Keyboard { .. }
+                        | OutputAction::MouseButton(_) => {
+                            push_press_of(
+                                output,
+                                &mut self.outcome.outputs,
+                                &mut self.outcome.internal,
+                            );
+                            push_release_of(output, &mut self.outcome.outputs);
                         }
-                        OutputAction::Keyboard { keycode } => {
-                            self.outcome.outputs.push(OutputEvent::Key {
-                                keycode: *keycode,
-                                pressed: true,
-                            });
-                            self.outcome.outputs.push(OutputEvent::Key {
-                                keycode: *keycode,
-                                pressed: false,
-                            });
-                        }
-                        OutputAction::MouseButton(button) => {
-                            self.outcome.outputs.push(OutputEvent::MouseButton {
-                                button: *button,
-                                pressed: true,
-                            });
-                            self.outcome.outputs.push(OutputEvent::MouseButton {
-                                button: *button,
-                                pressed: false,
-                            });
-                        }
-                        OutputAction::WheelClick { axis, amount } => {
-                            self.outcome.outputs.push(OutputEvent::WheelClick {
-                                axis: *axis,
-                                amount: *amount,
-                            });
-                        }
-                        OutputAction::SwitchActionSet(_)
-                        | OutputAction::EnableLayer { .. }
-                        | OutputAction::ModeShiftActivate { .. } => {
-                            self.outcome.internal.push(output.clone());
-                        }
-                        OutputAction::GamepadAxis(_) | OutputAction::MouseAxis(_) => {}
+                        _ => push_press_of(
+                            output,
+                            &mut self.outcome.outputs,
+                            &mut self.outcome.internal,
+                        ),
                     }
                 }
                 // Restart the hold clock so the next repeat waits a full
@@ -396,41 +403,15 @@ impl<'a> ActivatorRunner<'a> {
             {
                 continue;
             }
-            match output {
-                OutputAction::GamepadButton(button) => {
-                    self.outcome.outputs.push(OutputEvent::GamepadButton {
-                        button: *button,
-                        pressed: true,
-                    });
-                    state.held.push((index, output.clone()));
-                }
-                OutputAction::Keyboard { keycode } => {
-                    self.outcome.outputs.push(OutputEvent::Key {
-                        keycode: *keycode,
-                        pressed: true,
-                    });
-                    state.held.push((index, output.clone()));
-                }
-                OutputAction::MouseButton(button) => {
-                    self.outcome.outputs.push(OutputEvent::MouseButton {
-                        button: *button,
-                        pressed: true,
-                    });
-                    state.held.push((index, output.clone()));
-                }
-                OutputAction::WheelClick { axis, amount } => {
-                    // One detent per activation; nothing to hold or release.
-                    self.outcome.outputs.push(OutputEvent::WheelClick {
-                        axis: *axis,
-                        amount: *amount,
-                    });
-                }
-                OutputAction::SwitchActionSet(_)
-                | OutputAction::EnableLayer { .. }
-                | OutputAction::ModeShiftActivate { .. } => {
-                    self.outcome.internal.push(output.clone());
-                }
-                OutputAction::GamepadAxis(_) | OutputAction::MouseAxis(_) => {}
+            let holdable = matches!(
+                output,
+                OutputAction::GamepadButton(_)
+                    | OutputAction::Keyboard { .. }
+                    | OutputAction::MouseButton(_)
+            );
+            push_press_of(output, &mut self.outcome.outputs, &mut self.outcome.internal);
+            if holdable {
+                state.held.push((index, output.clone()));
             }
         }
     }

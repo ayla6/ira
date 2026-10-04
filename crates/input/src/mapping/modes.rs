@@ -82,16 +82,7 @@ impl MappingEngine {
                             y,
                             self.controller_deadzone_for(GamepadAxis::LeftX),
                         );
-                        let (target_x, target_y) = match output {
-                            StickOutput::Left => (GamepadAxis::LeftX, GamepadAxis::LeftY),
-                            StickOutput::Right => (GamepadAxis::RightX, GamepadAxis::RightY),
-                        };
-                        for (axis, value) in [(target_x, x), (target_y, y)] {
-                            if !totals.contains_key(&axis) {
-                                order.push(axis);
-                            }
-                            *totals.entry(axis).or_insert(0.0) += value;
-                        }
+                        add_stick_deflection(totals, order, output, x, y);
                         continue;
                     }
                     let JoystickSettings { output, processing } = settings;
@@ -109,16 +100,7 @@ impl MappingEngine {
                         y,
                         self.controller_deadzone_for(x_axis),
                     );
-                    let (target_x, target_y) = match output {
-                        StickOutput::Left => (GamepadAxis::LeftX, GamepadAxis::LeftY),
-                        StickOutput::Right => (GamepadAxis::RightX, GamepadAxis::RightY),
-                    };
-                    for (axis, value) in [(target_x, x), (target_y, y)] {
-                        if !totals.contains_key(&axis) {
-                            order.push(axis);
-                        }
-                        *totals.entry(axis).or_insert(0.0) += value;
-                    }
+                    add_stick_deflection(totals, order, output, x, y);
                 }
                 SourceMode::Trigger { threshold } => {
                     let Some(axis) = trigger_axis(source) else {
@@ -314,7 +296,7 @@ impl MappingEngine {
             .is_some_and(|mapping| !mapping.activators.is_empty())
     }
 
-    fn stick_pair(&self, x_axis: GamepadAxis, y_axis: GamepadAxis) -> Option<(f32, f32)> {
+    pub(crate) fn stick_pair(&self, x_axis: GamepadAxis, y_axis: GamepadAxis) -> Option<(f32, f32)> {
         // A stick that has only reported one axis so far still has a
         // well-defined position; the other reads as centered.
         let x = self
@@ -328,6 +310,27 @@ impl MappingEngine {
             .copied()
             .unwrap_or(0.0);
         Some((x, y))
+    }
+}
+
+/// Fold one stick's deflection into the composition totals on its output
+/// stick's axes.
+fn add_stick_deflection(
+    totals: &mut std::collections::HashMap<GamepadAxis, f32>,
+    order: &mut Vec<GamepadAxis>,
+    output: StickOutput,
+    x: f32,
+    y: f32,
+) {
+    let (target_x, target_y) = match output {
+        StickOutput::Left => (GamepadAxis::LeftX, GamepadAxis::LeftY),
+        StickOutput::Right => (GamepadAxis::RightX, GamepadAxis::RightY),
+    };
+    for (axis, value) in [(target_x, x), (target_y, y)] {
+        if !totals.contains_key(&axis) {
+            order.push(axis);
+        }
+        *totals.entry(axis).or_insert(0.0) += value;
     }
 }
 

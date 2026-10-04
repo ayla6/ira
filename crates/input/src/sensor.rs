@@ -581,22 +581,23 @@ fn load_sdl() -> Result<Option<(*mut c_void, Sdl3Api)>, String> {
 fn gamepad_ids(api: &Sdl3Api) -> Vec<i32> {
     let mut count = 0;
     let ids_ptr = unsafe { (api.get_gamepads)(&mut count) };
-    if ids_ptr.is_null() || count <= 0 {
-        return Vec::new();
-    }
-    let ids = unsafe { std::slice::from_raw_parts(ids_ptr, count as usize) }.to_vec();
-    unsafe { (api.free)(ids_ptr.cast()) };
-    ids
+    take_id_list(ids_ptr, count, api.free)
 }
 
 fn sensor_ids(api: &Sdl3Api) -> Vec<i32> {
     let mut count = 0;
     let ids_ptr = unsafe { (api.get_sensors)(&mut count) };
+    take_id_list(ids_ptr, count, api.free)
+}
+
+/// Copies an SDL id array into an owned vec and frees the original: the
+/// gamepad and sensor listings share this shape.
+fn take_id_list(ids_ptr: *mut i32, count: i32, free: SdlFree) -> Vec<i32> {
     if ids_ptr.is_null() || count <= 0 {
         return Vec::new();
     }
     let ids = unsafe { std::slice::from_raw_parts(ids_ptr, count as usize) }.to_vec();
-    unsafe { (api.free)(ids_ptr.cast()) };
+    unsafe { free(ids_ptr.cast()) };
     ids
 }
 

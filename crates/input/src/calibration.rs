@@ -127,6 +127,14 @@ mod tests {
     }
 
     #[test]
+    fn test_calibration_store_path_joins_the_save_dir() {
+        assert_eq!(
+            calibration_store_path("/tmp/save"),
+            std::path::PathBuf::from("/tmp/save/controller_calibration.json")
+        );
+    }
+
+    #[test]
     fn test_calibration_roundtrips_per_device() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("cal.json");

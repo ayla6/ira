@@ -275,6 +275,10 @@ pub struct PhysicalGamepad {
     /// they enter the mapping engine, mirroring Steam's per-controller
     /// toggle.
     nintendo_layout: bool,
+    /// Which wire layout the pad's key codes follow, resolved once at open
+    /// from its identity: recomputing it per event re-lowercased the device
+    /// name on every button press.
+    layout: ButtonLayout,
     /// Whether the device currently holds an exclusive grab, so the hub can
     /// hand the pad back to the desktop when the last session leaves.
     grabbed: bool,
@@ -313,6 +317,12 @@ impl PhysicalGamepad {
                 format!("failed to grab {} exclusively: {error}", path.display())
             })?;
         }
+        let id = device.input_id();
+        let layout = button_layout(
+            id.vendor(),
+            id.product(),
+            device.name().unwrap_or_default(),
+        );
         Ok(Self {
             info,
             device: Some(device),
@@ -324,6 +334,7 @@ impl PhysicalGamepad {
             left_trigger_clicked: false,
             right_trigger_clicked: false,
             nintendo_layout: false,
+            layout,
             grabbed: grab,
         })
     }
@@ -500,12 +511,7 @@ impl PhysicalGamepad {
             .unwrap_or_default();
         match event.destructure() {
             EventSummary::Key(_, code, value) => {
-                let layout = button_layout(
-                    self.info.vendor,
-                    self.info.product,
-                    &self.info.name,
-                );
-                if let Some(mut button) = map_button_for_device(code, layout) {
+                if let Some(mut button) = map_button_for_device(code, self.layout) {
                     if self.nintendo_layout {
                         button = swap_face_buttons(button);
                     }
@@ -1024,6 +1030,7 @@ mod tests {
             left_trigger_clicked: false,
             right_trigger_clicked: false,
             nintendo_layout: false,
+            layout: ButtonLayout::Standard,
             grabbed: false,
         }
     }

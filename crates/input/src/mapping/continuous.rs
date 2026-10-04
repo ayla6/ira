@@ -48,7 +48,6 @@ const MOMENTUM_MIN_RATE: f32 = 0.01;
 /// slow aiming produce silence.
 const GYRO_STREAM_CONFIRM_US: u64 = 120_000;
 
-
 impl MappingEngine {
     /// Feed the latest player-space rates from the gyro processor, stamped
     /// with the tick clock at which the sample arrived. Smoothed
@@ -265,7 +264,7 @@ impl MappingEngine {
         order: &mut Vec<GamepadAxis>,
     ) {
         let gyro = &self.profile.gyro;
-        if !gyro.enabled || gyro.output == GyroOutput::Mouse {
+        if !gyro.enabled {
             return;
         }
         let (x_axis, y_axis) = match gyro.output {

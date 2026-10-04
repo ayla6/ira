@@ -15,6 +15,8 @@
 //! stay quiet long enough, their mean is folded into the bias estimate so a
 //! resting controller stops drifting as its temperature changes.
 
+use std::collections::VecDeque;
+
 use crate::profile::{ControllerCalibration, GyroOrientation};
 
 /// Wall-clock span of the stillness window, in seconds. Time-based, not
@@ -182,14 +184,6 @@ impl Vec3 {
         }
     }
 
-    fn mean(samples: &[Self]) -> Self {
-        let count = samples.len() as f32;
-        samples
-            .iter()
-            .fold(Self::ZERO, |acc, sample| Self::sum(acc, *sample))
-            .scale(1.0 / count)
-    }
-
     fn sum(acc: Self, sample: Self) -> Self {
         Self {
             x: acc.x + sample.x,
@@ -201,8 +195,9 @@ impl Vec3 {
 
 struct StillnessTracker {
     /// (reading, age in seconds); entries older than the window are evicted
-    /// so the detector spans fixed wall-clock time at any sample rate.
-    samples: Vec<(Vec3, f32)>,
+    /// from the front so the detector spans fixed wall-clock time at any
+    /// sample rate.
+    samples: VecDeque<(Vec3, f32)>,
     /// Seconds of continuous stillness accumulated so far.
     settled: f32,
 }
@@ -210,7 +205,7 @@ struct StillnessTracker {
 impl StillnessTracker {
     fn new() -> Self {
         Self {
-            samples: Vec::new(),
+            samples: VecDeque::new(),
             settled: 0.0,
         }
     }
@@ -221,12 +216,12 @@ impl StillnessTracker {
         }
         while self
             .samples
-            .first()
+            .front()
             .is_some_and(|first| first.1 > STILLNESS_WINDOW_SECONDS)
         {
-            self.samples.remove(0);
+            self.samples.pop_front();
         }
-        self.samples.push((sample, 0.0));
+        self.samples.push_back((sample, 0.0));
         if self.is_still() {
             self.settled += dt;
         } else {
@@ -234,13 +229,24 @@ impl StillnessTracker {
         }
     }
 
+    /// Mean of the window without allocating: this runs per sample on the
+    /// report-rate path.
+    fn mean(&self) -> Vec3 {
+        let mut sum = Vec3::ZERO;
+        let mut count = 0u32;
+        for (sample, _) in &self.samples {
+            sum = sum.plus(*sample);
+            count += 1;
+        }
+        sum.scale(1.0 / count as f32)
+    }
+
     fn is_still(&self) -> bool {
         if self.samples.len() < STILLNESS_MIN_SAMPLES {
             return false;
         }
-        let readings = self.samples.iter().map(|(sample, _)| *sample).collect::<Vec<_>>();
-        let mean = Vec3::mean(&readings);
-        readings.iter().all(|sample| {
+        let mean = self.mean();
+        self.samples.iter().all(|(sample, _)| {
             (sample.x - mean.x).powi(2) < STILLNESS_VARIANCE
                 && (sample.y - mean.y).powi(2) < STILLNESS_VARIANCE
                 && (sample.z - mean.z).powi(2) < STILLNESS_VARIANCE
@@ -253,8 +259,7 @@ impl StillnessTracker {
         if self.settled < STILLNESS_SETTLE {
             return None;
         }
-        let readings = self.samples.iter().map(|(sample, _)| *sample).collect::<Vec<_>>();
-        let mean = Vec3::mean(&readings);
+        let mean = self.mean();
         (mean.magnitude() <= BIAS_MEAN_LIMIT).then_some(mean)
     }
 }
@@ -339,37 +344,36 @@ impl GyroProcessor {
             GyroOrientation::YawPlusRoll => (rotation.y + rotation.z, rotation.x, false),
             GyroOrientation::LaserPointer => match self.gravity.and_then(|up| up.normalized()) {
                 Some(up) => {
-                            // Laser Pointer, in Steam Input's sense: an
-                            // imaginary ray out of the controller drives
-                            // the cursor by POSITION. Yaw is unobservable
-                            // from an IMU alone, so the ray's horizontal
-                            // angle integrates the gravity-projected gyro
-                            // rate; the vertical angle is absolute from
-                            // gravity. Deltas accumulate here and are
-                            // drained straight into cursor movement —
-                            // never through the rate pipeline, whose
-                            // smoothing turned every hand settle into a
-                            // slide. Turn sign is empirically inverted
-                            // for the SDL frame (turn right = negative
-                            // rotation around up = cursor right).
-                            let yaw_rate = -rotation.dot(up);
-                            self.laser_yaw_pending += yaw_rate * dt;
-                            // Elevation of the pointing axis: SDL's +Z is
-                            // toward the user, so the nose is -Z and a
-                            // nose-up hold reads up.z negative. atan2
-                            // rather than asin: asin's derivative blows
-                            // up near ±1, turning accelerometer noise
-                            // into huge angle swings.
-                            let elevation =
-                                (-up.z).atan2((up.x * up.x + up.y * up.y).sqrt());
-                            if let Some(previous) = self.laser_pitch_prev {
-                                self.laser_pitch_pending += elevation - previous;
-                            }
-                        self.laser_pitch_prev = Some(elevation);
-                        (yaw_rate, 0.0, true)
+                    // Laser Pointer, in Steam Input's sense: an
+                    // imaginary ray out of the controller drives
+                    // the cursor by POSITION. Yaw is unobservable
+                    // from an IMU alone, so the ray's horizontal
+                    // angle integrates the gravity-projected gyro
+                    // rate; the vertical angle is absolute from
+                    // gravity. Deltas accumulate here and are
+                    // drained straight into cursor movement —
+                    // never through the rate pipeline, whose
+                    // smoothing turned every hand settle into a
+                    // slide. Turn sign is empirically inverted
+                    // for the SDL frame (turn right = negative
+                    // rotation around up = cursor right).
+                    let yaw_rate = -rotation.dot(up);
+                    self.laser_yaw_pending += yaw_rate * dt;
+                    // Elevation of the pointing axis: SDL's +Z is
+                    // toward the user, so the nose is -Z and a
+                    // nose-up hold reads up.z negative. atan2
+                    // rather than asin: asin's derivative blows
+                    // up near ±1, turning accelerometer noise
+                    // into huge angle swings.
+                    let elevation = (-up.z).atan2((up.x * up.x + up.y * up.y).sqrt());
+                    if let Some(previous) = self.laser_pitch_prev {
+                        self.laser_pitch_pending += elevation - previous;
                     }
-                    None => Self::controller_space(rotation),
-                },
+                    self.laser_pitch_prev = Some(elevation);
+                    (yaw_rate, 0.0, true)
+                }
+                None => Self::controller_space(rotation),
+            },
             GyroOrientation::PlayerSpace => match self.gravity.and_then(|gravity| gravity.normalized())
             {
                 Some(gravity) => Self::player_space(rotation, gravity),

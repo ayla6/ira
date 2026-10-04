@@ -71,17 +71,9 @@ impl MappingEngine {
             }
             _ => (GamepadAxis::LeftX, GamepadAxis::LeftY),
         };
-        let x = self
-            .values
-            .get(&InputSource::Axis(x_axis))
-            .copied()
-            .unwrap_or(0.0);
-        let y = self
-            .values
-            .get(&InputSource::Axis(y_axis))
-            .copied()
-            .unwrap_or(0.0);
-        Some((x, y))
+        // A stick that has only reported one axis so far still counts;
+        // `stick_pair` reads the missing half as centered.
+        self.stick_pair(x_axis, y_axis)
     }
 }
 
@@ -356,8 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rim_wobble_does_not_reflick() {
-        // Dropping just below the engage point while engaged must not end
+    fn test_rim_wobble_does_not_reflick() {        // Dropping just below the engage point while engaged must not end
         // the flick, or re-crossing the rim would snap all over again.
         let profile = flick_profile();
         let dots = profile.gyro.dots_per_360;
@@ -377,5 +368,13 @@ mod tests {
             total < dots * 0.75,
             "wobbling at the rim re-flicked: total {total}"
         );
+    }
+
+    #[test]
+    fn test_wrap_angle_keeps_deltas_within_half_turn() {
+        use std::f32::consts::PI;
+        assert!((super::wrap_angle(0.5) - 0.5).abs() < 0.001);
+        assert!((super::wrap_angle(PI + 0.5) - (-PI + 0.5)).abs() < 0.001);
+        assert!((super::wrap_angle(-PI - 0.5) - (PI - 0.5)).abs() < 0.001);
     }
 }

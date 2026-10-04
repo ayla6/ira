@@ -5,9 +5,18 @@ use std::path::Path;
 /// Files already at `target` are left in place. Subdirectories are copied recursively.
 /// Returns the number of files successfully migrated.
 pub fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
-    let _ = std::fs::create_dir_all(target);
-    let Ok(entries) = std::fs::read_dir(source) else {
+    if let Err(e) = std::fs::create_dir_all(target) {
+        eprintln!("safe_migrate: cannot create {}: {e}", target.display());
         return 0;
+    }
+    let entries = match std::fs::read_dir(source) {
+        Ok(entries) => entries,
+        // A missing source just means nothing was ever saved there.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return 0,
+        Err(e) => {
+            eprintln!("safe_migrate: cannot read {}: {e}", source.display());
+            return 0;
+        }
     };
     let mut count = 0;
     for entry in entries.flatten() {
@@ -40,7 +49,12 @@ pub fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
 fn safe_copy_and_verify(src: &Path, dst: &Path) -> bool {
     use std::io::Read;
     use std::hash::{Hash, Hasher};
-    if std::fs::copy(src, dst).is_err() {
+    if let Err(e) = std::fs::copy(src, dst) {
+        eprintln!(
+            "safe_migrate: copy {} -> {}: {e}",
+            src.display(),
+            dst.display()
+        );
         return false;
     }
     let digest = |path: &Path| -> Option<u64> {
@@ -59,6 +73,10 @@ fn safe_copy_and_verify(src: &Path, dst: &Path) -> bool {
     match (digest(src), digest(dst)) {
         (Some(a), Some(b)) if a == b => true,
         _ => {
+            eprintln!(
+                "safe_migrate: verification mismatch for {}, copy discarded",
+                dst.display()
+            );
             let _ = std::fs::remove_file(dst);
             false
         }

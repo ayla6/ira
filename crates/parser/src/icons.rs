@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use image::ImageEncoder;
 
+use super::paths::{encode_lossless_webp, find_image_file, load_image_bytes};
+
 /// Encodes little-endian RGB565 pixel data as a PNG file.
 pub fn save_rgb565_png(path: &Path, width: u32, height: u32, rgb565: &[u8]) -> Result<(), String> {
     let expected = (width as usize) * (height as usize) * 2;
@@ -11,14 +13,15 @@ pub fn save_rgb565_png(path: &Path, width: u32, height: u32, rgb565: &[u8]) -> R
             rgb565.len()
         ));
     }
-    let expand = |v: u16| ((v as u32 * 255 + 15) / 31) as u8;
+    let expand5 = |v: u16| ((u32::from(v) * 255 + 15) / 31) as u8;
+    let expand6 = |v: u16| ((u32::from(v) * 255 + 31) / 63) as u8;
     let img = image::ImageBuffer::from_fn(width, height, |x, y| {
         let i = (y as usize * width as usize + x as usize) * 2;
         let pixel = u16::from_le_bytes([rgb565[i], rgb565[i + 1]]);
         image::Rgb([
-            expand(pixel >> 11),
-            expand((pixel >> 5) & 0x1F),
-            expand(pixel & 0x1F),
+            expand5(pixel >> 11),
+            expand6((pixel >> 5) & 0x3F),
+            expand5(pixel & 0x1F),
         ])
     });
     img.save(path).map_err(|e| e.to_string())
@@ -67,7 +70,6 @@ fn try_convert_ico(path: &Path) -> PathBuf {
 /// missing or undecodable. Uses `load_image_bytes`, so extensionless or
 /// magic-less formats like TGA decode too.
 pub fn import_image_as_webp(src: &Path, dest_dir: &Path, base: &str) -> Option<PathBuf> {
-    use super::paths::{find_image_file, load_image_bytes};
     if !src.is_file() {
         return None;
     }
@@ -76,9 +78,9 @@ pub fn import_image_as_webp(src: &Path, dest_dir: &Path, base: &str) -> Option<P
     let img = load_image_bytes(&data)?;
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
-    let encoded = webp::Encoder::from_rgba(rgba.as_raw(), w, h).encode_lossless();
+    let encoded = encode_lossless_webp(rgba.as_raw(), w, h);
     let dest = dest_dir.join(format!("{base}.webp"));
-    std::fs::write(&dest, &*encoded).ok()?;
+    std::fs::write(&dest, encoded).ok()?;
     find_image_file(dest_dir, base)
 }
 
@@ -133,6 +135,22 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         assert!(save_rgb565_png(&tmp.path().join("i.png"), 48, 48, &[0, 0]).is_err());
     }
+
+    #[test]
+    fn test_save_rgb565_png_expands_mid_tone_channels() {
+        // Arrange: half-intensity green (6-bit) and red (5-bit).
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("mid.png");
+        let mut pixels = vec![0u8; 2 * 2 * 2];
+        pixels[0..2].copy_from_slice(&0x0400u16.to_le_bytes());
+        pixels[2..4].copy_from_slice(&0x7800u16.to_le_bytes());
+        // Act
+        save_rgb565_png(&path, 2, 2, &pixels).unwrap();
+        // Assert: green uses the full 6-bit range, red the 5-bit range.
+        let img = image::open(&path).unwrap().to_rgb8();
+        assert_eq!(img.get_pixel(0, 0).0, [0, 130, 0]);
+        assert_eq!(img.get_pixel(1, 0).0, [123, 0, 0]);
+    }
 }
 
 /// Decode an image to capped RGBA8 pixels for tile textures: the decode
@@ -164,6 +182,21 @@ pub fn decode_rgba_preview(png: &[u8], max_px: u32) -> Option<(u32, u32, Vec<u8>
 /// time is what keeps the picker tiles a regular size.
 pub const TRIM_ALPHA_CUTOFF: u8 = 8;
 
+/// Encode RGBA8 pixels as PNG bytes. Test fixtures build through this same
+/// path so they exercise the real encoder.
+fn encode_png_bytes(img: &image::RgbaImage) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .ok()?;
+    Some(out)
+}
+
 pub fn trim_transparent_margins(png: &[u8]) -> Option<Vec<u8>> {
     let img = image::load_from_memory(png).ok()?.into_rgba8();
     let (w, h) = img.dimensions();
@@ -184,16 +217,7 @@ pub fn trim_transparent_margins(png: &[u8]) -> Option<Vec<u8>> {
     }
     let cropped =
         image::imageops::crop_imm(&img, left, top, right - left, bottom - top).to_image();
-    let mut out = Vec::new();
-    image::codecs::png::PngEncoder::new(&mut out)
-        .write_image(
-            cropped.as_raw(),
-            cropped.width(),
-            cropped.height(),
-            image::ExtendedColorType::Rgba8,
-        )
-        .ok()?;
-    Some(out)
+    encode_png_bytes(&cropped)
 }
 
 #[cfg(test)]
@@ -208,11 +232,7 @@ mod trim_tests {
                 *pixel = image::Rgba([200, 100, 50, 255]);
             }
         }
-        let mut out = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut out)
-            .write_image(img.as_raw(), 6, 4, image::ExtendedColorType::Rgba8)
-            .unwrap();
-        out
+        encode_png_bytes(&img).unwrap()
     }
 
     #[test]
@@ -229,10 +249,7 @@ mod trim_tests {
         for pixel in img.pixels_mut() {
             *pixel = image::Rgba([10, 20, 30, 255]);
         }
-        let mut out = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut out)
-            .write_image(img.as_raw(), 4, 4, image::ExtendedColorType::Rgba8)
-            .unwrap();
+        let out = encode_png_bytes(&img).unwrap();
         assert!(trim_transparent_margins(&out).is_none());
     }
 
@@ -244,10 +261,7 @@ mod trim_tests {
     #[test]
     fn test_decode_rgba_preview_passes_small_images_through() {
         let img = image::RgbaImage::from_pixel(64, 64, image::Rgba([10, 200, 30, 255]));
-        let mut out = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut out)
-            .write_image(img.as_raw(), 64, 64, image::ExtendedColorType::Rgba8)
-            .unwrap();
+        let out = encode_png_bytes(&img).unwrap();
         let (width, height, pixels) = decode_rgba_preview(&out, 512).expect("decodes");
         assert_eq!((width, height), (64, 64));
         assert_eq!(pixels.len(), 64 * 64 * 4);
@@ -257,15 +271,7 @@ mod trim_tests {
     #[test]
     fn test_decode_rgba_preview_caps_large_images() {
         let img = image::RgbaImage::from_pixel(1024, 768, image::Rgba([10, 200, 30, 255]));
-        let mut out = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut out)
-            .write_image(
-                img.as_raw(),
-                1024,
-                768,
-                image::ExtendedColorType::Rgba8,
-            )
-            .unwrap();
+        let out = encode_png_bytes(&img).unwrap();
         let (width, height, _) = decode_rgba_preview(&out, 256).expect("decodes");
         assert!(width <= 256 && height <= 256);
         assert_eq!((width, height), (256, 192));
@@ -291,10 +297,7 @@ mod trim_tests {
                 *pixel = image::Rgba([10, 10, 10, 5]);
             }
         }
-        let mut out = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut out)
-            .write_image(img.as_raw(), 8, 8, image::ExtendedColorType::Rgba8)
-            .unwrap();
+        let out = encode_png_bytes(&img).unwrap();
         let trimmed = trim_transparent_margins(&out).expect("trims");
         let back = image::load_from_memory(&trimmed).unwrap().into_rgba8();
         assert_eq!(back.dimensions(), (4, 4));

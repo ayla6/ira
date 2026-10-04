@@ -1,6 +1,7 @@
 use ira_models::{AchievementStatus, AssetType, Game};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 #[derive(Deserialize)]
 struct AppDetailsName {
@@ -20,11 +21,11 @@ pub fn read_app_name(save_dir: &str, app_id: &str) -> Option<String> {
     }
 }
 
-pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
+pub fn populate_image_paths(image_dir: &Path, game: &mut Game) {
     let db_id = game.db_id;
     let _s = tracing::info_span!("populate_image_paths", db_id).entered();
 
-    let mut files: std::collections::HashSet<String> = std::fs::read_dir(image_dir)
+    let mut files: HashSet<String> = std::fs::read_dir(image_dir)
         .map(|d| {
             d.filter_map(|e| e.ok())
                 .filter_map(|e| e.file_name().to_str().map(String::from))
@@ -48,7 +49,7 @@ pub fn populate_image_paths(image_dir: &std::path::Path, game: &mut Game) {
         }
     }
 
-    let find = |base: &str| -> Option<std::path::PathBuf> {
+    let find = |base: &str| -> Option<PathBuf> {
         for ext in &["webp", "jpg"] {
             let name = format!("{}.{}", base, ext);
             if files.contains(&name) {

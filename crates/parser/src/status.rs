@@ -32,6 +32,10 @@ pub fn load_status_map(status_path: &Path) -> HashMap<String, AchievementStatus>
             .collect();
     }
 
+    eprintln!(
+        "load_status_map: ignoring corrupt achievements file {}",
+        status_path.display()
+    );
     HashMap::new()
 }
 

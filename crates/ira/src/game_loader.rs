@@ -4,10 +4,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub fn read_app_details(save_dir: &str, app_id: &str) -> Option<AppDetails> {
-    let path = ira_parser::data_dir(save_dir, app_id).join("appdetails.json");
+    let dir = ira_parser::data_dir(save_dir, app_id);
+    let path = dir.join("appdetails.json");
     let mut details = ira_api::steam::read_app_details_from_cache(&path)?;
 
-    let dlc_config_path = ira_parser::data_dir(save_dir, app_id).join("dlc_config.json");
+    let dlc_config_path = dir.join("dlc_config.json");
     if let Ok(data) = std::fs::read(&dlc_config_path) {
         if let Ok(saved) = serde_json::from_slice::<AppDetails>(&data) {
             for (id, saved_dlc) in &saved.dlcs {
@@ -44,21 +45,39 @@ pub fn load_saved_games(conn: &DbConn, save_dir: &str) -> Vec<Game> {
     )
 }
 
+/// The store-facing id: the matched Steam id when one exists, otherwise the
+/// platform-native id. Store-API callers resolve both through
+/// `Game::steam_api_id`; this is the same choice in one place.
+fn store_app_id(entry: &GameEntry) -> &str {
+    if !entry.steam_id.is_empty() {
+        &entry.steam_id
+    } else {
+        entry.external_id()
+    }
+}
+
+/// Console-library kinds whose rows store the absolute install location
+/// discovered at scan time (later rebuilds keep it for the context menu
+/// and icon restore).
+fn is_console_library_kind(kind: ira_models::GameKind) -> bool {
+    matches!(
+        kind,
+        ira_models::GameKind::Ps4
+            | ira_models::GameKind::Ps3
+            | ira_models::GameKind::PsVita
+            | ira_models::GameKind::WiiU
+            | ira_models::GameKind::ThreeDS
+    )
+}
 /// Whether a console-library row's game is gone: the owning source scan
 /// marked it vanished, or its recorded install path no longer exists. The
 /// row stays in the DB for its playtime and trophies, but loads must ignore
 /// it entirely — this is independent of the user's hidden flag, which the
 /// "show hidden games" setting governs.
 fn console_game_vanished(entry: &GameEntry) -> bool {
-    matches!(
-        entry.kind,
-        ira_models::GameKind::Ps4
-            | ira_models::GameKind::Ps3
-            | ira_models::GameKind::PsVita
-            | ira_models::GameKind::WiiU
-            | ira_models::GameKind::ThreeDS
-    ) && (entry.vanished
-        || (!entry.rom_path.is_empty() && !std::path::Path::new(&entry.rom_path).exists()))
+    is_console_library_kind(entry.kind)
+        && (entry.vanished
+            || (!entry.rom_path.is_empty() && !std::path::Path::new(&entry.rom_path).exists()))
 }
 
 /// Shared implementation behind `load_saved_games`.
@@ -104,11 +123,7 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     // match id lives in `steam_id` and never lands here. Store-API
     // callers resolve both through `Game::steam_api_id`.
     let app_id = entry.external_id();
-    let store_id = if !entry.steam_id.is_empty() {
-        &entry.steam_id
-    } else {
-        app_id
-    };
+    let store_id = store_app_id(entry);
 
     let mut game = entry.to_game();
     game.app_id = app_id.to_string();
@@ -120,16 +135,11 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     // every console kind with an emulator library stores the absolute
     // location discovered at scan time and later rebuilds must keep it
     // (context menu, icon restore).
-    if matches!(
+    if (matches!(
         entry.kind,
-        ira_models::GameKind::Retro
-            | ira_models::GameKind::Switch
-            | ira_models::GameKind::ThreeDS
-            | ira_models::GameKind::WiiU
-            | ira_models::GameKind::PsVita
-            | ira_models::GameKind::Ps4
-            | ira_models::GameKind::Ps3
-    ) && !entry.rom_path.is_empty()
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch
+    ) || is_console_library_kind(entry.kind))
+        && !entry.rom_path.is_empty()
     {
         game.game_path = entry.rom_path.clone();
     }
@@ -177,11 +187,7 @@ fn matches_placeholder(name: &str, template: &str) -> bool {
 }
 
 pub fn load_game_fast(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
-    let app_id = if !entry.steam_id.is_empty() {
-        &entry.steam_id
-    } else {
-        entry.external_id()
-    };
+    let app_id = store_app_id(entry);
     let _s = tracing::info_span!("load_game_fast", app_id).entered();
     let mut game = build_game_base(entry, save_dir);
     game.earned_count = entry.cached_earned_count as usize;
@@ -209,19 +215,20 @@ pub fn ra_achievement_mtime(save_dir: &str, game_id: &str) -> i64 {
 }
 
 pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
-    let app_id = if !entry.steam_id.is_empty() {
-        &entry.steam_id
-    } else {
-        entry.external_id()
-    };
+    let app_id = store_app_id(entry);
     let _s = tracing::info_span!("load_game", app_id).entered();
 
     let mut game = build_game_base(entry, save_dir);
 
     if entry.kind == ira_models::GameKind::Ps3 {
         game.achievements = ira_platforms::ps3::load_ps3_trophies(app_id);
-        game.total_count = game.achievements.len();
-        game.earned_count = game.achievements.iter().filter(|a| a.earned).count();
+        recount(&mut game);
+        return Ok(game);
+    }
+
+    if entry.kind == ira_models::GameKind::Ps4 {
+        game.achievements = ira_platforms::ps4::load_ps4_trophies(app_id);
+        recount(&mut game);
         return Ok(game);
     }
 
@@ -242,8 +249,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
         let _s = tracing::info_span!("load_ra_achievements_from_cache").entered();
         game.achievements =
             ira_platforms::retroachievements::load_ra_achievements_from_cache(save_dir, app_id);
-        game.total_count = game.achievements.len();
-        game.earned_count = game.achievements.iter().filter(|a| a.earned).count();
+        recount(&mut game);
         return Ok(game);
     }
 
@@ -251,32 +257,7 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let has_meta = meta_path.is_file();
 
     let status_map = if is_steam_native {
-        let mut map: HashMap<String, AchievementStatus> =
-            ira_platforms::steam::read_user_stats(app_id)
-                .into_iter()
-                .map(|(name, (earned, earned_time))| {
-                    (
-                        name,
-                        AchievementStatus {
-                            earned,
-                            earned_time,
-                        },
-                    )
-                })
-                .collect();
-        for ach in &steam_native_data.achievements {
-            map.entry(ach.id.clone())
-                .and_modify(|s| {
-                    if s.earned_time == 0 {
-                        s.earned_time = ach.earned_time;
-                    }
-                })
-                .or_insert(AchievementStatus {
-                    earned: ach.earned,
-                    earned_time: ach.earned_time,
-                });
-        }
-        map
+        steam_native_status_map(app_id, &steam_native_data)
     } else {
         let status_path = ira_parser::unlock_status_path(
             save_dir,
@@ -288,84 +269,14 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     };
 
     if !has_meta && !steam_native_data.achievements.is_empty() {
-        let icons_dir = ach_dir.join("achievement_images");
-        for ach in &steam_native_data.achievements {
-            let icon_path = if !ach.icon_url.is_empty() {
-                let icon_file = icons_dir.join(format!("{}.jpg", ach.id));
-                if icon_file.is_file() {
-                    icon_file.to_string_lossy().into_owned()
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            };
-            game.achievements.push(MergedAchievement {
-                name: ach.id.clone(),
-                display_name: ach.display_name.clone(),
-                description: ach.description.clone(),
-                hidden: ach.hidden,
-                earned: ach.earned,
-                earned_time: ach.earned_time,
-                icon_path,
-                icon_gray_path: String::new(),
-                global_percent: ach.global_percent,
-                trophy_type: '\0',
-            });
-        }
+        push_steam_native_achievements(&mut game, &ach_dir, &steam_native_data);
     } else if has_meta {
-        let meta_data =
-            std::fs::read(&meta_path).map_err(|e| format!("read achievements.json: {}", e))?;
-        let meta_list: Vec<ira_models::achievement::AchievementMeta> =
-            serde_json::from_slice(&meta_data).map_err(|e| {
-                eprintln!("Meta load error for {}", app_id);
-                format!("parse achievements.json: {}", e)
-            })?;
-
-        for meta in meta_list {
-            let status = status_map.get(&meta.name).cloned().unwrap_or_default();
-            let hidden = ira_models::achievement::parse_hidden(&meta.hidden);
-            let icon_gray = if meta.icon_gray.is_empty() {
-                meta.icon_gray_alt.clone()
-            } else {
-                meta.icon_gray.clone()
-            };
-
-            game.achievements.push(MergedAchievement {
-                name: meta.name.clone(),
-                display_name: meta.display_name.val.clone(),
-                description: meta.description.val.clone(),
-                hidden,
-                earned: status.earned,
-                earned_time: status.earned_time,
-                icon_path: ira_parser::find_icon_path(&ach_dir, &meta.icon),
-                icon_gray_path: ira_parser::find_icon_path(&ach_dir, &icon_gray),
-                global_percent: 0.0,
-                trophy_type: '\0',
-            });
-        }
+        push_meta_achievements(&mut game, &ach_dir, &meta_path, &status_map, app_id)?;
     } else {
-        let mut keys: Vec<_> = status_map.keys().cloned().collect();
-        keys.sort();
-        for name in keys {
-            let status = &status_map[&name];
-            game.achievements.push(MergedAchievement {
-                name: name.clone(),
-                display_name: name.clone(),
-                description: crate::tr!("No description available."),
-                hidden: false,
-                earned: status.earned,
-                earned_time: status.earned_time,
-                icon_path: String::new(),
-                icon_gray_path: String::new(),
-                global_percent: 0.0,
-                trophy_type: '\0',
-            });
-        }
+        push_bare_status_achievements(&mut game, &status_map);
     }
 
-    game.total_count = game.achievements.len();
-    game.earned_count = game.achievements.iter().filter(|a| a.earned).count();
+    recount(&mut game);
 
     if is_steam_native && steam_native_data.n_total > 0 {
         game.total_count = steam_native_data.n_total;
@@ -373,6 +284,147 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     }
 
     Ok(game)
+}
+
+/// Recompute the earned/total counters from the loaded achievement list.
+fn recount(game: &mut Game) {
+    game.total_count = game.achievements.len();
+    game.earned_count = game.achievements.iter().filter(|a| a.earned).count();
+}
+
+/// Merge live Steam user stats with the cached achievement list: stats win
+/// on earned state, the cache fills in unlock times the stats lack.
+fn steam_native_status_map(
+    app_id: &str,
+    data: &ira_platforms::steam::SteamAchievementData,
+) -> HashMap<String, AchievementStatus> {
+    let mut map: HashMap<String, AchievementStatus> =
+        ira_platforms::steam::read_user_stats(app_id)
+            .into_iter()
+            .map(|(name, (earned, earned_time))| {
+                (
+                    name,
+                    AchievementStatus {
+                        earned,
+                        earned_time,
+                    },
+                )
+            })
+            .collect();
+    for ach in &data.achievements {
+        map.entry(ach.id.clone())
+            .and_modify(|s| {
+                if s.earned_time == 0 {
+                    s.earned_time = ach.earned_time;
+                }
+            })
+            .or_insert(AchievementStatus {
+                earned: ach.earned,
+                earned_time: ach.earned_time,
+            });
+    }
+    map
+}
+
+/// Achievements known only from the Steam cache (no `achievements.json`
+/// metadata yet): ids and display data come from the cache verbatim.
+fn push_steam_native_achievements(
+    game: &mut Game,
+    ach_dir: &std::path::Path,
+    data: &ira_platforms::steam::SteamAchievementData,
+) {
+    let icons_dir = ach_dir.join("achievement_images");
+    for ach in &data.achievements {
+        let icon_path = if !ach.icon_url.is_empty() {
+            let icon_file = icons_dir.join(format!("{}.jpg", ach.id));
+            if icon_file.is_file() {
+                icon_file.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        game.achievements.push(MergedAchievement {
+            name: ach.id.clone(),
+            display_name: ach.display_name.clone(),
+            description: ach.description.clone(),
+            hidden: ach.hidden,
+            earned: ach.earned,
+            earned_time: ach.earned_time,
+            icon_path,
+            icon_gray_path: String::new(),
+            global_percent: ach.global_percent,
+            trophy_type: '\0',
+        });
+    }
+}
+
+/// Achievements with on-disk metadata: display data from
+/// `achievements.json`, earned state from the unlock status map.
+fn push_meta_achievements(
+    game: &mut Game,
+    ach_dir: &std::path::Path,
+    meta_path: &std::path::Path,
+    status_map: &HashMap<String, AchievementStatus>,
+    app_id: &str,
+) -> Result<(), String> {
+    let meta_data =
+        std::fs::read(meta_path).map_err(|e| format!("read achievements.json: {}", e))?;
+    let meta_list: Vec<ira_models::achievement::AchievementMeta> =
+        serde_json::from_slice(&meta_data).map_err(|e| {
+            eprintln!("Meta load error for {}", app_id);
+            format!("parse achievements.json: {}", e)
+        })?;
+
+    for meta in meta_list {
+        let status = status_map.get(&meta.name).cloned().unwrap_or_default();
+        let hidden = ira_models::achievement::parse_hidden(&meta.hidden);
+        let icon_gray = if meta.icon_gray.is_empty() {
+            meta.icon_gray_alt.clone()
+        } else {
+            meta.icon_gray.clone()
+        };
+
+        game.achievements.push(MergedAchievement {
+            name: meta.name.clone(),
+            display_name: meta.display_name.val.clone(),
+            description: meta.description.val.clone(),
+            hidden,
+            earned: status.earned,
+            earned_time: status.earned_time,
+            icon_path: ira_parser::find_icon_path(ach_dir, &meta.icon),
+            icon_gray_path: ira_parser::find_icon_path(ach_dir, &icon_gray),
+            global_percent: 0.0,
+            trophy_type: '\0',
+        });
+    }
+    Ok(())
+}
+
+/// Unlock status with neither metadata nor a Steam cache entry: bare
+/// name-only achievements so progress is still visible.
+fn push_bare_status_achievements(
+    game: &mut Game,
+    status_map: &HashMap<String, AchievementStatus>,
+) {
+    let mut keys: Vec<_> = status_map.keys().cloned().collect();
+    keys.sort();
+    for name in keys {
+        let status = &status_map[&name];
+        game.achievements.push(MergedAchievement {
+            name: name.clone(),
+            display_name: name.clone(),
+            description: crate::tr!("No description available."),
+            hidden: false,
+            earned: status.earned,
+            earned_time: status.earned_time,
+            icon_path: String::new(),
+            icon_gray_path: String::new(),
+            global_percent: 0.0,
+            trophy_type: '\0',
+        });
+    }
 }
 
 /// Copy every non-empty asset path from `from` over `to`.

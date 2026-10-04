@@ -423,7 +423,8 @@ pub fn show_daily_history_dialog(state: &SharedState) {
             let now = now_secs();
             let from = now - 84 * 86400;
 
-            let all_sessions = ira_db::get_sessions_range(&state.borrow().db, from, now)
+            let db = state.borrow().db.clone();
+            let all_sessions = ira_db::get_sessions_range(&db, from, now)
                 .unwrap_or_else(|e| {
                     eprintln!("Failed to read play sessions: {e}");
                     Vec::new()
@@ -432,7 +433,6 @@ pub fn show_daily_history_dialog(state: &SharedState) {
             // Straight from the database: games that left the library keep their
             // rows, and their past sessions must still read as themselves.
             let game_names: HashMap<i64, String> = {
-                let db = state.borrow().db.clone();
                 ira_db::load_all_games(&db)
                     .unwrap_or_else(|e| {
                         eprintln!("Failed to read game titles: {e}");

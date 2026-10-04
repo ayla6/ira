@@ -8,24 +8,20 @@ use super::state::SharedState;
 pub fn display_game(game: &Game, state: &SharedState) {
     let _span = tracing::info_span!("display_game", db_id = game.db_id).entered();
     let (content_box, content_scroll, grid_header, is_same_game, gen) = {
-        let s = state.borrow();
+        let mut s = state.borrow_mut();
         let is_same = s.displayed_db_id == game.db_id;
         let gen = s.view_generation + 1;
-        (
+        let widgets = (
             s.content_box.clone(),
             s.content_scroll.clone(),
             s.grid_header.clone(),
-            is_same,
-            gen,
-        )
-    };
-    {
-        let mut s = state.borrow_mut();
+        );
         s.displayed_db_id = game.db_id;
         s.displayed_variant_id = game.variant_id;
         s.displayed_content_dirty = false;
         s.view_generation = gen;
-    }
+        (widgets.0, widgets.1, widgets.2, is_same, gen)
+    };
 
     clear_children(&grid_header);
     content_scroll.set_child(Some(&content_box));

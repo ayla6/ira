@@ -86,6 +86,9 @@ pub fn write_game_shm(
 }
 
 fn write_str(dst: &mut [u8], src: &str) {
+    if dst.is_empty() {
+        return;
+    }
     let bytes = src.as_bytes();
     let len = bytes.len().min(dst.len() - 1);
     dst[..len].copy_from_slice(&bytes[..len]);

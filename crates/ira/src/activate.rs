@@ -141,25 +141,29 @@ pub fn activate(app: &adw::Application) -> SharedState {
     {
         let _s = tracing::info_span!("post_ui_setup").entered();
 
-        state.borrow_mut().steam = steam.clone();
-
-        let watcher = match AchievementWatcher::new(
+        let (watcher, game_names) = match AchievementWatcher::new(
             cfg_for_watcher,
             sender.clone(),
             save_dir.clone(),
             Arc::new(crate::game_loader::load_game),
         ) {
-            Ok(w) => {
-                let game_names = w.game_names();
-                state.borrow_mut().game_names = game_names;
-                Some(w)
+            Ok(watcher) => {
+                let game_names = watcher.game_names();
+                (Some(watcher), Some(game_names))
             }
             Err(e) => {
                 eprintln!("Live achievement watching unavailable: {}", e);
-                None
+                (None, None)
             }
         };
-        state.borrow_mut().watcher = watcher;
+        {
+            let mut state = state.borrow_mut();
+            state.steam = steam.clone();
+            if let Some(game_names) = game_names {
+                state.game_names = game_names;
+            }
+            state.watcher = watcher;
+        }
 
         refresh_playtime_watchers(&state);
     }

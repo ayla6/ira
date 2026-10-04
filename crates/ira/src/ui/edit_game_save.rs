@@ -1,4 +1,3 @@
-use super::add_game_dialog::collect_env_vars;
 use super::css::*;
 use super::edit_game_controller::ControllerWidgets;
 use super::edit_game_launch::LaunchConfigWidgets;
@@ -8,7 +7,7 @@ use super::edit_game_variants::VarW;
 use super::input_profile_store::add_game_compatibility;
 use super::message_helpers::refresh_selected_base_game;
 use super::state::{PendingImage, SharedState};
-use super::wine_config_env_dll::collect_dll_overrides;
+use super::wine_config_env_dll::{collect_dll_overrides, collect_env_vars};
 use super::wine_config_widget::WineConfigWidgets;
 use adw::prelude::*;
 use ira_models::{AssetType, GameLaunchConfig, TrophySource, WineConfig};
@@ -170,7 +169,8 @@ fn save_steam_link(params: &SaveGameSettingsParams) {
     }
 }
 
-fn save_version_and_overrides(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {    if let Some(ver) = params.pending_version.borrow().as_ref() {
+fn save_version_and_overrides(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
+    if let Some(ver) = params.pending_version.borrow().as_ref() {
         if let Err(e) = ira_db::set_shadps4_version(db, params.db_id, ver) {
             eprintln!("Failed to set shadps4 version: {}", e);
         }

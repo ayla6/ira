@@ -235,8 +235,12 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     {
         let state = state.clone();
         square_toggle.connect_toggled(move |btn| {
-            state.borrow_mut().cfg.grid_square_capsules = btn.is_active();
-            if let Err(e) = state.borrow().cfg.save() {
+            let save_result = {
+                let mut s = state.borrow_mut();
+                s.cfg.grid_square_capsules = btn.is_active();
+                s.cfg.save()
+            };
+            if let Err(e) = save_result {
                 eprintln!("Failed to save config: {e}");
             }
             super::grid_view::show_grid_view(&state);
@@ -280,10 +284,13 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     rebuild_sidebar(state);
 
-    let initial_loading = state.borrow().games.is_empty();
-    if !state.borrow().content_unloaded && initial_loading {
+    let (initial_loading, content_unloaded) = {
+        let s = state.borrow();
+        (s.games.is_empty(), s.content_unloaded)
+    };
+    if !content_unloaded && initial_loading {
         show_loading_view(state, &crate::tr!("Preparing game library…"), 0, 1);
-    } else if !state.borrow().content_unloaded {
+    } else if !content_unloaded {
         select_row_silently(state, Some(0));
         show_grid_view(state);
     }
@@ -402,9 +409,26 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
     vbox.set_margin_top(8);
     vbox.set_margin_bottom(8);
 
-    let current_mode = state.borrow().cfg.sort_mode;
-    let mut first_btn: Option<gtk4::CheckButton> = None;
+    let (current_mode, current_group_by) = {
+        let s = state.borrow();
+        (s.cfg.sort_mode, s.cfg.group_by)
+    };
+    append_sort_mode_rows(state, &vbox, current_mode);
+    append_group_by_rows(state, &vbox, current_group_by);
 
+    popover.set_child(Some(&vbox));
+
+    let btn = gtk4::MenuButton::new();
+    btn.set_popover(Some(&popover));
+
+    let sort_label = gtk4::Label::new(Some(current_mode.display_label()));
+    sort_label.set_visible(false);
+
+    (popover, btn, sort_label)
+}
+
+fn append_sort_mode_rows(state: &SharedState, vbox: &gtk4::Box, current_mode: SortMode) {
+    let mut first_btn: Option<gtk4::CheckButton> = None;
     for mode in SortMode::ORDERING_CHOICES {
         let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         row.set_size_request(-1, 36);
@@ -432,19 +456,26 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
         let mode_c = *mode;
         check.connect_toggled(move |_| {
             if check_clone.is_active() {
-                state_clone.borrow_mut().cfg.sort_mode = mode_c;
-                if let Err(e) = state_clone.borrow().cfg.save() {
+                let (sort_label, save_result) = {
+                    let mut s = state_clone.borrow_mut();
+                    s.cfg.sort_mode = mode_c;
+                    (s.sort_label.clone(), s.cfg.save())
+                };
+                if let Err(e) = save_result {
                     eprintln!("Failed to save config: {}", e);
                 }
-                state_clone
-                    .borrow()
-                    .sort_label
-                    .set_text(mode_c.display_label());
+                sort_label.set_text(mode_c.display_label());
                 rebuild_sidebar_and_show_grid(&state_clone);
             }
         });
     }
+}
 
+fn append_group_by_rows(
+    state: &SharedState,
+    vbox: &gtk4::Box,
+    current_group_by: ira_models::GroupBy,
+) {
     // ── Group by: the second function of this popover. A dimension
     // turns the sidebar into one collapsible category per value. ──
     vbox.append(&gtk4::Separator::new(gtk4::Orientation::Horizontal));
@@ -459,7 +490,7 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
         row.set_size_request(-1, 36);
 
         let check = gtk4::CheckButton::new();
-        if *mode == state.borrow().cfg.group_by {
+        if *mode == current_group_by {
             check.set_active(true);
         }
         if let Some(ref first) = group_first_btn {
@@ -480,26 +511,28 @@ fn build_sort_popover(state: &SharedState) -> (gtk4::Popover, gtk4::MenuButton, 
         let check_clone = check.clone();
         let mode_c = *mode;
         check.connect_toggled(move |_| {
-            if check_clone.is_active() && state_clone.borrow().cfg.group_by != mode_c {
-                state_clone.borrow_mut().cfg.group_by = mode_c;
-                if let Err(e) = state_clone.borrow().cfg.save() {
-                    eprintln!("Failed to save config: {}", e);
-                }
-                state_clone.borrow_mut().selected_group = GroupSelection::AllGames;
-                rebuild_sidebar_and_show_grid(&state_clone);
+            if !check_clone.is_active() {
+                return;
             }
+            let should_rebuild = {
+                let mut s = state_clone.borrow_mut();
+                if s.cfg.group_by == mode_c {
+                    false
+                } else {
+                    s.cfg.group_by = mode_c;
+                    s.selected_group = GroupSelection::AllGames;
+                    true
+                }
+            };
+            if !should_rebuild {
+                return;
+            }
+            if let Err(e) = state_clone.borrow().cfg.save() {
+                eprintln!("Failed to save config: {}", e);
+            }
+            rebuild_sidebar_and_show_grid(&state_clone);
         });
     }
-
-    popover.set_child(Some(&vbox));
-
-    let btn = gtk4::MenuButton::new();
-    btn.set_popover(Some(&popover));
-
-    let sort_label = gtk4::Label::new(Some(current_mode.display_label()));
-    sort_label.set_visible(false);
-
-    (popover, btn, sort_label)
 }
 
 fn connect_window_signals(
@@ -545,35 +578,44 @@ fn connect_window_signals(
             // No store row carries this kind anymore.
             super::sidebar_item::SidebarItemKind::AllGames => {}
             super::sidebar_item::SidebarItemKind::CollectionHeader => {
-                state_clone.borrow_mut().selected_id.clear();
                 // A derived category's id is its name's hash; resolve it
                 // back so the filter reads the derived-members map.
-                let derived = state_clone
-                    .borrow()
-                    .derived_members
-                    .keys()
-                    .find(|name| ira_models::derived_group_id(name) == group_id)
-                    .cloned();
-                state_clone.borrow_mut().selected_group = match derived {
-                    Some(name) => GroupSelection::Derived(name),
-                    None => GroupSelection::Collection(group_id),
+                let derived = {
+                    let s = state_clone.borrow();
+                    s.derived_members
+                        .keys()
+                        .find(|name| ira_models::derived_group_id(name) == group_id)
+                        .cloned()
                 };
-                state_clone.borrow_mut().multi_selected_ids.clear();
+                {
+                    let mut s = state_clone.borrow_mut();
+                    s.selected_id.clear();
+                    s.selected_group = match derived {
+                        Some(name) => GroupSelection::Derived(name),
+                        None => GroupSelection::Collection(group_id),
+                    };
+                    s.multi_selected_ids.clear();
+                }
                 show_grid_view(&state_clone);
             }
             super::sidebar_item::SidebarItemKind::AutoGroupHeader => {
-                state_clone.borrow_mut().selected_id.clear();
                 // The header carries the negated memory id; the members
                 // live under the same key in group_members.
-                state_clone.borrow_mut().selected_group =
-                    GroupSelection::Collection(group_id);
-                state_clone.borrow_mut().multi_selected_ids.clear();
+                {
+                    let mut s = state_clone.borrow_mut();
+                    s.selected_id.clear();
+                    s.selected_group = GroupSelection::Collection(group_id);
+                    s.multi_selected_ids.clear();
+                }
                 show_grid_view(&state_clone);
             }
             super::sidebar_item::SidebarItemKind::UncategorizedHeader => {
-                state_clone.borrow_mut().selected_id.clear();
-                state_clone.borrow_mut().selected_group = GroupSelection::Uncategorized;
-                state_clone.borrow_mut().multi_selected_ids.clear();
+                {
+                    let mut s = state_clone.borrow_mut();
+                    s.selected_id.clear();
+                    s.selected_group = GroupSelection::Uncategorized;
+                    s.multi_selected_ids.clear();
+                }
                 show_grid_view(&state_clone);
             }
             super::sidebar_item::SidebarItemKind::Game => {
@@ -597,19 +639,22 @@ fn connect_window_signals(
         if item.kind() == super::sidebar_item::SidebarItemKind::Game {
             let db_id = item.db_id();
             let item_variant_id = item.variant_id();
-            let s = state_clone.borrow();
-            if s.games.iter().any(|g| g.db_id == db_id) {
-                let vid = item_variant_id
+            let (has_game, default_variant) = {
+                let s = state_clone.borrow();
+                let has_game = s.games.iter().any(|g| g.db_id == db_id);
+                let default_variant = item_variant_id
                     .or_else(|| ira_db::get_default_variant(&s.db, db_id).ok().flatten());
-                drop(s);
-                if !state_clone
+                (has_game, default_variant)
+            };
+            if has_game {
+                let is_running = state_clone
                     .borrow()
                     .running_games
                     .lock()
                     .unwrap()
-                    .contains_key(&db_id)
-                {
-                    match super::play_button::launch_game(&state_clone, db_id, vid) {
+                    .contains_key(&db_id);
+                if !is_running {
+                    match super::play_button::launch_game(&state_clone, db_id, default_variant) {
                         Ok(_) => {}
                         Err(error) => {
                             eprintln!("Failed to launch game: {error}");
@@ -703,10 +748,11 @@ fn connect_search_signals(
     // Clicking anywhere in the sidebar or content area drops the search
     // focus: grid tiles are not focusable, so without this the entry keeps
     // the keyboard after a click elsewhere.
-    for scroll in [
-        state.borrow().sidebar_scroll.clone(),
-        state.borrow().content_scroll.clone(),
-    ] {
+    let (sidebar_scroll, content_scroll) = {
+        let s = state.borrow();
+        (s.sidebar_scroll.clone(), s.content_scroll.clone())
+    };
+    for scroll in [sidebar_scroll, content_scroll] {
         let state_clone = state.clone();
         let click = gtk4::GestureClick::new();
         click.connect_pressed(move |_, _, _, _| {

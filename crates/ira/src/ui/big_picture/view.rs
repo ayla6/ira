@@ -292,33 +292,8 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
     }
     // The virtual keyboard swallows navigation while it is open: arrows
     // walk the keys, Confirm types, B deletes, Options cancels.
-    {
-        let keyboard_open = state
-            .borrow()
-            .big_picture
-            .as_ref()
-            .is_some_and(|big| big.keyboard.is_open());
-        if keyboard_open {
-            let Some(big) = state.borrow().big_picture.clone() else {
-                return;
-            };
-            match command {
-                NavCommand::Up => big.keyboard.move_cursor(0, -1),
-                NavCommand::Down => big.keyboard.move_cursor(0, 1),
-                NavCommand::Left => big.keyboard.move_cursor(-1, 0),
-                NavCommand::Right => big.keyboard.move_cursor(1, 0),
-                NavCommand::Confirm => big.keyboard.press_selected(state),
-                NavCommand::Back => big.keyboard.backspace(),
-                // The shoulders move the text caret itself.
-                NavCommand::PrevTab => big.keyboard.move_caret(-1),
-                NavCommand::NextTab => big.keyboard.move_caret(1),
-                // Start commits, X cancels, L3 shifts the next letter.
-                NavCommand::Options => big.keyboard.press_ok(state),
-                NavCommand::Secondary => big.keyboard.close(state),
-                NavCommand::Tertiary => big.keyboard.bump_shift(state),
-            }
-            return;
-        }
+    if route_keyboard(state, command) {
+        return;
     }
     // A held B must not pop page after page (or quit the app): only the
     // keyboard's backspace consumes Back repeats, and that arm has
@@ -466,6 +441,41 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
         }
         _ => {}
     }
+}
+
+/// Route one nav command to the virtual keyboard while it is open:
+/// arrows walk the keys, Confirm types, B deletes, Options cancels.
+/// True when the keyboard consumed the command. Stays ahead of the
+/// Back-repeat guard — the keyboard's own backspace consumes Back
+/// repeats.
+fn route_keyboard(state: &SharedState, command: NavCommand) -> bool {
+    if !state
+        .borrow()
+        .big_picture
+        .as_ref()
+        .is_some_and(|big| big.keyboard.is_open())
+    {
+        return false;
+    }
+    let Some(big) = state.borrow().big_picture.clone() else {
+        return true;
+    };
+    match command {
+        NavCommand::Up => big.keyboard.move_cursor(0, -1),
+        NavCommand::Down => big.keyboard.move_cursor(0, 1),
+        NavCommand::Left => big.keyboard.move_cursor(-1, 0),
+        NavCommand::Right => big.keyboard.move_cursor(1, 0),
+        NavCommand::Confirm => big.keyboard.press_selected(state),
+        NavCommand::Back => big.keyboard.backspace(),
+        // The shoulders move the text caret itself.
+        NavCommand::PrevTab => big.keyboard.move_caret(-1),
+        NavCommand::NextTab => big.keyboard.move_caret(1),
+        // Start commits, X cancels, L3 shifts the next letter.
+        NavCommand::Options => big.keyboard.press_ok(state),
+        NavCommand::Secondary => big.keyboard.close(state),
+        NavCommand::Tertiary => big.keyboard.bump_shift(state),
+    }
+    true
 }
 
 /// The big-picture UI's viewport scale (1.0 = 1920 wide); 0 before the window

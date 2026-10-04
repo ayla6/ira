@@ -3,13 +3,23 @@ use super::add_game_env::build_env_page;
 use super::add_game_general::build_general_page;
 use super::css::*;
 use super::state::SharedState;
+use super::wine_config_env_dll::collect_env_vars;
 use super::wine_config_widget::WineConfigWidgets;
 use crate::AppMessage;
 use adw::prelude::*;
 use ira_models::{GameLaunchConfig, WineConfig};
 
 pub fn show_add_game_dialog(state: &SharedState) {
-    let (window, db, sender, steam, save_dir, ra_username, ra_web_api_key) = {
+    let (
+        window,
+        db,
+        sender,
+        steam,
+        save_dir,
+        ra_username,
+        ra_web_api_key,
+        default_wine_config,
+    ) = {
         let s = state.borrow();
         (
             s.window.clone(),
@@ -19,6 +29,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
             s.save_dir.clone(),
             s.cfg.ra_username.clone(),
             s.cfg.ra_web_api_key.clone(),
+            s.cfg.default_wine_config.clone(),
         )
     };
 
@@ -60,7 +71,7 @@ pub fn show_add_game_dialog(state: &SharedState) {
     );
 
     let (wine_pages, wine_widgets) = {
-        let dft = state.borrow().cfg.default_wine_config.clone();
+        let dft = default_wine_config;
         let cfg = if dft.enabled {
             dft.clone()
         } else {
@@ -233,6 +244,135 @@ struct AddGameWidgets<'a> {
     state: &'a SharedState,
 }
 
+struct AddWorkerParams {
+    db: ira_db::DbConn,
+    sender: crate::AppSender,
+    name: String,
+    app_id: String,
+    sgdb_id: String,
+    game_folder: String,
+    kind: ira_models::GameKind,
+    trophy_source: ira_models::TrophySource,
+    steam: std::sync::Arc<ira_api::SteamDataClient>,
+    save_dir: String,
+    ra_username: String,
+    ra_web_api_key: String,
+    cfg: ira_config::Config,
+    launch_config: GameLaunchConfig,
+    wine_config: WineConfig,
+    profile_id: Option<i64>,
+}
+
+fn spawn_add_worker(params: AddWorkerParams) {
+    std::thread::spawn(move || {
+        let AddWorkerParams {
+            db: db_c,
+            sender: sender_c,
+            name: name_c,
+            app_id: app_id_c,
+            sgdb_id: sgdb_id_c,
+            game_folder: game_folder_c,
+            kind: kind_c,
+            trophy_source: ts_c,
+            steam: steam_c,
+            save_dir: save_dir_c,
+            ra_username: ra_username_c,
+            ra_web_api_key: ra_web_api_key_c,
+            cfg: cfg_c,
+            launch_config,
+            wine_config,
+            profile_id: selected_profile_id,
+        } = params;
+        match add_game_to_db(AddGameToDbParams {
+            db: &db_c,
+            name: &name_c,
+            kind: kind_c,
+            trophy_source: ts_c,
+            app_id: &app_id_c,
+            game_folder: &game_folder_c,
+            launch_config: &launch_config,
+            wine_config: &wine_config,
+            profile_id: selected_profile_id,
+            steam: &steam_c,
+            save_dir: &save_dir_c,
+        }) {
+            Ok(game_id) => {
+                if !sgdb_id_c.is_empty() {
+                    if let Err(e) = ira_db::set_sgdb_id(&db_c, game_id, &sgdb_id_c) {
+                        eprintln!("Failed to store the SGDB id: {}", e);
+                    }
+                }
+                let entry = ira_db::find_by_db_id(&db_c, game_id).ok().flatten();
+                if let Some(entry) = entry {
+                    if let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir_c) {
+                        game.set_name(&name_c);
+                        game.game_path = launch_config.exe.clone();
+                        if game.game_folder.is_empty() {
+                            game.game_folder = game_folder_c.clone();
+                        }
+                        if let Err(e) = ira_db::update_game_title(&db_c, game.db_id, &name_c) {
+                            eprintln!("Failed to update game title: {}", e);
+                        }
+
+                        // One-time migration of existing emulator saves to centralized path
+                        let wine_prefix = if kind_c == ira_models::GameKind::Wine {
+                            Some(ira_launcher::wine_launch::wine_prefix(&wine_config))
+                        } else {
+                            None
+                        };
+                        ira_platforms::api_emulators::migrate_emulator_saves(
+                            &save_dir_c,
+                            ts_c,
+                            &app_id_c,
+                            wine_prefix.as_deref(),
+                        );
+
+                        // Centralize game saves if UFS data is available
+                        if let Some(details) =
+                            crate::game_loader::read_app_details(&save_dir_c, &app_id_c)
+                        {
+                            if !details.ufs_savefiles.is_empty() {
+                                ira_launcher::game_saves::setup_game_saves(
+                                    &details.ufs_savefiles,
+                                    &details.ufs_rootoverrides,
+                                    &app_id_c,
+                                    &save_dir_c,
+                                    wine_prefix.as_deref(),
+                                );
+                            }
+                        }
+
+                        let _ = sender_c.send(AppMessage::NewGame(game.clone()));
+                        let g_name = game.name.clone();
+                        crate::ui::enrichment::enrich_game_async(
+                            crate::ui::enrichment::EnrichGameParams {
+                                app_id: game.app_id.clone(),
+                                trophy_source: game.trophy_source,
+                                platform_id: game.platform_id.clone(),
+                                db_id: game.db_id,
+                                title: g_name,
+                                steam: steam_c,
+                                sender: sender_c,
+                                save_dir: save_dir_c,
+                                db: db_c,
+                                ra_username: ra_username_c,
+                                ra_web_api_key: ra_web_api_key_c,
+                                cfg: cfg_c,
+                                game: None,
+                                progress: None,
+                            },
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to add game: {}", e);
+                let _ = sender_c.send(AppMessage::AddGameError(e));
+            }
+        }
+    });
+}
+
 fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
     let AddGameWidgets {
         name_entry,
@@ -281,7 +421,6 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
     let ra_username = ra_username.to_string();
     let ra_web_api_key = ra_web_api_key.to_string();
     let win = win.clone();
-    let state_c = state.clone();
 
     add_btn.connect_clicked(move |_| {
         name_entry.remove_css_class(CSS_ERROR);
@@ -358,114 +497,26 @@ fn connect_add_handler(add_btn: &gtk4::Button, widgets: AddGameWidgets<'_>) {
             WineConfig::default()
         };
 
-        let db_c = db.clone();
-        let sender_c = sender.clone();
-        let name_c = name;
-        let app_id_c = typed_id.clone();
-        let sgdb_id_c = sgdb_id.clone();
-        let game_folder_c = game_folder;
-        let kind_c = kind;
-        let ts_c = trophy_source;
-        let steam_c = steam.clone();
-        let save_dir_c = save_dir.clone();
-        let ra_username_c = ra_username.clone();
-        let ra_web_api_key_c = ra_web_api_key.clone();
-        let cfg_c = cfg.clone();
-
-        std::thread::spawn(move || {
-            match add_game_to_db(AddGameToDbParams {
-                db: &db_c,
-                name: &name_c,
-                kind: kind_c,
-                trophy_source: ts_c,
-                app_id: &app_id_c,
-                game_folder: &game_folder_c,
-                launch_config: &launch_config,
-                wine_config: &wine_config,
-                profile_id: selected_profile_id,
-                steam: &steam_c,
-                save_dir: &save_dir_c,
-            }) {
-                Ok(game_id) => {
-                    if !sgdb_id_c.is_empty() {
-                        if let Err(e) = ira_db::set_sgdb_id(&db_c, game_id, &sgdb_id_c) {
-                            eprintln!("Failed to store the SGDB id: {}", e);
-                        }
-                    }
-                    let entry = ira_db::find_by_db_id(&db_c, game_id).ok().flatten();
-                    if let Some(entry) = entry {
-                        if let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir_c) {
-                            game.set_name(&name_c);
-                            game.game_path = launch_config.exe.clone();
-                            if game.game_folder.is_empty() {
-                                game.game_folder = game_folder_c.clone();
-                            }
-                            if let Err(e) = ira_db::update_game_title(&db_c, game.db_id, &name_c) {
-                                eprintln!("Failed to update game title: {}", e);
-                            }
-
-                            // One-time migration of existing emulator saves to centralized path
-                            let wine_prefix = if kind_c == ira_models::GameKind::Wine {
-                                Some(ira_launcher::wine_launch::wine_prefix(&wine_config))
-                            } else {
-                                None
-                            };
-                            ira_platforms::api_emulators::migrate_emulator_saves(
-                                &save_dir_c,
-                                ts_c,
-                                &app_id_c,
-                                wine_prefix.as_deref(),
-                            );
-
-                            // Centralize game saves if UFS data is available
-                            if let Some(details) =
-                                crate::game_loader::read_app_details(&save_dir_c, &app_id_c)
-                            {
-                                if !details.ufs_savefiles.is_empty() {
-                                    ira_launcher::game_saves::setup_game_saves(
-                                        &details.ufs_savefiles,
-                                        &details.ufs_rootoverrides,
-                                        &app_id_c,
-                                        &save_dir_c,
-                                        wine_prefix.as_deref(),
-                                    );
-                                }
-                            }
-
-                            let _ = sender_c.send(AppMessage::NewGame(game.clone()));
-                            let g_name = game.name.clone();
-                            crate::ui::enrichment::enrich_game_async(
-                                crate::ui::enrichment::EnrichGameParams {
-                                    app_id: game.app_id.clone(),
-                                    trophy_source: game.trophy_source,
-                                    platform_id: game.platform_id.clone(),
-                                    db_id: game.db_id,
-                                    title: g_name,
-                                    steam: steam_c,
-                                    sender: sender_c,
-                                    save_dir: save_dir_c,
-                                    db: db_c,
-                                    ra_username: ra_username_c,
-                                    ra_web_api_key: ra_web_api_key_c,
-                                    cfg: cfg_c,
-                                    game: None,
-                                    progress: None,
-                                },
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to add game: {}", e);
-                    let _ = sender_c.send(AppMessage::AddGameError(e));
-                }
-            }
+        spawn_add_worker(AddWorkerParams {
+            db: db.clone(),
+            sender: sender.clone(),
+            name,
+            app_id: typed_id,
+            sgdb_id,
+            game_folder,
+            kind,
+            trophy_source,
+            steam: steam.clone(),
+            save_dir: save_dir.to_string(),
+            ra_username: ra_username.to_string(),
+            ra_web_api_key: ra_web_api_key.to_string(),
+            cfg: cfg.clone(),
+            launch_config,
+            wine_config,
+            profile_id: selected_profile_id,
         });
 
-        let win_c2 = win.clone();
-        let sc2 = state_c.clone();
-        win_c2.close();
-        let _ = sc2;
+        win.close();
     });
 }
 
@@ -507,38 +558,4 @@ pub(super) fn build_env_var_row(key: &str, value: &str) -> gtk4::ListBoxRow {
 
     row.set_child(Some(&hbox));
     row
-}
-
-pub(super) fn collect_env_vars(box_: &gtk4::ListBox) -> Vec<(String, String)> {
-    let mut result = Vec::new();
-    let mut child = box_.first_child();
-    while let Some(w) = child {
-        if let Some(row) = w.downcast_ref::<gtk4::ListBoxRow>() {
-            if let Some(hbox) = row.child().and_then(|c| c.downcast::<gtk4::Box>().ok()) {
-                let children: Vec<gtk4::Widget> = {
-                    let mut v = Vec::new();
-                    let mut ch = hbox.first_child();
-                    while let Some(c) = ch.clone() {
-                        v.push(c.clone());
-                        ch = c.next_sibling();
-                    }
-                    v
-                };
-                if children.len() >= 2 {
-                    let key_w = &children[0];
-                    let val_w = &children[1];
-                    if let Some(key) = key_w.downcast_ref::<gtk4::Entry>() {
-                        if let Some(val) = val_w.downcast_ref::<gtk4::Entry>() {
-                            let k = key.text().to_string();
-                            if !k.is_empty() {
-                                result.push((k, val.text().to_string()));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        child = w.next_sibling();
-    }
-    result
 }

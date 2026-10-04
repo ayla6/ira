@@ -108,21 +108,18 @@ fn desired_for(config: &Config, save_dir: &str) -> Desired {
 }
 
 fn desired_for_pads(config: &Config, save_dir: &str, devices: &[DeviceInfo]) -> Desired {
+    // Nothing connected (or everything disabled): the daemon releases
+    // the pad, and its idle timer may retire it until Ira needs it
+    // again.
+    let released = Desired {
+        enabled: false,
+        profile: None,
+    };
     match devices.first() {
         Some(device) => {
-            desired_for_device(config, save_dir, device)
-                .unwrap_or(Desired {
-                    enabled: false,
-                    profile: None,
-                })
+            desired_for_device(config, save_dir, device).unwrap_or_else(|| released.clone())
         }
-        // Nothing connected (or everything disabled): the daemon releases
-        // the pad, and its idle timer may retire it until Ira needs it
-        // again.
-        None => Desired {
-            enabled: false,
-            profile: None,
-        },
+        None => released,
     }
 }
 

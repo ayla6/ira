@@ -233,13 +233,13 @@ pub(super) fn build_general_settings_page(
     let lang_section = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     let lang_title = gtk4::Label::new(Some(&crate::tr!("Language preferences")));
     lang_title.set_halign(gtk4::Align::Start);
-    lang_title.add_css_class("heading");
+    lang_title.add_css_class(CSS_HEADING);
     let lang_desc = gtk4::Label::new(Some(&crate::tr!(
         "When a game is added, the first supported language from this list is used for the emulator config"
     )));
     lang_desc.set_halign(gtk4::Align::Start);
     lang_desc.set_wrap(true);
-    lang_desc.add_css_class("dim-label");
+    lang_desc.add_css_class(CSS_DIM_LABEL);
     lang_section.append(&lang_title);
     lang_section.append(&lang_desc);
     lang_section.append(&lang_list);
@@ -1019,7 +1019,7 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
     let font_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     font_reset.set_valign(gtk4::Align::Center);
     font_reset.set_tooltip_text(Some(&crate::tr!("Reset to system default")));
-    font_reset.add_css_class("flat");
+    font_reset.add_css_class(CSS_FLAT);
     font_reset.set_visible(o.font_family.is_some());
 
     let font_row = adw::ActionRow::new();
@@ -1063,7 +1063,7 @@ pub(super) fn build_overlay_settings_page(cfg: &Config) -> (gtk4::Box, OverlayPa
 fn build_language_preferences_list(enabled: &[String]) -> gtk4::ListBox {
     let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
-    list.add_css_class("boxed-list");
+    list.add_css_class(CSS_BOXED_LIST);
 
     for code in enabled {
         add_language_row(&list, code);
@@ -1321,7 +1321,7 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
     // scrolled settings page. The page only carries the entry point.
     let filter_users_list = gtk4::ListBox::new();
     filter_users_list.set_selection_mode(gtk4::SelectionMode::None);
-    filter_users_list.add_css_class("boxed-list");
+    filter_users_list.add_css_class(CSS_BOXED_LIST);
     let search_row = gtk4::SearchEntry::new();
     search_row.set_placeholder_text(Some(&crate::tr!("Search filtered users\u{2026}")));
     search_row.set_hexpand(true);

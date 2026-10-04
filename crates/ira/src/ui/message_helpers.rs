@@ -10,6 +10,7 @@ use super::state::SharedState;
 use crate::Game;
 use ira_config::Config;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Order the library list by the user's sort settings.
 pub(super) fn sort_games(games: &mut [Game], cfg: &Config) {
@@ -108,20 +109,43 @@ pub(super) fn refresh_selected_base_game(state: &SharedState, db_id: i64) {
     });
 }
 
+/// Reload one game from disk on a background thread and publish it for
+/// display. The detail view's refresh path for sources the enrichment
+/// pass doesn't cover: Sony trophy consoles read live emulator files
+/// through the normal load path instead.
+pub(super) fn reload_game_async(
+    db: ira_db::DbConn,
+    save_dir: String,
+    sender: ira_models::AppSender,
+    db_id: i64,
+    variant_id: Option<i64>,
+) {
+    std::thread::spawn(move || {
+        let Some(entry) = ira_db::find_by_db_id(&db, db_id).ok().flatten() else {
+            return;
+        };
+        let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir) else {
+            return;
+        };
+        if let Some(vid) = variant_id {
+            crate::game_loader::apply_variant_images_for(&db, &save_dir, &entry, &mut game, vid);
+        }
+        let _ = sender.send(crate::AppMessage::EnrichedGame(game));
+    });
+}
+
 fn refresh_displayed_game_if(
     state: &SharedState,
     is_displayed: impl FnOnce(i64, Option<i64>) -> bool,
 ) {
-    let (displayed_db_id, displayed_variant_id) = {
+    let game = {
         let s = state.borrow();
-        (s.displayed_db_id, s.displayed_variant_id)
+        if !is_displayed(s.displayed_db_id, s.displayed_variant_id) {
+            None
+        } else {
+            s.find_game(s.displayed_db_id, s.displayed_variant_id)
+        }
     };
-    if !is_displayed(displayed_db_id, displayed_variant_id) {
-        return;
-    }
-    let game = state
-        .borrow()
-        .find_game(displayed_db_id, displayed_variant_id);
     if let Some(game) = game {
         display_game(&game, state);
     }
@@ -205,152 +229,107 @@ pub(super) fn reload_games(state: &SharedState) {
 }
 
 fn start_background_enrichment(state: &SharedState) {
-    let (
-        steam,
-        sender,
-        db,
-        save_dir,
-        ra_username,
-        ra_web_api_key,
-        cfg,
-        enrich_targets,
-        ra_games,
-        sgdb_games,
-    ) = {
+    let ctx = BackgroundCtx::collect(state);
+    spawn_enrich_workers(&ctx);
+    spawn_square_workers(&ctx);
+    spawn_ra_workers(&ctx);
+    spawn_sgdb_workers(&ctx);
+}
+
+struct BackgroundCtx {
+    steam: Arc<ira_api::SteamDataClient>,
+    sender: crate::AppSender,
+    db: ira_db::DbConn,
+    save_dir: String,
+    ra_username: String,
+    ra_web_api_key: String,
+    cfg: Config,
+    enrich_targets: Vec<(
+        String,
+        ira_models::TrophySource,
+        String,
+        i64,
+        String,
+        Game,
+    )>,
+    ra_games: Vec<(i64, String, String)>,
+    sgdb_games: Vec<(
+        i64,
+        String,
+        ira_models::GameKind,
+        String,
+        ira_models::TrophySource,
+    )>,
+    square_targets: Vec<Game>,
+}
+
+impl BackgroundCtx {
+    fn collect(state: &SharedState) -> Self {
         let s = state.borrow();
-        (
-            s.steam.clone(),
-            s.sender.clone(),
-            s.db.clone(),
-            s.save_dir.clone(),
-            s.cfg.ra_username.clone(),
-            s.cfg.ra_web_api_key.clone(),
-            s.cfg.clone(),
-            // ROM-library games join enrichment only while icon-less, so
-            // the RA → native → SGDB default icon chain can fill them in.
-            s.games
-                .iter()
-                .filter(|g| {
-                    !g.app_id.is_empty()
-                        && g.variant_id.is_none()
-                        && g.kind != ira_models::GameKind::Ps4
-                        && g.kind != ira_models::GameKind::Ps3
-                        && (!matches!(
-                            g.kind,
-                            ira_models::GameKind::Retro | ira_models::GameKind::Switch
-                        ) || g.icon_path.is_empty())
-                })
-                .map(|g| {
-                    (
-                        g.app_id.clone(),
-                        g.trophy_source,
-                        g.platform_id.clone(),
-                        g.db_id,
-                        g.name.clone(),
-                        g.clone(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-            s.games
-                .iter()
-                .filter(|g| {
-                    g.kind == ira_models::GameKind::Retro
-                        && g.trophy_source == ira_models::TrophySource::Ra
-                        && !g.app_id.is_empty()
-                })
-                .map(|g| (g.db_id, g.app_id.clone(), g.platform_id.clone()))
-                .collect::<Vec<_>>(),
-            s.games
-                .iter()
-                .filter(|g| {
-                    !g.sgdb_id.is_empty()
-                        && g.variant_id.is_none()
-                        && g.kind != ira_models::GameKind::Ps4
-                        && (g.icon_path.is_empty()
-                            || g.hero_image_path.is_empty()
-                            || g.grid_path.is_empty()
-                            || g.logo_path.is_empty()
-                            || g.header_path.is_empty())
-                })
-                .map(|g| {
-                    (
-                        g.db_id,
-                        g.sgdb_id.clone(),
+        // ROM-library games join enrichment only while icon-less, so
+        // the RA → native → SGDB default icon chain can fill them in.
+        let enrich_targets = s
+            .games
+            .iter()
+            .filter(|g| {
+                !g.app_id.is_empty()
+                    && g.variant_id.is_none()
+                    && g.kind != ira_models::GameKind::Ps4
+                    && g.kind != ira_models::GameKind::Ps3
+                    && (!matches!(
                         g.kind,
-                        g.app_id.clone(),
-                        g.trophy_source,
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
-    };
-
-    if !enrich_targets.is_empty() {
-        let n_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .min(enrich_targets.len())
-            .max(1);
-        let chunk_size = enrich_targets.len().div_ceil(n_threads).max(1);
-        let steam = steam.clone();
-        let sender = sender.clone();
-        let db = db.clone();
-        let save_dir = save_dir.clone();
-        let cfg = cfg.clone();
-        std::thread::spawn(move || {
-            let _s =
-                tracing::info_span!("background_enrich", count = enrich_targets.len()).entered();
-            std::thread::scope(|s| {
-                let handles: Vec<_> = enrich_targets
-                    .chunks(chunk_size)
-                    .map(|chunk| {
-                        let steam = &steam;
-                        let sender = &sender;
-                        let db = &db;
-                        let save_dir = &save_dir;
-                        let ra_username = &ra_username;
-                        let ra_web_api_key = &ra_web_api_key;
-                        let cfg = &cfg;
-                        s.spawn(move || {
-                            for (app_id, trophy_source, platform_id, db_id, title, game) in chunk {
-                                let _ =
-                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                        crate::ui::enrichment::enrich_game_blocking(
-                                            crate::ui::enrichment::EnrichGameParams {
-                                                app_id: app_id.clone(),
-                                                trophy_source: *trophy_source,
-                                                platform_id: platform_id.clone(),
-                                                db_id: *db_id,
-                                                title: title.clone(),
-                                                steam: steam.clone(),
-                                                sender: sender.clone(),
-                                                save_dir: save_dir.clone(),
-                                                db: db.clone(),
-                                                ra_username: ra_username.clone(),
-                                                ra_web_api_key: ra_web_api_key.clone(),
-                                                cfg: cfg.clone(),
-                                                game: Some(game.clone()),
-                                                progress: None,
-                                            },
-                                        );
-                                    }));
-                            }
-                        })
-                    })
-                    .collect();
-                for h in handles {
-                    let _ = h.join();
-                }
-            });
-        });
-    }
-
-    // PS4 and Switch squares come from the game itself — no SGDB match
-    // needed — so import the native icon into the square slot for every
-    // one of those games whose square never landed.
-    let square_targets: Vec<Game> = {
-        let s = state.borrow();
-        s.games
+                        ira_models::GameKind::Retro | ira_models::GameKind::Switch
+                    ) || g.icon_path.is_empty())
+            })
+            .map(|g| {
+                (
+                    g.app_id.clone(),
+                    g.trophy_source,
+                    g.platform_id.clone(),
+                    g.db_id,
+                    g.name.clone(),
+                    g.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let ra_games = s
+            .games
+            .iter()
+            .filter(|g| {
+                g.kind == ira_models::GameKind::Retro
+                    && g.trophy_source == ira_models::TrophySource::Ra
+                    && !g.app_id.is_empty()
+            })
+            .map(|g| (g.db_id, g.app_id.clone(), g.platform_id.clone()))
+            .collect::<Vec<_>>();
+        let sgdb_games = s
+            .games
+            .iter()
+            .filter(|g| {
+                !g.sgdb_id.is_empty()
+                    && g.variant_id.is_none()
+                    && g.kind != ira_models::GameKind::Ps4
+                    && (g.icon_path.is_empty()
+                        || g.hero_image_path.is_empty()
+                        || g.grid_path.is_empty()
+                        || g.logo_path.is_empty()
+                        || g.header_path.is_empty())
+            })
+            .map(|g| {
+                (
+                    g.db_id,
+                    g.sgdb_id.clone(),
+                    g.kind,
+                    g.app_id.clone(),
+                    g.trophy_source,
+                )
+            })
+            .collect::<Vec<_>>();
+        // PS4 and Switch squares come from the game itself — no SGDB match
+        // needed — so import the native icon into the square slot for every
+        // one of those games whose square never landed.
+        let square_targets = s
+            .games
             .iter()
             .filter(|g| {
                 g.variant_id.is_none()
@@ -361,127 +340,223 @@ fn start_background_enrichment(state: &SharedState) {
                     )
             })
             .cloned()
-            .collect()
-    };
-    if !square_targets.is_empty() {
-        let steam = steam.clone();
-        let sender = sender.clone();
-        let db = db.clone();
-        let save_dir = save_dir.clone();
-        let cfg = cfg.clone();
-        std::thread::spawn(move || {
-            let _s =
-                tracing::info_span!("background_squares", count = square_targets.len()).entered();
-            for game in square_targets {
-                let square =
-                    super::fetch_images::ensure_game_square(&steam, &save_dir, &db, &cfg, &game);
-                if !square.is_empty() {
-                    let _ = sender.send(crate::AppMessage::SquareReady(game.db_id));
-                }
-            }
-        });
+            .collect::<Vec<_>>();
+        Self {
+            steam: s.steam.clone(),
+            sender: s.sender.clone(),
+            db: s.db.clone(),
+            save_dir: s.save_dir.clone(),
+            ra_username: s.cfg.ra_username.clone(),
+            ra_web_api_key: s.cfg.ra_web_api_key.clone(),
+            cfg: s.cfg.clone(),
+            enrich_targets,
+            ra_games,
+            sgdb_games,
+            square_targets,
+        }
     }
+}
 
-    if !ra_games.is_empty() {
-        let sender = sender.clone();
-        let save_dir = save_dir.clone();
-        std::thread::spawn(move || {
-            let _s = tracing::info_span!("background_load_ra", count = ra_games.len()).entered();
-            let n_threads = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4)
-                .min(ra_games.len())
-                .max(1);
-            let chunk_size = ra_games.len().div_ceil(n_threads).max(1);
-            std::thread::scope(|s| {
-                let handles: Vec<_> = ra_games
-                    .chunks(chunk_size)
-                    .map(|chunk| {
-                        let db = &db;
-                        let save_dir = &save_dir;
-                        let sender = &sender;
-                        s.spawn(move || {
-                            for (db_id, app_id, _platform_id) in chunk {
-                                let Some(entry) = ira_db::find_by_db_id(db, *db_id).ok().flatten()
-                                else {
-                                    continue;
-                                };
-                                let current_mtime =
-                                    crate::game_loader::ra_achievement_mtime(save_dir, app_id);
-                                if current_mtime > 0
-                                    && current_mtime == entry.cached_achievement_mtime
-                                {
-                                    continue;
-                                }
-                                if let Ok(updated) = crate::game_loader::load_game(&entry, save_dir)
-                                {
-                                    if let Err(e) = ira_db::update_achievement_counts(
-                                        db,
-                                        updated.db_id,
-                                        updated.earned_count as i64,
-                                        updated.total_count as i64,
-                                        current_mtime,
-                                    ) {
-                                        eprintln!("Failed to update achievement counts: {}", e);
-                                    }
-                                    let _ = sender.send(crate::AppMessage::EnrichedGame(updated));
-                                }
-                            }
-                        })
+fn spawn_enrich_workers(ctx: &BackgroundCtx) {
+    if ctx.enrich_targets.is_empty() {
+        return;
+    }
+    let enrich_targets = ctx.enrich_targets.clone();
+    let steam = ctx.steam.clone();
+    let sender = ctx.sender.clone();
+    let db = ctx.db.clone();
+    let save_dir = ctx.save_dir.clone();
+    let ra_username = ctx.ra_username.clone();
+    let ra_web_api_key = ctx.ra_web_api_key.clone();
+    let cfg = ctx.cfg.clone();
+    let n_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(enrich_targets.len())
+        .max(1);
+    let chunk_size = enrich_targets.len().div_ceil(n_threads).max(1);
+    std::thread::spawn(move || {
+        let _s =
+            tracing::info_span!("background_enrich", count = enrich_targets.len()).entered();
+        std::thread::scope(|s| {
+            let handles: Vec<_> = enrich_targets
+                .chunks(chunk_size)
+                .map(|chunk| {
+                    let steam = &steam;
+                    let sender = &sender;
+                    let db = &db;
+                    let save_dir = &save_dir;
+                    let ra_username = &ra_username;
+                    let ra_web_api_key = &ra_web_api_key;
+                    let cfg = &cfg;
+                    s.spawn(move || {
+                        for (app_id, trophy_source, platform_id, db_id, title, game) in chunk {
+                            let _ =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    crate::ui::enrichment::enrich_game_blocking(
+                                        crate::ui::enrichment::EnrichGameParams {
+                                            app_id: app_id.clone(),
+                                            trophy_source: *trophy_source,
+                                            platform_id: platform_id.clone(),
+                                            db_id: *db_id,
+                                            title: title.clone(),
+                                            steam: steam.clone(),
+                                            sender: sender.clone(),
+                                            save_dir: save_dir.clone(),
+                                            db: db.clone(),
+                                            ra_username: ra_username.clone(),
+                                            ra_web_api_key: ra_web_api_key.clone(),
+                                            cfg: cfg.clone(),
+                                            game: Some(game.clone()),
+                                            progress: None,
+                                        },
+                                    );
+                                }));
+                        }
                     })
-                    .collect();
-                for h in handles {
-                    let _ = h.join();
-                }
-            });
-        });
-    }
-
-    if !sgdb_games.is_empty() {
-        std::thread::spawn(move || {
-            let _s = tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len())
-                .entered();
-            for (db_id, sgdb_id, kind, app_id, trophy_source) in sgdb_games {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let dir = if kind == ira_models::GameKind::Ps3 {
-                    ira_parser::ps3_data_dir(&save_dir, &app_id)
-                } else if kind == ira_models::GameKind::Retro {
-                    ira_parser::retro_data_dir(&save_dir, db_id)
-                } else if kind == ira_models::GameKind::Switch {
-                    ira_parser::switch_data_dir(&save_dir, db_id)
-                } else if trophy_source.has_steam_enrichment() {
-                    ira_parser::data_dir(&save_dir, &app_id)
-                } else {
-                    ira_parser::local_data_dir(&save_dir, db_id)
-                };
-                // Console games keep their square native: SGDB must never
-                // write that slot, and an empty path preserves whatever the
-                // handler already shows.
-                let skip: &[ira_models::AssetType] = if matches!(
-                    kind,
-                    ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
-                ) {
-                    &[ira_models::AssetType::Square]
-                } else {
-                    &[]
-                };
-                steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), skip)
-                }));
-                if let Ok((icon, hero, grid, logo, header, square)) = result {
-                    let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
-                        db_id,
-                        sgdb_id,
-                        icon,
-                        hero,
-                        grid,
-                        logo,
-                        header,
-                        square,
-                    });
-                }
+                })
+                .collect();
+            for h in handles {
+                let _ = h.join();
             }
         });
+    });
+}
+
+fn spawn_square_workers(ctx: &BackgroundCtx) {
+    if ctx.square_targets.is_empty() {
+        return;
     }
+    let square_targets = ctx.square_targets.clone();
+    let steam = ctx.steam.clone();
+    let sender = ctx.sender.clone();
+    let db = ctx.db.clone();
+    let save_dir = ctx.save_dir.clone();
+    let cfg = ctx.cfg.clone();
+    std::thread::spawn(move || {
+        let _s =
+            tracing::info_span!("background_squares", count = square_targets.len()).entered();
+        for game in square_targets {
+            let square =
+                super::fetch_images::ensure_game_square(&steam, &save_dir, &db, &cfg, &game);
+            if !square.is_empty() {
+                let _ = sender.send(crate::AppMessage::SquareReady(game.db_id));
+            }
+        }
+    });
+}
+
+fn spawn_ra_workers(ctx: &BackgroundCtx) {
+    if ctx.ra_games.is_empty() {
+        return;
+    }
+    let ra_games = ctx.ra_games.clone();
+    let sender = ctx.sender.clone();
+    let save_dir = ctx.save_dir.clone();
+    let db = ctx.db.clone();
+    std::thread::spawn(move || {
+        let _s = tracing::info_span!("background_load_ra", count = ra_games.len()).entered();
+        let n_threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4)
+            .min(ra_games.len())
+            .max(1);
+        let chunk_size = ra_games.len().div_ceil(n_threads).max(1);
+        std::thread::scope(|s| {
+            let handles: Vec<_> = ra_games
+                .chunks(chunk_size)
+                .map(|chunk| {
+                    let db = &db;
+                    let save_dir = &save_dir;
+                    let sender = &sender;
+                    s.spawn(move || {
+                        for (db_id, app_id, _platform_id) in chunk {
+                            let Some(entry) = ira_db::find_by_db_id(db, *db_id).ok().flatten()
+                            else {
+                                continue;
+                            };
+                            let current_mtime =
+                                crate::game_loader::ra_achievement_mtime(save_dir, app_id);
+                            if current_mtime > 0
+                                && current_mtime == entry.cached_achievement_mtime
+                            {
+                                continue;
+                            }
+                            if let Ok(updated) = crate::game_loader::load_game(&entry, save_dir)
+                            {
+                                if let Err(e) = ira_db::update_achievement_counts(
+                                    db,
+                                    updated.db_id,
+                                    updated.earned_count as i64,
+                                    updated.total_count as i64,
+                                    current_mtime,
+                                ) {
+                                    eprintln!("Failed to update achievement counts: {}", e);
+                                }
+                                let _ = sender.send(crate::AppMessage::EnrichedGame(updated));
+                            }
+                        }
+                    })
+                })
+                .collect();
+            for h in handles {
+                let _ = h.join();
+            }
+        });
+    });
+}
+
+fn spawn_sgdb_workers(ctx: &BackgroundCtx) {
+    if ctx.sgdb_games.is_empty() {
+        return;
+    }
+    let sgdb_games = ctx.sgdb_games.clone();
+    let steam = ctx.steam.clone();
+    let sender = ctx.sender.clone();
+    let save_dir = ctx.save_dir.clone();
+    std::thread::spawn(move || {
+        let _s = tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len())
+            .entered();
+        for (db_id, sgdb_id, kind, app_id, trophy_source) in sgdb_games {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let dir = if kind == ira_models::GameKind::Ps3 {
+                ira_parser::ps3_data_dir(&save_dir, &app_id)
+            } else if kind == ira_models::GameKind::Retro {
+                ira_parser::retro_data_dir(&save_dir, db_id)
+            } else if kind == ira_models::GameKind::Switch {
+                ira_parser::switch_data_dir(&save_dir, db_id)
+            } else if trophy_source.has_steam_enrichment() {
+                ira_parser::data_dir(&save_dir, &app_id)
+            } else {
+                ira_parser::local_data_dir(&save_dir, db_id)
+            };
+            // Console games keep their square native: SGDB must never
+            // write that slot, and an empty path preserves whatever the
+            // handler already shows.
+            let skip: &[ira_models::AssetType] = if matches!(
+                kind,
+                ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+            ) {
+                &[ira_models::AssetType::Square]
+            } else {
+                &[]
+            };
+            steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), skip)
+            }));
+            if let Ok((icon, hero, grid, logo, header, square)) = result {
+                let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
+                    db_id,
+                    sgdb_id,
+                    icon,
+                    hero,
+                    grid,
+                    logo,
+                    header,
+                    square,
+                });
+            }
+        }
+    });
 }
 
 pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
@@ -563,21 +638,13 @@ pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
         let sync_achievements = updated.achievements.clone();
         let sync_earned = updated.earned_count;
         let sync_total = updated.total_count;
-        let mut variant_grid_updates: Vec<Game> = Vec::new();
-        {
-            for g in &mut s.games {
-                if g.db_id == sync_db_id && g.variant_id.is_some() {
-                    let g_counts_changed =
-                        g.earned_count != sync_earned || g.total_count != sync_total;
-                    g.achievements = sync_achievements.clone();
-                    g.earned_count = sync_earned;
-                    g.total_count = sync_total;
-                    if g_counts_changed {
-                        variant_grid_updates.push(g.clone());
-                    }
-                }
-            }
-        }
+        let variant_grid_updates = sync_variant_achievements(
+            &mut s.games,
+            sync_db_id,
+            &sync_achievements,
+            sync_earned,
+            sync_total,
+        );
 
         s.games[i] = updated;
 
@@ -608,6 +675,28 @@ pub(super) fn apply_game_update(state: &SharedState, updated: Game) {
     for vg in variant_grid_updates {
         replace_grid_game(state, &vg);
     }
+}
+
+fn sync_variant_achievements(
+    games: &mut [Game],
+    db_id: i64,
+    achievements: &[crate::MergedAchievement],
+    earned: usize,
+    total: usize,
+) -> Vec<Game> {
+    let mut updates = Vec::new();
+    for g in games.iter_mut() {
+        if g.db_id == db_id && g.variant_id.is_some() {
+            let counts_changed = g.earned_count != earned || g.total_count != total;
+            g.achievements = achievements.to_vec();
+            g.earned_count = earned;
+            g.total_count = total;
+            if counts_changed {
+                updates.push(g.clone());
+            }
+        }
+    }
+    updates
 }
 
 pub(super) fn insert_or_update_game(state: &SharedState, game: Game) {
@@ -719,6 +808,18 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
                 game: None,
                 progress: None,
             });
+        } else if game.achievements.is_empty()
+            && game.kind.is_trophy_console()
+            && !game.app_id.is_empty()
+        {
+            // Sony consoles bypass the enrichment above (it only handles
+            // store-backed sources): trophies come straight from the
+            // emulator's live files through the normal load path.
+            let (db, save_dir, sender) = {
+                let s = state.borrow();
+                (s.db.clone(), s.save_dir.clone(), s.sender.clone())
+            };
+            reload_game_async(db, save_dir, sender, db_id, variant_id);
         } else if game.kind == ira_models::GameKind::Retro
             && game.trophy_source == ira_models::TrophySource::Ra
             && !game.app_id.is_empty()
@@ -726,9 +827,10 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
         {
             let app_id = game.app_id.clone();
             let db_id = game.db_id;
-            let save_dir = state.borrow().save_dir.clone();
-            let db = state.borrow().db.clone();
-            let sender = state.borrow().sender.clone();
+            let (save_dir, db, sender) = {
+                let s = state.borrow();
+                (s.save_dir.clone(), s.db.clone(), s.sender.clone())
+            };
             std::thread::spawn(move || {
                 if ira_platforms::retroachievements::redownload_missing_ra_badges(
                     &save_dir, &app_id,
@@ -745,8 +847,10 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
 }
 
 pub(super) fn clear_content(state: &SharedState) {
-    let content_box = state.borrow().content_box.clone();
-    let grid_header = state.borrow().grid_header.clone();
+    let (content_box, grid_header) = {
+        let s = state.borrow();
+        (s.content_box.clone(), s.grid_header.clone())
+    };
     clear_children(&content_box);
     clear_children(&grid_header);
 }

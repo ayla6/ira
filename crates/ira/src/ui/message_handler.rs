@@ -3,7 +3,7 @@ use super::helpers::replace_grid_game;
 use super::image_manager::build_image_manager_content_with_drafts;
 use super::message_helpers::{
     apply_game_update, handle_games_loaded, insert_or_update_game, refresh_selected_game,
-    refresh_steam_playtimes_for, switch_to_game,
+    refresh_steam_playtimes_for, reload_game_async, switch_to_game,
 };
 use super::sidebar::{rebuild_sidebar, set_sidebar_playing};
 use super::state::SharedState;
@@ -168,11 +168,15 @@ fn active_toplevel_or(fallback: &adw::ApplicationWindow) -> gtk4::Widget {
 }
 
 fn handle_game_stopped(state: &SharedState, db_id: i64) {
-    state.borrow().running_games.lock().unwrap().remove(&db_id);
+    let watcher = {
+        let s = state.borrow();
+        s.running_games.lock().unwrap().remove(&db_id);
+        s.watcher.clone()
+    };
     super::big_picture::hide_running(state);
     set_sidebar_playing(state, db_id, false);
     refresh_steam_playtimes_for(state, &[db_id]);
-    if let Some(ref watcher) = state.borrow().watcher {
+    if let Some(watcher) = watcher {
         watcher.unwatch(db_id);
     }
     refresh_selected_game(state, db_id);
@@ -180,26 +184,24 @@ fn handle_game_stopped(state: &SharedState, db_id: i64) {
 
 fn handle_game_started(state: &SharedState, db_id: i64) {
     set_sidebar_playing(state, db_id, true);
-    let game_name = state
-        .borrow()
-        .games
-        .iter()
-        .find(|g| g.db_id == db_id)
-        .map(|g| g.name.clone())
-        .unwrap_or_default();
-    if !game_name.is_empty() {
-        super::big_picture::show_running(state, &game_name);
-    }
-    trim_stale_images(state, db_id);
-    let (watcher, game, save_dir) = {
+    let (game_name, watcher, game, save_dir) = {
         let s = state.borrow();
         let game = s
             .games
             .iter()
             .find(|g| g.db_id == db_id && g.variant_id.is_none())
             .cloned();
-        (s.watcher.clone(), game, s.save_dir.clone())
+        (
+            game.as_ref().map(|g| g.name.clone()).unwrap_or_default(),
+            s.watcher.clone(),
+            game,
+            s.save_dir.clone(),
+        )
     };
+    if !game_name.is_empty() {
+        super::big_picture::show_running(state, &game_name);
+    }
+    trim_stale_images(state, db_id);
     if let (Some(watcher), Some(game)) = (watcher, game) {
         if let Some(watch_file) = crate::game_loader::achievement_watch_file(&game, &save_dir) {
             let entry = GameEntry::for_reload(
@@ -502,8 +504,17 @@ fn handle_sgdb_assets_downloaded(
 }
 
 fn handle_variant_selected(state: &SharedState, db_id: i64, variant_id: Option<i64>) {
+    let (db, save_dir, sender, selected_id) = {
+        let s = state.borrow();
+        (
+            s.db.clone(),
+            s.save_dir.clone(),
+            s.sender.clone(),
+            s.selected_id.clone(),
+        )
+    };
     if let Some(vid) = variant_id {
-        let is_show_as_entry = ira_db::get_variants(&state.borrow().db, db_id)
+        let is_show_as_entry = ira_db::get_variants(&db, db_id)
             .unwrap_or_default()
             .iter()
             .find(|v| v.id == vid)
@@ -515,27 +526,10 @@ fn handle_variant_selected(state: &SharedState, db_id: i64, variant_id: Option<i
         }
     }
 
-    let selected_id = state.borrow().selected_id.clone();
     if ira_models::parse_db_id(&selected_id) == db_id && selected_id != db_id.to_string() {
         switch_to_game(state, db_id, None);
     }
-
-    let (db, save_dir, sender) = {
-        let s = state.borrow();
-        (s.db.clone(), s.save_dir.clone(), s.sender.clone())
-    };
-    std::thread::spawn(move || {
-        let Some(entry) = ira_db::find_by_db_id(&db, db_id).ok().flatten() else {
-            return;
-        };
-        let Ok(mut game) = crate::game_loader::load_game(&entry, &save_dir) else {
-            return;
-        };
-        if let Some(vid) = variant_id {
-            crate::game_loader::apply_variant_images_for(&db, &save_dir, &entry, &mut game, vid);
-        }
-        let _ = sender.send(crate::AppMessage::EnrichedGame(game));
-    });
+    reload_game_async(db, save_dir, sender, db_id, variant_id);
 }
 
 fn handle_variants_changed(state: &SharedState, db_id: i64) {

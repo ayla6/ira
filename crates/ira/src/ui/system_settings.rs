@@ -5,7 +5,7 @@ use adw::prelude::*;
 use glib::clone::Downgrade;
 
 use super::add_game_dialog::build_env_var_row;
-use super::css::CSS_BOXED_LIST;
+use super::css::{CSS_BOXED_LIST, CSS_FLAT};
 use super::helpers::string_list_from;
 use super::wine_config_helpers::make_revert_btn;
 
@@ -80,7 +80,7 @@ pub(super) fn build_env_vars_group(
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.set_tooltip_text(Some(&crate::tr!("Add variable")));
     add_btn.set_valign(gtk4::Align::Center);
-    add_btn.add_css_class("flat");
+    add_btn.add_css_class(CSS_FLAT);
     group.set_header_suffix(Some(&add_btn));
 
     let env_vars_box = gtk4::ListBox::new();

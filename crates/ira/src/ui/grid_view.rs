@@ -138,19 +138,31 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     let header_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     header_box.set_margin_top(16);
 
-    let searching = !state.borrow().search_query.is_empty();
-    let selected_group = state.borrow().selected_group.clone();
+    let (search_query, selected_group, groups, auto_groups) = {
+        let s = state.borrow();
+        (
+            s.search_query.clone(),
+            s.selected_group.clone(),
+            s.groups.clone(),
+            s.auto_groups.clone(),
+        )
+    };
+    let searching = !search_query.is_empty();
     let show_recent = !searching && selected_group == GroupSelection::AllGames;
 
-    if show_recent {
+    let has_recent = if show_recent {
         let recent = super::helpers::recently_played(state, 8);
-        if !recent.is_empty() {
+        let has_recent = !recent.is_empty();
+        if has_recent {
             header_box.append(&build_recent_row(state, &recent, cover_height));
         }
-    }
+        has_recent
+    } else {
+        false
+    };
 
     let heading_text = if searching {
-        crate::tr!("Search: \"{}\"").replacen("{}", &state.borrow().search_query, 1)
+        crate::tr!("Search: \"{}\"").replacen("{}", &search_query, 1)
     } else {
         match &selected_group {
             GroupSelection::AllGames => crate::tr!("All games"),
@@ -160,13 +172,12 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
                 // Manual groups live in `groups`, auto groups under their
                 // negated ids in `auto_groups` — missing the second table
                 // is why auto groups all read "All games".
-                let s = state.borrow();
-                s.groups
+                groups
                     .iter()
                     .find(|g| g.id == *id)
                     .map(|g| g.name.clone())
                     .or_else(|| {
-                        s.auto_groups
+                        auto_groups
                             .iter()
                             .find(|g| g.id == *id)
                             .map(|g| g.name.clone())
@@ -181,13 +192,7 @@ fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
     heading.add_css_class(CSS_SECTION_TITLE);
     heading.set_margin_start(16);
     heading.set_margin_end(16);
-    heading.set_margin_top(
-        if show_recent && !super::helpers::recently_played(state, 1).is_empty() {
-            20
-        } else {
-            0
-        },
-    );
+    heading.set_margin_top(if show_recent && has_recent { 20 } else { 0 });
     heading.set_margin_bottom(8);
     header_box.append(&heading);
 
@@ -211,6 +216,9 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
         let pic = gtk4::Picture::new();
         pic.set_content_fit(gtk4::ContentFit::Cover);
         pic.set_size_request(cover_width, cover_height);
+        // Art ratio vs slot ratio mismatches measure taller than their
+        // allocation without this (see the big-picture grid cells).
+        pic.set_can_shrink(true);
         pic.add_css_class(CSS_GAME_COVER_PIC);
         let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
         pic.set_paintable(Some(&placeholder));
@@ -234,86 +242,70 @@ fn make_setup(state: &SharedState, item_size: Rc<Cell<(i32, i32)>>) -> SetupFn {
         unsafe { vbox.set_data::<AtomicI64>("game-variant-id", AtomicI64::new(0)) };
         unsafe { vbox.set_data::<gtk4::Label>("name-label", name_label) };
 
-        let sc = state.clone();
-        let click = gtk4::GestureClick::new();
-        click.connect_pressed(move |gesture, _, _, _| {
-            let widget = gesture.widget().unwrap();
-            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
-                let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                if db_id != 0 {
-                    let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
-                        .and_then(|ptr| {
-                            let v = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                            if v > 0 {
-                                Some(v)
-                            } else {
-                                None
-                            }
-                        });
-                    switch_to_game(&sc, db_id, variant_id);
-                    super::sidebar::scroll_to_row(&sc, db_id, variant_id);
-                }
-            }
-        });
-        vbox.add_controller(click);
-
-        let sc2 = state.clone();
-        let right_click = gtk4::GestureClick::new();
-        right_click.set_button(3);
-        right_click.connect_pressed(move |gesture, _, x, y| {
-            // Shift+right-click: reset one of the game's stored images.
-            if gesture
-                .current_event_state()
-                .contains(gdk4::ModifierType::SHIFT_MASK)
-            {
-                let widget = gesture.widget().unwrap();
-                if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
-                    let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                    if db_id != 0 {
-                        let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
-                            .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed))
-                            .filter(|v| *v > 0);
-                        let game = sc2
-                            .borrow()
-                            .find_game(db_id, variant_id);
-                        if let Some(game) = game {
-                            super::context_menu::show_image_reset_menu(
-                                &sc2,
-                                &game,
-                                &widget,
-                                x,
-                                y,
-                            );
-                        }
-                    }
-                }
-                return;
-            }
-            let widget = gesture.widget().unwrap();
-            if let Some(ptr) = unsafe { widget.data::<AtomicI64>("game-db-id") } {
-                let db_id = unsafe { ptr.as_ref() }.load(Ordering::Relaxed);
-                if db_id != 0 {
-                    let variant_id = unsafe { widget.data::<AtomicI64>("game-variant-id") }
-                        .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed))
-                        .filter(|v| *v > 0);
-                    let game = sc2.borrow().find_game(db_id, variant_id);
-                    if let Some(game) = game {
-                        show_game_context_menu(
-                            &sc2,
-                            &game,
-                            &widget,
-                            x,
-                            y,
-                            None::<&gtk4::ListBoxRow>,
-                        );
-                    }
-                }
-            }
-        });
-        vbox.add_controller(right_click);
+        wire_tile_clicks(&state, &vbox);
 
         vbox.upcast::<gtk4::Widget>()
     })
+}
+
+fn tile_db_id(widget: &gtk4::Widget) -> i64 {
+    unsafe { widget.data::<AtomicI64>("game-db-id") }
+        .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed))
+        .unwrap_or(0)
+}
+
+fn tile_variant_id(widget: &gtk4::Widget) -> Option<i64> {
+    unsafe { widget.data::<AtomicI64>("game-variant-id") }
+        .map(|ptr| unsafe { ptr.as_ref() }.load(Ordering::Relaxed))
+        .filter(|v| *v > 0)
+}
+
+fn wire_tile_clicks(state: &SharedState, vbox: &gtk4::Box) {
+    let sc = state.clone();
+    let click = gtk4::GestureClick::new();
+    click.connect_pressed(move |gesture, _, _, _| {
+        let widget = gesture.widget().unwrap();
+        let db_id = tile_db_id(&widget);
+        if db_id != 0 {
+            let variant_id = tile_variant_id(&widget);
+            switch_to_game(&sc, db_id, variant_id);
+            super::sidebar::scroll_to_row(&sc, db_id, variant_id);
+        }
+    });
+    vbox.add_controller(click);
+
+    let sc2 = state.clone();
+    let right_click = gtk4::GestureClick::new();
+    right_click.set_button(3);
+    right_click.connect_pressed(move |gesture, _, x, y| {
+        let widget = gesture.widget().unwrap();
+        let db_id = tile_db_id(&widget);
+        if db_id == 0 {
+            return;
+        }
+        let variant_id = tile_variant_id(&widget);
+        // Shift+right-click: reset one of the game's stored images.
+        if gesture
+            .current_event_state()
+            .contains(gdk4::ModifierType::SHIFT_MASK)
+        {
+            if let Some(game) = sc2.borrow().find_game(db_id, variant_id) {
+                super::context_menu::show_image_reset_menu(&sc2, &game, &widget, x, y);
+            }
+            return;
+        }
+        if let Some(game) = sc2.borrow().find_game(db_id, variant_id) {
+            show_game_context_menu(
+                &sc2,
+                &game,
+                &widget,
+                x,
+                y,
+                None::<&gtk4::ListBoxRow>,
+            );
+        }
+    });
+    vbox.add_controller(right_click);
 }
 
 fn make_bind(
@@ -356,37 +348,7 @@ fn make_bind(
         }
         if !art.is_empty() {
             if square {
-                // Cover-fit: the raw texture keeps its aspect and the
-                // Picture crops it into the square, so mismatched art is
-                // never stretched. The staleness check matters: a decoded
-                // texture landing after the cell was rebound to another
-                // game would paint the wrong art. Recycled cells also
-                // blank first — the previous game's cover must not flash
-                // while the new one decodes.
-                let blank = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
-                pic.set_paintable(Some(&blank));
-                let pic_weak = pic.downgrade();
-                let vbox_weak = vbox.downgrade();
-                let db_id = game.db_id;
-                let variant_id = game.variant_id.unwrap_or(0);
-                let path = art.clone();
-                let set = move |texture: Option<gdk4::Texture>| {
-                    if let (Some(pic), Some(vbox), Some(texture)) =
-                        (pic_weak.upgrade(), vbox_weak.upgrade(), texture)
-                    {
-                        if !is_stale(&vbox, db_id, variant_id) {
-                            pic.set_paintable(Some(&texture));
-                        }
-                    }
-                };
-                match ira_images::cached_texture(art) {
-                    Some(texture) => set(Some(texture)),
-                    None => ira_images::load_texture_async_with_priority(
-                        &path,
-                        glib::Priority::DEFAULT,
-                        set,
-                    ),
-                }
+                bind_square_art(pic, vbox, art, game, cover_width, cover_height);
             } else {
                 queue_cover_load(
                     pic.clone(),
@@ -414,18 +376,64 @@ fn make_bind(
             overlay.remove_overlay(&badge);
         }
         if let Some(text) = badge_text(game, sort_mode, &state) {
-            let badge = gtk4::Label::new(Some(&text));
-            badge.set_valign(gtk4::Align::End);
-            badge.set_halign(gtk4::Align::Center);
-            // No negative margins here: GTK 4 sizes labels in one pass
-            // with the margin and in another without, and every relayout
-            // printed "adjusted size vertical min 8 must not decrease
-            // below min 20" — once per visible tile with a badge.
-            badge.add_css_class(CSS_COVER_BADGE);
+            let badge = make_cover_badge(&text);
             overlay.add_overlay(&badge);
             unsafe { vbox.set_data::<gtk4::Label>("badge", badge) };
         }
     })
+}
+
+fn make_cover_badge(text: &str) -> gtk4::Label {
+    let badge = gtk4::Label::new(Some(text));
+    badge.set_valign(gtk4::Align::End);
+    badge.set_halign(gtk4::Align::Center);
+    // No negative margins here: GTK 4 sizes labels in one pass
+    // with the margin and in another without, and every relayout
+    // printed "adjusted size vertical min 8 must not decrease
+    // below min 20" — once per visible tile with a badge.
+    badge.add_css_class(CSS_COVER_BADGE);
+    badge
+}
+
+fn bind_square_art(
+    pic: &gtk4::Picture,
+    vbox: &gtk4::Box,
+    art: &str,
+    game: &Game,
+    cover_width: i32,
+    cover_height: i32,
+) {
+    // Cover-fit: the raw texture keeps its aspect and the
+    // Picture crops it into the square, so mismatched art is
+    // never stretched. The staleness check matters: a decoded
+    // texture landing after the cell was rebound to another
+    // game would paint the wrong art. Recycled cells also
+    // blank first — the previous game's cover must not flash
+    // while the new one decodes.
+    let blank = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
+    pic.set_paintable(Some(&blank));
+    let pic_weak = pic.downgrade();
+    let vbox_weak = vbox.downgrade();
+    let db_id = game.db_id;
+    let variant_id = game.variant_id.unwrap_or(0);
+    let path = art.to_string();
+    let set = move |texture: Option<gdk4::Texture>| {
+        if let (Some(pic), Some(vbox), Some(texture)) =
+            (pic_weak.upgrade(), vbox_weak.upgrade(), texture)
+        {
+            if !is_stale(&vbox, db_id, variant_id) {
+                pic.set_paintable(Some(&texture));
+            }
+        }
+    };
+    match ira_images::cached_texture(art) {
+        Some(texture) => set(Some(texture)),
+        None => ira_images::load_texture_async_with_priority(
+            &path,
+            glib::Priority::DEFAULT,
+            set,
+        ),
+    }
 }
 
 fn make_unbind(item_size: Rc<Cell<(i32, i32)>>) -> UnbindFn {
@@ -465,34 +473,32 @@ fn make_unbind(item_size: Rc<Cell<(i32, i32)>>) -> UnbindFn {
 /// section titles ride along for the grid's header rows. Any other view
 /// (search, a narrowed selection, no grouping) is flat.
 fn arrange_sections(state: &SharedState, games: &[Game]) -> (Vec<Game>, Vec<(String, u32)>) {
-    let (group_by, searching) = {
+    let (group_by, searching, selected_all, db) = {
         let s = state.borrow();
-        (s.cfg.group_by, !s.search_query.is_empty())
+        (
+            s.cfg.group_by,
+            !s.search_query.is_empty(),
+            s.selected_group == GroupSelection::AllGames,
+            s.db.clone(),
+        )
     };
-    let selected_all = state.borrow().selected_group == GroupSelection::AllGames;
     if group_by == GroupBy::Off || searching || !selected_all || games.is_empty() {
         return (games.to_vec(), Vec::new());
     }
     let entity_names = match group_by {
-        GroupBy::Publisher => ira_db::game_entity_names(
-            &state.borrow().db,
-            ira_db::KIND_COMPANY,
-            Some("is_publisher"),
-        )
-        .unwrap_or_default(),
-        GroupBy::Developer => ira_db::game_entity_names(
-            &state.borrow().db,
-            ira_db::KIND_COMPANY,
-            Some("is_developer"),
-        )
-        .unwrap_or_default(),
-        GroupBy::Genre => {
-            ira_db::game_entity_names(&state.borrow().db, ira_db::KIND_GENRE, None)
+        GroupBy::Publisher => {
+            ira_db::game_entity_names(&db, ira_db::KIND_COMPANY, Some("is_publisher"))
                 .unwrap_or_default()
         }
-        GroupBy::Family => {
-            ira_db::game_entity_names(&state.borrow().db, ira_db::KIND_FAMILY, None)
+        GroupBy::Developer => {
+            ira_db::game_entity_names(&db, ira_db::KIND_COMPANY, Some("is_developer"))
                 .unwrap_or_default()
+        }
+        GroupBy::Genre => {
+            ira_db::game_entity_names(&db, ira_db::KIND_GENRE, None).unwrap_or_default()
+        }
+        GroupBy::Family => {
+            ira_db::game_entity_names(&db, ira_db::KIND_FAMILY, None).unwrap_or_default()
         }
         _ => Default::default(),
     };
@@ -603,23 +609,29 @@ pub fn show_grid_view(state: &SharedState) {
         s.loading = None;
     }
 
-    let content_scroll = state.borrow().content_scroll.clone();
-    let grid_header = state.borrow().grid_header.clone();
+    let (content_scroll, grid_header, square, stored_h, sort_mode, search_empty) = {
+        let s = state.borrow();
+        (
+            s.content_scroll.clone(),
+            s.grid_header.clone(),
+            s.cfg.grid_square_capsules,
+            s.grid_item_height.get(),
+            s.cfg.sort_mode,
+            s.search_query.is_empty(),
+        )
+    };
 
     content_scroll.vadjustment().set_value(0.0);
     clear_children(&grid_header);
 
-    let square = state.borrow().cfg.grid_square_capsules;
     let aspect = if square { 1.0 } else { 1.5 };
     let min_w = 110;
-    let stored_h = state.borrow().grid_item_height.get();
     let item_h = if !square && stored_h > 0 {
         stored_h
     } else {
         let (cw, ch) = {
-            let cs = state.borrow().content_scroll.clone();
-            let w = cs.width();
-            let h = cs.height();
+            let w = content_scroll.width();
+            let h = content_scroll.height();
             if w > 0 {
                 (w, h)
             } else {
@@ -641,10 +653,9 @@ pub fn show_grid_view(state: &SharedState) {
 
     let header_box = build_grid_header(state, item_h);
 
-    let sort_mode = state.borrow().cfg.sort_mode;
     let games = filtered_games(state);
 
-    if games.is_empty() && !state.borrow().search_query.is_empty() {
+    if games.is_empty() && !search_empty {
         show_empty_search_view(&content_scroll);
         return;
     }
@@ -757,9 +768,9 @@ fn progress_fraction(completed: usize, total: usize) -> f64 {
 }
 
 fn progress_text(completed: usize, total: usize) -> String {
-    crate::tr!("{completed} of {total} sources")
-        .replace("{completed}", &completed.to_string())
-        .replace("{total}", &total.to_string())
+    crate::tr!("{} of {} sources")
+        .replacen("{}", &completed.to_string(), 1)
+        .replacen("{}", &total.to_string(), 1)
 }
 
 pub fn refresh_grid_store(state: &SharedState) {

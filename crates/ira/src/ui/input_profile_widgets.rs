@@ -172,7 +172,7 @@ pub(crate) fn section_title_row(text: &str) -> adw::ActionRow {
     row.set_selectable(false);
     row.set_activatable(false);
     let label = gtk4::Label::new(Some(text));
-    label.add_css_class("heading");
+    label.add_css_class(CSS_HEADING);
     label.add_css_class(CSS_DIM_LABEL);
     label.set_xalign(0.0);
     row.set_child(Some(&label));

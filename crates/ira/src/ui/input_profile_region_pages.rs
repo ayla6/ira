@@ -412,7 +412,7 @@ mod gtk_repro {
         let header = adw::HeaderBar::new();
         let sidebar_scroll = gtk4::ScrolledWindow::new();
         let sidebar = gtk4::ListBox::new();
-        sidebar.add_css_class("navigation-sidebar");
+        sidebar.add_css_class(super::super::css::CSS_NAVIGATION_SIDEBAR);
         sidebar_scroll.set_child(Some(&sidebar));
         sidebar_scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
         let stack = gtk4::Stack::new();

@@ -1,11 +1,42 @@
 use super::css::*;
-use super::helpers::{clamped, clamped_boxed_list, clear_children, esc, poll_channel, status_row};
+use super::helpers::{clear_children, esc, poll_channel, status_row};
 use super::state::SharedState;
+use super::steam_search_dialog::{build_search_dialog, SearchDialogWidgets};
 use adw::prelude::*;
 use std::rc::Rc;
 use std::sync::mpsc;
 
 type SelectCallback = Rc<dyn Fn(&str, &str)>;
+
+/// One Steam store hit: escaped title, app-id subtitle and the caller's
+/// labelled button writing the picked id back into the entry row.
+fn steam_id_result_row(
+    app_id: &str,
+    name: &str,
+    button_label: &str,
+    app_id_row: &adw::EntryRow,
+    on_select: &SelectCallback,
+    dialog: &adw::Dialog,
+) -> adw::ActionRow {
+    let row = adw::ActionRow::new();
+    row.set_title(&esc(name));
+    row.set_subtitle(&crate::tr!("App ID: {}").replacen("{}", app_id, 1));
+    let pick_btn = gtk4::Button::with_label(button_label);
+    pick_btn.add_css_class(CSS_SUGGESTED_ACTION);
+    pick_btn.set_valign(gtk4::Align::Center);
+    let sid = app_id.to_string();
+    let matched_name = name.to_string();
+    let on_select = on_select.clone();
+    let row_update = app_id_row.clone();
+    let dlg = dialog.clone();
+    pick_btn.connect_clicked(move |_| {
+        on_select(&sid, &matched_name);
+        row_update.set_text(&sid);
+        dlg.close();
+    });
+    row.add_suffix(&pick_btn);
+    row
+}
 
 pub(super) fn show_steam_id_search_popup(
     state: &SharedState,
@@ -15,32 +46,19 @@ pub(super) fn show_steam_id_search_popup(
     button_label: &str,
     on_select: SelectCallback,
 ) {
-    let dialog = adw::Dialog::new();
-    dialog.set_title(&crate::tr!("Search Steam store"));
-    dialog.set_content_width(500);
-    dialog.set_content_height(400);
-
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&adw::HeaderBar::new());
-
-    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-
-    let search_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    let entry = gtk4::SearchEntry::new();
-    entry.set_placeholder_text(Some(&crate::tr!("Game name…")));
-    entry.set_text(game_name);
-    entry.set_hexpand(true);
-    search_row.append(&entry);
-    let search_btn = gtk4::Button::with_label(&crate::tr!("Search"));
-    search_btn.add_css_class(CSS_SUGGESTED_ACTION);
-    search_row.append(&search_btn);
-    content.append(&clamped(&search_row, 500, (12, 12, 12, 12)));
-
-    let (scrolled, list) = clamped_boxed_list(500);
-    content.append(&scrolled);
-
-    toolbar.set_content(Some(&content));
-    dialog.set_child(Some(&toolbar));
+    let SearchDialogWidgets {
+        dialog,
+        entry,
+        search_btn,
+        list,
+    } = build_search_dialog(
+        &crate::tr!("Search Steam store"),
+        500,
+        400,
+        500,
+        game_name,
+        Some(&crate::tr!("Game name…")),
+    );
 
     let state_c = state.clone();
     let button_label_s = button_label.to_string();
@@ -71,24 +89,14 @@ pub(super) fn show_steam_id_search_popup(
                 return;
             }
             for (app_id, name) in results {
-                let row = adw::ActionRow::new();
-                row.set_title(&esc(&name));
-                row.set_subtitle(&crate::tr!("App ID: {}").replacen("{}", &app_id, 1));
-                let match_btn = gtk4::Button::with_label(&btn_label);
-                match_btn.add_css_class(CSS_SUGGESTED_ACTION);
-                match_btn.set_valign(gtk4::Align::Center);
-                let sid = app_id.clone();
-                let matched_name = name.clone();
-                let on_select_c3 = on_select_c2.clone();
-                let row_update = row_c2.clone();
-                let dlg = dialog_c2.clone();
-                match_btn.connect_clicked(move |_| {
-                    on_select_c3(&sid, &matched_name);
-                    row_update.set_text(&sid);
-                    dlg.close();
-                });
-                row.add_suffix(&match_btn);
-                list_c2.append(&row);
+                list_c2.append(&steam_id_result_row(
+                    &app_id,
+                    &name,
+                    &btn_label,
+                    &row_c2,
+                    &on_select_c2,
+                    &dialog_c2,
+                ));
             }
         });
     };

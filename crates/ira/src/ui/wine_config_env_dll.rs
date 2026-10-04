@@ -2,21 +2,23 @@ use super::css::*;
 use super::helpers::string_list_from;
 use adw::prelude::*;
 
+fn hbox_children(hbox: &gtk4::Box) -> Vec<gtk4::Widget> {
+    let mut children = Vec::new();
+    let mut next = hbox.first_child();
+    while let Some(child) = next.clone() {
+        children.push(child.clone());
+        next = child.next_sibling();
+    }
+    children
+}
+
 pub(super) fn collect_env_vars(box_: &gtk4::ListBox) -> Vec<(String, String)> {
     let mut result = Vec::new();
     let mut child = box_.first_child();
     while let Some(w) = child {
         if let Some(row) = w.downcast_ref::<gtk4::ListBoxRow>() {
             if let Some(hbox) = row.child().and_then(|c| c.downcast::<gtk4::Box>().ok()) {
-                let children: Vec<gtk4::Widget> = {
-                    let mut v = Vec::new();
-                    let mut ch = hbox.first_child();
-                    while let Some(c) = ch.clone() {
-                        v.push(c.clone());
-                        ch = c.next_sibling();
-                    }
-                    v
-                };
+                let children = hbox_children(&hbox);
                 if children.len() >= 2 {
                     if let (Some(name_entry), Some(value_entry)) = (
                         children[0].downcast_ref::<gtk4::Entry>(),
@@ -100,15 +102,7 @@ pub(super) fn collect_dll_overrides(box_: &gtk4::ListBox) -> Vec<(String, String
     while let Some(w) = child {
         if let Some(row) = w.downcast_ref::<gtk4::ListBoxRow>() {
             if let Some(hbox) = row.child().and_then(|c| c.downcast::<gtk4::Box>().ok()) {
-                let children: Vec<gtk4::Widget> = {
-                    let mut v = Vec::new();
-                    let mut ch = hbox.first_child();
-                    while let Some(c) = ch.clone() {
-                        v.push(c.clone());
-                        ch = c.next_sibling();
-                    }
-                    v
-                };
+                let children = hbox_children(&hbox);
                 if children.len() >= 2 {
                     let name_entry = children[0].clone();
                     let value_combo = children[1].clone();

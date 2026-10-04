@@ -34,7 +34,7 @@ pub(super) fn show_classifications_edit_dialog(
     let list_toolbar = adw::ToolbarView::new();
     let list_header = adw::HeaderBar::new();
     let list_title = gtk4::Label::new(Some(&crate::tr!("Age ratings")));
-    list_title.add_css_class("heading");
+    list_title.add_css_class(CSS_HEADING);
     list_header.set_title_widget(Some(&list_title));
     let add_btn = gtk4::Button::from_icon_name("list-add-symbolic");
     add_btn.add_css_class(CSS_FLAT);
@@ -53,7 +53,7 @@ pub(super) fn show_classifications_edit_dialog(
     let add_toolbar = adw::ToolbarView::new();
     let add_header = adw::HeaderBar::new();
     let add_title = gtk4::Label::new(Some(&crate::tr!("Add a rating")));
-    add_title.add_css_class("heading");
+    add_title.add_css_class(CSS_HEADING);
     add_header.set_title_widget(Some(&add_title));
     add_toolbar.add_top_bar(&add_header);
     let add_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -245,7 +245,7 @@ pub(super) fn show_synopsis_edit_dialog(
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
     let title = gtk4::Label::new(Some(&crate::tr!("Synopsis")));
-    title.add_css_class("heading");
+    title.add_css_class(CSS_HEADING);
     header.set_title_widget(Some(&title));
     // The apply lives in the header — nothing floating over dead space.
     let apply = gtk4::Button::with_label(&crate::tr!("Apply"));

@@ -405,15 +405,10 @@ fn fetch_steam_game_icon(
             .join(format!("{}.ico", clienticon))
     });
 
-    let ico_bytes = if let Some(ref path) = ico_in_games {
-        if path.is_file() {
-            std::fs::read(path).ok()
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let ico_bytes = ico_in_games
+        .as_ref()
+        .filter(|path| path.is_file())
+        .and_then(|path| std::fs::read(path).ok());
 
     let ico_bytes = match ico_bytes {
         Some(b) => b,

@@ -7,6 +7,8 @@ use adw::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::css::CSS_ERROR;
+
 /// The Apply/Clear callbacks, shared between the buttons and the owner.
 type ActionSlot = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
@@ -68,7 +70,7 @@ impl DatePick {
                 let text = entry.text().trim().to_string();
                 match super::edit_game_scraper::parse_typed_date(&text) {
                     Some(parsed) => {
-                        entry.remove_css_class("error");
+                        entry.remove_css_class(CSS_ERROR);
                         *typed.borrow_mut() = Some(parsed.stored);
                         if let Ok(preset) = glib::DateTime::from_utc(
                             parsed.year,
@@ -84,11 +86,11 @@ impl DatePick {
                         }
                     }
                     None if text.is_empty() => {
-                        entry.remove_css_class("error");
+                        entry.remove_css_class(CSS_ERROR);
                         *typed.borrow_mut() = None;
                     }
                     None => {
-                        entry.add_css_class("error");
+                        entry.add_css_class(CSS_ERROR);
                         *typed.borrow_mut() = None;
                     }
                 }
@@ -118,7 +120,7 @@ impl DatePick {
                 }
                 *typed.borrow_mut() = Some(iso.clone());
                 entry.set_text(&iso);
-                entry.remove_css_class("error");
+                entry.remove_css_class(CSS_ERROR);
             });
         }
 

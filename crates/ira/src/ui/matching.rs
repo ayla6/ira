@@ -76,29 +76,29 @@ pub fn match_game_to_steam(
                 }
                 match crate::game_loader::load_game(&entry, &save_dir) {
                     Ok(mut game) => {
-                    if game.name.is_empty() || game.name.starts_with("App ID:") {
-                        game.set_name(&game_name);
+                        if game.name.is_empty() || game.name.starts_with("App ID:") {
+                            game.set_name(&game_name);
+                        }
+                        let name = game.name.clone();
+                        let _ = sender.send(AppMessage::NewGame(game));
+                        enrich_game_async(crate::ui::enrichment::EnrichGameParams {
+                            app_id: steam_app_id.clone(),
+                            trophy_source: ira_models::TrophySource::Gse,
+                            platform_id: steam_app_id.clone(),
+                            db_id: entry.id,
+                            title: name,
+                            steam,
+                            sender,
+                            save_dir,
+                            db,
+                            ra_username,
+                            ra_web_api_key,
+                            cfg,
+                            game: None,
+                            progress: None,
+                        });
                     }
-                    let name = game.name.clone();
-                    let _ = sender.send(AppMessage::NewGame(game));
-                    enrich_game_async(crate::ui::enrichment::EnrichGameParams {
-                        app_id: steam_app_id.clone(),
-                        trophy_source: ira_models::TrophySource::Gse,
-                        platform_id: steam_app_id.clone(),
-                        db_id: entry.id,
-                        title: name,
-                        steam,
-                        sender,
-                        save_dir,
-                        db,
-                        ra_username,
-                        ra_web_api_key,
-                        cfg,
-                        game: None,
-                        progress: None,
-                    });
-                }
-                Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
+                    Err(e) => eprintln!("match_game_to_steam: load_game failed: {}", e),
                 }
             }
             Ok(None) => eprintln!(
@@ -253,11 +253,13 @@ pub fn confirm_mark_unlocked(
     ach: &MergedAchievement,
     reload: impl Fn() + 'static,
 ) {
-    let window = state.borrow().window.clone();
+    let (window, save_dir) = {
+        let s = state.borrow();
+        (s.window.clone(), s.save_dir.clone())
+    };
     let ach_name = ach.name.clone();
     let app_id = app_id.to_string();
     let native_id = native_id.to_string();
-    let save_dir = state.borrow().save_dir.clone();
     confirm_dialog(
         &window,
         &crate::tr!("Mark as already unlocked?"),

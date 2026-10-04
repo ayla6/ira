@@ -3,6 +3,7 @@ use gtk4::glib;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::css::CSS_FLAT;
 use super::input_output_keys::is_modifier_key;
 
 const GAMEPAD_BUTTON_NAMES: &[(u16, &str)] = &[
@@ -54,29 +55,29 @@ pub fn build_hotkey_row(
     // Keyboard binding button
     let kb_btn = gtk4::Button::new();
     kb_btn.set_valign(gtk4::Align::Center);
-    kb_btn.add_css_class("flat");
+    kb_btn.add_css_class(CSS_FLAT);
     kb_btn.set_size_request(100, -1);
-    update_kb_label(&kb_btn, &kb_value.borrow());
+    update_hotkey_label(&kb_btn, &kb_value.borrow());
 
     // Reset keyboard to default (only visible when not default)
     let kb_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     kb_reset.set_valign(gtk4::Align::Center);
     kb_reset.set_tooltip_text(Some(&crate::tr!("Reset to default")));
-    kb_reset.add_css_class("flat");
+    kb_reset.add_css_class(CSS_FLAT);
     kb_reset.set_visible(keyboard != default_kb);
 
     // Gamepad binding button
     let gp_btn = gtk4::Button::new();
     gp_btn.set_valign(gtk4::Align::Center);
-    gp_btn.add_css_class("flat");
+    gp_btn.add_css_class(CSS_FLAT);
     gp_btn.set_size_request(100, -1);
-    update_gp_label(&gp_btn, &gp_value.borrow());
+    update_hotkey_label(&gp_btn, &gp_value.borrow());
 
     // Reset gamepad to default
     let gp_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     gp_reset.set_valign(gtk4::Align::Center);
     gp_reset.set_tooltip_text(Some(&crate::tr!("Reset to default")));
-    gp_reset.add_css_class("flat");
+    gp_reset.add_css_class(CSS_FLAT);
     gp_reset.set_visible(gamepad != default_gp);
 
     row.add_suffix(&kb_btn);
@@ -92,7 +93,9 @@ pub fn build_hotkey_row(
     HotkeyWidgets { kb_value, gp_value }
 }
 
-fn update_kb_label(btn: &gtk4::Button, value: &str) {
+/// The button's shown binding, or "Not set" when empty. Keyboard and
+/// gamepad rows share it — only the stored value differs.
+fn update_hotkey_label(btn: &gtk4::Button, value: &str) {
     let label = if value.is_empty() {
         crate::tr!("Not set")
     } else {
@@ -101,13 +104,21 @@ fn update_kb_label(btn: &gtk4::Button, value: &str) {
     btn.set_label(&label);
 }
 
-fn update_gp_label(btn: &gtk4::Button, value: &str) {
-    let label = if value.is_empty() {
-        crate::tr!("Not set")
-    } else {
-        value.to_string()
-    };
-    btn.set_label(&label);
+/// Reset-to-default wiring shared by both rows: restore the default
+/// value and repaint the button.
+fn connect_reset_to_default(
+    reset: &gtk4::Button,
+    btn: &gtk4::Button,
+    value: &Rc<RefCell<String>>,
+    default: &str,
+) {
+    let btn_c = btn.clone();
+    let value_c = value.clone();
+    let default_c = default.to_string();
+    reset.connect_clicked(move |_| {
+        *value_c.borrow_mut() = default_c.clone();
+        update_hotkey_label(&btn_c, &default_c);
+    });
 }
 
 fn setup_keyboard(
@@ -135,7 +146,7 @@ fn setup_keyboard(
         let key_name = keyval_to_name(keyval);
         if key_name == "Escape" {
             *capturing_c.borrow_mut() = false;
-            update_kb_label(&btn_c, &value_c.borrow());
+            update_hotkey_label(&btn_c, &value_c.borrow());
             return glib::Propagation::Stop;
         }
 
@@ -152,7 +163,7 @@ fn setup_keyboard(
 
         *value_c.borrow_mut() = full.clone();
         *capturing_c.borrow_mut() = false;
-        update_kb_label(&btn_c, &full);
+        update_hotkey_label(&btn_c, &full);
         reset_c.set_visible(full != default_c);
         glib::Propagation::Stop
     });
@@ -164,7 +175,7 @@ fn setup_keyboard(
     btn.connect_clicked(move |_| {
         if *capturing_c.borrow() {
             *capturing_c.borrow_mut() = false;
-            update_kb_label(&btn_c, &value_c.borrow());
+            update_hotkey_label(&btn_c, &value_c.borrow());
         } else {
             *capturing_c.borrow_mut() = true;
             btn_c.set_label("…");
@@ -182,17 +193,11 @@ fn setup_keyboard(
     let default_c = default.clone();
     right_click.connect_pressed(move |_, _, _, _| {
         *value_c.borrow_mut() = String::new();
-        update_kb_label(&btn_c, "");
+        update_hotkey_label(&btn_c, "");
         reset_c.set_visible(default_c.is_empty());
     });
 
-    let btn_c = btn.clone();
-    let value_c = value.clone();
-    let default_c = default;
-    reset.connect_clicked(move |_| {
-        *value_c.borrow_mut() = default_c.clone();
-        update_kb_label(&btn_c, &default_c);
-    });
+    connect_reset_to_default(reset, btn, value, &default);
 }
 
 fn setup_gamepad(
@@ -223,7 +228,7 @@ fn setup_gamepad(
     btn.connect_clicked(move |_| {
         if *capturing_c.borrow() {
             stop_gamepad_capture(&capturing_c, &poll_c);
-            update_gp_label(&btn_c, &value_c.borrow());
+            update_hotkey_label(&btn_c, &value_c.borrow());
         } else {
             *capturing_c.borrow_mut() = true;
             pressed_c.borrow_mut().clear();
@@ -258,7 +263,7 @@ fn setup_gamepad(
                 if start.elapsed() > std::time::Duration::from_secs(60) {
                     *capturing_cc.borrow_mut() = false;
                     *poll_cc.borrow_mut() = None;
-                    update_gp_label(&btn_cc, &value_cc.borrow());
+                    update_hotkey_label(&btn_cc, &value_cc.borrow());
                     return glib::ControlFlow::Break;
                 }
                 tick.set(tick.get() + 1);
@@ -277,7 +282,7 @@ fn setup_gamepad(
                     if t0.elapsed() >= std::time::Duration::from_millis(300) {
                         let combo = pressed_cc.borrow().join("+");
                         *value_cc.borrow_mut() = combo.clone();
-                        update_gp_label(&btn_cc, &combo);
+                        update_hotkey_label(&btn_cc, &combo);
                         reset_cc.set_visible(combo != default_cc);
                         *capturing_cc.borrow_mut() = false;
                         *poll_cc.borrow_mut() = None;
@@ -302,17 +307,11 @@ fn setup_gamepad(
     right_click.connect_pressed(move |_, _, _, _| {
         stop_gamepad_capture(&capturing_c, &poll_c);
         *value_c.borrow_mut() = String::new();
-        update_gp_label(&btn_c, "");
+        update_hotkey_label(&btn_c, "");
         reset_c.set_visible(default_c.is_empty());
     });
 
-    let btn_c = btn.clone();
-    let value_c = value.clone();
-    let default_c = default;
-    reset.connect_clicked(move |_| {
-        *value_c.borrow_mut() = default_c.clone();
-        update_gp_label(&btn_c, &default_c);
-    });
+    connect_reset_to_default(reset, btn, value, &default);
 }
 
 fn stop_gamepad_capture(

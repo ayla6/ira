@@ -13,7 +13,6 @@ use adw::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::Instant;
 
 /// The game a big-picture grid action targets: launch uses the same (db, variant)
 /// pair the desktop grid stores on its cells.
@@ -21,8 +20,6 @@ type GameKey = (i64, i64);
 
 /// Width the floating name tooltip clips its text to.
 const TOOLTIP_MAX_WIDTH: f64 = 480.0;
-/// Selection scroll animation length (matches the home carousel).
-const SCROLL_MILLIS: u64 = 90;
 
 fn game_key(game: &Game) -> GameKey {
     (game.db_id, game.variant_id.unwrap_or(0))
@@ -31,7 +28,8 @@ fn game_key(game: &Game) -> GameKey {
 /// Where pressing (dx, dy) from `current` lands in a `cols`-wide grid of
 /// `count` items; None when the grid is empty or the press is a no-op.
 /// Horizontal moves stay on the row, vertical moves keep the column, and
-/// overshoot into a short last row slides onto its last item.
+/// overshoot into a short last row slides onto its last item instead of
+/// sticking.
 pub(super) fn grid_move(
     current: usize,
     count: usize,
@@ -64,10 +62,10 @@ pub(super) fn grid_move(
     } else {
         col
     };
-    let next = next_row * cols + next_col;
-    // A vertical move onto a short last row's missing column stays put
-    // instead of dragging the selection sideways.
-    (next < count && next != current as i64).then_some(next as usize)
+    // A vertical move past a short last row's end slides onto its last
+    // item (only the last row can be short — rows fill in order).
+    let next = (next_row * cols + next_col).min(count - 1);
+    (next != current as i64).then_some(next as usize)
 }
 
 /// The selection outline pokes this far past a tile's edge (the ring's
@@ -93,7 +91,9 @@ fn scroll_target(
     let top = top_pad + (index / cols) as f64 * row_h;
     let bottom = top + row_h;
     let rows = if top < value {
-        ((top - OUTLINE_ALLOWANCE - top_pad) / row_h).floor().max(0.0)
+        // The selected row itself, not the one above it: flooring the
+        // outline-adjusted top would drop a whole extra row into view.
+        ((top - top_pad) / row_h).floor().max(0.0)
     } else if bottom + OUTLINE_ALLOWANCE > value + page {
         (((bottom + OUTLINE_ALLOWANCE - page - top_pad) / row_h).ceil()).max(0.0)
     } else {
@@ -185,13 +185,10 @@ pub(super) struct AllSoftwareUi {
     /// The last selection before the grid lost it (manual scrolling) —
     /// the arrows re-acquire here, keeping the column in view.
     last_selected: Cell<Option<usize>>,
-    /// The running scroll glide, retargeted (never restarted) by new
-    /// presses mid-flight: repeats land faster than one glide, and
-    /// restarting every time starves the camera while the selection
-    /// runs off-screen.
-    scroll_anim: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
-    /// The glide's latest goal, picked up every frame while it runs.
-    scroll_goal: Rc<Cell<f64>>,
+    /// The running scroll glide, shared with the groups grid and the
+    /// home carousel: discrete presses ease, held repeats snap so the
+    /// camera never trails the selection.
+    scroll_glide: super::scroll_glide::ScrollGlide,
     /// The "sorted by …" label in the header.
     ordering: gtk4::Label,
     /// The header line and its wings; their margins and spacings are
@@ -446,8 +443,7 @@ pub(super) fn build(
         selected: Cell::new(None),
         selected_key,
         last_selected: Cell::new(None),
-        scroll_anim: Rc::new(RefCell::new(None)),
-        scroll_goal: Rc::new(Cell::new(0.0)),
+        scroll_glide: super::scroll_glide::ScrollGlide::new(),
         ring,
         overlay: grid_overlay,
         ordering,
@@ -541,17 +537,11 @@ impl AllSoftwareUi {
         }
         self.tab_icon_scale.set(scale);
         let pixel = (22.0 * scale).round().max(8.0) as i32;
-        let mut stack = vec![self.tabs.clone().upcast::<gtk4::Widget>()];
-        while let Some(widget) = stack.pop() {
+        for_each_descendant(&self.tabs.clone().upcast::<gtk4::Widget>(), |widget| {
             if let Some(image) = widget.downcast_ref::<gtk4::Image>() {
                 image.set_pixel_size(pixel);
             }
-            let mut child = widget.first_child();
-            while let Some(node) = child {
-                stack.push(node.clone());
-                child = node.next_sibling();
-            }
-        }
+        });
         center_tab_icons(&self.tabs);
     }
 
@@ -586,6 +576,7 @@ impl AllSoftwareUi {
         // A glide caught mid-flight by the slide shows a half-scrolled
         // tile at the viewport edge; land both surfaces before sliding.
         self.finish_scroll();
+        self.groups_grid.finish_scroll();
         super::home::finish_scroll(state);
         // Keep the toggle group in step; its notify loops back here and
         // early-returns.
@@ -1089,7 +1080,8 @@ impl AllSoftwareUi {
 
     fn scroll_to_selected(&self) {
         let adj = self.scrolled.vadjustment();
-        self.animate_scroll_to(self.snapped_scroll_target(&adj));
+        self.scroll_glide
+            .animate_to(&self.scrolled, &adj, self.snapped_scroll_target(&adj));
     }
 
     /// The scroll value that rests exactly on the selected row — never
@@ -1119,45 +1111,9 @@ impl AllSoftwareUi {
     /// must not catch the grid mid-glide: the slide would show a
     /// half-scrolled tile at the viewport edge.
     pub(super) fn finish_scroll(&self) {
-        if let Some(id) = self.scroll_anim.borrow_mut().take() {
-            id.remove();
-        }
+        self.scroll_glide.finish();
         let adj = self.scrolled.vadjustment();
         adj.set_value(self.snapped_scroll_target(&adj));
-    }
-
-    /// Glide to `target` like the home carousel does; a press during the
-    /// glide retargets it from wherever it currently is instead of
-    /// restarting the clock. The glide steps on frame-clock ticks — once
-    /// per displayed frame, in sync with vsync — instead of 16ms timers
-    /// that drift against the frames and read as choppy.
-    fn animate_scroll_to(&self, target: f64) {
-        self.scroll_goal.set(target);
-        if self.scroll_anim.borrow().is_some() {
-            return;
-        }
-        let adj = self.scrolled.vadjustment();
-        if (target - adj.value()).abs() < 0.5 {
-            return;
-        }
-        let start = adj.value();
-        let started = Instant::now();
-        let anim = Rc::clone(&self.scroll_anim);
-        let goal = Rc::clone(&self.scroll_goal);
-        let id = self.scrolled.add_tick_callback(move |_, _| {
-            let t = (started.elapsed().as_millis() as f64 / SCROLL_MILLIS as f64).min(1.0);
-            let eased = 1.0 - (1.0 - t) * (1.0 - t);
-            let g = goal.get();
-            adj.set_value(start + (g - start) * eased);
-            if t >= 1.0 {
-                adj.set_value(g);
-                *anim.borrow_mut() = None;
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
-            }
-        });
-        *self.scroll_anim.borrow_mut() = Some(id);
     }
 }
 
@@ -1378,6 +1334,20 @@ fn launch(state: &SharedState, game: &Game) {
     }
 }
 
+/// Depth-first walk of `root` and every descendant, applying `f` to
+/// each. The two tab passes share it — icon scaling and icon centering
+/// both reach into AdwButtonContent internals the same way.
+fn for_each_descendant(root: &gtk4::Widget, mut f: impl FnMut(&gtk4::Widget)) {
+    let mut stack = vec![root.clone()];
+    while let Some(widget) = stack.pop() {
+        f(&widget);
+        let mut child = widget.first_child();
+        while let Some(node) = child {
+            stack.push(node.clone());
+            child = node.next_sibling();
+        }
+    }
+}
 /// Vertically center each tab's icon on its label's capital-letter band.
 /// Plain box centering aligns the icon to the label's line box, and the
 /// bundled font's glyphs sit low in that box (its tall CJK line
@@ -1385,17 +1355,11 @@ fn launch(state: &SharedState, game: &Game) {
 /// real geometry from pango — the font's baseline and cap height
 /// against the rendered line height — instead of tuning pixels by eye.
 fn center_tab_icons(tabs: &adw::ToggleGroup) {
-    let mut stack = vec![tabs.clone().upcast::<gtk4::Widget>()];
-    while let Some(widget) = stack.pop() {
+    for_each_descendant(&tabs.clone().upcast::<gtk4::Widget>(), |widget| {
         if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
             center_icon_on_label(label);
         }
-        let mut child = widget.first_child();
-        while let Some(node) = child {
-            stack.push(node.clone());
-            child = node.next_sibling();
-        }
-    }
+    });
 }
 
 /// Drop the icon beside `label` so its center rests on the
@@ -1480,13 +1444,13 @@ mod tests {
     }
 
     #[test]
-    fn test_grid_move_never_slides_off_short_last_row() {
+    fn test_grid_move_slides_onto_short_last_row() {
         // 7 items: row 1 holds indexes 5 and 6. Down from a column the
-        // short row does not have stays put instead of dragging the
-        // selection onto the row's only remaining cell.
+        // short row does not have lands on its last item instead of
+        // sticking — holding down always makes progress.
         assert_eq!(grid_move(0, 7, COLS, 0, 1, true), Some(5));
-        assert_eq!(grid_move(3, 7, COLS, 0, 1, true), None);
-        assert_eq!(grid_move(4, 7, COLS, 0, 1, true), None);
+        assert_eq!(grid_move(3, 7, COLS, 0, 1, true), Some(6));
+        assert_eq!(grid_move(4, 7, COLS, 0, 1, true), Some(6));
         assert_eq!(grid_move(6, 7, COLS, 0, 1, true), None);
         // The short row wraps within its own two cells.
         assert_eq!(grid_move(6, 7, COLS, 1, 0, true), Some(5));
@@ -1494,8 +1458,10 @@ mod tests {
     }
 
     #[test]
-    fn test_grid_move_stays_put_on_last_row() {
-        assert_eq!(grid_move(7, 12, COLS, 0, 1, true), None);
+    fn test_grid_move_down_into_short_row_takes_its_end() {
+        // 12 items: row 2 holds 10 and 11. Down from mid-row slides to
+        // the row's last item; down from the very last item stays put.
+        assert_eq!(grid_move(7, 12, COLS, 0, 1, true), Some(11));
         assert_eq!(grid_move(11, 12, COLS, 0, 1, true), None);
     }
 
@@ -1519,8 +1485,12 @@ mod tests {
         // Scrolling back up to row 0 lands on the first boundary, again
         // lowered by the ring's room, clamped to the top.
         assert_eq!(scroll_target(0, COLS, row_h, top_pad, 90.0, 300.0), 0.0);
-        // Deep rows (row 5 = index 25) scroll to the boundary that fits.
+        // Deep rows below (row 5 = index 25) scroll to the boundary that fits.
         assert_eq!(scroll_target(25, COLS, row_h, top_pad, 90.0, 300.0), 390.0);
+        // Scrolling up lands the selected row itself at the top (lowered
+        // by the ring's room): row 3's top is 308, so 290 — never the row
+        // above it.
+        assert_eq!(scroll_target(15, COLS, row_h, top_pad, 490.0, 300.0), 290.0);
     }
 
     #[test]

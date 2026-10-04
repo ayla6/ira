@@ -3,7 +3,7 @@
 //! Sets pages, Cancel / Apply / Save footer with a canonical dirty check,
 //! and an unsaved-changes guard.
 
-use super::css::{CSS_ERROR, CSS_SUGGESTED_ACTION};
+use super::css::{CSS_ERROR, CSS_SUGGESTED_ACTION, CSS_TITLE_1, CSS_TOOLBAR};
 use super::helpers::DialogLayout;
 use super::input_profile_action_sets::build_sets_page;
 use super::input_profile_set_indicator::SetIndicator;
@@ -146,7 +146,7 @@ pub(super) fn show_input_profile_editor(
     // The header names the layout being edited and follows renames, instead
     // of sitting empty above every page.
     let title = gtk4::Label::new(Some(profile_name.borrow().as_str()));
-    title.add_css_class("title");
+    title.add_css_class(CSS_TITLE_1);
     layout.header.set_title_widget(Some(&title));
 
     // Two-phase wiring: pages need the edit hooks, the hooks need the
@@ -453,7 +453,7 @@ fn add_editor_footer(
     // A flat bottom bar under the page area, separated from the content the
     // way libadwaita footer bars are.
     let footer = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
-    footer.add_css_class("toolbar");
+    footer.add_css_class(CSS_TOOLBAR);
     footer.set_margin_start(16);
     footer.set_margin_end(16);
     footer.append(status);

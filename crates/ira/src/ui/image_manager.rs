@@ -488,6 +488,57 @@ fn build_reset_icon_button(
     Some(reset_btn)
 }
 
+/// Watch a fetch button's download channel from the idle loop: on arrival
+/// restore the button to `idle_label`, stage the bytes into the dialog
+/// draft (or flash the short error for two seconds), then refresh the
+/// section. Shared by the RA/SS fetch buttons — same draft flow,
+/// different idle labels.
+fn poll_download_result(
+    rx: RefCell<std::sync::mpsc::Receiver<Result<Vec<u8>, String>>>,
+    btn: glib::WeakRef<gtk4::Button>,
+    pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
+    asset: String,
+    refresh: Rc<dyn Fn()>,
+    idle_label: String,
+) {
+    glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+        if let Ok(result) = rx.borrow_mut().try_recv() {
+            if let Some(btn) = btn.upgrade() {
+                btn.set_sensitive(true);
+                btn.set_label(&idle_label);
+            }
+            match result {
+                Ok(bytes) => {
+                    if let Some(ref pc) = pending_copies {
+                        pc.borrow_mut().insert(
+                            asset.clone(),
+                            PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
+                        );
+                    }
+                    refresh();
+                }
+                Err(err) => {
+                    if let Some(btn) = btn.upgrade() {
+                        let short: String = err.chars().take(40).collect();
+                        btn.set_label(&short);
+                        let btn_weak = btn.downgrade();
+                        let idle_label = idle_label.clone();
+                        glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
+                            if let Some(btn) = btn_weak.upgrade() {
+                                btn.set_label(&idle_label);
+                            }
+                            glib::ControlFlow::Break
+                        });
+                    }
+                }
+            }
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+}
+
 fn build_ra_icon_button(
     asset_type: &str,
     game: &Game,
@@ -503,9 +554,14 @@ fn build_ra_icon_button(
     }
     let btn = gtk4::Button::with_label(&crate::tr!("RA"));
     let app_id = game.app_id.clone();
-    let save_dir = state.borrow().save_dir.clone();
-    let ra_username = state.borrow().cfg.ra_username.clone();
-    let ra_web_api_key = state.borrow().cfg.ra_web_api_key.clone();
+    let (save_dir, ra_username, ra_web_api_key) = {
+        let s = state.borrow();
+        (
+            s.save_dir.clone(),
+            s.cfg.ra_username.clone(),
+            s.cfg.ra_web_api_key.clone(),
+        )
+    };
     let refresh = Rc::clone(refresh_images);
     let pending_copies_ra = pending_copies.clone();
     let asset_ra = asset_type.to_string();
@@ -536,45 +592,14 @@ fn build_ra_icon_button(
             };
             let _ = tx.send(result);
         });
-        let btn_weak = btn_clone.downgrade();
-        let refresh = refresh.clone();
-        let pc = pending_copies_ra.clone();
-        let asset = asset_ra.clone();
-        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-            if let Ok(result) = rx.borrow_mut().try_recv() {
-                if let Some(btn) = btn_weak.upgrade() {
-                    btn.set_sensitive(true);
-                    btn.set_label(&crate::tr!("RA"));
-                }
-                match result {
-                    Ok(bytes) => {
-                        if let Some(ref pc) = pc {
-                            pc.borrow_mut().insert(
-                                asset.clone(),
-                                PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
-                            );
-                        }
-                        refresh();
-                    }
-                    Err(err) => {
-                        if let Some(btn) = btn_weak.upgrade() {
-                            let short: String = err.chars().take(40).collect();
-                            btn.set_label(&short);
-                            let btn_weak = btn.downgrade();
-                            glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
-                                if let Some(btn) = btn_weak.upgrade() {
-                                    btn.set_label(&crate::tr!("RA"));
-                                }
-                                glib::ControlFlow::Break
-                            });
-                        }
-                    }
-                }
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
-            }
-        });
+        poll_download_result(
+            rx,
+            btn_clone.downgrade(),
+            pending_copies_ra.clone(),
+            asset_ra.clone(),
+            refresh.clone(),
+            crate::tr!("RA").to_string(),
+        );
     });
     Some(btn)
 }
@@ -601,10 +626,10 @@ fn build_ss_square_button(
         "Download square box art from ScreenScraper"
     )));
     let db_id = game.db_id;
-    let steam = state.borrow().steam.clone();
-    let cfg = state.borrow().cfg.clone();
-    let db = state.borrow().db.clone();
-    let save_dir = state.borrow().save_dir.clone();
+    let (steam, cfg, db, save_dir) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.cfg.clone(), s.db.clone(), s.save_dir.clone())
+    };
     let refresh = Rc::clone(refresh_images);
     let pending_copies_ss = pending_copies.clone();
     let asset_ss = asset_type.to_string();
@@ -638,45 +663,14 @@ fn build_ss_square_button(
                 let _ = tx.send(result);
             }
         });
-        let btn_weak = btn_clone.downgrade();
-        let refresh = refresh.clone();
-        let pc = pending_copies_ss.clone();
-        let asset = asset_ss.clone();
-        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-            if let Ok(result) = rx.borrow_mut().try_recv() {
-                if let Some(btn) = btn_weak.upgrade() {
-                    btn.set_sensitive(true);
-                    btn.set_label("SS");
-                }
-                match result {
-                    Ok(bytes) => {
-                        if let Some(ref pc) = pc {
-                            pc.borrow_mut().insert(
-                                asset.clone(),
-                                PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
-                            );
-                        }
-                        refresh();
-                    }
-                    Err(err) => {
-                        if let Some(btn) = btn_weak.upgrade() {
-                            let short: String = err.chars().take(40).collect();
-                            btn.set_label(&short);
-                            let btn_weak = btn.downgrade();
-                            glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
-                                if let Some(btn) = btn_weak.upgrade() {
-                                    btn.set_label("SS");
-                                }
-                                glib::ControlFlow::Break
-                            });
-                        }
-                    }
-                }
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
-            }
-        });
+        poll_download_result(
+            rx,
+            btn_clone.downgrade(),
+            pending_copies_ss.clone(),
+            asset_ss.clone(),
+            refresh.clone(),
+            "SS".to_string(),
+        );
     });
     Some(btn)
 }
@@ -693,7 +687,8 @@ fn build_ss_slot_button(
     refresh_images: &Rc<dyn Fn()>,
     pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
 ) -> Option<gtk4::Button> {
-    let kind = match AssetType::from_string(asset_type) {        Some(AssetType::Logo) => super::fetch_images::MediaKind::Wheel,
+    let kind = match AssetType::from_string(asset_type) {
+        Some(AssetType::Logo) => super::fetch_images::MediaKind::Wheel,
         Some(AssetType::Header) => super::fetch_images::MediaKind::SteamGrid,
         _ => return None,
     };
@@ -709,9 +704,10 @@ fn build_ss_slot_button(
     }));
     let db_id = game.db_id;
     let ss_id = game.screenscraper_id.clone();
-    let steam = state.borrow().steam.clone();
-    let cfg = state.borrow().cfg.clone();
-    let db = state.borrow().db.clone();
+    let (steam, cfg, db) = {
+        let s = state.borrow();
+        (s.steam.clone(), s.cfg.clone(), s.db.clone())
+    };
     let refresh = Rc::clone(refresh_images);
     let pending_copies_ss = pending_copies.clone();
     let asset_ss = asset_type.to_string();
@@ -754,45 +750,14 @@ fn build_ss_slot_button(
                 let _ = tx.send(result);
             }
         });
-        let btn_weak = btn_clone.downgrade();
-        let refresh = refresh.clone();
-        let pc = pending_copies_ss.clone();
-        let asset = asset_ss.clone();
-        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-            if let Ok(result) = rx.borrow_mut().try_recv() {
-                if let Some(btn) = btn_weak.upgrade() {
-                    btn.set_sensitive(true);
-                    btn.set_label("SS");
-                }
-                match result {
-                    Ok(bytes) => {
-                        if let Some(ref pc) = pc {
-                            pc.borrow_mut().insert(
-                                asset.clone(),
-                                PendingImage::Bytes(gtk4::glib::Bytes::from_owned(bytes)),
-                            );
-                        }
-                        refresh();
-                    }
-                    Err(err) => {
-                        if let Some(btn) = btn_weak.upgrade() {
-                            let short: String = err.chars().take(40).collect();
-                            btn.set_label(&short);
-                            let btn_weak = btn.downgrade();
-                            glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
-                                if let Some(btn) = btn_weak.upgrade() {
-                                    btn.set_label("SS");
-                                }
-                                glib::ControlFlow::Break
-                            });
-                        }
-                    }
-                }
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
-            }
-        });
+        poll_download_result(
+            rx,
+            btn_clone.downgrade(),
+            pending_copies_ss.clone(),
+            asset_ss.clone(),
+            refresh.clone(),
+            "SS".to_string(),
+        );
     });
     Some(btn)
 }

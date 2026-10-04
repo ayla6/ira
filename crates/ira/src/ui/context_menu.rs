@@ -34,6 +34,66 @@ fn append_organise_entity_entries(menu: &gio::Menu) {
     menu.append(Some(&crate::tr!("Publisher")), Some("game.mass_publisher"));
 }
 
+fn resolve_game_locations(
+    s: &super::state::AppState,
+    game: &Game,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+) {
+    let config = super::helpers::logged_game_config(&s.db, game.db_id);
+    let app_default = s.cfg.default_wine_config.clone();
+    let (launch, mut wine, profile_id) = config.unwrap_or_default();
+    super::helpers::apply_game_wine_profile(&mut wine, &s.db, profile_id);
+    wine = wine.merge_with_default(&app_default);
+    let resolve_rom = |p: &str| -> String {
+        if !matches!(
+            game.kind,
+            ira_models::GameKind::Retro | ira_models::GameKind::Switch
+        ) || p.is_empty()
+        {
+            return p.to_string();
+        }
+        s.cfg
+            .resolve_rom_path(&game.platform_id, p)
+            .map(|resolved| resolved.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.to_string())
+    };
+    let resolved_game_path = resolve_rom(&game.game_path);
+    let game_dir = if !launch.working_dir.is_empty() {
+        Some(launch.working_dir)
+    } else if !launch.exe.is_empty() {
+        std::path::Path::new(&launch.exe)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+    } else if !resolved_game_path.is_empty() {
+        std::path::Path::new(&resolved_game_path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+    } else {
+        None
+    };
+    let game_file =
+        if !resolved_game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
+            Some(resolved_game_path)
+        } else {
+            None
+        };
+    let show_wine = game.kind == ira_models::GameKind::Wine && wine.enabled;
+    (
+        game_dir,
+        game_file,
+        if show_wine {
+            Some(ira_launcher::wine_launch::wine_prefix(&wine))
+        } else {
+            None
+        },
+        launch.manual_script.clone(),
+    )
+}
+
 pub fn show_game_context_menu(
     state: &SharedState,
     game: &Game,
@@ -42,13 +102,24 @@ pub fn show_game_context_menu(
     at_y: f64,
     _sidebar_row: Option<&gtk4::ListBoxRow>,
 ) {
-    let current_hidden = state
-        .borrow()
-        .games
-        .iter()
-        .find(|g| g.db_id == game.db_id)
-        .map(|g| g.hidden)
-        .unwrap_or(game.hidden);
+    let (current_hidden, game_folder, game_file, wine_prefix, manual_script, save_dir) = {
+        let s = state.borrow();
+        let hidden = s
+            .games
+            .iter()
+            .find(|g| g.db_id == game.db_id)
+            .map(|g| g.hidden)
+            .unwrap_or(game.hidden);
+        let (folder, file, prefix, script) = resolve_game_locations(&s, game);
+        (
+            hidden,
+            folder,
+            file,
+            prefix,
+            script,
+            s.save_dir.clone(),
+        )
+    };
 
     let menu = gio::Menu::new();
 
@@ -67,66 +138,6 @@ pub fn show_game_context_menu(
 
     let folders_menu = gio::Menu::new();
 
-    let (game_folder, game_file, wine_prefix, manual_script) = {
-        let s = state.borrow();
-        let config = super::helpers::logged_game_config(&s.db, game.db_id);
-        let app_default = s.cfg.default_wine_config.clone();
-        let (launch, mut wine, profile_id) = config.unwrap_or_default();
-        if let Some(pid) = profile_id {
-            if let Ok(Some(profile)) = ira_db::get_profile(&s.db, pid) {
-                wine.version = profile.wine_version;
-                wine.custom_wine_path = profile.custom_wine_path;
-                wine.prefix = profile.prefix;
-                wine.arch = profile.arch;
-            }
-        }
-        wine = wine.merge_with_default(&app_default);
-        let resolve_rom = |p: &str| -> String {
-            if !matches!(
-                game.kind,
-                ira_models::GameKind::Retro | ira_models::GameKind::Switch
-            ) || p.is_empty()
-            {
-                return p.to_string();
-            }
-            s.cfg
-                .resolve_rom_path(&game.platform_id, p)
-                .map(|resolved| resolved.to_string_lossy().into_owned())
-                .unwrap_or_else(|| p.to_string())
-        };
-        let resolved_game_path = resolve_rom(&game.game_path);
-        let game_dir = if !launch.working_dir.is_empty() {
-            Some(launch.working_dir)
-        } else if !launch.exe.is_empty() {
-            std::path::Path::new(&launch.exe)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-        } else if !resolved_game_path.is_empty() {
-            std::path::Path::new(&resolved_game_path)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-        } else {
-            None
-        };
-        let game_file =
-            if !resolved_game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
-                Some(resolved_game_path)
-            } else {
-                None
-            };
-        let show_wine = game.kind == ira_models::GameKind::Wine && wine.enabled;
-        (
-            game_dir,
-            game_file,
-            if show_wine {
-                Some(ira_launcher::wine_launch::wine_prefix(&wine))
-            } else {
-                None
-            },
-            launch.manual_script.clone(),
-        )
-    };
-
     if game_file.is_some() || game_folder.is_some() {
         folders_menu.append(
             Some(&crate::tr!("Game location")),
@@ -140,7 +151,6 @@ pub fn show_game_context_menu(
         );
     }
     folders_menu.append(Some(&crate::tr!("Data location")), Some("game.open_images"));
-    let save_dir = state.borrow().save_dir.clone();
     let save_location = super::context_menu_actions::centralized_save_path(&save_dir, game);
     if save_location.is_some() {
         folders_menu.append(

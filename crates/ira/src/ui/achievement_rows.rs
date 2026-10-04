@@ -194,114 +194,123 @@ pub fn create_global_stats_row(
     progress.set_opacity(0.18);
     progress.add_css_class(CSS_GLOBAL_BAR);
 
-    let is_hidden_spoiler = ach.hidden && !ach.earned;
-
     let content_stack = gtk4::Stack::new();
     content_stack.set_hexpand(true);
     content_stack.set_transition_type(gtk4::StackTransitionType::SlideLeft);
     content_stack.set_transition_duration(350);
 
-    let make_content = |img: gtk4::Image, title: &str, desc: &str| -> gtk4::Box {
-        let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-        content.set_margin_top(8);
-        content.set_margin_bottom(8);
-        content.set_margin_start(12);
-        content.set_margin_end(12);
-        content.append(&img);
-
-        let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-        vbox.set_valign(gtk4::Align::Start);
-        vbox.set_hexpand(true);
-        let title_label = gtk4::Label::new(Some(title));
-        title_label.set_xalign(0.0);
-        vbox.append(&title_label);
-        let desc_label = gtk4::Label::new(Some(desc));
-        desc_label.set_wrap(true);
-        desc_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-        desc_label.set_xalign(0.0);
-        desc_label.add_css_class(CSS_DIM_LABEL);
-        desc_label.add_css_class(CSS_CAPTION);
-        vbox.append(&desc_label);
-        content.append(&vbox);
-
-        let pct_label = gtk4::Label::new(Some(&format!("{:.1}%", ach.global_percent)));
-        pct_label.set_valign(gtk4::Align::Start);
-        pct_label.add_css_class(CSS_HEADING);
-        content.append(&pct_label);
-        content
-    };
-
-    let pct_str = format!("{:.1}%", ach.global_percent);
-
-    let reveal = if is_hidden_spoiler {
-        let spoiler_img = achievement_icon(ach, budget);
-
-        let spoiler_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-        spoiler_content.set_margin_top(8);
-        spoiler_content.set_margin_bottom(8);
-        spoiler_content.set_margin_start(12);
-        spoiler_content.set_margin_end(12);
-        spoiler_content.append(&spoiler_img);
-
-        let vbox_spoiler = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-        vbox_spoiler.set_valign(gtk4::Align::Start);
-        vbox_spoiler.set_hexpand(true);
-        let title_spoiler = gtk4::Label::new(Some(&crate::tr!("Hidden trophy")));
-        title_spoiler.set_xalign(0.0);
-        vbox_spoiler.append(&title_spoiler);
-        let desc_spoiler = gtk4::Label::new(Some(&crate::tr!("Click to reveal spoiler")));
-        desc_spoiler.set_xalign(0.0);
-        desc_spoiler.add_css_class(CSS_DIM_LABEL);
-        desc_spoiler.add_css_class(CSS_CAPTION);
-        vbox_spoiler.append(&desc_spoiler);
-        spoiler_content.append(&vbox_spoiler);
-
-        let pct_label = gtk4::Label::new(Some(&pct_str));
-        pct_label.set_valign(gtk4::Align::Start);
-        pct_label.add_css_class(CSS_HEADING);
-        spoiler_content.append(&pct_label);
-
-        content_stack.add_named(&spoiler_content, Some("spoiler"));
-
-        let real_img = achievement_icon(ach, budget);
-
-        let real_content = make_content(real_img, &ach.display_name, &ach.description);
-        content_stack.add_named(&real_content, Some("real"));
-
-        content_stack.set_visible_child_name("spoiler");
-        row.set_selectable(true);
-        row.set_activatable(true);
-
-        grid.attach(&progress, 0, 0, 1, 1);
-        grid.attach(&content_stack, 0, 0, 1, 1);
-        row.set_child(Some(&grid));
-
-        let stack_weak = content_stack.downgrade();
-        let row_weak = row.downgrade();
-        Some(Box::new(move || {
-            let Some(row) = row_weak.upgrade() else {
-                return;
-            };
-            let Some(stack) = stack_weak.upgrade() else {
-                return;
-            };
-            stack.set_visible_child_name("real");
-            row.set_activatable(false);
-            row.set_selectable(false);
-        }) as Box<dyn Fn()>)
+    let reveal = if ach.hidden && !ach.earned {
+        build_spoiler_stack(&row, &content_stack, ach, budget)
     } else {
         let img = achievement_icon(ach, budget);
-
-        let content = make_content(img, &ach.display_name, &ach.description);
+        let content = make_global_content(img, &ach.display_name, &ach.description, ach.global_percent);
         content_stack.add_named(&content, Some("real"));
         content_stack.set_visible_child_name("real");
-
-        grid.attach(&progress, 0, 0, 1, 1);
-        grid.attach(&content_stack, 0, 0, 1, 1);
-        row.set_child(Some(&grid));
-
         None
     };
 
+    grid.attach(&progress, 0, 0, 1, 1);
+    grid.attach(&content_stack, 0, 0, 1, 1);
+    row.set_child(Some(&grid));
+
     (row, reveal)
+}
+
+fn make_global_content(
+    img: gtk4::Image,
+    title: &str,
+    desc: &str,
+    global_percent: f64,
+) -> gtk4::Box {
+    let content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    content.set_margin_top(8);
+    content.set_margin_bottom(8);
+    content.set_margin_start(12);
+    content.set_margin_end(12);
+    content.append(&img);
+
+    let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    vbox.set_valign(gtk4::Align::Start);
+    vbox.set_hexpand(true);
+    let title_label = gtk4::Label::new(Some(title));
+    title_label.set_xalign(0.0);
+    vbox.append(&title_label);
+    let desc_label = gtk4::Label::new(Some(desc));
+    desc_label.set_wrap(true);
+    desc_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    desc_label.set_xalign(0.0);
+    desc_label.add_css_class(CSS_DIM_LABEL);
+    desc_label.add_css_class(CSS_CAPTION);
+    vbox.append(&desc_label);
+    content.append(&vbox);
+
+    let pct_label = gtk4::Label::new(Some(&format!("{global_percent:.1}%")));
+    pct_label.set_valign(gtk4::Align::Start);
+    pct_label.add_css_class(CSS_HEADING);
+    content.append(&pct_label);
+    content
+}
+
+fn build_spoiler_stack(
+    row: &gtk4::ListBoxRow,
+    content_stack: &gtk4::Stack,
+    ach: &MergedAchievement,
+    budget: &mut ImageLoadBudget,
+) -> Option<Box<dyn Fn() + 'static>> {
+    let pct_str = format!("{:.1}%", ach.global_percent);
+    let spoiler_img = achievement_icon(ach, budget);
+
+    let spoiler_content = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
+    spoiler_content.set_margin_top(8);
+    spoiler_content.set_margin_bottom(8);
+    spoiler_content.set_margin_start(12);
+    spoiler_content.set_margin_end(12);
+    spoiler_content.append(&spoiler_img);
+
+    let vbox_spoiler = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    vbox_spoiler.set_valign(gtk4::Align::Start);
+    vbox_spoiler.set_hexpand(true);
+    let title_spoiler = gtk4::Label::new(Some(&crate::tr!("Hidden trophy")));
+    title_spoiler.set_xalign(0.0);
+    vbox_spoiler.append(&title_spoiler);
+    let desc_spoiler = gtk4::Label::new(Some(&crate::tr!("Click to reveal spoiler")));
+    desc_spoiler.set_xalign(0.0);
+    desc_spoiler.add_css_class(CSS_DIM_LABEL);
+    desc_spoiler.add_css_class(CSS_CAPTION);
+    vbox_spoiler.append(&desc_spoiler);
+    spoiler_content.append(&vbox_spoiler);
+
+    let pct_label = gtk4::Label::new(Some(&pct_str));
+    pct_label.set_valign(gtk4::Align::Start);
+    pct_label.add_css_class(CSS_HEADING);
+    spoiler_content.append(&pct_label);
+
+    content_stack.add_named(&spoiler_content, Some("spoiler"));
+
+    let real_img = achievement_icon(ach, budget);
+    let real_content = make_global_content(
+        real_img,
+        &ach.display_name,
+        &ach.description,
+        ach.global_percent,
+    );
+    content_stack.add_named(&real_content, Some("real"));
+
+    content_stack.set_visible_child_name("spoiler");
+    row.set_selectable(true);
+    row.set_activatable(true);
+
+    let stack_weak = content_stack.downgrade();
+    let row_weak = row.downgrade();
+    Some(Box::new(move || {
+        let Some(row) = row_weak.upgrade() else {
+            return;
+        };
+        let Some(stack) = stack_weak.upgrade() else {
+            return;
+        };
+        stack.set_visible_child_name("real");
+        row.set_activatable(false);
+        row.set_selectable(false);
+    }) as Box<dyn Fn()>)
 }

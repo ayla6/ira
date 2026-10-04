@@ -14,6 +14,7 @@ mod input;
 mod marquee;
 mod mouse;
 mod running;
+mod scroll_glide;
 mod status;
 mod view;
 

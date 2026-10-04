@@ -107,9 +107,14 @@ fn build_launch_wine_advanced_pages(
     let saved_profile_id = params.saved_profile_id;
     let app_default_wine = params.app_default_wine;
     let show_launch_config = game.kind.is_managed_pc() || game.kind == ira_models::GameKind::Other;
-    let profiles = ira_db::get_all_profiles(&state.borrow().db).unwrap_or_default();
-    let save_dir = state.borrow().save_dir.clone();
-    let registry = state.borrow().controller_registry.clone();
+    let (profiles, save_dir, registry) = {
+        let s = state.borrow();
+        (
+            ira_db::get_all_profiles(&s.db).unwrap_or_default(),
+            s.save_dir.clone(),
+            s.controller_registry.clone(),
+        )
+    };
 
     let overlay_source_id = game.overlay_source_id();
     let (
@@ -667,8 +672,10 @@ pub fn show_edit_game_dialog(state: &SharedState, db_id: i64) {
         return;
     };
 
-    let parent = state.borrow().window.clone();
-    let save_dir = state.borrow().save_dir.clone();
+    let (parent, save_dir) = {
+        let s = state.borrow();
+        (s.window.clone(), s.save_dir.clone())
+    };
     let (win, sidebar, stack, content_area) = create_dialog_window(&game, &parent);
 
     let app_details = crate::game_loader::read_app_details(&save_dir, &game.app_id);

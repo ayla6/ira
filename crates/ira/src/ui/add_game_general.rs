@@ -1,4 +1,3 @@
-use super::css::*;
 use super::state::SharedState;
 use adw::prelude::*;
 use std::rc::Rc;
@@ -128,10 +127,10 @@ pub(super) fn build_general_page(
     ids_group.set_title(&crate::tr!("Service IDs"));
     let steam_id_entry = adw::EntryRow::new();
     steam_id_entry.set_title(&crate::tr!("Steam app ID"));
-    let steam_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
-    steam_search_btn.set_valign(gtk4::Align::Center);
-    steam_search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
-    steam_search_btn.add_css_class(CSS_FLAT);
+    let steam_search_btn = super::helpers::icon_button(
+        "system-search-symbolic",
+        &crate::tr!("Search Steam store"),
+    );
     {
         let sc = state.clone();
         let win_c = win.clone();
@@ -180,10 +179,10 @@ pub(super) fn build_general_page(
     let sgdb_id_entry = adw::EntryRow::new();
     sgdb_id_entry.set_title(&crate::tr!("SteamGridDB ID"));
     sgdb_id_entry.set_input_purpose(gtk4::InputPurpose::Number);
-    let sgdb_search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
-    sgdb_search_btn.set_valign(gtk4::Align::Center);
-    sgdb_search_btn.set_tooltip_text(Some(&crate::tr!("Search SteamGridDB")));
-    sgdb_search_btn.add_css_class(CSS_FLAT);
+    let sgdb_search_btn = super::helpers::icon_button(
+        "system-search-symbolic",
+        &crate::tr!("Search SteamGridDB"),
+    );
     {
         let sc = state.clone();
         let win_c = win.clone();

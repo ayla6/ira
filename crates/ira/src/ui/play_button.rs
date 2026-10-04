@@ -50,6 +50,50 @@ fn set_running_state(
     }
 }
 
+/// The icon and label of a hbox built by [`build_play_btn_hbox`]. All
+/// three button shapes share the lookup — first child is the icon, last
+/// the label — so it lives here instead of thrice inline.
+fn play_btn_icon_label(hbox: &gtk4::Box) -> (gtk4::Image, gtk4::Label) {
+    let icon = hbox
+        .first_child()
+        .and_then(|c| c.downcast::<gtk4::Image>().ok())
+        .unwrap();
+    let label = hbox
+        .last_child()
+        .and_then(|c| c.downcast::<gtk4::Label>().ok())
+        .unwrap();
+    (icon, label)
+}
+
+/// The click shared by every play-button shape: stop a running game,
+/// else launch (with `variant_id` for the variant shape, `None`
+/// otherwise) and repaint the button to the outcome.
+fn toggle_play_clicked(
+    state: &SharedState,
+    db_id: i64,
+    variant_id: Option<i64>,
+    sender: &ira_models::AppSender,
+    icon: &gtk4::Image,
+    label: &gtk4::Label,
+    btn: &impl IsA<gtk4::Widget>,
+) {
+    if is_game_running(state, db_id) {
+        stop_game(state, db_id);
+        set_running_state(icon, label, btn, false);
+    } else {
+        match launch_game(state, db_id, variant_id) {
+            Ok(true) => {
+                set_running_state(icon, label, btn, true);
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("Failed to launch game: {}", e);
+                let _ = sender.send(AppMessage::AddGameError(e));
+            }
+        }
+    }
+}
+
 fn is_game_running(state: &SharedState, db_id: i64) -> bool {
     state
         .borrow()
@@ -723,45 +767,18 @@ fn build_simple_play_button(
     btn.set_height_request(PLAY_BTN_HEIGHT);
 
     let hbox = build_play_btn_hbox();
-    let icon = hbox
-        .first_child()
-        .and_then(|c| c.downcast::<gtk4::Image>().ok())
-        .unwrap();
-    let label = hbox
-        .last_child()
-        .and_then(|c| c.downcast::<gtk4::Label>().ok())
-        .unwrap();
+    let (icon, label) = play_btn_icon_label(&hbox);
 
     btn.set_child(Some(&hbox));
 
-    if !is_running {
-        btn.add_css_class(CSS_SUGGESTED_ACTION);
-    } else {
-        icon.set_icon_name(Some("window-close-symbolic"));
-        label.set_text(&crate::tr!("Stop"));
-    }
+    set_running_state(&icon, &label, &btn, is_running);
 
     let icon_click = icon;
     let label_click = label;
     let st = state.clone();
     let sender_c = sender.clone();
     btn.connect_clicked(move |btn| {
-        let is_running = is_game_running(&st, db_id);
-        if is_running {
-            stop_game(&st, db_id);
-            set_running_state(&icon_click, &label_click, btn, false);
-        } else {
-            match launch_game(&st, db_id, None) {
-                Ok(true) => {
-                    set_running_state(&icon_click, &label_click, btn, true);
-                }
-                Ok(false) => {}
-                Err(e) => {
-                    eprintln!("Failed to launch game: {}", e);
-                    let _ = sender_c.send(AppMessage::AddGameError(e));
-                }
-            }
-        }
+        toggle_play_clicked(&st, db_id, None, &sender_c, &icon_click, &label_click, btn);
     });
 
     btn.upcast()
@@ -777,26 +794,14 @@ fn build_disc_play_button(
     let split = adw::SplitButton::new();
 
     let hbox = build_play_btn_hbox();
-    let icon = hbox
-        .first_child()
-        .and_then(|c| c.downcast::<gtk4::Image>().ok())
-        .unwrap();
-    let label = hbox
-        .last_child()
-        .and_then(|c| c.downcast::<gtk4::Label>().ok())
-        .unwrap();
+    let (icon, label) = play_btn_icon_label(&hbox);
 
     split.set_child(Some(&hbox));
     split.set_height_request(PLAY_BTN_HEIGHT);
     split.set_valign(gtk4::Align::Center);
     split.set_dropdown_tooltip(&crate::tr!("Select disc"));
 
-    if !is_running {
-        split.add_css_class(CSS_SUGGESTED_ACTION);
-    } else {
-        icon.set_icon_name(Some("window-close-symbolic"));
-        label.set_text(&crate::tr!("Stop"));
-    }
+    set_running_state(&icon, &label, &split, is_running);
 
     let default_did = ira_db::get_default_disc(&state.borrow().db, db_id)
         .ok()
@@ -845,22 +850,15 @@ fn build_disc_play_button(
     let st_launch = state.clone();
     let sender_c = sender.clone();
     split.connect_clicked(move |btn| {
-        let is_running = is_game_running(&st_launch, db_id);
-        if is_running {
-            stop_game(&st_launch, db_id);
-            set_running_state(&icon_click, &label_click, btn, false);
-        } else {
-            match launch_game(&st_launch, db_id, None) {
-                Ok(true) => {
-                    set_running_state(&icon_click, &label_click, btn, true);
-                }
-                Ok(false) => {}
-                Err(e) => {
-                    eprintln!("Failed to launch game: {}", e);
-                    let _ = sender_c.send(AppMessage::AddGameError(e));
-                }
-            }
-        }
+        toggle_play_clicked(
+            &st_launch,
+            db_id,
+            None,
+            &sender_c,
+            &icon_click,
+            &label_click,
+            btn,
+        );
     });
 
     split.upcast()
@@ -877,26 +875,14 @@ fn build_variant_play_button(
     let split = adw::SplitButton::new();
 
     let hbox = build_play_btn_hbox();
-    let icon = hbox
-        .first_child()
-        .and_then(|c| c.downcast::<gtk4::Image>().ok())
-        .unwrap();
-    let label = hbox
-        .last_child()
-        .and_then(|c| c.downcast::<gtk4::Label>().ok())
-        .unwrap();
+    let (icon, label) = play_btn_icon_label(&hbox);
 
     split.set_child(Some(&hbox));
     split.set_height_request(PLAY_BTN_HEIGHT);
     split.set_valign(gtk4::Align::Center);
     split.set_dropdown_tooltip(&crate::tr!("Select variant"));
 
-    if !is_running {
-        split.add_css_class(CSS_SUGGESTED_ACTION);
-    } else {
-        icon.set_icon_name(Some("window-close-symbolic"));
-        label.set_text(&crate::tr!("Stop"));
-    }
+    set_running_state(&icon, &label, &split, is_running);
 
     let default_vid = variant_id.or_else(|| {
         ira_db::get_default_variant(&state.borrow().db, db_id)
@@ -956,23 +942,16 @@ fn build_variant_play_button(
     let current_variant_launch = current_variant;
     let sender_c = sender.clone();
     split.connect_clicked(move |btn| {
-        let is_running = is_game_running(&st_launch, db_id);
-        if is_running {
-            stop_game(&st_launch, db_id);
-            set_running_state(&icon_click, &label_click, btn, false);
-        } else {
-            let vid = current_variant_launch.get();
-            match launch_game(&st_launch, db_id, vid) {
-                Ok(true) => {
-                    set_running_state(&icon_click, &label_click, btn, true);
-                }
-                Ok(false) => {}
-                Err(e) => {
-                    eprintln!("Failed to launch game: {}", e);
-                    let _ = sender_c.send(AppMessage::AddGameError(e));
-                }
-            }
-        }
+        let vid = current_variant_launch.get();
+        toggle_play_clicked(
+            &st_launch,
+            db_id,
+            vid,
+            &sender_c,
+            &icon_click,
+            &label_click,
+            btn,
+        );
     });
 
     split.upcast()

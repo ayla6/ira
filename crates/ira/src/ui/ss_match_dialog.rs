@@ -9,6 +9,12 @@ use std::sync::mpsc;
 use super::css::*;
 use super::helpers::{clear_children, poll_channel, replace_row_actions, status_row};
 use super::rom_name::pick_search_name;
+use super::state::SharedState;
+use super::steam_search_dialog::{
+    build_search_dialog, match_result_row, status_label, SearchDialogWidgets,
+};
+use ira_api::screenscraper::ScrapedGame;
+use ira_api::ScraperCreds;
 
 /// The `system:` prefix on a manual search term: "system:n64 Mario 64"
 /// scopes the query to a console, by platform key or raw ScreenScraper
@@ -31,13 +37,6 @@ fn split_system_prefix(term: &str) -> (Option<u32>, String) {
         None => (None, term.to_string()),
     }
 }
-use super::steam_search_dialog::{
-    build_search_dialog, match_result_row, status_label, SearchDialogWidgets,
-};
-use super::state::SharedState;
-use ira_api::screenscraper::ScrapedGame;
-use ira_api::ScraperCreds;
-
 /// Where a picked match lands. The game settings' dialog stages the pick
 /// onto its draft — nothing is written until Save, and the closure is the
 /// scraper section's own staging step — while the batch matchers (mass
@@ -137,15 +136,13 @@ fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
 /// Whether the row's current title is already authoritative: edited by the
 /// user, from an RA match, or from an official console header.
 pub(super) fn entry_title_trusted(state: &SharedState, db_id: i64) -> Option<bool> {
-    Some(
-        ira_db::find_by_db_id(&state.borrow().db, db_id)
-            .ok()
-            .flatten()?
-            .title_trusted
-            || ira_models::title_from_trusted_source(
-                &state.borrow().games.iter().find(|g| g.db_id == db_id)?.platform_id,
-            ),
-    )
+    let s = state.borrow();
+    let db_title_trusted = ira_db::find_by_db_id(&s.db, db_id)
+        .ok()
+        .flatten()?
+        .title_trusted;
+    let platform_id = &s.games.iter().find(|g| g.db_id == db_id)?.platform_id;
+    Some(db_title_trusted || ira_models::title_from_trusted_source(platform_id))
 }
 
 fn apply_ss_match(
@@ -247,8 +244,8 @@ pub fn show_ss_search_dialog(
     // disabled ScreenScraper means no requests at all, manual included.
     let disabled = !state.borrow().cfg.screenscraper_enabled;
     // Say which console the search is scoped to.
-    let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten();
-    let console = match &entry {
+    let db_entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten();
+    let console = match &db_entry {
         Some(entry) if entry.kind.is_pc() => crate::tr!("PC"),
         _ => ira_models::find_console(platform_id)
             .map(|def| def.display_name.to_string())

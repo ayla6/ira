@@ -97,11 +97,11 @@ fn build_header_stats(game: &Game, fraction: f64, state: &SharedState) -> gtk4::
     let history_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 24);
     history_box.set_valign(gtk4::Align::Center);
     history_box.append(&stat_label(
-        "Last played",
+        &crate::tr!("Last played"),
         &format_last_played(game.last_played),
     ));
     let pt_box = stat_label(
-        "Play time",
+        &crate::tr!("Play time"),
         &format_playtime(super::helpers::display_playtime(state, game)),
     );
     history_box.append(&pt_box);
@@ -388,6 +388,19 @@ fn build_hero_overlay(
     base.set_hexpand(true);
     overlay.set_child(Some(&base));
 
+    overlay.add_overlay(&make_hero_picture(hero_path, has_hero));
+
+    if has_logo && !game.logo_path.is_empty() {
+        overlay.add_overlay(&make_logo_layer(game));
+    } else if !has_logo {
+        overlay.add_overlay(&make_hero_title(game));
+    }
+
+    overlay.add_overlay(&make_size_monitor(&overlay));
+    overlay
+}
+
+fn make_hero_picture(hero_path: &str, has_hero: bool) -> gtk4::Picture {
     let hero = gtk4::Picture::new();
     if !hero_path.is_empty() {
         ira_images::load_texture_async_with_priority(hero_path, glib::Priority::HIGH, {
@@ -405,91 +418,102 @@ fn build_hero_overlay(
     hero.set_vexpand(true);
     hero.set_content_fit(gtk4::ContentFit::Cover);
     if !has_hero {
-        hero.add_css_class("hero-fallback-bg");
+        hero.add_css_class(CSS_HERO_FALLBACK_BG);
     }
-    overlay.add_overlay(&hero);
+    hero
+}
 
-    if has_logo && !game.logo_path.is_empty() {
-        let logo_pct = game.logo_size.clamp(5, 100);
-        let logo_pos = game.logo_position.clone();
+fn make_logo_layer(game: &Game) -> gtk4::DrawingArea {
+    let logo_pct = game.logo_size.clamp(5, 100);
+    let logo_pos = game.logo_position.clone();
+    let logo_area = gtk4::DrawingArea::new();
+    logo_area.set_halign(gtk4::Align::Fill);
+    logo_area.set_valign(gtk4::Align::Fill);
+    logo_area.set_hexpand(true);
+    logo_area.set_vexpand(true);
 
-        let logo_area = gtk4::DrawingArea::new();
-        logo_area.set_halign(gtk4::Align::Fill);
-        logo_area.set_valign(gtk4::Align::Fill);
-        logo_area.set_hexpand(true);
-        logo_area.set_vexpand(true);
-
-        let pixbuf_cell: Rc<RefCell<Option<Pixbuf>>> = Rc::new(RefCell::new(None));
-        {
-            let pixbuf_cell = pixbuf_cell.clone();
-            let logo_weak = logo_area.downgrade();
-            ira_images::pixbuf_for_async(game.logo_path.clone(), move |pixbuf| {
-                if let Some(pb) = pixbuf {
-                    *pixbuf_cell.borrow_mut() = Some(pb);
-                    if let Some(area) = logo_weak.upgrade() {
-                        area.queue_draw();
-                    }
-                }
-            });
-        }
-
-        logo_area.set_draw_func(move |_area, cr, area_w, area_h| {
-            let Some(ref pixbuf) = *pixbuf_cell.borrow() else {
-                return;
-            };
-            let pb_w = pixbuf.width() as f64;
-            let pb_h = pixbuf.height() as f64;
-
-            let w = area_w as f64;
-            let h = area_h as f64;
-            if w <= 0.0 || h <= 0.0 {
-                return;
-            }
-
-            let (halign, valign) = logo_position_align(&logo_pos);
-            let (x, y, lw, lh) = logo_rect(w, h, pb_w, pb_h, logo_pct, halign, valign);
-
-            let _ = cr.save();
-            cr.translate(x, y);
-            cr.scale(lw / pb_w, lh / pb_h);
-            cr.set_source_pixbuf(pixbuf, 0.0, 0.0);
-            let _ = cr.paint();
-            let _ = cr.restore();
-        });
-
-        overlay.add_overlay(&logo_area);
-    } else if !has_logo {
-        let title_label = gtk4::Label::new(Some(&game.name));
-        title_label.set_xalign(0.0);
-        title_label.set_valign(gtk4::Align::Center);
-        title_label.set_halign(gtk4::Align::Start);
-        title_label.set_margin_start(24);
-        title_label.set_margin_end(24);
-        title_label.add_css_class("hero-title-overlay");
-        overlay.add_overlay(&title_label);
-    }
-
+    let pixbuf_cell: Rc<RefCell<Option<Pixbuf>>> = Rc::new(RefCell::new(None));
     {
-        let overlay_weak = overlay.downgrade();
-        let size_monitor = gtk4::DrawingArea::new();
-        size_monitor.set_halign(gtk4::Align::Fill);
-        size_monitor.set_valign(gtk4::Align::Fill);
-        size_monitor.set_hexpand(true);
-        size_monitor.set_vexpand(true);
-        size_monitor.set_draw_func(move |_area, _cr, w, _h| {
-            if w > 0 {
-                if let Some(overlay) = overlay_weak.upgrade() {
-                    let target = ((w as f64) / HERO_ASPECT_RATIO).max(150.0) as i32;
-                    if overlay.height_request() != target {
-                        overlay.set_height_request(target);
-                    }
+        let pixbuf_cell = pixbuf_cell.clone();
+        let logo_weak = logo_area.downgrade();
+        ira_images::pixbuf_for_async(game.logo_path.clone(), move |pixbuf| {
+            if let Some(pb) = pixbuf {
+                *pixbuf_cell.borrow_mut() = Some(pb);
+                if let Some(area) = logo_weak.upgrade() {
+                    area.queue_draw();
                 }
             }
         });
-        overlay.add_overlay(&size_monitor);
     }
 
-    overlay
+    logo_area.set_draw_func(move |_area, cr, area_w, area_h| {
+        draw_game_logo(cr, area_w, area_h, &pixbuf_cell, &logo_pos, logo_pct);
+    });
+    logo_area
+}
+
+fn draw_game_logo(
+    cr: &gtk4::cairo::Context,
+    area_w: i32,
+    area_h: i32,
+    pixbuf_cell: &Rc<RefCell<Option<Pixbuf>>>,
+    logo_pos: &str,
+    logo_pct: i32,
+) {
+    let Some(ref pixbuf) = *pixbuf_cell.borrow() else {
+        return;
+    };
+    let (w, h) = (area_w as f64, area_h as f64);
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let (halign, valign) = logo_position_align(logo_pos);
+    let (x, y, lw, lh) = logo_rect(
+        w,
+        h,
+        pixbuf.width() as f64,
+        pixbuf.height() as f64,
+        logo_pct,
+        halign,
+        valign,
+    );
+    let _ = cr.save();
+    cr.translate(x, y);
+    cr.scale(lw / pixbuf.width() as f64, lh / pixbuf.height() as f64);
+    cr.set_source_pixbuf(pixbuf, 0.0, 0.0);
+    let _ = cr.paint();
+    let _ = cr.restore();
+}
+
+fn make_hero_title(game: &Game) -> gtk4::Label {
+    let title_label = gtk4::Label::new(Some(&game.name));
+    title_label.set_xalign(0.0);
+    title_label.set_valign(gtk4::Align::Center);
+    title_label.set_halign(gtk4::Align::Start);
+    title_label.set_margin_start(24);
+    title_label.set_margin_end(24);
+    title_label.add_css_class(CSS_HERO_TITLE_OVERLAY);
+    title_label
+}
+
+fn make_size_monitor(overlay: &gtk4::Overlay) -> gtk4::DrawingArea {
+    let overlay_weak = overlay.downgrade();
+    let size_monitor = gtk4::DrawingArea::new();
+    size_monitor.set_halign(gtk4::Align::Fill);
+    size_monitor.set_valign(gtk4::Align::Fill);
+    size_monitor.set_hexpand(true);
+    size_monitor.set_vexpand(true);
+    size_monitor.set_draw_func(move |_area, _cr, w, _h| {
+        if w > 0 {
+            if let Some(overlay) = overlay_weak.upgrade() {
+                let target = ((w as f64) / HERO_ASPECT_RATIO).max(150.0) as i32;
+                if overlay.height_request() != target {
+                    overlay.set_height_request(target);
+                }
+            }
+        }
+    });
+    size_monitor
 }
 
 fn stat_label(caption: &str, value: &str) -> gtk4::Box {

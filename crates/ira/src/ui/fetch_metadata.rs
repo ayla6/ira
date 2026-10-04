@@ -16,18 +16,38 @@ use std::sync::Arc;
 use super::mass_match_ss::{RefetchOutcome, RefetchProgress};
 use super::state::SharedState;
 
+/// The ScreenScraper-pass gate: no other SS job running and credentials
+/// configured. Shared by the metadata and full refetches — both ride the
+/// same quota.
+fn ss_refetch_allowed(state: &SharedState) -> bool {
+    let s = state.borrow();
+    !s.ss_job_busy.get() && s.cfg.screenscraper_enabled && !s.cfg.screenscraper_id.is_empty()
+}
+
+/// The worker half of an SS job: client, credentials and DB handle.
+fn ss_worker_parts(
+    state: &SharedState,
+) -> (
+    std::sync::Arc<ira_api::SteamDataClient>,
+    ira_api::ScraperCreds,
+    ira_db::DbConn,
+) {
+    let s = state.borrow();
+    (
+        s.steam.clone(),
+        ira_api::ScraperCreds::from_account(
+            s.cfg.screenscraper_id.clone(),
+            s.cfg.screenscraper_password.clone(),
+        ),
+        s.db.clone(),
+    )
+}
+
 /// Start refetching missing metadata for every matched game with holes in
 /// its record, revealing the sidebar strip. `false` when a ScreenScraper
 /// job or a strip job is already running, or nothing has gaps.
 pub fn start_metadata_refetch(state: &SharedState, force: bool) -> bool {
-    let (busy, allowed) = {
-        let s = state.borrow();
-        (
-            s.ss_job_busy.get(),
-            s.cfg.screenscraper_enabled && !s.cfg.screenscraper_id.is_empty(),
-        )
-    };
-    if busy || !allowed {
+    if !ss_refetch_allowed(state) {
         return false;
     }
     let queue = super::mass_match_ss::refetch_queue(state, force);
@@ -43,17 +63,7 @@ pub fn start_metadata_refetch(state: &SharedState, force: bool) -> bool {
     };
     state.borrow().ss_job_busy.set(true);
 
-    let (steam, creds, db) = {
-        let s = state.borrow();
-        (
-            s.steam.clone(),
-            ira_api::ScraperCreds::from_account(
-                s.cfg.screenscraper_id.clone(),
-                s.cfg.screenscraper_password.clone(),
-            ),
-            s.db.clone(),
-        )
-    };
+    let (steam, creds, db) = ss_worker_parts(state);
     let cancel = job.cancel_flag();
     let rx = super::mass_match_ss::spawn_refetch_worker(queue, steam, creds, db, Some(cancel));
     let state = state.clone();
@@ -307,7 +317,8 @@ pub(crate) fn garnish_steam_link(
 /// date, the store page's parsed date fills in when it has none — and
 /// an epoch date an old bug wrote counts as missing, so refetches
 /// repair it.
-pub(crate) fn steam_refetch_one(    steam: &ira_api::SteamDataClient,
+pub(crate) fn steam_refetch_one(
+    steam: &ira_api::SteamDataClient,
     db: &ira_db::DbConn,
     db_id: i64,
 ) -> RefetchOutcome {
@@ -429,14 +440,7 @@ pub(crate) fn steam_refetch_one(    steam: &ira_api::SteamDataClient,
 /// then the paced ScreenScraper pass. One strip job covers both, so
 /// "everything" really is one click.
 pub fn start_full_refetch(state: &SharedState, force: bool) -> bool {
-    let (busy, allowed) = {
-        let s = state.borrow();
-        (
-            s.ss_job_busy.get(),
-            s.cfg.screenscraper_enabled && !s.cfg.screenscraper_id.is_empty(),
-        )
-    };
-    if busy || !allowed {
+    if !ss_refetch_allowed(state) {
         return false;
     }
     let ss_queue = super::mass_match_ss::refetch_queue(state, force);
@@ -458,17 +462,7 @@ pub fn start_full_refetch(state: &SharedState, force: bool) -> bool {
     };
     state.borrow().ss_job_busy.set(true);
 
-    let (steam, creds, db) = {
-        let s = state.borrow();
-        (
-            s.steam.clone(),
-            ira_api::ScraperCreds::from_account(
-                s.cfg.screenscraper_id.clone(),
-                s.cfg.screenscraper_password.clone(),
-            ),
-            s.db.clone(),
-        )
-    };
+    let (steam, creds, db) = ss_worker_parts(state);
     let cancel = job.cancel_flag();
     let jobs: Vec<(Source, i64)> = steam_queue
         .into_iter()

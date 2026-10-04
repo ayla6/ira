@@ -4,6 +4,7 @@
 //! shared store keyed by vendor:product, not in any profile — one
 //! calibration serves every profile played with that pad.
 
+use super::css::CSS_DIM_LABEL;
 use super::input_calibration_dialog::show_input_calibration_dialog;
 use super::input_profile_widgets::{slider_row_with_scale, SliderSpec};
 use adw::prelude::*;
@@ -148,7 +149,7 @@ fn add_gyro_rows(
     ));
     let bias_label = gtk4::Label::new(None);
     bias_label.set_xalign(1.0);
-    bias_label.add_css_class("dim-label");
+    bias_label.add_css_class(CSS_DIM_LABEL);
     bias_label.set_text(
         &ira_input::load_calibration(store_path, device.vendor, device.product)
             .map(format_calibration)
@@ -360,8 +361,8 @@ fn deadzone_of(store_path: &Path, device: &DeviceInfo, tab: StickTab) -> f32 {
 }
 
 fn format_calibration(calibration: ControllerCalibration) -> String {
-    format!(
-        "X {:.3}  Y {:.3}  Z {:.3}",
-        calibration.x, calibration.y, calibration.z
-    )
+    crate::tr!("X {x}  Y {y}  Z {z}")
+        .replace("{x}", &format!("{:.3}", calibration.x))
+        .replace("{y}", &format!("{:.3}", calibration.y))
+        .replace("{z}", &format!("{:.3}", calibration.z))
 }

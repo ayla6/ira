@@ -47,6 +47,10 @@ pub(super) struct GroupsGrid {
     /// memory id. Selection resolves through this, so display orderings
     /// (by size) can never desync which group a tile opens.
     order: RefCell<Vec<Option<i64>>>,
+    /// The running scroll glide, shared with the everything grid:
+    /// discrete presses ease, held repeats snap so the camera never
+    /// trails the selection.
+    scroll_glide: super::scroll_glide::ScrollGlide,
 }
 
 impl GroupsGrid {
@@ -113,6 +117,7 @@ impl GroupsGrid {
             tile: Cell::new(0),
             slots: RefCell::new(Vec::new()),
             order: RefCell::new(Vec::new()),
+            scroll_glide: super::scroll_glide::ScrollGlide::new(),
         };
         grid.reload(state);
         grid
@@ -161,6 +166,11 @@ impl GroupsGrid {
     /// callbacks that may execute under an outstanding shared borrow, so
     /// it must never take the state mutably here.
     pub(super) fn reload(&self, state: &SharedState) {
+        // Forget the previous tile size first: building from a stale
+        // size while the flow is narrower measures oversized children
+        // (layout warnings) and paints wrong geometry until a later
+        // pass corrects it. Fresh size or the small fallback below.
+        self.tile.set(0);
         self.ensure_sized();
         let (groups, autos, members, db, show_hidden, order) = {
             let s = state.borrow();
@@ -476,7 +486,14 @@ impl GroupsGrid {
         } else {
             return;
         };
-        adj.set_value(target.max(0.0));
+        self.scroll_glide
+            .animate_to(&self.scrolled, &adj, target.max(0.0));
+    }
+
+    /// End any scroll glide, leaving the value where it is. Tab
+    /// switches land both scrolled surfaces before sliding.
+    pub(super) fn finish_scroll(&self) {
+        self.scroll_glide.finish();
     }
 
     /// Keep the selection within the tiles after the groups change.
@@ -485,5 +502,77 @@ impl GroupsGrid {
         if self.selection.get() > max {
             self.selection.set(max);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Faithful replica of the tile shell + collage: measures what the
+    /// FlowBox sees when tiles are built oversized for its columns.
+    fn measure_tile(tile: i32, for_width: i32) -> (i32, i32) {
+        let tile_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+        tile_box.set_halign(gtk4::Align::Center);
+        let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+        slot.set_size_request(tile, tile);
+        tile_box.append(&slot);
+        let collage = gtk4::Grid::new();
+        collage.set_row_homogeneous(true);
+        collage.set_column_homogeneous(true);
+        for i in 0..4 {
+            let pic = gtk4::Picture::new();
+            pic.set_content_fit(gtk4::ContentFit::Cover);
+            pic.set_can_shrink(true);
+            pic.set_halign(gtk4::Align::Fill);
+            pic.set_valign(gtk4::Align::Fill);
+            collage.attach(&pic, i % 2, i / 2, 1, 1);
+        }
+        slot.append(&collage);
+        let name = gtk4::Label::new(Some("PlayStation 2"));
+        tile_box.append(&name);
+        let (min_h, _nat_h, _, _) = tile_box.measure(gtk4::Orientation::Vertical, for_width);
+        let (min_w, _nat_w, _, _) = tile_box.measure(gtk4::Orientation::Horizontal, -1);
+        (min_w, min_h)
+    }
+
+    #[test]
+    fn test_tile_measure_matches_flow_columns() {
+        let _ = gtk4::init();
+        if !gtk4::is_initialized() {
+            return;
+        }
+        // The production layout-warning filter must swallow REAL measure
+        // warnings: classic log handlers never see them (proven by the
+        // absence of any interception), only the structured writer does.
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let swallowed = Arc::new(AtomicBool::new(false));
+        let swallowed_clone = Arc::clone(&swallowed);
+        gtk4::glib::log_set_writer_func(move |level, fields| {
+            use gtk4::glib::{LogLevel, LogWriterOutput};
+            if level == LogLevel::Warning {
+                let mut message = None;
+                for field in fields {
+                    if field.key() == "MESSAGE" {
+                        message = field.value_str();
+                    }
+                }
+                if message.is_some_and(|m| m.contains("Trying to measure")) {
+                    swallowed_clone.store(true, Ordering::SeqCst);
+                    return LogWriterOutput::Handled;
+                }
+            }
+            LogWriterOutput::Unhandled
+        });
+        let (w, h) = measure_tile(360, 240);
+        eprintln!("360-tile measured at 240 wide: min {w}x{h}");
+        let (w2, h2) = measure_tile(240, 240);
+        eprintln!("240-tile measured at 240 wide: min {w2}x{h2}");
+        assert!(
+            swallowed.load(Ordering::SeqCst),
+            "writer func must observe the real measure warning"
+        );
+        assert!(h2 <= 268, "matching tile must fit its column, got {h2}");
     }
 }

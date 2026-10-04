@@ -215,8 +215,8 @@ fn build_filter_button(ctx: &SgdbPickerCtx, a: &SgdbAsset) -> Option<gtk4::Butto
         btn.set_tooltip_text(Some(&crate::tr!("Hide art by this author")));
         btn
     };
-    btn.add_css_class("flat");
-    btn.add_css_class("sgdb-filter");
+    btn.add_css_class(CSS_FLAT);
+    btn.add_css_class(CSS_SGDB_FILTER);
     let ctx = ctx.clone();
     let author = a.author.clone();
     let steam64 = a.author_steam64.clone();
@@ -232,7 +232,7 @@ fn find_filter_button(widget: &gtk4::Widget) -> Option<gtk4::Button> {
     while let Some(c) = child {
         child = c.next_sibling();
         if let Some(btn) = c.downcast_ref::<gtk4::Button>() {
-            if btn.has_css_class("sgdb-filter") {
+            if btn.has_css_class(CSS_SGDB_FILTER) {
                 return Some(btn.clone());
             }
         }
@@ -260,13 +260,13 @@ fn attach_hover_reveal<T: IsA<gtk4::Widget>, U: IsA<gtk4::Widget>>(
         let target = target.clone();
         move |_, _, _| {
             if let Some(t) = target.upgrade() {
-                t.add_css_class("sgdb-reveal");
+                t.add_css_class(CSS_SGDB_REVEAL);
             }
         }
     });
     ctrl.connect_leave(move |_| {
         if let Some(t) = target.upgrade() {
-            t.remove_css_class("sgdb-reveal");
+            t.remove_css_class(CSS_SGDB_REVEAL);
         }
     });
     area.add_controller(ctrl);
@@ -347,6 +347,25 @@ impl SgdbPickerCtx {
         }
     }
 
+    /// Run `f` over every card and row tag belonging to `author`, in
+    /// place — no rebuild, so loaded thumbnails and the scroll position
+    /// stay untouched. Shared by the filter and unfilter halves.
+    fn for_each_author_card(&self, author: &str, mut f: impl FnMut(&gtk4::Widget)) {
+        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
+        else {
+            return;
+        };
+        for container in [&flow.upcast::<gtk4::Widget>(), &list_view.upcast()] {
+            let mut child = container.first_child();
+            while let Some(w) = child {
+                child = w.next_sibling();
+                if tag_author(&w.widget_name()) == author {
+                    f(&w);
+                }
+            }
+        }
+    }
+
     /// Dim one author's art in place: persist the choice, then dim
     /// exactly that author's cards and rows where they stand and flip
     /// their eye buttons to the unfilter state — no rebuild, no reorder,
@@ -357,24 +376,7 @@ impl SgdbPickerCtx {
         if let Some(persist) = &self.filter_user {
             persist(author.to_string(), steam64.to_string());
         }
-        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
-        else {
-            return;
-        };
-        let mut child = flow.first_child();
-        while let Some(w) = child {
-            child = w.next_sibling();
-            if tag_author(&w.widget_name()) == author {
-                self.dim_card(&w);
-            }
-        }
-        let mut child = list_view.first_child();
-        while let Some(w) = child {
-            child = w.next_sibling();
-            if tag_author(&w.widget_name()) == author {
-                self.dim_card(&w);
-            }
-        }
+        self.for_each_author_card(author, |w| self.dim_card(w));
     }
 
     /// Dim one card-or-row and flip its eye button to the unfilter
@@ -396,24 +398,7 @@ impl SgdbPickerCtx {
         if let Some(persist) = &self.unfilter_user {
             persist(author.to_string());
         }
-        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
-        else {
-            return;
-        };
-        let mut child = flow.first_child();
-        while let Some(w) = child {
-            child = w.next_sibling();
-            if tag_author(&w.widget_name()) == author {
-                self.undim_card(&w);
-            }
-        }
-        let mut child = list_view.first_child();
-        while let Some(w) = child {
-            child = w.next_sibling();
-            if tag_author(&w.widget_name()) == author {
-                self.undim_card(&w);
-            }
-        }
+        self.for_each_author_card(author, |w| self.undim_card(w));
     }
 
     /// Drop one card-or-row's dim when its style is no longer filtered and

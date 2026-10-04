@@ -100,3 +100,49 @@ fn test_parse_trop_xml_with_attributes() {
     assert!(unlocks.get("2").unwrap().0);
     assert_eq!(unlocks.get("2").unwrap().1, 1000000001);
 }
+
+#[test]
+fn test_load_ps4_trophies_empty_id() {
+    // Arrange: no NPWR id
+    // Act
+    let ach = ps4::load_ps4_trophies("");
+    // Assert
+    assert!(ach.is_empty());
+}
+
+#[test]
+fn test_load_ps4_trophies_missing_user_dir() {
+    // Arrange: user dir without trophy data (e.g. never launched there)
+    let tmp = tempfile::tempdir().unwrap();
+    // Act
+    let ach = ps4::load_ps4_trophies_in("NPWR00000_00", tmp.path());
+    // Assert: silent empty, no panic
+    assert!(ach.is_empty());
+}
+
+#[test]
+fn test_load_ps4_trophies_reads_defs_and_states() {
+    // Arrange: minimal shadPS4 user dir with one earned + one locked trophy
+    let tmp = tempfile::tempdir().unwrap();
+    let trophy_dir = tmp.path().join("trophy").join("NPWR00000_00");
+    std::fs::create_dir_all(trophy_dir.join("Xml")).unwrap();
+    std::fs::create_dir_all(trophy_dir.join("Icons")).unwrap();
+    std::fs::write(
+        trophy_dir.join("Xml").join("TROP.XML"),
+        "<?xml version=\"1.0\"?>\n<trophyconf>\n    <trophy id=\"0\" ttype=\"G\" hidden=\"no\">\n        <name>Gold</name>\n        <detail>Shiny</detail>\n    </trophy>\n    <trophy id=\"1\" ttype=\"B\" hidden=\"no\">\n        <name>Bronze</name>\n        <detail>Dull</detail>\n    </trophy>\n</trophyconf>",
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("home").join("1000").join("trophy")).unwrap();
+    std::fs::write(
+        tmp.path().join("home").join("1000").join("trophy").join("NPWR00000_00.xml"),
+        "<?xml version=\"1.0\"?>\n<trophies>\n    <trophy id=\"0\" unlockstate=\"true\" timestamp=\"100\"></trophy>\n</trophies>",
+    )
+    .unwrap();
+    // Act
+    let ach = ps4::load_ps4_trophies_in("NPWR00000_00", tmp.path());
+    // Assert
+    assert_eq!(ach.len(), 2);
+    assert!(ach[0].earned);
+    assert_eq!(ach[0].earned_time, 100);
+    assert!(!ach[1].earned);
+}

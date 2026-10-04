@@ -201,7 +201,7 @@ fn build_game_folder_row(
     row.set_text(&game.game_folder);
     let browse = super::helpers::make_browse_button(
         Some(win),
-        "Select game folder",
+        &crate::tr!("Select game folder"),
         true,
         None,
         super::helpers::entry_path_closure(&row),
@@ -581,12 +581,18 @@ fn build_language_section(
     ));
     row.set_model(Some(&model));
 
-    let save_dir = state.borrow().save_dir.clone();
-    let game_exe = {
-        let config = ira_db::get_game_config(&state.borrow().db, game.db_id)
+    let (save_dir, game_exe, language_preferences) = {
+        let s = state.borrow();
+        let exe = ira_db::get_game_config(&s.db, game.db_id)
             .ok()
-            .flatten();
-        config.map(|(l, _, _)| l.exe).unwrap_or_default()
+            .flatten()
+            .map(|(l, _, _)| l.exe)
+            .unwrap_or_default();
+        (
+            s.save_dir.clone(),
+            exe,
+            s.cfg.language_preferences.clone(),
+        )
     };
     let current_lang = ira_platforms::api_emulators::read_current_language(
         game.trophy_source,
@@ -598,8 +604,7 @@ fn build_language_section(
         .as_ref()
         .and_then(|lang| languages.iter().position(|l| l == lang))
         .or_else(|| {
-            let prefs = &state.borrow().cfg.language_preferences;
-            prefs
+            language_preferences
                 .iter()
                 .find_map(|p| languages.iter().position(|l| l == p))
         })

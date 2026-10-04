@@ -23,6 +23,14 @@ pub struct GameListProgress {
     pub total: usize,
 }
 
+/// Progress sink shared by every source scan in one list build.
+type ProgressCallback = Arc<dyn Fn(GameListProgress) + Send + Sync>;
+/// Steam discovery results: found games plus cached playtimes by app id.
+type SteamDiscovery = (
+    Vec<steam::SteamGame>,
+    std::collections::HashMap<String, (f64, i64)>,
+);
+
 #[derive(Clone)]
 struct ProgressReporter {
     inner: Arc<ReporterInner>,
@@ -32,7 +40,7 @@ struct ProgressReporter {
 }
 
 struct ReporterInner {
-    callback: Arc<dyn Fn(GameListProgress) + Send + Sync>,
+    callback: ProgressCallback,
     total: usize,
     completed: AtomicUsize,
     /// One entry per source in spawn order. Sources run concurrently, so a
@@ -48,7 +56,7 @@ struct SourceProgress {
 }
 
 impl ProgressReporter {
-    fn new(callback: Arc<dyn Fn(GameListProgress) + Send + Sync>, total: usize) -> Self {
+    fn new(callback: ProgressCallback, total: usize) -> Self {
         Self {
             inner: Arc::new(ReporterInner {
                 callback,
@@ -234,7 +242,7 @@ fn start_game_list_load_with_mode(
     };
     std::thread::spawn(move || {
         let progress_sender = sender.clone();
-        let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
+        let progress: ProgressCallback = Arc::new(move |update| {
             let _ = progress_sender.send(ira_models::AppMessage::GamesLoadProgress {
                 status: update.status,
                 completed: update.completed,
@@ -261,51 +269,17 @@ pub fn build_game_list(
     let cfg = cfg.clone();
     let sort_mode = options.sort_mode;
     let sort_descending = options.sort_descending;
-    let total_sources = 1
-        + usize::from(options.steam_enabled)
-        + usize::from(options.shadps4_enabled)
-        + usize::from(options.rpcs3_enabled)
-        + usize::from(options.vita3k_enabled)
-        + usize::from(options.cemu_enabled)
-        + usize::from(options.azahar_enabled)
-        + usize::from(options.switch_installed_enabled)
-        + usize::from(options.rom_scan_enabled);
-    let reporter = ProgressReporter::new(progress, total_sources);
+    let reporter = ProgressReporter::new(progress, count_sources(options));
     reporter.status(crate::tr!("Preparing game library…"));
 
     std::thread::scope(|s| {
         let steam_discovery = if options.steam_enabled {
-            let db = db.clone();
-            let reporter = reporter.for_source(crate::tr!("Scanning Steam games…"));
-            Some(s.spawn(move || {
-                let _s = tracing::info_span!("steam_discover").entered();
-                reporter.status(crate::tr!("Scanning Steam games…"));
-                let steam_games = steam::discover_games();
-                if !steam_games.is_empty() {
-                    cleanup_steam_entries(&db, &steam_games);
-                }
-                let steam_playtimes = steam::read_all_playtimes();
-                reporter.finish(crate::tr!("Loaded Steam games"));
-                (steam_games, steam_playtimes)
-            }))
+            spawn_steam_discovery(s, &db, &reporter)
         } else {
             None
         };
 
-        let db_native = db.clone();
-        let save_dir_native = save_dir.clone();
-        let native_reporter = reporter.for_source(crate::tr!("Loading saved games…"));
-        let native_handle = s.spawn(move || {
-            let _s = tracing::info_span!("load_games_from_db").entered();
-            native_reporter.status(crate::tr!("Loading saved games…"));
-            // The DB load is the floor of the list: it holds every row no
-            // enabled scan re-discovers (a disabled source has no scan at
-            // all), and rescans re-discover the rest. Source appends must
-            // therefore replace, not add.
-            let games = game_loader::load_saved_games(&db_native, &save_dir_native);
-            native_reporter.finish(crate::tr!("Loaded saved games"));
-            games
-        });
+        let native_handle = spawn_native_load(s, &db, &save_dir, &reporter);
 
         let ps4_handle = spawn_source_scan(
             s,
@@ -399,24 +373,7 @@ pub fn build_game_list(
         );
 
         let ra_handle = if options.rom_scan_enabled {
-            let db_ra = db.clone();
-            let save_dir_ra = save_dir.clone();
-            let cfg_ra = cfg.clone();
-            let reporter = reporter.for_source(crate::tr!("Scanning ROM library…"));
-            Some(s.spawn(move || {
-                let _s = tracing::info_span!("build_ra_games").entered();
-                reporter.status(crate::tr!("Scanning ROM library…"));
-                let status_reporter = reporter.clone();
-                let games = retroachievements::build_ra_games(
-                    &db_ra,
-                    &save_dir_ra,
-                    &cfg_ra,
-                    game_loader::load_game_fast,
-                    move |status| status_reporter.status(status),
-                );
-                reporter.finish(crate::tr!("Loaded ROM library"));
-                games
-            }))
+            spawn_rom_scan(s, &db, &save_dir, &cfg, &reporter)
         } else {
             None
         };
@@ -447,41 +404,132 @@ pub fn build_game_list(
         // Drain every source in declaration order so the pre-sort entry
         // order stays stable across runs; Steam was materialized earlier
         // and lands between the emulator scans and the ROM library.
-        for source in [
-            PendingSource::Thread("PS4", ps4_handle),
-            PendingSource::Thread("PS3", ps3_handle),
-            PendingSource::Thread("Vita3K", vita3k_handle),
-            PendingSource::Thread("Cemu", cemu_handle),
-            PendingSource::Thread("Azahar", azahar_handle),
-            PendingSource::Thread("Switch", switch_installed_handle),
-            PendingSource::Ready(steam_games),
-            PendingSource::Thread("RA", ra_handle),
-        ] {
-            match source {
-                PendingSource::Ready(source_games) => {
-                    append_source_games(&mut games, source_games);
-                }
-                PendingSource::Thread(name, handle) => {
-                    let Some(handle) = handle else { continue };
-                    match handle.join() {
-                        Ok(source_games) => append_source_games(&mut games, source_games),
-                        Err(_) => eprintln!("{name} games thread panicked"),
-                    }
-                }
-            }
-        }
+        drain_pending_sources(
+            &mut games,
+            [
+                PendingSource::Thread("PS4", ps4_handle),
+                PendingSource::Thread("PS3", ps3_handle),
+                PendingSource::Thread("Vita3K", vita3k_handle),
+                PendingSource::Thread("Cemu", cemu_handle),
+                PendingSource::Thread("Azahar", azahar_handle),
+                PendingSource::Thread("Switch", switch_installed_handle),
+                PendingSource::Ready(steam_games),
+                PendingSource::Thread("RA", ra_handle),
+            ],
+        );
 
-        games.sort_by(|a, b| {
-            let ord = sort_mode.compare(a, b);
-            if sort_descending {
-                ord.reverse()
-            } else {
-                ord
-            }
-        });
+        sort_games(&mut games, sort_mode, sort_descending);
 
         games
     })
+}
+
+/// How many progress-reporting sources a run has: the saved-games load plus
+/// one per enabled scan. Kept next to the spawn sites so the count stays in
+/// sync when sources are added.
+fn count_sources(options: &GameListOptions) -> usize {
+    1 + usize::from(options.steam_enabled)
+        + usize::from(options.shadps4_enabled)
+        + usize::from(options.rpcs3_enabled)
+        + usize::from(options.vita3k_enabled)
+        + usize::from(options.cemu_enabled)
+        + usize::from(options.azahar_enabled)
+        + usize::from(options.switch_installed_enabled)
+        + usize::from(options.rom_scan_enabled)
+}
+
+/// Steam discovery plus stale-entry cleanup, off the UI thread like every
+/// other source scan.
+fn spawn_steam_discovery<'scope>(
+    s: &'scope std::thread::Scope<'scope, '_>,
+    db: &db::DbConn,
+    reporter: &ProgressReporter,
+) -> Option<std::thread::ScopedJoinHandle<'scope, SteamDiscovery>> {
+    let db = db.clone();
+    let reporter = reporter.for_source(crate::tr!("Scanning Steam games…"));
+    Some(s.spawn(move || {
+        let _s = tracing::info_span!("steam_discover").entered();
+        reporter.status(crate::tr!("Scanning Steam games…"));
+        let steam_games = steam::discover_games();
+        if !steam_games.is_empty() {
+            cleanup_steam_entries(&db, &steam_games);
+        }
+        let steam_playtimes = steam::read_all_playtimes();
+        reporter.finish(crate::tr!("Loaded Steam games"));
+        (steam_games, steam_playtimes)
+    }))
+}
+
+/// The DB load is the floor of the list: it holds every row no enabled scan
+/// re-discovers (a disabled source has no scan at all), and rescans
+/// re-discover the rest. Source appends must therefore replace, not add.
+fn spawn_native_load<'scope>(
+    s: &'scope std::thread::Scope<'scope, '_>,
+    db: &db::DbConn,
+    save_dir: &str,
+    reporter: &ProgressReporter,
+) -> std::thread::ScopedJoinHandle<'scope, Vec<Game>> {
+    let db = db.clone();
+    let save_dir = save_dir.to_string();
+    let reporter = reporter.for_source(crate::tr!("Loading saved games…"));
+    s.spawn(move || {
+        let _s = tracing::info_span!("load_games_from_db").entered();
+        reporter.status(crate::tr!("Loading saved games…"));
+        let games = game_loader::load_saved_games(&db, &save_dir);
+        reporter.finish(crate::tr!("Loaded saved games"));
+        games
+    })
+}
+
+fn spawn_rom_scan<'scope>(
+    s: &'scope std::thread::Scope<'scope, '_>,
+    db: &db::DbConn,
+    save_dir: &str,
+    cfg: &Config,
+    reporter: &ProgressReporter,
+) -> Option<std::thread::ScopedJoinHandle<'scope, Vec<Game>>> {
+    let db = db.clone();
+    let save_dir = save_dir.to_string();
+    let cfg = cfg.clone();
+    let reporter = reporter.for_source(crate::tr!("Scanning ROM library…"));
+    Some(s.spawn(move || {
+        let _s = tracing::info_span!("build_ra_games").entered();
+        reporter.status(crate::tr!("Scanning ROM library…"));
+        let status_reporter = reporter.clone();
+        let games = retroachievements::build_ra_games(
+            &db,
+            &save_dir,
+            &cfg,
+            game_loader::load_game_fast,
+            move |status| status_reporter.status(status),
+        );
+        reporter.finish(crate::tr!("Loaded ROM library"));
+        games
+    }))
+}
+
+fn drain_pending_sources(games: &mut Vec<Game>, sources: [PendingSource<'_>; 8]) {
+    for source in sources {
+        match source {
+            PendingSource::Ready(source_games) => {
+                append_source_games(games, source_games);
+            }
+            PendingSource::Thread(name, handle) => {
+                let Some(handle) = handle else { continue };
+                match handle.join() {
+                    Ok(source_games) => append_source_games(games, source_games),
+                    Err(_) => eprintln!("{name} games thread panicked"),
+                }
+            }
+        }
+    }
+}
+
+fn sort_games(games: &mut [Game], sort_mode: SortMode, sort_descending: bool) {
+    games.sort_by(|a, b| {
+        let ord = sort_mode.compare(a, b);
+        if sort_descending { ord.reverse() } else { ord }
+    });
 }
 
 /// Merge one scan source into the accumulated list. Replacement is
@@ -491,13 +539,19 @@ pub fn build_game_list(
 /// because it is fresher; variants (same db_id, different variant_id) stay
 /// separate entries and replaced entries keep their position.
 fn append_source_games(games: &mut Vec<Game>, discovered: Vec<Game>) {
+    // Index the accumulated list once: the merge is linear overall instead
+    // of a scan per discovered game.
+    let mut index: std::collections::HashMap<(i64, Option<i64>), usize> = games
+        .iter()
+        .enumerate()
+        .map(|(i, existing)| ((existing.db_id, existing.variant_id), i))
+        .collect();
     for game in discovered {
-        if let Some(existing) = games.iter_mut().find(|existing| {
-            existing.db_id == game.db_id && existing.variant_id == game.variant_id
-        }) {
-            *existing = game;
+        if let Some(&i) = index.get(&(game.db_id, game.variant_id)) {
+            games[i] = game;
             continue;
         }
+        index.insert((game.db_id, game.variant_id), games.len());
         games.push(game);
     }
 }
@@ -813,12 +867,12 @@ fn reconcile_console_presence(db: &db::DbConn, kind: GameKind, seen: &[(String, 
             return;
         }
     };
+    let seen: std::collections::HashSet<(&str, &str)> = seen
+        .iter()
+        .map(|(native_id, platform_id)| (native_id.as_str(), platform_id.as_str()))
+        .collect();
     for entry in entries.iter().filter(|entry| entry.kind == kind) {
-        let present = seen
-            .iter()
-            .any(|(native_id, platform_id)| {
-                entry.native_id == *native_id && entry.platform_id == *platform_id
-            });
+        let present = seen.contains(&(entry.native_id.as_str(), entry.platform_id.as_str()));
         if present == entry.vanished {
             if let Err(error) = db::set_game_vanished(db, entry.id, !present) {
                 eprintln!("Failed to mark {kind} game {}: {error}", entry.id);
@@ -865,6 +919,15 @@ fn build_rpcs3_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<G
     )
 }
 
+/// Re-read a console row right after its metadata was resolved, so later
+/// steps (location persistence, game build) see the current row.
+fn read_console_entry(db: &db::DbConn, db_id: i64) -> Option<GameEntry> {
+    db::find_by_db_id(db, db_id).unwrap_or_else(|e| {
+        eprintln!("Failed to read game {db_id}: {e}");
+        None
+    })
+}
+
 fn load_special_game(
     db: &db::DbConn,
     save_dir: &str,
@@ -875,11 +938,7 @@ fn load_special_game(
     icon_path: &std::path::Path,
 ) -> Option<Game> {
     let meta = find_or_create_console_entry(db, kind, "", game_id, title, false)?;
-    let entry = db::find_by_db_id(db, meta.db_id)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to read game {}: {e}", meta.db_id);
-            None
-        })?;
+    let entry = read_console_entry(db, meta.db_id)?;
     let mut game = match game_loader::load_game_fast(&entry, save_dir) {
         Ok(game) => game,
         Err(e) => {
@@ -943,6 +1002,12 @@ fn build_cemu_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Ga
         .collect()
 }
 
+/// True when the data dir already holds an icon: scan-time extraction
+/// must never replace downloaded or user-picked assets.
+fn icon_exists(data_dir: &std::path::Path) -> bool {
+    ira_parser::find_image_file(data_dir, ira_models::AssetType::Icon.file_base()).is_some()
+}
+
 /// Imports the title's iconTex.tga into `data/wiiu/{title_id}/` unless an
 /// icon is already present. Returns an empty path when unavailable.
 fn default_wiiu_icon(
@@ -951,7 +1016,7 @@ fn default_wiiu_icon(
     game_path: &std::path::Path,
 ) -> std::path::PathBuf {
     let data_dir = ira_parser::wiiu_data_dir(save_dir, title_id);
-    if ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
+    if icon_exists(&data_dir) {
         return std::path::PathBuf::new();
     }
     let icon_tga = game_path.join("meta").join("iconTex.tga");
@@ -986,7 +1051,7 @@ fn default_azahar_icon(save_dir: &str, title_id: &str, icon: Option<&[u8]>) -> s
         return std::path::PathBuf::new();
     };
     let data_dir = ira_parser::three_ds_data_dir(save_dir, title_id);
-    if ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
+    if icon_exists(&data_dir) {
         return std::path::PathBuf::new();
     }
     if std::fs::create_dir_all(&data_dir).is_err() {
@@ -1028,18 +1093,12 @@ fn build_switch_installed_games(
                 &installed.title,
                 false,
             )?;
-            let entry = db::find_by_db_id(db, meta.db_id)
-                .unwrap_or_else(|e| {
-                    eprintln!("Failed to read game {}: {e}", meta.db_id);
-                    None
-                })?;
+            let entry = read_console_entry(db, meta.db_id)?;
             let data_dir = ira_parser::switch_data_dir(save_dir, meta.db_id);
             // Cache-miss fallback: the NAND-installed control NCA is
             // decrypted when the emulator cached no icon; its NACP also
             // supplies the application title when the cache had none.
-            let nand = if installed.icon.is_none()
-                && ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_none()
-            {
+            let nand = if installed.icon.is_none() && !icon_exists(&data_dir) {
                 ira_platforms::switch::extract_installed_meta(executable, &installed.title_id)
             } else {
                 None
@@ -1116,7 +1175,7 @@ fn default_switch_icon(
     nand: Option<&[u8]>,
 ) {
     let data_dir = ira_parser::switch_data_dir(save_dir, db_id);
-    if ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
+    if icon_exists(&data_dir) {
         return;
     }
     if let Some(bytes) = nand {
@@ -1163,6 +1222,46 @@ fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
     }
 }
 
+/// Look up a Steam row by app id, inserting it on first discovery.
+/// Returns `None` (having logged) when the DB is unreadable.
+fn find_or_create_steam_entry(db: &db::DbConn, app_id: &str, name: &str) -> Option<GameEntry> {
+    match db::find_by_steam_id(db, app_id, GameKind::Steam.as_str()) {
+        Ok(Some(entry)) => Some(entry),
+        Ok(None) => {
+            if let Err(e) = db::add_game(
+                db,
+                db::NewGame {
+                    kind: GameKind::Steam,
+                    trophy_source: ira_models::TrophySource::SteamNative,
+                    steam_id: app_id,
+                    trophy_id: "",
+                    native_id: app_id,
+                    platform_id: GameKind::Steam.as_str(),
+                    title: name,
+                },
+            ) {
+                eprintln!("Steam: failed to add {app_id} to DB: {e}");
+                return None;
+            }
+            match db::find_by_steam_id(db, app_id, GameKind::Steam.as_str()) {
+                Ok(Some(entry)) => Some(entry),
+                Ok(None) => {
+                    eprintln!("Steam: entry for {app_id} vanished after insert");
+                    None
+                }
+                Err(e) => {
+                    eprintln!("DB error re-looking up Steam app {app_id}: {e}");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("DB error looking up Steam app {app_id}: {e}");
+            None
+        }
+    }
+}
+
 fn build_steam_games(
     db: &db::DbConn,
     save_dir: &str,
@@ -1176,46 +1275,8 @@ fn build_steam_games(
             continue;
         }
 
-        let entry = match db::find_by_steam_id(db, &sg.app_id, GameKind::Steam.as_str()) {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("DB error looking up Steam app {}: {e}", sg.app_id);
-                continue;
-            }
-        };
-
-        let entry = match entry {
-            Some(e) => e,
-            None => {
-                if let Err(e) = db::add_game(
-                    db,
-                    db::NewGame {
-                        kind: GameKind::Steam,
-                        trophy_source: ira_models::TrophySource::SteamNative,
-                        steam_id: &sg.app_id,
-                        trophy_id: "",
-                        native_id: &sg.app_id,
-                        platform_id: "steam",
-                        title: &sg.name,
-                    },
-                ) {
-                    eprintln!("Steam: failed to add {} to DB: {e}", sg.app_id);
-                    continue;
-                }
-                match db::find_by_steam_id(db, &sg.app_id, GameKind::Steam.as_str()) {
-                    Ok(e) => match e {
-                        Some(e) => e,
-                        None => {
-                            eprintln!("Steam: entry for {} vanished after insert", sg.app_id);
-                            continue;
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("DB error re-looking up Steam app {}: {e}", sg.app_id);
-                        continue;
-                    }
-                }
-            }
+        let Some(entry) = find_or_create_steam_entry(db, &sg.app_id, &sg.name) else {
+            continue;
         };
 
         match game_loader::load_game_fast(&entry, save_dir) {
@@ -1243,6 +1304,46 @@ fn build_steam_games(
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    /// A progress sink plus the collected updates, for `build_game_list`.
+    fn test_progress_collector() -> (ProgressCallback, Arc<Mutex<Vec<GameListProgress>>>) {
+        let updates = Arc::new(Mutex::new(Vec::new()));
+        let sink = updates.clone();
+        (
+            Arc::new(move |update| {
+                sink.lock().unwrap().push(update);
+            }),
+            updates,
+        )
+    }
+
+    /// A Retro row whose ROM file is missing, with a `roms/` tree the config
+    /// points at. The row survives with its metadata; only the stale path is
+    /// cleared, so the game leaves the list but can reattach later.
+    fn stale_rom_fixture() -> (tempfile::TempDir, db::DbConn, i64, Config) {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let game_id = db::add_game(
+            &db,
+            db::NewGame {
+                kind: GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "stale-game",
+                platform_id: "saturn",
+                title: "Stale game",
+            },
+        )
+        .unwrap();
+        db::set_rom_path(&db, game_id, "missing.rom").unwrap();
+        std::fs::create_dir_all(tmp.path().join("roms/saturn")).unwrap();
+        let cfg = Config {
+            roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
+            ..Config::default()
+        };
+        (tmp, db, game_id, cfg)
+    }
 
     #[test]
     fn test_progress_reporter_tracks_completed_sources() {
@@ -1451,28 +1552,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_stale_rom_entries_keeps_row_for_missing_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
-        let game_id = db::add_game(
-            &db,
-            db::NewGame {
-                kind: GameKind::Retro,
-                trophy_source: ira_models::TrophySource::Empty,
-                steam_id: "",
-                trophy_id: "",
-                native_id: "stale-game",
-                platform_id: "saturn",
-                title: "Stale game",
-            },
-        )
-        .unwrap();
-        db::set_rom_path(&db, game_id, "missing.rom").unwrap();
-        let rom_root = tmp.path().join("roms/saturn");
-        std::fs::create_dir_all(&rom_root).unwrap();
-        let cfg = Config {
-            roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
-            ..Config::default()
-        };
+        let (_tmp, db, game_id, cfg) = stale_rom_fixture();
 
         cleanup_stale_rom_entries(&db, &cfg);
 
@@ -1486,29 +1566,8 @@ mod tests {
 
     #[test]
     fn test_cleanup_stale_rom_entries_keeps_play_history() {
-        let tmp = tempfile::tempdir().unwrap();
-        let db = db::init_db(&tmp.path().join("ira.db").to_string_lossy());
-        let game_id = db::add_game(
-            &db,
-            db::NewGame {
-                kind: GameKind::Retro,
-                trophy_source: ira_models::TrophySource::Empty,
-                steam_id: "",
-                trophy_id: "",
-                native_id: "stale-game",
-                platform_id: "saturn",
-                title: "Stale game",
-            },
-        )
-        .unwrap();
-        db::set_rom_path(&db, game_id, "missing.rom").unwrap();
+        let (_tmp, db, game_id, cfg) = stale_rom_fixture();
         db::record_session(&db, game_id, None, 1000, 1301).unwrap();
-        let rom_root = tmp.path().join("roms/saturn");
-        std::fs::create_dir_all(&rom_root).unwrap();
-        let cfg = Config {
-            roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
-            ..Config::default()
-        };
 
         cleanup_stale_rom_entries(&db, &cfg);
 
@@ -1712,11 +1771,7 @@ mod tests {
         std::fs::create_dir_all(&rom_root).unwrap();
         std::fs::write(rom_root.join("saved.rom"), b"rom").unwrap();
 
-        let updates = Arc::new(Mutex::new(Vec::new()));
-        let updates_clone = updates.clone();
-        let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
-            updates_clone.lock().unwrap().push(update);
-        });
+        let (progress, updates) = test_progress_collector();
         let mut cfg = Config {
             save_dir: tmp.path().to_string_lossy().into_owned(),
             roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
@@ -1779,11 +1834,7 @@ mod tests {
         )
         .unwrap();
 
-        let updates = Arc::new(Mutex::new(Vec::new()));
-        let updates_clone = updates.clone();
-        let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
-            updates_clone.lock().unwrap().push(update);
-        });
+        let (progress, _updates) = test_progress_collector();
         let mut cfg = Config {
             save_dir: tmp.path().to_string_lossy().into_owned(),
             roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),
@@ -1818,11 +1869,7 @@ mod tests {
         std::fs::create_dir_all(&rom_root).unwrap();
         std::fs::write(rom_root.join("Quack Shot.iso"), b"rom").unwrap();
 
-        let updates = Arc::new(Mutex::new(Vec::new()));
-        let updates_clone = updates.clone();
-        let progress: Arc<dyn Fn(GameListProgress) + Send + Sync> = Arc::new(move |update| {
-            updates_clone.lock().unwrap().push(update);
-        });
+        let (progress, _updates) = test_progress_collector();
         let mut cfg = Config {
             save_dir: tmp.path().to_string_lossy().into_owned(),
             roms_folder: tmp.path().join("roms").to_string_lossy().into_owned(),

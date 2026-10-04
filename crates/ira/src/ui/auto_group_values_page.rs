@@ -176,6 +176,14 @@ pub(super) fn fill_check_list(
                 .collect()
         })
         .unwrap_or_default();
+    let refill = RefillCtx {
+        list: list.clone(),
+        checks: checks.clone(),
+        menus: menus.clone(),
+        dimension,
+        values_row: values_row.clone(),
+        state: state.clone(),
+    };
     for opt in &options {
         let check = gtk4::CheckButton::new();
         check.set_active(picked.contains(&opt.value));
@@ -189,41 +197,7 @@ pub(super) fn fill_check_list(
             // The pencil opens the editor; saving there refills this
             // list so renames land. The row and the check itself
             // still toggle.
-            let state = state.clone();
-            let row_c = row.clone();
-            let name = opt.value.clone();
-            let list = list.clone();
-            let checks = checks.clone();
-            let values_row = values_row.clone();
-            let menus = menus.clone();
-            let pen = gtk4::Button::from_icon_name("document-edit-symbolic");
-            pen.add_css_class(super::css::CSS_FLAT);
-            pen.set_valign(gtk4::Align::Center);
-            pen.set_tooltip_text(Some(&crate::tr!("Manage")));
-            pen.connect_clicked(move |_| {
-                let on_saved: Rc<dyn Fn()> = Rc::new({
-                    let list = list.clone();
-                    let checks = checks.clone();
-                    let values_row = values_row.clone();
-                    let state = state.clone();
-                    let menus = menus.clone();
-                    move || {
-                        fill_check_list(
-                            &list,
-                            &checks,
-                            &menus,
-                            dimension,
-                            picked_values(&checks).into_iter().collect(),
-                            &values_row,
-                            &state,
-                        );
-                    }
-                });
-                super::edit_game_entity_dialog::show_entity_editor(
-                    &state, &row_c, kind, id, &name, on_saved,
-                );
-            });
-            row.add_suffix(&pen);
+            row.add_suffix(&entity_edit_button(&refill, &row, kind, id, &opt.value));
         }
         row.add_suffix(&check);
         row.set_activatable(true);
@@ -253,6 +227,58 @@ pub(super) fn fill_check_list(
         list.append(&empty);
     }
     refresh_values_row(checks, values_row);
+}
+
+/// Everything the entity pencil needs to refill its value list after an
+/// editor save: the hosted list, its checks, the menus, the dimension,
+/// the rule row showing the picks, and the state for entity lookups.
+#[derive(Clone)]
+struct RefillCtx {
+    list: gtk4::ListBox,
+    checks: ValueChecks,
+    menus: Rc<ValueMenus>,
+    dimension: AutoDimension,
+    values_row: adw::ActionRow,
+    state: super::state::SharedState,
+}
+
+/// The pencil opening the entity editor for one entity-dimension row.
+/// Saving there refills the same list so renames land; the row and the
+/// check itself still toggle on their own clicks.
+fn entity_edit_button(
+    refill: &RefillCtx,
+    row: &adw::ActionRow,
+    kind: &'static str,
+    id: i64,
+    name: &str,
+) -> gtk4::Button {
+    let pen = gtk4::Button::from_icon_name("document-edit-symbolic");
+    pen.add_css_class(super::css::CSS_FLAT);
+    pen.set_valign(gtk4::Align::Center);
+    pen.set_tooltip_text(Some(&crate::tr!("Manage")));
+    let refill = refill.clone();
+    let row_c = row.clone();
+    let name = name.to_string();
+    pen.connect_clicked(move |_| {
+        let on_saved: Rc<dyn Fn()> = Rc::new({
+            let refill = refill.clone();
+            move || {
+                fill_check_list(
+                    &refill.list,
+                    &refill.checks,
+                    &refill.menus,
+                    refill.dimension,
+                    picked_values(&refill.checks).into_iter().collect(),
+                    &refill.values_row,
+                    &refill.state,
+                );
+            }
+        });
+        super::edit_game_entity_dialog::show_entity_editor(
+            &refill.state, &row_c, kind, id, &name, on_saved,
+        );
+    });
+    pen
 }
 
 /// The rule row's subtitle: the picked names, or the any-value hint.

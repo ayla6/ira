@@ -704,7 +704,8 @@ pub(crate) fn clamped(
 
 /// A vertically scrolling, width-clamped boxed `ListBox` for dialog result
 /// areas. Returns the scrolled container to pack and the list to fill.
-pub(crate) fn clamped_boxed_list(max_width: i32) -> (gtk4::ScrolledWindow, gtk4::ListBox) {    let list = gtk4::ListBox::new();
+pub(crate) fn clamped_boxed_list(max_width: i32) -> (gtk4::ScrolledWindow, gtk4::ListBox) {
+    let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
     list.set_valign(gtk4::Align::Start);
     list.add_css_class(CSS_BOXED_LIST);
@@ -861,7 +862,14 @@ pub fn refresh_settings_images_page(
         Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
     ) -> gtk4::Widget,
 ) {
-    let sd = match state.borrow().settings_data.clone() {
+    let (sd_opt, game_opt) = {
+        let s = state.borrow();
+        (
+            s.settings_data.clone(),
+            s.games.iter().find(|g| g.db_id == db_id).cloned(),
+        )
+    };
+    let sd = match sd_opt {
         Some(d) => d,
         None => return,
     };
@@ -873,13 +881,7 @@ pub fn refresh_settings_images_page(
         if let Some(old) = sd.stack.child_by_name("images") {
             sd.stack.remove(&old);
         }
-        if let Some(game) = state
-            .borrow()
-            .games
-            .iter()
-            .find(|g| g.db_id == db_id)
-            .cloned()
-        {
+        if let Some(game) = game_opt {
             let new_page = build_page(
                 state,
                 &game,
@@ -1059,11 +1061,19 @@ pub fn linked_members(state: &SharedState, db_id: i64) -> Vec<i64> {
 /// view only: session recording keeps writing each game's own column,
 /// so no stored value ever carries another game's hours.
 pub fn display_playtime(state: &SharedState, game: &Game) -> f64 {
-    let members = linked_members(state, game.db_id);
+    let (members, db) = {
+        let s = state.borrow();
+        (
+            s.playtime_links
+                .get(&game.db_id)
+                .cloned()
+                .unwrap_or_else(|| vec![game.db_id]),
+            s.db.clone(),
+        )
+    };
     if members.len() <= 1 {
         return game.playtime;
     }
-    let db = state.borrow().db.clone();
     members
         .iter()
         .filter_map(|id| {

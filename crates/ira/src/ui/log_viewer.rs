@@ -1,3 +1,4 @@
+use super::css::CSS_HEADING;
 use super::state::SharedState;
 use adw::prelude::*;
 use gtk4::gdk::RGBA;
@@ -27,7 +28,7 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     header.pack_start(&search_entry);
 
     let title_label = gtk4::Label::new(Some(&crate::tr!("{}: Log").replacen("{}", &game_name, 1)));
-    title_label.add_css_class("heading");
+    title_label.add_css_class(CSS_HEADING);
     header.set_title_widget(Some(&title_label));
 
     let scrolled = gtk4::ScrolledWindow::new();
@@ -49,7 +50,8 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
     let initial: String = {
         let lines = log.lock().unwrap();
         if lines.is_empty() {
-            "No log output yet. The log will populate when the game is launched.".to_string()
+            crate::tr!("No log output yet. The log will populate when the game is launched.")
+                .to_string()
         } else {
             lines.join("\n")
         }
@@ -149,50 +151,59 @@ pub fn show_log_dialog(state: &SharedState, db_id: i64) {
         .unwrap()
         .contains_key(&db_id);
     if is_running {
-        let log = ira_launcher::wrapper::get_game_log(db_id);
-        let window_weak = window.downgrade();
-        let buf_clone = buffer;
-        let tv_clone = text_view;
-        let mark_clone = mark;
-        let mut last_len: usize = {
-            let lines = log.lock().unwrap();
-            lines.len()
-        };
-        glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
-            if window_weak.upgrade().is_none() {
-                return glib::ControlFlow::Break;
-            }
-            let lines = log.lock().unwrap();
-            if lines.len() > last_len {
-                let new_text = lines[last_len..].join("\n");
-                let current_text =
-                    buf_clone.text(&buf_clone.start_iter(), &buf_clone.end_iter(), false);
-                let separator = if current_text.is_empty() || current_text.ends_with('\n') {
-                    ""
-                } else {
-                    "\n"
-                };
-                let insert_text = format!("{}{}", separator, new_text);
-                let mut end = buf_clone.end_iter();
-                buf_clone.insert(&mut end, &insert_text);
-                buf_clone.move_mark(&mark_clone, &buf_clone.end_iter());
-                tv_clone.scroll_to_mark(&mark_clone, 0.0, false, 0.0, 0.0);
-                last_len = lines.len();
-
-                let st = search_state.borrow();
-                if !st.last_query.is_empty() {
-                    drop(st);
-                    let query = search_state.borrow().last_query.clone();
-                    clear_highlights(&buf_clone);
-                    let mut st = search_state.borrow_mut();
-                    st.matches.clear();
-                    st.current = 0;
-                    find_matches(&buf_clone, &query, &mut st);
-                }
-            }
-            glib::ControlFlow::Continue
-        });
+        tail_running_log(&window, db_id, buffer, text_view, mark, &search_state);
     }
+}
+
+/// Append new log lines to a running game's dialog every 500ms until the
+/// dialog closes. The active search re-runs over the fresh text so matches
+/// stay highlighted as the log grows.
+fn tail_running_log(
+    window: &adw::Dialog,
+    db_id: i64,
+    buffer: gtk4::TextBuffer,
+    text_view: gtk4::TextView,
+    mark: gtk4::TextMark,
+    search_state: &Rc<RefCell<SearchState>>,
+) {
+    let log = ira_launcher::wrapper::get_game_log(db_id);
+    let window_weak = window.downgrade();
+    let mut last_len: usize = {
+        let lines = log.lock().unwrap();
+        lines.len()
+    };
+    let search_state = search_state.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+        if window_weak.upgrade().is_none() {
+            return glib::ControlFlow::Break;
+        }
+        let lines = log.lock().unwrap();
+        if lines.len() > last_len {
+            let new_text = lines[last_len..].join("\n");
+            let current_text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
+            let separator = if current_text.is_empty() || current_text.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
+            let insert_text = format!("{}{}", separator, new_text);
+            let mut end = buffer.end_iter();
+            buffer.insert(&mut end, &insert_text);
+            buffer.move_mark(&mark, &buffer.end_iter());
+            text_view.scroll_to_mark(&mark, 0.0, false, 0.0, 0.0);
+            last_len = lines.len();
+
+            let query = search_state.borrow().last_query.clone();
+            if !query.is_empty() {
+                clear_highlights(&buffer);
+                let mut st = search_state.borrow_mut();
+                st.matches.clear();
+                st.current = 0;
+                find_matches(&buffer, &query, &mut st);
+            }
+        }
+        glib::ControlFlow::Continue
+    });
 }
 
 struct SearchState {

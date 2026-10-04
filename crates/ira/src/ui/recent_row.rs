@@ -16,6 +16,35 @@ pub(super) fn build_recent_row(
 ) -> gtk4::Widget {
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
 
+    let (title_row, left_btn, right_btn) = build_recent_title_row();
+    vbox.append(&title_row);
+
+    let spacing = VirtualGrid::grid_spacing_for_item_w((cover_height as f64 * 2.0 / 3.0) as i32);
+    let row = RecentRow::new(spacing, cover_height);
+    let game_widths = append_recent_covers(state, &row, recent, cover_height);
+
+    // The row is a GtkScrollable, so the scrolled window uses it directly
+    // instead of wrapping it in a clipping viewport: hover shadows and the
+    // hover scale escape the covers like they do in the grid, while wheel,
+    // touchpad and scrollbar interactions stay fully native.
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Never);
+    scrolled.set_hexpand(true);
+    scrolled.set_vexpand(false);
+    scrolled.set_valign(gtk4::Align::Start);
+    scrolled.set_kinetic_scrolling(true);
+    scrolled.set_overlay_scrolling(true);
+    scrolled.add_css_class(CSS_RECENT_SCROLL);
+    scrolled.set_child(Some(&row));
+
+    vbox.append(&scrolled);
+
+    wire_recent_scroll(&scrolled, &left_btn, &right_btn, spacing, &game_widths);
+
+    vbox.upcast()
+}
+
+fn build_recent_title_row() -> (gtk4::Box, gtk4::Button, gtk4::Button) {
     let title_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     title_row.set_hexpand(true);
 
@@ -42,12 +71,15 @@ pub(super) fn build_recent_row(
     btn_box.append(&left_btn);
     btn_box.append(&right_btn);
     title_row.append(&btn_box);
+    (title_row, left_btn, right_btn)
+}
 
-    vbox.append(&title_row);
-
-    let spacing = VirtualGrid::grid_spacing_for_item_w((cover_height as f64 * 2.0 / 3.0) as i32);
-    let row = RecentRow::new(spacing, cover_height);
-
+fn append_recent_covers(
+    state: &SharedState,
+    row: &RecentRow,
+    recent: &[Game],
+    cover_height: i32,
+) -> Vec<i32> {
     let mut game_widths: Vec<i32> = Vec::with_capacity(recent.len());
     for (i, game) in recent.iter().enumerate() {
         let (w, h, use_header) = if i == 0 {
@@ -79,23 +111,16 @@ pub(super) fn build_recent_row(
         );
         row.append_cover(&item);
     }
+    game_widths
+}
 
-    // The row is a GtkScrollable, so the scrolled window uses it directly
-    // instead of wrapping it in a clipping viewport: hover shadows and the
-    // hover scale escape the covers like they do in the grid, while wheel,
-    // touchpad and scrollbar interactions stay fully native.
-    let scrolled = gtk4::ScrolledWindow::new();
-    scrolled.set_policy(gtk4::PolicyType::Automatic, gtk4::PolicyType::Never);
-    scrolled.set_hexpand(true);
-    scrolled.set_vexpand(false);
-    scrolled.set_valign(gtk4::Align::Start);
-    scrolled.set_kinetic_scrolling(true);
-    scrolled.set_overlay_scrolling(true);
-    scrolled.add_css_class(CSS_RECENT_SCROLL);
-    scrolled.set_child(Some(&row));
-
-    vbox.append(&scrolled);
-
+fn wire_recent_scroll(
+    scrolled: &gtk4::ScrolledWindow,
+    left_btn: &gtk4::Button,
+    right_btn: &gtk4::Button,
+    spacing: i32,
+    game_widths: &[i32],
+) {
     let mut step_sizes = vec![spacing];
     step_sizes.extend(game_widths.iter().map(|w| w + spacing));
     let steps = Rc::new(step_sizes);
@@ -123,8 +148,6 @@ pub(super) fn build_recent_row(
     left_btn.connect_clicked(move |_| {
         adj_click.set_value(step_target_left(adj_click.value(), &steps2));
     });
-
-    vbox.upcast()
 }
 
 /// One clickable cover: the artwork (or the game name as fallback) with a
@@ -157,11 +180,11 @@ pub(super) fn build_cover(
     let pic = gtk4::Picture::new();
     pic.set_content_fit(gtk4::ContentFit::Cover);
     pic.set_size_request(w, h);
-    // Square capsules over portrait art measure taller than their
-    // allocation without this (see the big-picture grid cells).
-    if square {
-        pic.set_can_shrink(true);
-    }
+    // Any art whose ratio differs from the slot measures taller than its
+    // allocation without this (see the big-picture grid cells) — the
+    // homogeneous tab stack measures even hidden pages, so one unshrunk
+    // cover spams layout warnings for the whole window.
+    pic.set_can_shrink(true);
     pic.add_css_class(CSS_GAME_COVER_PIC);
     if !image_path.is_empty() {
         if square {

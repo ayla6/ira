@@ -9,6 +9,41 @@ use super::achievement_rows::{build_global_tab, create_achievement_row};
 use super::image_budget::ImageLoadBudget;
 use super::state::SharedState;
 
+fn trophy_rank(t: char) -> u8 {
+    match t {
+        'B' => 0,
+        'S' => 1,
+        'G' => 2,
+        'P' => 3,
+        _ => 4,
+    }
+}
+
+fn mark_unlocked_action(
+    state: &SharedState,
+    trophy_source: ira_models::TrophySource,
+    app_id: &str,
+    native_id: &str,
+    ach: &MergedAchievement,
+    reload: &(impl Fn() + Clone + 'static),
+) -> Box<dyn Fn()> {
+    let ach_clone = ach.clone();
+    let reload_clone = reload.clone();
+    let app_id = app_id.to_string();
+    let native_id = native_id.to_string();
+    let state_clone = state.clone();
+    Box::new(move || {
+        super::matching::confirm_mark_unlocked(
+            &state_clone,
+            trophy_source,
+            &app_id,
+            &native_id,
+            &ach_clone,
+            reload_clone.clone(),
+        )
+    })
+}
+
 pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32) -> gtk4::Widget {
     let _span = tracing::info_span!("build_achievements_view", db_id = game.db_id).entered();
     let is_ps4 = game.kind.is_trophy_console();
@@ -41,16 +76,6 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
             .then_with(|| a.display_name.cmp(&b.display_name))
     });
 
-    fn trophy_rank(t: char) -> u8 {
-        match t {
-            'B' => 0,
-            'S' => 1,
-            'G' => 2,
-            'P' => 3,
-            _ => 4,
-        }
-    }
-
     let app_id_for_reload = game.app_id.clone();
     let kind_for_reload = game.kind;
     let trophy_source_for_reload = game.trophy_source;
@@ -64,8 +89,10 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         ira_models::GameKind::Wine | ira_models::GameKind::Linux
     );
 
-    let sender = state.borrow().sender.clone();
-    let save_dir = state.borrow().save_dir.clone();
+    let (sender, save_dir) = {
+        let s = state.borrow();
+        (s.sender.clone(), s.save_dir.clone())
+    };
     let reload = move || {
         let (steam_id, game_id): (&str, &str) = if is_retro_or_ps4 {
             ("", &app_id_for_reload)
@@ -143,22 +170,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
         let first_n = FIRST_BATCH.min(locked.len());
         for ach in &locked[..first_n] {
             let on_mark = if can_mark_unlocked {
-                let ach_clone = (*ach).clone();
-                let reload_clone = reload.clone();
-                let trophy_source_clone = game.trophy_source;
-                let app_id_clone = game.app_id.clone();
-                let platform_id_clone = game.platform_id.clone();
-                let state_clone = state.clone();
-                Some(Box::new(move || {
-                    super::matching::confirm_mark_unlocked(
-                        &state_clone,
-                        trophy_source_clone,
-                        &app_id_clone,
-                        &platform_id_clone,
-                        &ach_clone,
-                        reload_clone.clone(),
-                    );
-                }) as Box<dyn Fn()>)
+                Some(mark_unlocked_action(
+                    state,
+                    game.trophy_source,
+                    &game.app_id,
+                    &game.platform_id,
+                    ach,
+                    &reload,
+                ))
             } else {
                 None
             };
@@ -239,22 +258,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                 let mut batch_budget = ImageLoadBudget::new(0);
                 for ach in &remaining[i..end] {
                     let on_mark = if can_mark_unlocked {
-                        let ach_clone = ach.clone();
-                        let reload_clone = reload.clone();
-                        let trophy_source_clone = trophy_source;
-                        let app_id_clone = app_id.clone();
-                        let native_id_clone = native_id.clone();
-                        let state_clone = state.clone();
-                        Some(Box::new(move || {
-                            super::matching::confirm_mark_unlocked(
-                                &state_clone,
-                                trophy_source_clone,
-                                &app_id_clone,
-                                &native_id_clone,
-                                &ach_clone,
-                                reload_clone.clone(),
-                            );
-                        }) as Box<dyn Fn()>)
+                        Some(mark_unlocked_action(
+                            &state,
+                            trophy_source,
+                            &app_id,
+                            &native_id,
+                            ach,
+                            &reload,
+                        ))
                     } else {
                         None
                     };

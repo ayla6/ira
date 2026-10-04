@@ -144,6 +144,47 @@ pub(super) fn build_weekly_chart(
         }
     });
 
+    let (header_row, week_label, sidebar_header) = build_chart_header();
+    container.append(&header_row);
+
+    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    row.set_hexpand(true);
+    row.set_vexpand(true);
+
+    let (chart_area, chart, pw, pd, nd, nw) = build_chart_area(empty_hint.as_ref());
+    row.append(&chart_area);
+
+    let (sidebar_box, sidebar_list) = build_chart_sidebar();
+    row.append(&sidebar_box);
+    container.append(&row);
+
+    let (initial_idx, forced_day) = focus_selection(&weeks, focus);
+
+    let state = Rc::new(RefCell::new(State {
+        current_idx: initial_idx,
+        selected_day: 6,
+        is_single_game,
+        weeks,
+        chart: chart.downgrade(),
+        sidebar_header: sidebar_header.downgrade(),
+        sidebar_list: sidebar_list.downgrade(),
+        week_label: week_label.downgrade(),
+        prev_w: pw.downgrade(),
+        next_w: nw.downgrade(),
+        prev_d: pd.downgrade(),
+        next_d: nd.downgrade(),
+        on_delete,
+        ctrl_held,
+    }));
+
+    wire_chart_nav(&state, &chart, &pw, &nw, &pd, &nd);
+    wire_chart_keys(&container, &state);
+
+    rebuild(&state, forced_day);
+    container.upcast()
+}
+
+fn build_chart_header() -> (gtk4::Box, gtk4::Label, gtk4::Label) {
     let week_label = gtk4::Label::new(Some(""));
     week_label.set_halign(gtk4::Align::Start);
     week_label.set_hexpand(true);
@@ -161,12 +202,19 @@ pub(super) fn build_weekly_chart(
     header_row.set_hexpand(true);
     header_row.append(&week_label);
     header_row.append(&sidebar_header);
-    container.append(&header_row);
+    (header_row, week_label, sidebar_header)
+}
 
-    let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-    row.set_hexpand(true);
-    row.set_vexpand(true);
-
+fn build_chart_area(
+    empty_hint: Option<&String>,
+) -> (
+    gtk4::Box,
+    BarChart,
+    gtk4::Button,
+    gtk4::Button,
+    gtk4::Button,
+    gtk4::Button,
+) {
     // Chart area: BarChart + day labels + nav (nav centered relative to chart only)
     let chart_area = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     chart_area.set_hexpand(true);
@@ -182,7 +230,7 @@ pub(super) fn build_weekly_chart(
     chart_overlay.set_hexpand(true);
     chart_overlay.set_vexpand(true);
     chart_overlay.set_child(Some(&chart));
-    if let Some(hint) = &empty_hint {
+    if let Some(hint) = empty_hint {
         let hint_label = gtk4::Label::new(Some(hint));
         hint_label.add_css_class(CSS_DIM_LABEL);
         hint_label.set_halign(gtk4::Align::Center);
@@ -206,8 +254,10 @@ pub(super) fn build_weekly_chart(
     chart_area.append(&chart_overlay);
     chart_area.append(&day_labels);
     chart_area.append(&nav);
-    row.append(&chart_area);
+    (chart_area, chart, pw, pd, nd, nw)
+}
 
+fn build_chart_sidebar() -> (gtk4::Box, gtk4::ListBox) {
     // Sidebar — fills to bottom of window
     let sidebar_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar_box.set_width_request(SIDEBAR_W);
@@ -222,28 +272,17 @@ pub(super) fn build_weekly_chart(
     scroll.set_vexpand(true);
     scroll.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     sidebar_box.append(&scroll);
-    row.append(&sidebar_box);
-    container.append(&row);
+    (sidebar_box, sidebar_list)
+}
 
-    let (initial_idx, forced_day) = focus_selection(&weeks, focus);
-
-    let state = Rc::new(RefCell::new(State {
-        current_idx: initial_idx,
-        selected_day: 6,
-        is_single_game,
-        weeks,
-        chart: chart.downgrade(),
-        sidebar_header: sidebar_header.downgrade(),
-        sidebar_list: sidebar_list.downgrade(),
-        week_label: week_label.downgrade(),
-        prev_w: pw.downgrade(),
-        next_w: nw.downgrade(),
-        prev_d: pd.downgrade(),
-        next_d: nd.downgrade(),
-        on_delete,
-        ctrl_held,
-    }));
-
+fn wire_chart_nav(
+    state: &Rc<RefCell<State>>,
+    chart: &BarChart,
+    pw: &gtk4::Button,
+    nw: &gtk4::Button,
+    pd: &gtk4::Button,
+    nd: &gtk4::Button,
+) {
     {
         let st = state.clone();
         chart.connect_day_activated(move |idx| select_day(&st, idx));
@@ -278,51 +317,48 @@ pub(super) fn build_weekly_chart(
         let st = state.clone();
         nd.connect_clicked(move |_| nav_day(&st, 1));
     }
+}
 
-    {
-        let st = state.clone();
-        let kc = gtk4::EventControllerKey::new();
-        kc.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        let ctrl = {
-            let s = st.borrow();
-            s.ctrl_held.clone()
-        };
-        let ctrl_pressed = ctrl.clone();
-        let ctrl_released = ctrl;
-        kc.connect_key_pressed(move |_, key, _, _| {
-            if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
-                ctrl_pressed.set(true);
+fn wire_chart_keys(container: &gtk4::Box, state: &Rc<RefCell<State>>) {
+    let st = state.clone();
+    let kc = gtk4::EventControllerKey::new();
+    kc.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    let ctrl = {
+        let s = st.borrow();
+        s.ctrl_held.clone()
+    };
+    let ctrl_pressed = ctrl.clone();
+    let ctrl_released = ctrl;
+    kc.connect_key_pressed(move |_, key, _, _| {
+        if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
+            ctrl_pressed.set(true);
+        }
+        match key {
+            gtk4::gdk::Key::Left | gtk4::gdk::Key::KP_Left => {
+                nav_day(&st, -1);
+                glib::Propagation::Stop
             }
-            match key {
-                gtk4::gdk::Key::Left | gtk4::gdk::Key::KP_Left => {
-                    nav_day(&st, -1);
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Right | gtk4::gdk::Key::KP_Right => {
-                    nav_day(&st, 1);
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Up | gtk4::gdk::Key::KP_Up => {
-                    nav_week(&st, -1);
-                    glib::Propagation::Stop
-                }
-                gtk4::gdk::Key::Down | gtk4::gdk::Key::KP_Down => {
-                    nav_week(&st, 1);
-                    glib::Propagation::Stop
-                }
-                _ => glib::Propagation::Proceed,
+            gtk4::gdk::Key::Right | gtk4::gdk::Key::KP_Right => {
+                nav_day(&st, 1);
+                glib::Propagation::Stop
             }
-        });
-        kc.connect_key_released(move |_, key, _, _| {
-            if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
-                ctrl_released.set(false);
+            gtk4::gdk::Key::Up | gtk4::gdk::Key::KP_Up => {
+                nav_week(&st, -1);
+                glib::Propagation::Stop
             }
-        });
-        container.add_controller(kc);
-    }
-
-    rebuild(&state, forced_day);
-    container.upcast()
+            gtk4::gdk::Key::Down | gtk4::gdk::Key::KP_Down => {
+                nav_week(&st, 1);
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
+        }
+    });
+    kc.connect_key_released(move |_, key, _, _| {
+        if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
+            ctrl_released.set(false);
+        }
+    });
+    container.add_controller(kc);
 }
 
 fn nav_day(st: &Rc<RefCell<State>>, dir: i32) {
@@ -464,27 +500,21 @@ fn update_stats(s: &State) {
     let dash = "<span weight=\"normal\">\u{2014}</span>";
 
     let wt = if week.week_start <= today && today <= we {
-        format!(
-            "This week {} {}",
-            dash,
-            format_duration(week.week_total as i64)
-        )
+        crate::tr!("This week {} {}")
+            .replacen("{}", dash, 1)
+            .replacen("{}", &format_duration(week.week_total as i64), 1)
     } else if week.week_start.month() == we.month() {
-        format!(
-            "{} \u{2013} {} {} {}",
-            week.week_start.format("%b %-d"),
-            we.format("%-d"),
-            dash,
-            format_duration(week.week_total as i64)
-        )
+        crate::tr!("{} – {} {} {}")
+            .replacen("{}", &week.week_start.format("%b %-d").to_string(), 1)
+            .replacen("{}", &we.format("%-d").to_string(), 1)
+            .replacen("{}", dash, 1)
+            .replacen("{}", &format_duration(week.week_total as i64), 1)
     } else {
-        format!(
-            "{} \u{2013} {} {} {}",
-            week.week_start.format("%b %-d"),
-            we.format("%b %-d"),
-            dash,
-            format_duration(week.week_total as i64)
-        )
+        crate::tr!("{} – {} {} {}")
+            .replacen("{}", &week.week_start.format("%b %-d").to_string(), 1)
+            .replacen("{}", &we.format("%b %-d").to_string(), 1)
+            .replacen("{}", dash, 1)
+            .replacen("{}", &format_duration(week.week_total as i64), 1)
     };
     if let Some(w) = s.week_label.upgrade() {
         w.set_markup(&wt);

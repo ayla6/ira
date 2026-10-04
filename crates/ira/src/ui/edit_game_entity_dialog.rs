@@ -536,7 +536,7 @@ pub(super) fn show_entity_editor(
     let entity_toolbar = adw::ToolbarView::new();
     let entity_header = adw::HeaderBar::new();
     let title = gtk4::Label::new(Some(name));
-    title.add_css_class("heading");
+    title.add_css_class(CSS_HEADING);
     entity_header.set_title_widget(Some(&title));
     entity_toolbar.add_top_bar(&entity_header);
     let entity_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -551,7 +551,7 @@ pub(super) fn show_entity_editor(
     let merge_toolbar = adw::ToolbarView::new();
     let merge_header = adw::HeaderBar::new();
     let merge_title = gtk4::Label::new(Some(&crate::tr!("Merge into…")));
-    merge_title.add_css_class("heading");
+    merge_title.add_css_class(CSS_HEADING);
     merge_header.set_title_widget(Some(&merge_title));
     merge_toolbar.add_top_bar(&merge_header);
     merge_toolbar.set_content(Some(&editor.merge));
@@ -602,7 +602,7 @@ pub(super) fn show_entity_dialog(
     root_header.pack_start(&add_btn);
     root_header.pack_start(&manage_btn);
     let title = gtk4::Label::new(Some(&field.label));
-    title.add_css_class("heading");
+    title.add_css_class(CSS_HEADING);
     root_header.set_title_widget(Some(&title));
     root_toolbar.add_top_bar(&root_header);
 
@@ -617,7 +617,7 @@ pub(super) fn show_entity_dialog(
     let search_toolbar = adw::ToolbarView::new();
     let search_header = adw::HeaderBar::new();
     let search_title = gtk4::Label::new(Some(&crate::tr!("Search")));
-    search_title.add_css_class("heading");
+    search_title.add_css_class(CSS_HEADING);
     search_header.set_title_widget(Some(&search_title));
     search_toolbar.add_top_bar(&search_header);
     let search_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -640,7 +640,7 @@ pub(super) fn show_entity_dialog(
     let manage_toolbar = adw::ToolbarView::new();
     let manage_header = adw::HeaderBar::new();
     let manage_heading = gtk4::Label::new(Some(&manage_title_text));
-    manage_heading.add_css_class("heading");
+    manage_heading.add_css_class(CSS_HEADING);
     manage_header.set_title_widget(Some(&manage_heading));
     manage_toolbar.add_top_bar(&manage_header);
     let manage_box = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -765,7 +765,7 @@ pub(super) fn show_entity_dialog(
     let entity_toolbar = adw::ToolbarView::new();
     let entity_header = adw::HeaderBar::new();
     let entity_heading = gtk4::Label::new(None);
-    entity_heading.add_css_class("heading");
+    entity_heading.add_css_class(CSS_HEADING);
     entity_header.set_title_widget(Some(&entity_heading));
     entity_toolbar.add_top_bar(&entity_header);
     let entity_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
@@ -781,7 +781,7 @@ pub(super) fn show_entity_dialog(
     let merge_toolbar = adw::ToolbarView::new();
     let merge_header = adw::HeaderBar::new();
     let merge_heading = gtk4::Label::new(Some(&crate::tr!("Merge into…")));
-    merge_heading.add_css_class("heading");
+    merge_heading.add_css_class(CSS_HEADING);
     merge_header.set_title_widget(Some(&merge_heading));
     merge_toolbar.add_top_bar(&merge_header);
     merge_toolbar.set_content(Some(&editor.merge));

@@ -2,6 +2,7 @@
 //! previous launcher, or the Switch version of a game also here — and link
 //! entries of the same game so their time and sessions count together.
 
+use super::css::{CSS_BOXED_LIST, CSS_FLAT};
 use super::helpers::{clear_children, display_playtime, refresh_playtime_links};
 use super::state::SharedState;
 use crate::Game;
@@ -177,7 +178,7 @@ fn member_row(
             .replacen("{}", &super::game_display::format_playtime(entry.playtime), 1)
     ));
     let remove = gtk4::Button::from_icon_name("edit-delete-symbolic");
-    remove.add_css_class("flat");
+    remove.add_css_class(CSS_FLAT);
     remove.set_valign(gtk4::Align::Center);
     remove.set_tooltip_text(Some(&crate::tr!("Remove from link")));
     let page_weak = page.downgrade();
@@ -326,7 +327,7 @@ fn build_game_picker(games: &[GameEntry]) -> (gtk4::Widget, GameChecks) {
     column.append(&search);
     let list = gtk4::ListBox::new();
     list.set_selection_mode(gtk4::SelectionMode::None);
-    list.add_css_class("boxed-list");
+    list.add_css_class(CSS_BOXED_LIST);
     let checks = Rc::new(RefCell::new(Vec::new()));
     let rows: Rc<RefCell<Vec<(String, gtk4::ListBoxRow)>>> = Rc::new(RefCell::new(Vec::new()));
     for game in games {

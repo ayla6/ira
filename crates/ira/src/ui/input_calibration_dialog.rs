@@ -236,10 +236,10 @@ fn same_device(left: &ira_input::DeviceInfo, right: &ira_input::DeviceInfo) -> b
 }
 
 fn format_calibration(calibration: ControllerCalibration) -> String {
-    format!(
-        "Calibration complete. Bias: X={:.4}, Y={:.4}, Z={:.4}",
-        calibration.x, calibration.y, calibration.z
-    )
+    crate::tr!("Calibration complete. Bias: X={x}, Y={y}, Z={z}")
+        .replace("{x}", &format!("{:.4}", calibration.x))
+        .replace("{y}", &format!("{:.4}", calibration.y))
+        .replace("{z}", &format!("{:.4}", calibration.z))
 }
 
 fn set_error(status: &gtk4::Label, message: &str) {

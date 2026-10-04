@@ -9,6 +9,7 @@ use ira_models::{AutoDimension, AutoGroup};
 use std::rc::Rc;
 use super::auto_group_editor::GroupsUi;
 use super::auto_group_values_page::{ValueMenus, ValueOption, ValuesPage};
+use super::css::CSS_HEADING;
 use super::state::SharedState;
 
 pub(super) fn show_auto_group_create(state: &SharedState) {
@@ -40,7 +41,7 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
     let main_toolbar = adw::ToolbarView::new();
     let main_header = adw::HeaderBar::new();
     let main_title = gtk4::Label::new(Some(&crate::tr!("Auto group")));
-    main_title.add_css_class("heading");
+    main_title.add_css_class(CSS_HEADING);
     main_header.set_title_widget(Some(&main_title));
     main_toolbar.add_top_bar(&main_header);
 
@@ -55,7 +56,7 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
     let values_toolbar = adw::ToolbarView::new();
     let values_header = adw::HeaderBar::new();
     let values_title = gtk4::Label::new(Some(&crate::tr!("Pick values")));
-    values_title.add_css_class("heading");
+    values_title.add_css_class(CSS_HEADING);
     values_header.set_title_widget(Some(&values_title));
     values_toolbar.add_top_bar(&values_header);
     values_toolbar.set_content(Some(&values_page.root()));

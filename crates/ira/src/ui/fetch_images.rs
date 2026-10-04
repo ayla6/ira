@@ -9,6 +9,7 @@
 //! art — so any asset file that went missing or never landed (squares
 //! included) is downloaded.
 
+use super::css::{CSS_FETCH_STRIP, CSS_FLAT};
 use super::state::SharedState;
 use crate::Game;
 use adw::prelude::*;
@@ -48,6 +49,21 @@ pub struct FetchIndicator {
     running: Rc<Cell<bool>>,
 }
 
+/// Arm the strip for a run: clear any cancel, mark it running, reveal it
+/// with the running labels and reset the progress widgets. Shared by the
+/// image fetch and every strip job — the same Nautilus-style treatment.
+fn arm_indicator(indicator: &FetchIndicator, short: &str, status: &str) {
+    indicator.cancel.store(false, Ordering::Relaxed);
+    indicator.running.set(true);
+    indicator.reveal(true);
+    indicator.ring.reset();
+    indicator.close_btn.set_sensitive(true);
+    indicator.close_btn.set_icon_name("process-stop-symbolic");
+    indicator.short.set_text(short);
+    indicator.status.set_text(status);
+    indicator.bar.set_fraction(0.0);
+}
+
 /// Start fetching missing images for every matched game, revealing the
 /// indicator. `Err` carries the reason it refused: a job already
 /// running, or no game in the library it could fetch anything for.
@@ -82,30 +98,24 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
         return Err(crate::tr!("No games to fetch images for").to_string());
     }
     let total = games.len();
-    indicator.cancel.store(false, Ordering::Relaxed);
-    indicator.running.set(true);
-    indicator.reveal(true);
-    indicator.ring.reset();
-    indicator.close_btn.set_sensitive(true);
-    indicator.close_btn.set_icon_name("process-stop-symbolic");
-    indicator.short.set_text(&crate::tr!("Fetching images…"));
-    indicator
-        .status
-        .set_text(&crate::tr!("Fetching missing images…"));
-    indicator.bar.set_fraction(0.0);
+    arm_indicator(
+        &indicator,
+        &crate::tr!("Fetching images…"),
+        &crate::tr!("Fetching missing images…"),
+    );
 
     let (tx, rx) = super::helpers::ui_channel::<FetchUpdate>();
-    let (steam, sender, save_dir, db) = {
+    let (steam, sender, save_dir, db, cfg) = {
         let s = state.borrow();
         (
             s.steam.clone(),
             s.sender.clone(),
             s.save_dir.clone(),
             s.db.clone(),
+            s.cfg.clone(),
         )
     };
     let cancel = Arc::clone(&indicator.cancel);
-    let cfg = state.borrow().cfg.clone();
     let switch_exe = cfg.console("switch").executable.clone();
     std::thread::spawn(move || {
         let mut fetched = 0usize;
@@ -232,15 +242,7 @@ pub fn begin_strip_job(state: &SharedState, short: &str, status: &str) -> Option
         }
         s.strip_job_busy.set(true);
     }
-    indicator.running.set(true);
-    indicator.cancel.store(false, Ordering::Relaxed);
-    indicator.reveal(true);
-    indicator.ring.reset();
-    indicator.close_btn.set_sensitive(true);
-    indicator.close_btn.set_icon_name("process-stop-symbolic");
-    indicator.short.set_text(short);
-    indicator.status.set_text(status);
-    indicator.bar.set_fraction(0.0);
+    arm_indicator(&indicator, short, status);
     Some(StripJob {
         cancel: Arc::clone(&indicator.cancel),
     })
@@ -816,12 +818,12 @@ impl FetchIndicator {
     pub fn build(toolbar: &adw::ToolbarView) -> Self {
         toolbar.set_bottom_bar_style(adw::ToolbarStyle::Flat);
         let toggle = gtk4::Button::new();
-        toggle.add_css_class("flat");
+        toggle.add_css_class(CSS_FLAT);
         toggle.set_hexpand(true);
         // ToolbarView bottom bars inherit bold toolbar label styling; the
         // strip reads like sidebar content instead, with the toolbar's own
         // 6px inset (Nautilus relies on the same padding).
-        toggle.add_css_class("fetch-strip");
+        toggle.add_css_class(CSS_FETCH_STRIP);
         toggle.set_margin_start(6);
         toggle.set_margin_end(6);
         toggle.set_margin_top(6);

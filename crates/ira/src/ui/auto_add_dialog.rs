@@ -462,7 +462,8 @@ pub(super) fn poll_events(
 /// automatic identification found nothing and the user picked a game
 /// via the Steam search fallback.
 pub(super) fn continue_identify(folder: PathBuf, app_id: String, wizard: &Rc<RefCell<Wizard>>) {
-    let steam = wizard.borrow().state.borrow().steam.clone();
+    let state = wizard.borrow().state.clone();
+    let steam = state.borrow().steam.clone();
     set_status(wizard, &crate::tr!("Identifying game…"));
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
@@ -1480,21 +1481,21 @@ fn prompt_install_emulator(
     emu_kind: EmuKind,
 ) {
     // Honor a remembered choice so the user isn't asked every time.
-    let remembered = wizard.borrow().state.borrow().cfg.auto_emu_install;
+    let (remembered, default_version_cfg) = {
+        let w = wizard.borrow();
+        let s = w.state.borrow();
+        (
+            s.cfg.auto_emu_install,
+            s.cfg.default_api_emu_version.clone(),
+        )
+    };
     match remembered {
         Some(true) => {
-            let version = wizard
-                .borrow()
-                .state
-                .borrow()
-                .cfg
-                .default_api_emu_version
-                .clone();
             start_install(
                 wizard.clone(),
                 game_folder,
                 app_id,
-                version,
+                default_version_cfg,
                 db_id,
                 emu_kind,
             );
@@ -1658,7 +1659,8 @@ fn start_install(
     db_id: i64,
     emu_kind: EmuKind,
 ) {
-    let save_dir = wizard.borrow().state.borrow().save_dir.clone();
+    let state = wizard.borrow().state.clone();
+    let save_dir = state.borrow().save_dir.clone();
 
     let (tx, rx) = mpsc::channel::<WizardEvent>();
     let tx_c = tx;

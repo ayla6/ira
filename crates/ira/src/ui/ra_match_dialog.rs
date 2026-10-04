@@ -20,8 +20,9 @@ pub(super) fn persist_ra_match(
     ra_title: &str,
 ) {
     let app_id = trophy_id.to_string();
+    let db = sc.borrow().db.clone();
     if let Err(e) = ira_db::update_game_ids(
-        &sc.borrow().db,
+        &db,
         db_id,
         "",
         &app_id,
@@ -30,7 +31,7 @@ pub(super) fn persist_ra_match(
     ) {
         eprintln!("Failed to update game IDs for RA match: {}", e);
     }
-    if let Err(e) = ira_db::set_manual_unmatch(&sc.borrow().db, db_id, false) {
+    if let Err(e) = ira_db::set_manual_unmatch(&db, db_id, false) {
         eprintln!("Failed to clear manual unmatch: {}", e);
     }
     // ScreenScraper's title outranks RA's: a row an SS match already
@@ -57,7 +58,7 @@ pub(super) fn persist_ra_match(
             sd.pending_copies.borrow_mut().remove(&key);
         }
     }
-    let (ra_username, ra_web_api_key, steam, sender, save_dir, db, cfg) = {
+    let (ra_username, ra_web_api_key, steam, sender, save_dir, db, cfg, game) = {
         let s = sc.borrow();
         (
             s.cfg.ra_username.clone(),
@@ -67,10 +68,10 @@ pub(super) fn persist_ra_match(
             s.save_dir.clone(),
             s.db.clone(),
             s.cfg.clone(),
+            s.games.iter().find(|g| g.db_id == db_id).cloned(),
         )
     };
-    let g = sc.borrow().games.iter().find(|g| g.db_id == db_id).cloned();
-    if let Some(g) = g {
+    if let Some(g) = game {
         enrich_game_async(EnrichGameParams {
             app_id: g.app_id.clone(),
             trophy_source: g.trophy_source,

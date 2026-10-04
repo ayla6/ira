@@ -8,6 +8,18 @@ use super::state::SharedState;
 use super::window::build_window;
 use adw::prelude::*;
 
+/// The running application for window operations: downcast once here
+/// instead of at every hide/quit site.
+fn app_of(state: &SharedState) -> adw::Application {
+    state
+        .borrow()
+        .window
+        .application()
+        .expect("no application")
+        .downcast::<adw::Application>()
+        .expect("not an adw Application")
+}
+
 pub fn show_close_choice_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
     let dialog = adw::AlertDialog::new(
@@ -27,16 +39,7 @@ pub fn show_close_choice_dialog(state: &SharedState) {
     let state_clone = state.clone();
     dialog.connect_response(None, move |_, resp| match resp {
         "background" => hide_to_background(&state_clone),
-        "quit" => {
-            let app = state_clone
-                .borrow()
-                .window
-                .application()
-                .expect("no application")
-                .downcast::<adw::Application>()
-                .expect("not an adw Application");
-            app.quit();
-        }
+        "quit" => app_of(&state_clone).quit(),
         _ => {}
     });
     dialog.present(Some(&window));
@@ -46,13 +49,7 @@ pub fn hide_to_background(state: &SharedState) {
     teardown_content(state);
     ira_images::clear_texture_cache();
 
-    let app = state
-        .borrow()
-        .window
-        .application()
-        .expect("no application")
-        .downcast::<adw::Application>()
-        .expect("not an adw Application");
+    let app = app_of(state);
 
     state.borrow().window.destroy();
 

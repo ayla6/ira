@@ -15,13 +15,11 @@ use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 
 /// How many recent games the carousel keeps.
 const RECENT_LIMIT: usize = 12;
-/// Selection scroll animation length.
-const SCROLL_MILLIS: u64 = 90;
 /// How long native scrolling must stay quiet before the carousel snaps
 /// to the nearest whole-cover boundary.
 const SNAP_AFTER_MS: u64 = 350;
@@ -56,11 +54,10 @@ pub(super) struct HomeUi {
     /// The last selection before the carousel lost it (manual scrolling) —
     /// the arrows re-acquire here when it is still on screen.
     last_selected: Cell<Option<usize>>,
-    scroll_anim: RefCell<Option<gtk4::TickCallbackId>>,
-    /// The glide's latest goal, picked up every frame while it runs (same
-    /// retarget-instead-of-restart as the game grid: repeats outpace one
-    /// glide and restarting starves the camera).
-    scroll_goal: Cell<f64>,
+    /// The running scroll glide, shared with the game grids: discrete
+    /// presses ease, held repeats snap so the camera never trails the
+    /// selection.
+    scroll_glide: super::scroll_glide::ScrollGlide,
     /// The pending post-scroll settle snap, restarted on every native
     /// scroll event.
     snap_source: RefCell<Option<glib::SourceId>>,
@@ -205,8 +202,7 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
         games: RefCell::new(Vec::new()),
         selected: Cell::new(None),
         last_selected: Cell::new(None),
-        scroll_anim: RefCell::new(None),
-        scroll_goal: Cell::new(0.0),
+        scroll_glide: super::scroll_glide::ScrollGlide::new(),
         snap_source: RefCell::new(None),
         square_queued: RefCell::new(HashSet::new()),
     };
@@ -463,9 +459,7 @@ pub(super) fn finish_scroll(state: &SharedState) {
         return;
     };
     let ui = &big.home;
-    if let Some(id) = ui.scroll_anim.borrow_mut().take() {
-        id.remove();
-    }
+    ui.scroll_glide.finish();
     let adj = ui.scrolled.hadjustment();
     let target = match ui.selected.get() {
         Some(selected) => whole_cover_target(ui, &adj, selected),
@@ -790,31 +784,7 @@ fn update_scroll(big: &Rc<BigPictureUi>) {
     let Some(target) = whole_cover_target(ui, &adj, selected) else {
         return;
     };
-    ui.scroll_goal.set(target);
-    if ui.scroll_anim.borrow().is_some() {
-        return;
-    }
-    let start = adj.value();
-    if (target - start).abs() < 0.5 {
-        return;
-    }
-    let adj = adj.clone();
-    let started = Instant::now();
-    let ticker_big = Rc::clone(big);
-    let id = ui.scrolled.add_tick_callback(move |_, _| {
-        let t = (started.elapsed().as_millis() as f64 / SCROLL_MILLIS as f64).min(1.0);
-        let eased = 1.0 - (1.0 - t) * (1.0 - t);
-        let g = ticker_big.home.scroll_goal.get();
-        adj.set_value(start + (g - start) * eased);
-        if t >= 1.0 {
-            adj.set_value(g);
-            *ticker_big.home.scroll_anim.borrow_mut() = None;
-            glib::ControlFlow::Break
-        } else {
-            glib::ControlFlow::Continue
-        }
-    });
-    *ui.scroll_anim.borrow_mut() = Some(id);
+    ui.scroll_glide.animate_to(&ui.scrolled, &adj, target);
 }
 
 /// The grid tile at the end of the carousel that opens All Software: a

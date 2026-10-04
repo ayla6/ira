@@ -76,9 +76,14 @@ pub fn update_sidebar_game(state: &SharedState, db_id: i64, name: &str, icon_pat
 }
 
 pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
-    let store = state.borrow().sidebar_store.clone();
-    let sidebar_scroll = state.borrow().sidebar_scroll.clone();
-    let saved_scroll = sidebar_scroll.vadjustment().value();
+    let (store, saved_scroll, sidebar_scroll) = {
+        let s = state.borrow();
+        (
+            s.sidebar_store.clone(),
+            s.sidebar_scroll.vadjustment().value(),
+            s.sidebar_scroll.clone(),
+        )
+    };
     for i in 0..store.n_items() {
         if let Some(item) = store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()) {
             if item.kind() == SidebarItemKind::Game
@@ -126,7 +131,21 @@ pub fn rebuild_sidebar(state: &SharedState) {
     let store = state.borrow().sidebar_store.clone();
     let saved_scroll = sidebar_scroll.vadjustment().value();
 
-    let (searching, show_hidden, groups, collapsed, games, group_members, running_games, group_by) = {
+    let (
+        searching,
+        show_hidden,
+        groups,
+        collapsed,
+        games,
+        group_members,
+        running_games,
+        group_by,
+        sort_mode,
+        sort_descending,
+        db,
+        auto_groups,
+        search_query,
+    ) = {
         let s = state.borrow();
         (
             !s.search_query.is_empty(),
@@ -140,23 +159,22 @@ pub fn rebuild_sidebar(state: &SharedState) {
                 .map(|games| games.keys().copied().collect::<HashSet<_>>())
                 .unwrap_or_default(),
             s.cfg.group_by,
+            s.cfg.sort_mode,
+            s.cfg.sort_descending,
+            s.db.clone(),
+            s.auto_groups.clone(),
+            s.search_query.clone(),
         )
     };
     // Every game list below is ordered by the grid's own comparator, so
-    // changing the sort reshapes the sidebar alongside the grid. The
-    // entity sorts follow the credited names from the cache, exactly
-    // like filtered_games does; other modes never touch the map.
-    let (sort_mode, sort_descending) = {
-        let s = state.borrow();
-        (s.cfg.sort_mode, s.cfg.sort_descending)
-    };
+    // changing the sort reshapes the sidebar alongside the grid.
     let sort_entity_names = match sort_mode {
         ira_models::SortMode::Publisher => {
-            ira_db::game_entity_names(&state.borrow().db, ira_db::KIND_COMPANY, Some("is_publisher"))
+            ira_db::game_entity_names(&db, ira_db::KIND_COMPANY, Some("is_publisher"))
                 .unwrap_or_default()
         }
         ira_models::SortMode::Developer => {
-            ira_db::game_entity_names(&state.borrow().db, ira_db::KIND_COMPANY, Some("is_developer"))
+            ira_db::game_entity_names(&db, ira_db::KIND_COMPANY, Some("is_developer"))
                 .unwrap_or_default()
         }
         _ => Default::default(),
@@ -178,10 +196,6 @@ pub fn rebuild_sidebar(state: &SharedState) {
         // ── Derived categories: one collapsible section per value of
         // the group-by dimension, replacing the collections view. The
         // members map feeds the grid filter when a section is selected.
-        let db = {
-            let s = state.borrow();
-            s.db.clone()
-        };
         let entity_names = match group_by {
             ira_models::GroupBy::Developer => ira_db::game_entity_names(
                 &db,
@@ -271,11 +285,8 @@ pub fn rebuild_sidebar(state: &SharedState) {
         // ── Auto groups: rule-managed sections between the collections
         // and the uncategorized tail. Their memberships were folded into
         // group_members under negated ids by the refresh above. ──
-        let auto_groups = state.borrow().auto_groups.clone();
         for group in &auto_groups {
-            let member_ids = state
-                .borrow()
-                .group_members
+            let member_ids = group_members
                 .get(&group.id)
                 .cloned()
                 .unwrap_or_default();
@@ -333,7 +344,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
         state.borrow_mut().derived_members = HashMap::new();
     } else {
         state.borrow_mut().derived_members = HashMap::new();
-        let search = SearchQuery::parse(&state.borrow().search_query);
+        let search = SearchQuery::parse(&search_query);
         let mut filtered: Vec<&Game> = visible_games
             .iter()
             .filter(|g| search.matches(g))
@@ -370,9 +381,28 @@ fn sort_grid_order(
     games.sort_by(|a, b| super::filter::game_compare(a, b, sort_mode, descending, entity_names));
 }
 
+fn toggle_collapsed(state: &SharedState, group_id: i64) {
+    {
+        let mut s = state.borrow_mut();
+        if s.collapsed_collections.contains(&group_id) {
+            s.collapsed_collections.remove(&group_id);
+        } else {
+            s.collapsed_collections.insert(group_id);
+        }
+    }
+    rebuild_sidebar(state);
+}
+
 fn restore_selection(state: &SharedState) {
-    let multi_selected_ids = state.borrow().multi_selected_ids.clone();
-    let store = state.borrow().sidebar_store.clone();
+    let (multi_selected_ids, store, selected_id, selected_group) = {
+        let s = state.borrow();
+        (
+            s.multi_selected_ids.clone(),
+            s.sidebar_store.clone(),
+            s.selected_id.clone(),
+            s.selected_group.clone(),
+        )
+    };
 
     if !multi_selected_ids.is_empty() {
         let selection = state.borrow().sidebar_selection.clone();
@@ -394,9 +424,6 @@ fn restore_selection(state: &SharedState) {
         update_sticky_selection(state);
         return;
     }
-
-    let selected_id = state.borrow().selected_id.clone();
-    let selected_group = state.borrow().selected_group.clone();
 
     if !selected_id.is_empty() {
         let db_id = ira_models::parse_db_id(&selected_id);
@@ -575,14 +602,7 @@ fn sidebar_bind_auto_group_header(state: &SharedState, row: &gtk4::Box, item: &S
     let sc = state.clone();
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
-        let mut s = sc.borrow_mut();
-        if s.collapsed_collections.contains(&group_id) {
-            s.collapsed_collections.remove(&group_id);
-        } else {
-            s.collapsed_collections.insert(group_id);
-        }
-        drop(s);
-        rebuild_sidebar(&sc);
+        toggle_collapsed(&sc, group_id);
     });
     arrow.add_controller(click);
     row.append(&arrow);
@@ -683,14 +703,7 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
     let sc = state.clone();
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
-        let mut s = sc.borrow_mut();
-        if s.collapsed_collections.contains(&group_id) {
-            s.collapsed_collections.remove(&group_id);
-        } else {
-            s.collapsed_collections.insert(group_id);
-        }
-        drop(s);
-        rebuild_sidebar(&sc);
+        toggle_collapsed(&sc, group_id);
     });
     arrow.add_controller(click);
     row.append(&arrow);
@@ -784,9 +797,12 @@ fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
     right_click.set_button(3);
     right_click.connect_pressed(move |_, _, x, y| {
         if let Some(r) = row_weak.upgrade() {
-            let selected_ids = {
+            let (selected_ids, game) = {
                 let s = sc.borrow();
-                s.sidebar_selection.selected_db_ids()
+                (
+                    s.sidebar_selection.selected_db_ids(),
+                    s.find_game(db_id, variant_id),
+                )
             };
             let item_grid_id = match variant_id {
                 Some(vid) => format!("{}-v{}", db_id, vid),
@@ -798,11 +814,8 @@ fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
                     .map(|s| ira_models::parse_db_id(s))
                     .collect();
                 show_multi_game_context_menu(&sc, &db_ids, &r, x, y);
-            } else {
-                let game = sc.borrow().find_game(db_id, variant_id);
-                if let Some(game) = game {
-                    show_game_context_menu(&sc, &game, &r, x, y, None::<&gtk4::ListBoxRow>);
-                }
+            } else if let Some(game) = game {
+                show_game_context_menu(&sc, &game, &r, x, y, None::<&gtk4::ListBoxRow>);
             }
         }
     });

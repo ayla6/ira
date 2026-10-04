@@ -220,7 +220,7 @@ fn show_add_set_dialog(
 
     let rows = gtk4::ListBox::new();
     rows.set_selection_mode(gtk4::SelectionMode::None);
-    rows.add_css_class("boxed-list");
+    rows.add_css_class(super::css::CSS_BOXED_LIST);
     rows.append(&entry);
     rows.append(&copy);
     let layout_box = gtk4::Box::new(gtk4::Orientation::Vertical, 8);

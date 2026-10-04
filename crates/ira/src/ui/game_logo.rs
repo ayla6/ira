@@ -207,121 +207,174 @@ pub(super) fn build_game_logo_page(
     }
 
     if let Some(info) = steam_reset {
-        let steam_reset_btn = gtk4::Button::from_icon_name("view-refresh-symbolic");
-        steam_reset_btn.add_css_class(CSS_FLAT);
-        steam_reset_btn.set_valign(gtk4::Align::Center);
-        steam_reset_btn.set_tooltip_text(Some(&crate::tr!("Reset")));
-        let selected_pos_r = selected_pos.clone();
-        let size_adj_r = size_adj.clone();
-        let btns_r = btns;
-        let preview_r = preview_draw.clone();
-        let modified_r = modified.clone();
-        let app_id_clone = info.app_id.clone();
-        let steam_clone = info.steam.clone();
-        let db = info.db.clone();
-        let db_id = info.db_id;
-        let btn_weak = steam_reset_btn.downgrade();
-        steam_reset_btn.connect_clicked(move |_| {
-            if let Some(btn) = btn_weak.upgrade() {
-                btn.set_sensitive(false);
-            }
-            let (tx, rx) = mpsc::channel::<Option<(String, i32)>>();
-            let app_id = app_id_clone.clone();
-            let steam = steam_clone.clone();
-            std::thread::spawn(move || {
-                let info = steam.fetch_steamcmd_info(&app_id);
-                let _ = tx.send(info.map(|i| (i.logo_position, i.logo_size)));
-            });
-            let rx = Rc::new(RefCell::new(rx));
-            let db = db.clone();
-            let btns_weak = Rc::downgrade(&btns_r);
-            let selected_weak = Rc::downgrade(&selected_pos_r);
-            let size_weak = size_adj_r.downgrade();
-            let preview_weak = preview_r.downgrade();
-            let modified_weak = Rc::downgrade(&modified_r);
-            let btn_weak = btn_weak.clone();
-            glib::source::idle_add_local_full(glib::Priority::LOW, move || {
-                let (
-                    Some(btn),
-                    Some(selected),
-                    Some(size_adj),
-                    Some(modified),
-                    Some(btns),
-                    Some(preview),
-                ) = (
-                    btn_weak.upgrade(),
-                    selected_weak.upgrade(),
-                    size_weak.upgrade(),
-                    modified_weak.upgrade(),
-                    btns_weak.upgrade(),
-                    preview_weak.upgrade(),
-                )
-                else {
-                    return glib::ControlFlow::Break;
-                };
-                match rx.borrow_mut().try_recv() {
-                    Ok(Some((pos, size))) => {
-                        let pos_str = if pos.is_empty() {
-                            ira_models::LogoPosition::DEFAULT.to_string()
-                        } else {
-                            pos
-                        };
-                        *selected.borrow_mut() = pos_str.clone();
-                        size_adj.set_value(size.clamp(5, 100) as f64);
-                        modified.set(true);
-                        for b in btns.iter().filter_map(|b| b.upgrade()) {
-                            b.remove_css_class(CSS_SELECTED);
-                        }
-                        let target = ira_models::LogoPosition::from_string(&pos_str);
-                        for (i, &p) in ira_models::LogoPosition::all().iter().enumerate() {
-                            if p == target {
-                                if let Some(b) = btns[i].upgrade() {
-                                    b.add_css_class(CSS_SELECTED);
-                                }
-                            }
-                        }
-                        preview.queue_draw();
-                        let _ = ira_db::set_logo_settings(&db, db_id, &pos_str, size.clamp(5, 100));
-                        btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                    Ok(None) => {
-                        btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                    Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        btn.set_sensitive(true);
-                        glib::ControlFlow::Break
-                    }
-                }
-            });
-        });
-        header_row.append(&steam_reset_btn);
+        header_row.append(&build_steam_reset_button(
+            info,
+            &selected_pos,
+            &size_adj,
+            &btns,
+            &preview_draw,
+            &modified,
+        ));
     }
     logo_page.append(&header_row);
 
+    logo_page.append(&build_logo_size_row(&size_adj, preview_draw, &modified));
+
+    Some((logo_page, selected_pos, size_adj, modified))
+}
+
+fn build_logo_size_row(
+    size_adj: &gtk4::Adjustment,
+    preview_draw: gtk4::DrawingArea,
+    modified: &Rc<Cell<bool>>,
+) -> gtk4::Box {
     let size_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     size_row.set_hexpand(true);
 
-    let size_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(&size_adj));
+    let size_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(size_adj));
     size_scale.set_draw_value(false);
     size_scale.set_hexpand(true);
 
-    let size_spin = gtk4::SpinButton::new(Some(&size_adj), 1.0, 1);
+    let size_spin = gtk4::SpinButton::new(Some(size_adj), 1.0, 1);
     size_spin.set_numeric(true);
     size_spin.set_digits(1);
 
-    let preview_draw_for_size = preview_draw;
     let modified_for_size = modified.clone();
     size_adj.connect_value_changed(move |_| {
-        preview_draw_for_size.queue_draw();
+        preview_draw.queue_draw();
         modified_for_size.set(true);
     });
 
     size_row.append(&size_scale);
     size_row.append(&size_spin);
-    logo_page.append(&size_row);
+    size_row
+}
 
-    Some((logo_page, selected_pos, size_adj, modified))
+fn build_steam_reset_button(
+    info: SteamLogoReset,
+    selected_pos: &Rc<RefCell<String>>,
+    size_adj: &gtk4::Adjustment,
+    btns: &Rc<Vec<glib::WeakRef<gtk4::Button>>>,
+    preview_draw: &gtk4::DrawingArea,
+    modified: &Rc<Cell<bool>>,
+) -> gtk4::Button {
+    let steam_reset_btn = gtk4::Button::from_icon_name("view-refresh-symbolic");
+    steam_reset_btn.add_css_class(CSS_FLAT);
+    steam_reset_btn.set_valign(gtk4::Align::Center);
+    steam_reset_btn.set_tooltip_text(Some(&crate::tr!("Reset")));
+    let selected_pos_r = selected_pos.clone();
+    let size_adj_r = size_adj.clone();
+    let btns_r = btns.clone();
+    let preview_r = preview_draw.clone();
+    let modified_r = modified.clone();
+    let app_id_clone = info.app_id.clone();
+    let steam_clone = info.steam.clone();
+    let db = info.db.clone();
+    let db_id = info.db_id;
+    let btn_weak = steam_reset_btn.downgrade();
+    steam_reset_btn.connect_clicked(move |_| {
+        if let Some(btn) = btn_weak.upgrade() {
+            btn.set_sensitive(false);
+        }
+        let (tx, rx) = mpsc::channel::<Option<(String, i32)>>();
+        let app_id = app_id_clone.clone();
+        let steam = steam_clone.clone();
+        std::thread::spawn(move || {
+            let info = steam.fetch_steamcmd_info(&app_id);
+            let _ = tx.send(info.map(|i| (i.logo_position, i.logo_size)));
+        });
+        let rx = Rc::new(RefCell::new(rx));
+        let db = db.clone();
+        let btns_weak = Rc::downgrade(&btns_r);
+        let selected_weak = Rc::downgrade(&selected_pos_r);
+        let size_weak = size_adj_r.downgrade();
+        let preview_weak = preview_r.downgrade();
+        let modified_weak = Rc::downgrade(&modified_r);
+        let btn_weak = btn_weak.clone();
+        glib::source::idle_add_local_full(glib::Priority::LOW, move || {
+            apply_steam_logo_result(&SteamLogoApply {
+                btn_weak: btn_weak.clone(),
+                selected_weak: selected_weak.clone(),
+                size_weak: size_weak.clone(),
+                modified_weak: modified_weak.clone(),
+                btns_weak: btns_weak.clone(),
+                preview_weak: preview_weak.clone(),
+                rx: rx.clone(),
+                db: db.clone(),
+                db_id,
+            })
+        });
+    });
+    steam_reset_btn
+}
+
+struct SteamLogoApply {
+    btn_weak: glib::WeakRef<gtk4::Button>,
+    selected_weak: std::rc::Weak<RefCell<String>>,
+    size_weak: glib::WeakRef<gtk4::Adjustment>,
+    modified_weak: std::rc::Weak<Cell<bool>>,
+    btns_weak: std::rc::Weak<Vec<glib::WeakRef<gtk4::Button>>>,
+    preview_weak: glib::WeakRef<gtk4::DrawingArea>,
+    rx: LogoFetchRx,
+    db: ira_db::DbConn,
+    db_id: i64,
+}
+
+type LogoFetchRx = Rc<RefCell<mpsc::Receiver<Option<(String, i32)>>>>;
+
+fn apply_steam_logo_result(ctx: &SteamLogoApply) -> glib::ControlFlow {
+    let (
+        Some(btn),
+        Some(selected),
+        Some(size_adj),
+        Some(modified),
+        Some(btns),
+        Some(preview),
+    ) = (
+        ctx.btn_weak.upgrade(),
+        ctx.selected_weak.upgrade(),
+        ctx.size_weak.upgrade(),
+        ctx.modified_weak.upgrade(),
+        ctx.btns_weak.upgrade(),
+        ctx.preview_weak.upgrade(),
+    )
+    else {
+        return glib::ControlFlow::Break;
+    };
+    match ctx.rx.borrow_mut().try_recv() {
+        Ok(Some((pos, size))) => {
+            let pos_str = if pos.is_empty() {
+                ira_models::LogoPosition::DEFAULT.to_string()
+            } else {
+                pos
+            };
+            *selected.borrow_mut() = pos_str.clone();
+            size_adj.set_value(size.clamp(5, 100) as f64);
+            modified.set(true);
+            for b in btns.iter().filter_map(|b| b.upgrade()) {
+                b.remove_css_class(CSS_SELECTED);
+            }
+            let target = ira_models::LogoPosition::from_string(&pos_str);
+            for (i, &p) in ira_models::LogoPosition::all().iter().enumerate() {
+                if p == target {
+                    if let Some(b) = btns[i].upgrade() {
+                        b.add_css_class(CSS_SELECTED);
+                    }
+                }
+            }
+            preview.queue_draw();
+            let _ = ira_db::set_logo_settings(&ctx.db, ctx.db_id, &pos_str, size.clamp(5, 100));
+            btn.set_sensitive(true);
+            glib::ControlFlow::Break
+        }
+        Ok(None) => {
+            btn.set_sensitive(true);
+            glib::ControlFlow::Break
+        }
+        Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        Err(mpsc::TryRecvError::Disconnected) => {
+            btn.set_sensitive(true);
+            glib::ControlFlow::Break
+        }
+    }
 }

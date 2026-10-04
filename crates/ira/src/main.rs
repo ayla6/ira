@@ -24,6 +24,59 @@ fn init_tracing() -> Option<()> {
     None
 }
 
+/// Under Gamescope's nested compositor, run GTK against its XWayland: the
+/// Wayland-native path segfaults the compositor on menus (xdg_popup).
+/// Gamescope also never draws server-side decorations, and the fullscreen
+/// shell has no headerbar of its own — without GTK_CSD=0 GTK paints a fake
+/// titlebar inside the fullscreen window. Explicit env wins; this only
+/// fills in the defaults.
+fn apply_gamescope_env_defaults() {
+    if !ira::ui::big_picture::running_in_gamescope() {
+        return;
+    }
+    if std::env::var("GDK_BACKEND").is_err() {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
+    if std::env::var("GTK_CSD").is_err() {
+        std::env::set_var("GTK_CSD", "0");
+    }
+}
+/// Silence one benign GTK layout warning: the big-picture groups tiles
+/// carry a fixed square size request — that request IS their squareness,
+/// removing it stretches the collage — so during tab slides and first
+/// layouts GTK measures them at a transitional width below the request
+/// and complains once per tile before converging on the next frame.
+/// Anything else falls through to the default writer untouched.
+///
+/// Note: this must be a log *writer* func, not a classic log handler —
+/// real measure warnings bypass classic handlers entirely (verified with
+/// a failing-then-passing measure test in big_picture::groups).
+fn init_layout_warning_filter() {
+    gtk4::glib::log_set_writer_func(|level, fields| {
+        use gtk4::glib::{LogLevel, LogWriterOutput};
+        if level == LogLevel::Warning {
+            let mut domain = None;
+            let mut message = None;
+            for field in fields {
+                match field.key() {
+                    "GLIB_DOMAIN" => domain = field.value_str(),
+                    "MESSAGE" => message = field.value_str(),
+                    _ => {}
+                }
+            }
+            if domain == Some("Gtk")
+                && message.is_some_and(|m| {
+                    m.starts_with("Trying to measure GtkBox")
+                        && m.contains("but it needs at least")
+                })
+            {
+                return LogWriterOutput::Handled;
+            }
+        }
+        LogWriterOutput::Unhandled
+    });
+}
+
 /// When IRA_CRITICAL_BACKTRACE is set, every GTK critical warning prints a
 /// Rust backtrace after it, so a single run pinpoints which code path passed
 /// the stale widget pointer.
@@ -79,19 +132,8 @@ fn publish_overlay_screen_size() {
 }
 
 fn main() {
-    // Under Gamescope's nested compositor, run GTK against its XWayland:
-    // the Wayland-native path segfaults the compositor on menus (xdg_popup).
-    // Respect an explicit GDK_BACKEND; this only fills in the default.
-    let in_gamescope = ira::ui::big_picture::running_in_gamescope();
-    if in_gamescope && std::env::var("GDK_BACKEND").is_err() {
-        std::env::set_var("GDK_BACKEND", "x11");
-    }
-    // Gamescope never draws server-side decorations, and the fullscreen
-    // shell has no headerbar of its own — without this GTK paints a fake
-    // titlebar inside the fullscreen window. Respect an explicit GTK_CSD.
-    if in_gamescope && std::env::var("GTK_CSD").is_err() {
-        std::env::set_var("GTK_CSD", "0");
-    }
+    eprintln!("ira: starting build {}", env!("IRA_BUILD_HASH"));
+    apply_gamescope_env_defaults();
 
     // Big-picture entry: `--big-picture` or running under Gamescope.
     // Fullscreens the main window, dropping the desktop chrome — nothing
@@ -107,6 +149,7 @@ fn main() {
 
     let _flush_guard = init_tracing();
     init_critical_backtrace();
+    init_layout_warning_filter();
     // Keep large image buffers (covers, heroes, logos) mmap-backed so freeing
     // them returns the memory to the OS instead of leaving fragmented holes in
     // the sbrk arena that malloc_trim can't reclaim. Pinning the threshold

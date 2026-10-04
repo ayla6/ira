@@ -69,7 +69,7 @@ fn capture_dialog(
     instruction.set_wrap(true);
     instruction.set_xalign(0.0);
     let status = gtk4::Label::new(Some(&crate::tr!("Waiting for input...")));
-    status.add_css_class("title-3");
+    status.add_css_class(super::css::CSS_TITLE_3);
     status.set_xalign(0.0);
     content.append(&instruction);
     content.append(&status);

@@ -20,14 +20,11 @@ use std::rc::{Rc, Weak};
 use glib::object::Cast as _;
 use gtk4::prelude::{AdjustmentExt, BoxExt, FixedExt, WidgetExt};
 use ira_input::ControllerFamily;
-use ira_overlay_ipc::{
-    CMD_ACTIVATE, CMD_BACK, CMD_EXIT_GAME, CMD_HIDE, CMD_MOUSE_DOWN, CMD_MOUSE_MOVE, CMD_MOUSE_UP,
-    CMD_NAV_DOWN, CMD_NAV_LEFT, CMD_NAV_RIGHT, CMD_NAV_UP, CMD_SCROLL, CMD_SHOW, CanvasAction,
-    CanvasCommand,
-};
+use ira_overlay_ipc::CanvasAction;
 use ira_widgets::{menu, style as bp};
 
 use super::game::GameData;
+use super::widgets;
 
 /// Effect of an applied command that the frame loop must honor.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -54,7 +51,7 @@ pub(super) enum MenuAction {
 }
 
 impl MenuAction {
-    const ALL: [Self; 5] = [
+    pub(super) const ALL: [Self; 5] = [
         Self::Resume,
         Self::Trophies,
         Self::Screenshot,
@@ -127,6 +124,84 @@ pub(super) fn debug_log() -> bool {
     *DEBUG.get_or_init(|| std::env::var_os("IRA_OVERLAY_DEBUG").is_some())
 }
 
+/// Sidebar panel: full-height, flush left, one row per section in order
+/// plus title/progress headers. The header is the shared menu header, so
+/// its text starts exactly where row text starts (same side padding).
+fn build_sidebar() -> (gtk4::Box, gtk4::Label, gtk4::Label, Vec<gtk4::Box>) {
+    let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    sidebar.set_halign(gtk4::Align::Start);
+    sidebar.set_valign(gtk4::Align::Fill);
+    // Big picture's own menu width at the 1080p reference.
+    sidebar.set_size_request(560, -1);
+    sidebar.add_css_class(bp::CSS_BP_MENU_PANEL);
+    let side_title = menu::menu_header("");
+    let side_progress = menu::menu_header("");
+    side_progress.add_css_class(bp::CSS_BP_PAGE_SUBTITLE);
+    sidebar.append(&side_title);
+    sidebar.append(&side_progress);
+    let mut side_rows = Vec::new();
+    for action in MenuAction::ALL {
+        // The same row big picture itself builds.
+        let row = menu::menu_row(&action.label());
+        sidebar.append(&row);
+        side_rows.push(row);
+    }
+    let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    spacer.set_vexpand(true);
+    sidebar.append(&spacer);
+    (sidebar, side_title, side_progress, side_rows)
+}
+
+/// Content pane: hint panel and trophies list in a stack, swapped per
+/// section. An extension of the sidebar: same surface flush against it,
+/// full height, square — the list starts at its edge.
+fn build_content() -> (gtk4::Box, gtk4::Stack, gtk4::ScrolledWindow, gtk4::Box) {
+    let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    content.set_hexpand(true);
+    content.set_valign(gtk4::Align::Fill);
+    // The surface class is managed per section in update_content
+    // (trophies only); the box itself starts bare.
+    content.set_margin_top(0);
+    content.set_margin_bottom(0);
+    content.set_margin_start(0);
+    content.set_margin_end(32);
+    let stack = gtk4::Stack::new();
+    stack.set_vexpand(true);
+    stack.set_hexpand(true);
+    let hint_box = widgets::build_hint_panel();
+    stack.add_named(&hint_box, Some("hint"));
+    let ach_list = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
+    ach_list.set_valign(gtk4::Align::Fill);
+    ach_list.set_vexpand(true);
+    // Fills the viewport: without this the rows size to their
+    // natural text width and park wherever the viewport puts them.
+    ach_list.set_hexpand(true);
+    let scrolled = gtk4::ScrolledWindow::new();
+    scrolled.set_child(Some(&ach_list));
+    scrolled.set_vexpand(true);
+    // Rows wrap; nothing scrolls sideways. A horizontal offset is
+    // how the list ended up parked on the right edge, so the axis
+    // stays off by construction, not by hope.
+    scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
+    stack.add_named(&scrolled, Some("list"));
+    stack.set_visible_child_name("hint");
+    content.append(&stack);
+    (content, stack, scrolled, ach_list)
+}
+
+/// Bottom button bar, prompts flush right (glyphs painted later by
+/// `rebuild_footer`).
+fn build_footer() -> (gtk4::Box, gtk4::Box) {
+    let bottom = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+    bottom.set_halign(gtk4::Align::Fill);
+    bottom.add_css_class(bp::CSS_BP_BOTTOM);
+    let prompts = gtk4::Box::new(gtk4::Orientation::Horizontal, 28);
+    prompts.set_halign(gtk4::Align::End);
+    prompts.set_hexpand(true);
+    bottom.append(&prompts);
+    (bottom, prompts)
+}
+
 impl OverlayUi {
     /// Builds the UI shared behind `Rc<RefCell>`: the sidebar and
     /// achievement rows carry real GTK motion/click controllers that borrow
@@ -137,7 +212,6 @@ impl OverlayUi {
         on_hide: Rc<dyn Fn()>,
         gamescope: bool,
     ) -> Rc<RefCell<Self>> {
-        use super::widgets;
         let rc = Rc::new_cyclic(|weak: &Weak<RefCell<Self>>| {
             // Fullscreen column: main row above a bottom button bar.
             let root = gtk4::Overlay::new();
@@ -154,76 +228,14 @@ impl OverlayUi {
             main.set_hexpand(true);
             main.set_vexpand(true);
 
-            // Sidebar: full-height panel flush left, BP menu spacing. The
-            // header is the shared menu header, so its text starts exactly
-            // where row text starts (same side padding on both).
-            let sidebar = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
-            sidebar.set_halign(gtk4::Align::Start);
-            sidebar.set_valign(gtk4::Align::Fill);
-            // Big picture's own menu width at the 1080p reference.
-            sidebar.set_size_request(560, -1);
-            sidebar.add_css_class(bp::CSS_BP_MENU_PANEL);
-            let side_title = menu::menu_header("");
-            let side_progress = menu::menu_header("");
-            side_progress.add_css_class(bp::CSS_BP_PAGE_SUBTITLE);
-            sidebar.append(&side_title);
-            sidebar.append(&side_progress);
-            let mut side_rows = Vec::new();
-            for action in MenuAction::ALL {
-                // The same row big picture itself builds.
-                let row = menu::menu_row(&action.label());
-                sidebar.append(&row);
-                side_rows.push(row);
-            }
-            let spacer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-            spacer.set_vexpand(true);
-            sidebar.append(&spacer);
+            let (sidebar, side_title, side_progress, side_rows) = build_sidebar();
             main.append(&sidebar);
 
-            // Content: hint panel or trophies list, swapped per section.
-            // An extension of the sidebar: same surface flush against
-            // it, full height, square — the list starts at its edge.
-            let content = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-            content.set_hexpand(true);
-            content.set_valign(gtk4::Align::Fill);
-            // The surface class is managed per section in update_content
-            // (trophies only); the box itself starts bare.
-            content.set_margin_top(0);
-            content.set_margin_bottom(0);
-            content.set_margin_start(0);
-            content.set_margin_end(32);
-            let stack = gtk4::Stack::new();
-            stack.set_vexpand(true);
-            stack.set_hexpand(true);
-            let hint_box = widgets::build_hint_panel();
-            stack.add_named(&hint_box, Some("hint"));
-            let ach_list = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-            ach_list.set_valign(gtk4::Align::Fill);
-            ach_list.set_vexpand(true);
-            // Fills the viewport: without this the rows size to their
-            // natural text width and park wherever the viewport puts them.
-            ach_list.set_hexpand(true);
-            let scrolled = gtk4::ScrolledWindow::new();
-            scrolled.set_child(Some(&ach_list));
-            scrolled.set_vexpand(true);
-            // Rows wrap; nothing scrolls sideways. A horizontal offset is
-            // how the list ended up parked on the right edge, so the axis
-            // stays off by construction, not by hope.
-            scrolled.set_hscrollbar_policy(gtk4::PolicyType::Never);
-            stack.add_named(&scrolled, Some("list"));
-            stack.set_visible_child_name("hint");
-            content.append(&stack);
+            let (content, stack, scrolled, ach_list) = build_content();
             main.append(&content);
             column.append(&main);
 
-            // Bottom button bar, prompts flush right with real glyphs.
-            let bottom = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
-            bottom.set_halign(gtk4::Align::Fill);
-            bottom.add_css_class(bp::CSS_BP_BOTTOM);
-            let prompts = gtk4::Box::new(gtk4::Orientation::Horizontal, 28);
-            prompts.set_halign(gtk4::Align::End);
-            prompts.set_hexpand(true);
-            bottom.append(&prompts);
+            let (bottom, prompts) = build_footer();
             column.append(&bottom);
 
             // Motion over empty areas still belongs to the mouse: reveal the
@@ -290,7 +302,6 @@ impl OverlayUi {
     /// Repaints the footer prompts for a controller family. Called when
     /// the daemon publishes a new physical identity.
     pub fn rebuild_footer(&mut self, family: ControllerFamily) {
-        use super::widgets;
         use ira_input::GamepadButton;
         widgets::clear_children(&self.prompts);
         self.prompts.append(&widgets::build_prompt(
@@ -315,7 +326,6 @@ impl OverlayUi {
     }
 
     pub fn rebuild(&mut self, data: &GameData) {
-        use super::widgets;
         self.side_title.set_text(&data.name);
         self.side_progress.set_text(&data.progress_line());
         widgets::clear_children(&self.ach_list);
@@ -398,133 +408,6 @@ impl OverlayUi {
             eprintln!("ira-overlay-ui: layout {geom}");
         }
     }
-
-    pub fn apply(&mut self, cmd: CanvasCommand) -> UiEffect {
-        if debug_log() && cmd.kind != CMD_MOUSE_MOVE {
-            eprintln!(
-                "ira-overlay-ui: apply kind={} a={} b={} c={}",
-                cmd.kind, cmd.a, cmd.b, cmd.c
-            );
-        }
-        match cmd.kind {
-            CMD_NAV_UP => {
-                self.hide_cursor();
-                self.move_focus(-1);
-            }
-            CMD_NAV_DOWN => {
-                self.hide_cursor();
-                self.move_focus(1);
-            }
-            CMD_NAV_LEFT => {
-                self.hide_cursor();
-                self.focus_sidebar();
-            }
-            CMD_NAV_RIGHT => {
-                self.hide_cursor();
-                self.focus_content();
-            }
-            CMD_ACTIVATE => {
-                self.hide_cursor();
-                return self.activate_focused();
-            }
-            CMD_BACK => {
-                self.hide_cursor();
-                return self.go_back();
-            }
-            CMD_EXIT_GAME => {
-                self.hide_cursor();
-                return self.activate_exit();
-            }
-            CMD_SCROLL => {
-                self.hide_cursor();
-                super::stub::inject(super::stub::InjectedInput::Scroll { dy: cmd.a as f32 });
-            }
-            // Pointer goes straight into the compositor as real Wayland
-            // input in injected mode; in gamescope mode there is no stub
-            // compositor and these are no-ops (pad navigates instead).
-            CMD_MOUSE_MOVE => {
-                super::stub::inject(super::stub::InjectedInput::Motion {
-                    x: cmd.a as f32,
-                    y: cmd.b as f32,
-                });
-            }
-            CMD_MOUSE_DOWN => {
-                super::stub::inject(super::stub::InjectedInput::Button {
-                    x11_button: cmd.c,
-                    down: true,
-                });
-            }
-            CMD_MOUSE_UP => {
-                super::stub::inject(super::stub::InjectedInput::Button {
-                    x11_button: cmd.c,
-                    down: false,
-                });
-            }
-            CMD_SHOW => {
-                self.focus = Focus::Side(0);
-                self.update_content();
-                self.scroll_top();
-                self.log_showgeom();
-                // Opened from the chord (pad or keyboard): the pointer
-                // parks until the mouse actually moves.
-                self.hide_cursor();
-                return UiEffect::Show;
-            }
-            CMD_HIDE => return UiEffect::Hide,
-            _ => {}
-        }
-        UiEffect::None
-    }
-
-    pub(super) fn section(&self) -> MenuAction {
-        match self.focus {
-            Focus::Side(i) => MenuAction::ALL
-                .get(i)
-                .copied()
-                .unwrap_or(MenuAction::Resume),
-            // Content only exists under Trophies (`focus_content`
-            // refuses every other section).
-            Focus::Ach(_) => MenuAction::Trophies,
-        }
-    }
-
-    /// Sidebar index behind the current focus: sticky while browsing
-    /// content, so going back lands where you left.
-    pub(super) fn side_index(&self) -> usize {
-        match self.focus {
-            Focus::Side(i) => i,
-            Focus::Ach(_) => MenuAction::ALL
-                .iter()
-                .position(|a| *a == MenuAction::Trophies)
-                .unwrap_or(0),
-        }
-    }
-
-    /// Swaps the content pane (hint vs trophies) to the cursor's
-    /// section and repaints focus. Trophies live inside their submenu:
-    /// the list shows only while its section is up, and only then does
-    /// the area wear the sidebar's surface — every other section is bare
-    /// dim with nothing on it.
-    pub(super) fn update_content(&mut self) {
-        let show_list =
-            self.section() == MenuAction::Trophies || matches!(self.focus, Focus::Ach(_));
-        self.stack
-            .set_visible_child_name(if show_list { "list" } else { "hint" });
-        if show_list {
-            self.content.add_css_class(bp::CSS_BP_EXTENSION);
-        } else {
-            self.content.remove_css_class(bp::CSS_BP_EXTENSION);
-        }
-        self.paint_focus();
-    }
-
-    /// Click release that paired with its press: activates, and closes
-    /// through the shared on_hide mirror (same as a gamepad Back).
-    pub(super) fn click_release(&mut self, x: f64, y: f64) {
-        if self.pointer_release(x, y, 1) == UiEffect::Hide {
-            (self.on_hide)();
-        }
-    }
 }
 
 #[cfg(test)]
@@ -542,7 +425,10 @@ mod tests {
     }
 
     #[test]
-    fn test_menu_starts_on_resume_hint() {
+    fn test_menu_structure_and_layout() {
+        // Single GTK init per process: initializing twice (even on the
+        // same thread) aborts, so every widget assertion lives in this
+        // one test.
         let Some(ui) = test_ui() else {
             eprintln!("skipping: no display for widget construction");
             return;
@@ -559,15 +445,6 @@ mod tests {
             3,
             "footer holds Select/Back/Close prompts"
         );
-    }
-
-    #[test]
-    fn test_content_adjoins_sidebar_and_rows_fill() {
-        let Some(ui) = test_ui() else {
-            eprintln!("skipping: no display for widget construction");
-            return;
-        };
-        let u = ui.borrow();
         // Structural adjacency: the main row holds [sidebar, content] in
         // order, and the content pane fills beside the fixed sidebar.
         let sidebar_w = u.sidebar.upcast_ref::<gtk4::Widget>();

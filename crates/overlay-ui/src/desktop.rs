@@ -356,15 +356,9 @@ fn pointer_at(
     root_w: u32,
     root_h: u32,
 ) -> Option<(f64, f64)> {
-    use x11rb::protocol::xproto::ConnectionExt as _;
-    let reply = conn.query_pointer(root).ok()?.reply().ok()?;
+    let pos = pointer_raw(conn, root)?;
     let rect = rect.unwrap_or((0, 0, root_w, root_h));
-    Some(map_to_overlay(
-        i32::from(reply.root_x),
-        i32::from(reply.root_y),
-        rect,
-        screen,
-    ))
+    Some(map_to_overlay(pos.0, pos.1, rect, screen))
 }
 
 /// Active desktop window (`_NET_ACTIVE_WINDOW`), if the WM publishes it.

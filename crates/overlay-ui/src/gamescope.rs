@@ -138,40 +138,38 @@ fn set_external_overlay(xid: u32) -> Result<(), String> {
 
 /// Appends `_NET_WM_STATE_SKIP_TASKBAR`/`_SKIP_PAGER` to the window state.
 fn set_net_wm_state(xid: u32) -> Result<(), String> {
-    use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
-    let (conn, _) = x11rb::connect(None).map_err(|e| e.to_string())?;
+    let conn = x11_connect()?;
     let state = intern(&conn, b"_NET_WM_STATE")?;
     let skip_taskbar = intern(&conn, b"_NET_WM_STATE_SKIP_TASKBAR")?;
     let skip_pager = intern(&conn, b"_NET_WM_STATE_SKIP_PAGER")?;
     let data = [skip_taskbar.to_ne_bytes(), skip_pager.to_ne_bytes()].concat();
-    conn.change_property(PropMode::APPEND, xid, state, AtomEnum::ATOM, 32, 2, &data)
-        .map_err(|e| e.to_string())?
-        .check()
-        .map_err(|e| e.to_string())?;
-    conn.flush().map_err(|e| e.to_string())?;
-    Ok(())
+    write_and_flush(&conn, |c| {
+        c.change_property(PropMode::APPEND, xid, state, AtomEnum::ATOM, 32, 2, &data)
+            .map_err(|e| e.to_string())?
+            .check()
+            .map_err(|e| e.to_string())
+    })
 }
 
 fn set_cardinal(xid: u32, name: &[u8], value: u32) -> Result<(), String> {
-    use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
-    let (conn, _) = x11rb::connect(None).map_err(|e| e.to_string())?;
+    let conn = x11_connect()?;
     let atom = intern(&conn, name)?;
-    conn.change_property(
-        PropMode::REPLACE,
-        xid,
-        atom,
-        AtomEnum::CARDINAL,
-        32,
-        1,
-        &value.to_ne_bytes(),
-    )
-    .map_err(|e| e.to_string())?
-    .check()
-    .map_err(|e| e.to_string())?;
-    conn.flush().map_err(|e| e.to_string())?;
-    Ok(())
+    write_and_flush(&conn, |c| {
+        c.change_property(
+            PropMode::REPLACE,
+            xid,
+            atom,
+            AtomEnum::CARDINAL,
+            32,
+            1,
+            &value.to_ne_bytes(),
+        )
+        .map_err(|e| e.to_string())?
+        .check()
+        .map_err(|e| e.to_string())
+    })
 }
 
 fn intern(conn: &x11rb::rust_connection::RustConnection, name: &[u8]) -> Result<u32, String> {
@@ -181,6 +179,25 @@ fn intern(conn: &x11rb::rust_connection::RustConnection, name: &[u8]) -> Result<
         .reply()
         .map_err(|e| e.to_string())
         .map(|r| r.atom)
+}
+
+/// Throwaway X connection for one-shot property writes. These run on
+/// show/hide edges only, never on the hot path, so per-call connects
+/// cost nothing.
+fn x11_connect() -> Result<x11rb::rust_connection::RustConnection, String> {
+    x11rb::connect(None)
+        .map(|(conn, _)| conn)
+        .map_err(|e| e.to_string())
+}
+
+/// Runs a property write (checking its cookie) and flushes the connection.
+fn write_and_flush(
+    conn: &x11rb::rust_connection::RustConnection,
+    write: impl FnOnce(&x11rb::rust_connection::RustConnection) -> Result<(), String>,
+) -> Result<(), String> {
+    use x11rb::connection::Connection;
+    write(conn)?;
+    conn.flush().map_err(|e| e.to_string())
 }
 
 /// Persistent X connection for unmap/remap/focus queries. Gamescope never

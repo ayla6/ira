@@ -426,12 +426,17 @@ mod tests {
 
     #[test]
     fn test_cursor_size_bounds() {
+        let prev = std::env::var_os("XCURSOR_SIZE");
         unsafe { std::env::set_var("XCURSOR_SIZE", "7") };
         assert_eq!(cursor_size(), 24);
         unsafe { std::env::set_var("XCURSOR_SIZE", "48") };
         assert_eq!(cursor_size(), 48);
         unsafe { std::env::remove_var("XCURSOR_SIZE") };
         assert_eq!(cursor_size(), 24);
+        match prev {
+            Some(v) => unsafe { std::env::set_var("XCURSOR_SIZE", v) },
+            None => unsafe { std::env::remove_var("XCURSOR_SIZE") },
+        }
     }
 
     /// Builds a synthetic XFixesGetCursorImage reply: 32-byte header

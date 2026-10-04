@@ -198,31 +198,27 @@ pub(super) fn watch_row(row: &gtk4::Box, weak: &Weak<RefCell<OverlayUi>>, activa
             u.pointer_press(wx, wy, 1)
         });
     });
-    if activatable {
-        let release_row = row.clone();
-        let release = weak.clone();
-        click.connect_released(move |gesture, _, ex, ey| {
-            gesture.set_state(gtk4::EventSequenceState::Claimed);
-            if let Some(ui) = release.upgrade() {
-                let mut u = ui.borrow_mut();
-                let widget = release_row.upcast_ref::<gtk4::Widget>();
-                let (wx, wy) = u.to_window(widget, ex, ey);
+    // Release activates only for sidebar rows (like gamepad A, and able
+    // to hide the overlay); achievement rows are informational (Steam
+    // parity: press focuses, release does nothing).
+    let release_row = row.clone();
+    let release = weak.clone();
+    click.connect_released(move |gesture, _, ex, ey| {
+        gesture.set_state(gtk4::EventSequenceState::Claimed);
+        if let Some(ui) = release.upgrade() {
+            let mut u = ui.borrow_mut();
+            let widget = release_row.upcast_ref::<gtk4::Widget>();
+            let (wx, wy) = u.to_window(widget, ex, ey);
+            if activatable {
                 if debug_log() {
                     eprintln!("ira-overlay-ui: pointer release at {wx:.0},{wy:.0}");
                 }
                 u.click_release(wx, wy);
-            }
-        });
-    } else {
-        let release_row = row.clone();
-        let release = weak.clone();
-        click.connect_released(move |gesture, _, ex, ey| {
-            gesture.set_state(gtk4::EventSequenceState::Claimed);
-            forward_row(&release, &release_row, ex, ey, |u, wx, wy| {
+            } else {
                 u.pointer_release(wx, wy, 1);
-            });
-        });
-    }
+            }
+        }
+    });
     row.add_controller(click);
 }
 

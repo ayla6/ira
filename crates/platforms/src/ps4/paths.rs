@@ -3,19 +3,24 @@ use crate::emu_dirs::home_dir;
 
 pub const SHADPS4_FLATPAK_ID: &str = "net.shadps4.shadPS4";
 
+fn xdg_data_subdir(subdir: &str) -> PathBuf {
+    xdg::BaseDirectories::new()
+        .get_data_home()
+        .map(|p| p.join(subdir))
+        .unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join(".local").join("share").join(subdir)
+        })
+}
+
+pub(crate) fn xdg_data_dir_for(subdir: &str) -> PathBuf {
+    xdg_data_subdir(subdir)
+}
+
 /// shadPS4 user data directory.
 /// Linux: ~/.local/share/shadPS4/
 pub fn shadps4_user_dir() -> PathBuf {
-    xdg::BaseDirectories::new()
-        .get_data_home()
-        .map(|p| p.join("shadPS4"))
-        .unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("shadPS4")
-        })
+    xdg_data_subdir("shadPS4")
 }
 
 pub fn shadps4_user_dir_for(executable: &str) -> PathBuf {

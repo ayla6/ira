@@ -41,6 +41,18 @@ pub struct ShadPS4Game {
     pub user_dir: PathBuf,
 }
 
+fn is_update_dir(name: &str) -> bool {
+    name.ends_with("-UPDATE") || name.ends_with("-patch")
+}
+
+fn npwr_from_bytes(data: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(data)
+        .lines()
+        .find(|l| l.starts_with("NPWR"))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Recursively scan a directory for game folders (containing sce_sys/param.sfo).
 /// Max depth: 5 levels. Skips dirs ending in -UPDATE or -patch.
 fn scan_dir(path: &Path, results: &mut Vec<PathBuf>, depth: u32) {
@@ -61,8 +73,7 @@ fn scan_dir(path: &Path, results: &mut Vec<PathBuf>, depth: u32) {
             continue;
         }
         let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str.ends_with("-UPDATE") || name_str.ends_with("-patch") {
+        if is_update_dir(&name.to_string_lossy()) {
             continue;
         }
         scan_dir(&entry.path(), results, depth + 1);
@@ -113,12 +124,7 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<ShadPS4Game> {
                 // Fallback: try strings extraction
                 let npwr = std::fs::read(&npbind_path)
                     .ok()
-                    .and_then(|data| {
-                        String::from_utf8_lossy(&data)
-                            .lines()
-                            .find(|l| l.starts_with("NPWR"))
-                            .map(|s| s.trim().to_string())
-                    })
+                    .and_then(|data| npwr_from_bytes(&data))
                     .unwrap_or_default();
                 if npwr.is_empty() {
                     eprintln!("shadPS4: no NPWR ID for {}", serial);

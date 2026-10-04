@@ -23,6 +23,34 @@ fn decode_xml_entities(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
+fn attr_value<'a>(tag: &'a str, key: &str) -> Option<&'a str> {
+    tag.split_whitespace().find_map(|attr| {
+        let (k, v) = attr.split_once('=')?;
+        (k == key).then(|| v.trim_matches('"'))
+    })
+}
+
+fn tag_name(tag: &str) -> &str {
+    tag.split_whitespace().next().unwrap_or("")
+}
+
+/// Reads `<...>` starting after `<` was consumed.
+/// Returns (tag content, is_closing).
+fn read_tag(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Option<(String, bool)> {
+    let mut buf = String::new();
+    let closing = chars.peek() == Some(&'/');
+    if closing {
+        chars.next();
+    }
+    for ch in chars.by_ref() {
+        if ch == '>' {
+            return Some((buf, closing));
+        }
+        buf.push(ch);
+    }
+    None
+}
+
 pub fn parse_trop_xml(path: &Path) -> Vec<TrophyDef> {
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
@@ -31,89 +59,82 @@ pub fn parse_trop_xml(path: &Path) -> Vec<TrophyDef> {
             return Vec::new();
         }
     };
+    parse_trop_defs(&data)
+}
 
+struct TrophyBuilder {
+    id: String,
+    name: String,
+    detail: String,
+    ttype: char,
+    hidden: bool,
+}
+
+fn parse_trop_defs(data: &str) -> Vec<TrophyDef> {
     let mut trophies = Vec::new();
-    let mut current_id = String::new();
-    let mut current_name = String::new();
-    let mut current_detail = String::new();
-    let mut current_ttype = 'B';
-    let mut current_hidden = false;
+    let mut current = TrophyBuilder {
+        id: String::new(),
+        name: String::new(),
+        detail: String::new(),
+        ttype: 'B',
+        hidden: false,
+    };
     let mut in_trophy = false;
     let mut in_name = false;
     let mut in_detail = false;
-    let mut tag_buf = String::new();
 
     let mut chars = data.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '<' {
-            // Start of a tag
-            tag_buf.clear();
-            let mut closing = false;
-            if chars.peek() == Some(&'/') {
-                chars.next();
-                closing = true;
+        if c != '<' {
+            if in_name {
+                current.name.push(c);
+            } else if in_detail {
+                current.detail.push(c);
             }
-            while let Some(&ch) = chars.peek() {
-                if ch == '>' {
-                    chars.next();
-                    break;
-                }
-                tag_buf.push(ch);
-                chars.next();
-            }
+            continue;
+        }
+        let Some((tag, closing)) = read_tag(&mut chars) else {
+            break;
+        };
+        let tag = tag.trim();
+        let name = tag_name(tag);
 
-            let tag = tag_buf.trim();
-            let tag_name = tag.split_whitespace().next().unwrap_or("");
-
-            if closing {
-                if tag_name == "trophy" && in_trophy {
-                    trophies.push(TrophyDef {
-                        id: current_id.clone(),
-                        name: decode_xml_entities(&current_name),
-                        detail: decode_xml_entities(&current_detail),
-                        ttype: current_ttype,
-                        hidden: current_hidden,
-                    });
-                    in_trophy = false;
-                } else if tag_name == "name" {
-                    in_name = false;
-                } else if tag_name == "detail" {
-                    in_detail = false;
-                }
-            } else {
-                if tag_name == "trophy" {
-                    in_trophy = true;
-                    current_name.clear();
-                    current_detail.clear();
-                    current_ttype = 'B';
-                    current_hidden = false;
-                    // Parse attributes
-                    for attr in tag.split_whitespace() {
-                        if let Some(eq_pos) = attr.find('=') {
-                            let key = &attr[..eq_pos];
-                            let val = attr[eq_pos + 1..].trim_matches('"');
-                            match key {
-                                "id" => current_id = val.to_string(),
-                                "ttype" => {
-                                    current_ttype = val.chars().next().unwrap_or('B');
-                                }
-                                "hidden" => current_hidden = val == "yes",
-                                _ => {}
-                            }
-                        }
-                    }
-                } else if tag_name == "name" {
-                    in_name = true;
-                    current_name.clear();
-                } else if tag_name == "detail" {
-                    in_detail = true;
-                    current_detail.clear();
-                }
+        if closing {
+            if name == "trophy" && in_trophy {
+                trophies.push(TrophyDef {
+                    id: std::mem::take(&mut current.id),
+                    name: decode_xml_entities(&current.name),
+                    detail: decode_xml_entities(&current.detail),
+                    ttype: current.ttype,
+                    hidden: current.hidden,
+                });
+                in_trophy = false;
+            } else if name == "name" {
+                in_name = false;
+            } else if name == "detail" {
+                in_detail = false;
             }
-        } else if in_name {
-            current_name.push(c);
-        } else if in_detail {
-            current_detail.push(c);
+            continue;
+        }
+        if name == "trophy" {
+            in_trophy = true;
+            current.name.clear();
+            current.detail.clear();
+            current.ttype = 'B';
+            current.hidden = false;
+            if let Some(id) = attr_value(tag, "id") {
+                current.id = id.to_string();
+            }
+            current.ttype = attr_value(tag, "ttype")
+                .and_then(|v| v.chars().next())
+                .unwrap_or('B');
+            current.hidden = attr_value(tag, "hidden") == Some("yes");
+        } else if name == "name" {
+            in_name = true;
+            current.name.clear();
+        } else if name == "detail" {
+            in_detail = true;
+            current.detail.clear();
         }
     }
 
@@ -123,7 +144,6 @@ pub fn parse_trop_xml(path: &Path) -> Vec<TrophyDef> {
 /// Parse user trophy XML to get unlock states.
 /// Returns map of trophy_id → (earned, timestamp)
 pub fn parse_user_trophies(path: &Path) -> HashMap<String, (bool, i64)> {
-
     let mut result = HashMap::new();
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
@@ -135,45 +155,24 @@ pub fn parse_user_trophies(path: &Path) -> HashMap<String, (bool, i64)> {
 
     let mut chars = data.chars().peekable();
     while let Some(c) = chars.next() {
-        if c == '<' {
-            let mut tag = String::new();
-            let mut closing = false;
-            if chars.peek() == Some(&'/') {
-                chars.next();
-                closing = true;
-            }
-            while let Some(&ch) = chars.peek() {
-                if ch == '>' {
-                    chars.next();
-                    break;
-                }
-                tag.push(ch);
-                chars.next();
-            }
-
-            if !closing && tag.trim().starts_with("trophy") {
-                let mut id = String::new();
-                let mut earned = false;
-                let mut timestamp: i64 = 0;
-
-                for attr in tag.split_whitespace() {
-                    if let Some(eq_pos) = attr.find('=') {
-                        let key = &attr[..eq_pos];
-                        let val = attr[eq_pos + 1..].trim_matches('"');
-                        match key {
-                            "id" => id = val.to_string(),
-                            "unlockstate" => earned = val == "true",
-                            "timestamp" => timestamp = val.parse().unwrap_or(0),
-                            _ => {}
-                        }
-                    }
-                }
-
-                if !id.is_empty() {
-                    result.insert(id, (earned, timestamp));
-                }
-            }
+        if c != '<' {
+            continue;
         }
+        let Some((tag, closing)) = read_tag(&mut chars) else {
+            break;
+        };
+        if closing || !tag.trim().starts_with("trophy") {
+            continue;
+        }
+        let id = attr_value(&tag, "id").unwrap_or_default().to_string();
+        if id.is_empty() {
+            continue;
+        }
+        let earned = attr_value(&tag, "unlockstate") == Some("true");
+        let timestamp = attr_value(&tag, "timestamp")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        result.insert(id, (earned, timestamp));
     }
 
     result

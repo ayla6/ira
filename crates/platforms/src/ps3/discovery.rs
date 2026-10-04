@@ -20,7 +20,7 @@ pub struct Rpcs3Game {
 
 /// Scan a game folder for its PARAM.SFO, parse it, and find the NPWR ID from TROPDIR.
 /// Returns None if PARAM.SFO is missing or has no TITLE_ID.
-fn scan_game_folder(game_path: &Path) -> Option<Rpcs3Game> {
+fn scan_game_folder(game_path: &Path, config_dir: &Path) -> Option<Rpcs3Game> {
     let param_sfo = game_path.join("PARAM.SFO");
     if !param_sfo.is_file() {
         return None;
@@ -49,7 +49,7 @@ fn scan_game_folder(game_path: &Path) -> Option<Rpcs3Game> {
         npwr_id,
         title,
         game_path: game_path.to_path_buf(),
-        config_dir: PathBuf::new(),
+        config_dir: config_dir.to_path_buf(),
     })
 }
 
@@ -59,17 +59,18 @@ fn find_npwr_id(tropdir: &Path) -> String {
         Ok(e) => e,
         Err(_) => return String::new(),
     };
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            continue;
-        }
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if name_str.starts_with("NPWR") {
-            return name_str.into_owned();
-        }
-    }
-    String::new()
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(is_dir)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("NPWR"))
+        .collect();
+    names.sort();
+    names.into_iter().next().unwrap_or_default()
+}
+
+fn is_dir(entry: &std::fs::DirEntry) -> bool {
+    entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
 }
 
 /// Discover all installed RPCS3 games.
@@ -91,12 +92,8 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<Rpcs3Game> {
         games.extend(
             entries
                 .flatten()
-                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                .filter_map(|e| scan_game_folder(&e.path()))
-                .map(|mut game| {
-                    game.config_dir = config_dir.clone();
-                    game
-                }),
+                .filter(is_dir)
+                .filter_map(|e| scan_game_folder(&e.path(), &config_dir)),
         );
     }
 
@@ -106,14 +103,10 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<Rpcs3Game> {
         games.extend(
             entries
                 .flatten()
-                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .filter(is_dir)
                 .map(|e| e.path().join("PS3_GAME"))
                 .filter(|p| p.join("PARAM.SFO").is_file())
-                .filter_map(|ref p| scan_game_folder(p))
-                .map(|mut game| {
-                    game.config_dir = config_dir.clone();
-                    game
-                }),
+                .filter_map(|ref p| scan_game_folder(p, &config_dir)),
         );
     }
 
@@ -139,7 +132,7 @@ mod tests {
         std::fs::create_dir_all(tropdir.join("other")).unwrap();
 
         let result = find_npwr_id(&tropdir);
-        assert!(result.starts_with("NPWR"));
+        assert_eq!(result, "NPWR00906_00");
     }
 
     #[test]
@@ -155,6 +148,6 @@ mod tests {
     #[test]
     fn test_scan_game_folder_missing_param_sfo() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(scan_game_folder(tmp.path()).is_none());
+        assert!(scan_game_folder(tmp.path(), tmp.path()).is_none());
     }
 }

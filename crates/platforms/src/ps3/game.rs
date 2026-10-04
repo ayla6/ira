@@ -71,32 +71,9 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
     };
     out.name_lower = out.name.to_lowercase();
 
-    // Default icon: copy the game's ICON0.PNG to data/ps3/{NPWR}/ and convert
-    // to WebP. Only copies if no icon (webp/jpg) already exists in the data dir.
     let ps3_data_dir = Path::new(save_dir).join("data").join("ps3").join(npwr_id);
-    if ira_parser::find_image_file(&ps3_data_dir, ira_models::AssetType::Icon.file_base()).is_none() {
-        let default_icon = game.game_path.join("ICON0.PNG");
-        if default_icon.is_file() {
-            let _ = std::fs::create_dir_all(&ps3_data_dir);
-            let tmp_png = ps3_data_dir.join("icon.png");
-            let _ = std::fs::copy(&default_icon, &tmp_png);
-            ira_parser::convert_to_lossless_webp(&tmp_png);
-        }
-    }
-
-    // Image paths — always use data/ps3/{NPWR_ID}/ to match game_data_dir/
-    // entry_data_dir and the background SGDB enrichment download target.
-    let image_dir = ps3_data_dir.clone();
-
-    // Fallback to the emulator's original ICON0.PNG if no icon in data dir.
-    if ira_parser::find_image_file(&image_dir, ira_models::AssetType::Icon.file_base()).is_none() {
-        let default_icon = game.game_path.join("ICON0.PNG");
-        if default_icon.is_file() {
-            out.icon_path = default_icon.to_string_lossy().into_owned();
-        }
-    }
-
-    ira_parser::populate_image_paths(&image_dir, &mut out);
+    ensure_default_icon(&game.game_path, &ps3_data_dir);
+    apply_icon_paths(&mut out, &game.game_path, &ps3_data_dir);
 
     // Build achievements from TROPCONF.SFM definitions + TROPUSR.DAT unlock state.
     out.achievements = load_ps3_trophies_in(npwr_id, &game.config_dir);
@@ -104,6 +81,36 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
     out.earned_count = out.achievements.iter().filter(|a| a.earned).count();
 
     out
+}
+
+/// Copy ICON0.PNG into the data dir (converting to WebP) when no icon exists there yet.
+fn ensure_default_icon(game_path: &Path, data_dir: &Path) {
+    if ira_parser::find_image_file(data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
+        return;
+    }
+    let default_icon = game_path.join("ICON0.PNG");
+    if !default_icon.is_file() {
+        return;
+    }
+    if std::fs::create_dir_all(data_dir).is_err() {
+        return;
+    }
+    let tmp_png = data_dir.join("icon.png");
+    if std::fs::copy(&default_icon, &tmp_png).is_err() {
+        return;
+    }
+    ira_parser::convert_to_lossless_webp(&tmp_png);
+}
+
+fn apply_icon_paths(out: &mut Game, game_path: &Path, image_dir: &Path) {
+    // Fallback to the emulator's original ICON0.PNG if no icon in data dir.
+    if ira_parser::find_image_file(image_dir, ira_models::AssetType::Icon.file_base()).is_none() {
+        let default_icon = game_path.join("ICON0.PNG");
+        if default_icon.is_file() {
+            out.icon_path = default_icon.to_string_lossy().into_owned();
+        }
+    }
+    ira_parser::populate_image_paths(image_dir, out);
 }
 
 /// Load PS3 trophy achievements from TROPCONF.SFM (definitions) + TROPUSR.DAT (unlock state).
@@ -123,36 +130,35 @@ pub fn load_ps3_trophies_in(npwr_id: &str, config_dir: &Path) -> Vec<MergedAchie
         HashMap::new()
     });
 
-    let mut achievements = Vec::new();
-    for def in &defs {
-        // TROPCONF.SFM trophy IDs are zero-padded strings ("000", "001", ...).
-        // TROPUSR.DAT uses numeric u32 IDs. Parse the string to u32 for lookup.
-        let trophy_num: u32 = def.id.parse().unwrap_or(0);
-        let (earned, timestamp) = unlock_states
-            .get(&trophy_num)
-            .cloned()
-            .unwrap_or((false, 0));
+    defs.iter()
+        .map(|def| {
+            // TROPCONF.SFM trophy IDs are zero-padded strings ("000", "001", ...).
+            // TROPUSR.DAT uses numeric u32 IDs. Parse the string to u32 for lookup.
+            let trophy_num: u32 = def.id.parse().unwrap_or(0);
+            let (earned, timestamp) = unlock_states
+                .get(&trophy_num)
+                .cloned()
+                .unwrap_or((false, 0));
 
-        let icon_path = trophy_icon_path_in(config_dir, npwr_id, trophy_num);
-        let icon_str = if icon_path.is_file() {
-            icon_path.to_string_lossy().into_owned()
-        } else {
-            String::new()
-        };
+            let icon_path = trophy_icon_path_in(config_dir, npwr_id, trophy_num);
+            let icon_str = if icon_path.is_file() {
+                icon_path.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            };
 
-        achievements.push(MergedAchievement {
-            name: format!("trophy_{}", def.id),
-            display_name: def.name.clone(),
-            description: def.detail.clone(),
-            hidden: def.hidden,
-            earned,
-            earned_time: timestamp,
-            icon_path: icon_str.clone(),
-            icon_gray_path: icon_str, // PS3 doesn't have gray icons — reuse same
-            global_percent: 0.0,
-            trophy_type: def.ttype,
-        });
-    }
-
-    achievements
+            MergedAchievement {
+                name: format!("trophy_{}", def.id),
+                display_name: def.name.clone(),
+                description: def.detail.clone(),
+                hidden: def.hidden,
+                earned,
+                earned_time: timestamp,
+                icon_path: icon_str.clone(),
+                icon_gray_path: icon_str, // PS3 doesn't have gray icons — reuse same
+                global_percent: 0.0,
+                trophy_type: def.ttype,
+            }
+        })
+        .collect()
 }

@@ -33,7 +33,13 @@ fn scan_app(path: &Path) -> Option<Vita3KGame> {
     if !sfo_path.is_file() {
         return None;
     }
-    let psf = parse_psf(&sfo_path).ok()?;
+    let psf = match parse_psf(&sfo_path) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Vita3K: skip {}: {}", path.display(), e);
+            return None;
+        }
+    };
     let title_id = psf_get_title_id(&psf);
     if title_id.is_empty() {
         return None;

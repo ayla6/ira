@@ -36,6 +36,14 @@ pub fn is_ds_extension(ext: &str) -> bool {
     )
 }
 
+fn ds_entry_pick(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(is_ds_extension)
+        .unwrap_or(false)
+}
+
 fn u32_le(buf: &[u8]) -> Option<u32> {
     Some(u32::from_le_bytes(buf.try_into().ok()?))
 }
@@ -58,6 +66,14 @@ fn supercard_base(lead: &[u8]) -> u64 {
     } else {
         0
     }
+}
+
+/// Banner address for a lead buffer, accounting for a prepended
+/// SuperCard header. Shared by the plain-file and streaming icon readers.
+fn banner_addr(lead: &[u8]) -> Option<u64> {
+    let base = supercard_base(lead);
+    let header = lead.get(base as usize..)?;
+    Some(u32_le(header.get(0x68..0x6C)?)? as u64 + base)
 }
 
 /// UTF-16 banner title, NUL-trimmed.
@@ -150,32 +166,18 @@ pub fn read_rom_info(path: &Path, unpack_archives: bool) -> Option<DsRomInfo> {
     if archives::is_archive_extension(&ext) && !unpack_archives {
         return None;
     }
-    let pick = |name: &str| {
-        Path::new(name)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(is_ds_extension)
-            .unwrap_or(false)
-    };
-    archives::with_entry_reader(path, &pick, |reader| read_from_stream(reader))
+    archives::with_entry_reader(path, &ds_entry_pick, |reader| read_from_stream(reader))
 }
 
 /// Reads only the banner icon from a DS ROM, without hashing. Always
 /// handles archives — the NDS button must work even when bulk extraction is
 /// off — and stops decompressing after the banner.
 pub fn read_icon(path: &Path) -> Option<Vec<u8>> {
-    let pick = |name: &str| {
-        Path::new(name)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(is_ds_extension)
-            .unwrap_or(false)
-    };
     // Plain files: try direct seek first (fast, no streaming)
     if let Some(icon) = read_icon_plain(path) {
         return Some(icon);
     }
-    archives::with_entry_reader(path, &pick, |reader| read_icon_from_stream(reader))
+    archives::with_entry_reader(path, &ds_entry_pick, |reader| read_icon_from_stream(reader))
 }
 
 fn read_icon_plain(path: &Path) -> Option<Vec<u8>> {
@@ -185,9 +187,7 @@ fn read_icon_plain(path: &Path) -> Option<Vec<u8>> {
     // DS header itself is then parsed from `base`.
     let mut head = vec![0u8; 0xB4 + 0x100];
     file.read_exact(&mut head).ok()?;
-    let base = supercard_base(&head);
-    let header = head.get(base as usize..)?;
-    let icon_addr = u32_le(header.get(0x68..0x6C)?)? as u64 + base;
+    let icon_addr = banner_addr(&head)?;
     file.seek(SeekFrom::Start(icon_addr)).ok()?;
     let mut banner = vec![0u8; BANNER_LEN];
     file.read_exact(&mut banner).ok()?;
@@ -202,9 +202,7 @@ fn read_icon_from_stream(reader: &mut dyn Read) -> Option<Vec<u8>> {
     const LEAD_LEN: usize = 8192;
     let mut lead = vec![0u8; LEAD_LEN];
     reader.read_exact(&mut lead).ok()?;
-    let base = supercard_base(&lead);
-    let header = lead.get(base as usize..)?;
-    let icon_addr = u32_le(header.get(0x68..0x6C)?)? as u64 + base;
+    let icon_addr = banner_addr(&lead)?;
 
     let mut capture = RangeCapture::new(vec![(icon_addr, BANNER_LEN)]);
     capture.feed(&lead);
@@ -224,14 +222,7 @@ fn read_icon_from_stream(reader: &mut dyn Read) -> Option<Vec<u8>> {
 /// "AQQE") — the serial every DS title ships with. Works through
 /// containers: only the first bytes of the entry are read.
 pub fn read_serial(path: &Path) -> Option<String> {
-    let pick = |name: &str| {
-        Path::new(name)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(is_ds_extension)
-            .unwrap_or(false)
-    };
-    archives::with_entry_reader(path, &pick, |reader| {
+    archives::with_entry_reader(path, &ds_entry_pick, |reader| {
         let mut lead = vec![0u8; 512 + 0x10];
         reader.read_exact(&mut lead).ok()?;
         let base = supercard_base(&lead) as usize;
@@ -260,13 +251,13 @@ fn serial_from_header(header: &[u8]) -> Option<String> {
 fn read_from_stream(reader: &mut dyn Read) -> Option<DsRomInfo> {
     let mut lead = vec![0u8; 1024];
     reader.read_exact(&mut lead).ok()?;
-    let base = supercard_base(&lead);
-    let header = &lead[base as usize..base as usize + 512];
-    let arm9_addr = u32_le(&header[0x20..0x24])? as u64 + base as u64;
-    let arm9_size = u32_le(&header[0x2C..0x30])? as usize;
-    let arm7_addr = u32_le(&header[0x30..0x34])? as u64 + base as u64;
-    let arm7_size = u32_le(&header[0x3C..0x40])? as usize;
-    let icon_addr = u32_le(&header[0x68..0x6C])? as u64 + base as u64;
+    let base = supercard_base(&lead) as u64;
+    let header = lead.get(base as usize..base as usize + 512)?;
+    let arm9_addr = u32_le(header.get(0x20..0x24)?)? as u64 + base;
+    let arm9_size = u32_le(header.get(0x2C..0x30)?)? as usize;
+    let arm7_addr = u32_le(header.get(0x30..0x34)?)? as u64 + base;
+    let arm7_size = u32_le(header.get(0x3C..0x40)?)? as usize;
+    let icon_addr = u32_le(header.get(0x68..0x6C)?)? as u64 + base;
     if arm9_size + arm7_size > 16 * 1024 * 1024 {
         // rcheevos's sanity check — not a DS ROM.
         return None;

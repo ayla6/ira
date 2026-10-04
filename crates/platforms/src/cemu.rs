@@ -36,6 +36,10 @@ pub fn cemu_data_dir_for(executable: &str) -> PathBuf {
     if let Some(portable) = portable_dir_for(executable) {
         return portable;
     }
+    xdg_data_dir()
+}
+
+fn xdg_data_dir() -> PathBuf {
     xdg::BaseDirectories::new()
         .get_data_home()
         .unwrap_or_else(|| home_dir().join(".local").join("share"))
@@ -46,10 +50,14 @@ fn settings_path_for(executable: &str) -> PathBuf {
     cemu_config_dir_for(executable).join("settings.xml")
 }
 
-fn setting_text<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<String> {
+fn child_text<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<&'a str> {
     node.children()
         .find(|child| child.has_tag_name(name))
         .and_then(|child| child.text())
+}
+
+fn setting_text<'a>(node: roxmltree::Node<'a, 'a>, name: &str) -> Option<String> {
+    child_text(node, name)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
@@ -114,19 +122,10 @@ fn parse_title_xml(path: &Path) -> Option<(String, String)> {
     let data = std::fs::read_to_string(path).ok()?;
     let document = roxmltree::Document::parse(&data).ok()?;
     let root = document.root_element();
-    let title_id = root
-        .children()
-        .find(|node| node.has_tag_name("title_id"))
-        .and_then(|node| node.text())
+    let title_id = child_text(root, "title_id")
         .and_then(|id| u64::from_str_radix(id.trim().trim_start_matches("0x"), 16).ok())?;
-    let title = root
-        .children()
-        .find(|node| node.has_tag_name("longname_en"))
-        .or_else(|| {
-            root.children()
-                .find(|node| node.has_tag_name("shortname_en"))
-        })
-        .and_then(|node| node.text())
+    let title = child_text(root, "longname_en")
+        .or_else(|| child_text(root, "shortname_en"))
         .map(str::trim)
         .unwrap_or_default()
         .to_string();
@@ -190,22 +189,17 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<CemuGame> {
     let mlc = mlc_path_for(executable);
     // usr/title stores every category, but scan_title keeps only launchable
     // titles; system categories live under sys/title and are never games.
-    let roots = {
-        let mut roots = configured_game_paths_for(executable);
-        roots.push(mlc.join("usr/title"));
-        roots
-    };
+    let mut roots = configured_game_paths_for(executable);
+    roots.push(mlc.join("usr/title"));
 
     let mut games = Vec::new();
     for root in roots {
         scan_dir(&root, 0, &mut games);
     }
 
-    // The same title can be reachable from several roots (a configured game
-    // path and the mlc storage); a title ID uniquely identifies a Wii U
-    // title, so dedupe on it instead of the path to avoid duplicating the
-    // game in the library. Configured game paths are scanned first, so the
-    // user-chosen location wins.
+    // Same title reachable from several roots (game path + mlc storage):
+    // a title ID uniquely identifies a Wii U title. Configured paths are
+    // scanned first, so the user-chosen location wins.
     let mut seen = HashSet::new();
     games.retain(|game| seen.insert(game.title_id.clone()));
     games
@@ -217,8 +211,7 @@ fn is_title_dir(path: &Path) -> bool {
 }
 
 /// Reads the `<path>` of `title_id` from Cemu's title list cache, which
-/// remembers where every library title was last seen — including titles
-/// whose configured game paths are empty, as in flatpak installs.
+/// remembers where every library title was last seen.
 fn title_path_from_cache_file(cache: &Path, title_id: &str) -> Option<PathBuf> {
     let data = std::fs::read_to_string(cache).ok()?;
     let document = roxmltree::Document::parse(&data).ok()?;
@@ -229,11 +222,7 @@ fn title_path_from_cache_file(cache: &Path, title_id: &str) -> Option<PathBuf> {
             node.attribute("titleId")
                 .is_some_and(|id| id.eq_ignore_ascii_case(title_id))
         })
-        .and_then(|node| {
-            node.children()
-                .find(|child| child.has_tag_name("path"))
-                .and_then(|child| child.text())
-        })
+        .and_then(|node| child_text(node, "path"))
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)

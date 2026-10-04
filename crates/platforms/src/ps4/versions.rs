@@ -1,19 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use super::paths::SHADPS4_FLATPAK_ID;
+use super::paths::{xdg_data_dir_for, SHADPS4_FLATPAK_ID};
 
 /// Path to the shadPS4 Qt Launcher data directory.
 fn shadps4qt_dir() -> PathBuf {
-    xdg::BaseDirectories::new()
-        .get_data_home()
-        .map(|p| p.join("shadPS4QtLauncher"))
-        .unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("shadPS4QtLauncher")
-        })
+    xdg_data_dir_for("shadPS4QtLauncher")
 }
 
 /// A version entry from versions.json.
@@ -46,7 +37,7 @@ pub fn read_shadps4_launch_options() -> Vec<crate::emulator_detect::DetectedEmul
             } else {
                 format!("{} ({})", version.name, version.date)
             },
-            launch_command: version.path.trim_matches('"').to_string(),
+            launch_command: unquote(&version.path).to_string(),
         })
         .filter(|option| executable_available(&option.launch_command))
         .collect::<Vec<_>>();
@@ -75,9 +66,8 @@ pub fn detect_shadps4_version_path() -> Option<String> {
     let ini_path = shadps4qt_dir().join("qt_ui.ini");
     if let Ok(data) = std::fs::read_to_string(&ini_path) {
         for line in data.lines() {
-            let trimmed = line.trim();
-            if let Some(val) = trimmed.strip_prefix("versionSelected=") {
-                let path = val.trim_matches('"').to_string();
+            if let Some(val) = line.trim().strip_prefix("versionSelected=") {
+                let path = unquote(val).to_string();
                 if !path.is_empty() && executable_available(&path) {
                     return Some(path);
                 }
@@ -88,7 +78,7 @@ pub fn detect_shadps4_version_path() -> Option<String> {
     // Fallback: pick the first installed version from versions.json.
     let versions = read_shadps4_versions();
     for v in &versions {
-        let p = v.path.trim_matches('"').to_string();
+        let p = unquote(&v.path).to_string();
         if !p.is_empty() && executable_available(&p) {
             return Some(p);
         }
@@ -118,7 +108,7 @@ fn pick_shadps4_executable(
     detected: Option<&str>,
 ) -> String {
     for candidate in [per_game, global] {
-        let candidate = candidate.trim_matches('"');
+        let candidate = unquote(candidate);
         if candidate.is_empty() {
             continue;
         }
@@ -134,7 +124,7 @@ fn pick_shadps4_executable(
         }
     }
     if let Some(p) = detected {
-        let p = p.trim_matches('"');
+        let p = unquote(p);
         if !p.is_empty() && executable_available(p) {
             return p.to_string();
         }
@@ -163,6 +153,10 @@ pub fn shadps4_executable_available(candidate: &str) -> bool {
 
 fn executable_available(candidate: &str) -> bool {
     Path::new(candidate).is_file() || which::which(candidate).is_ok()
+}
+
+fn unquote(s: &str) -> &str {
+    s.trim_matches('"')
 }
 
 #[cfg(test)]

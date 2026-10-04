@@ -10,11 +10,12 @@ pub enum PsfValue {
     Binary(Vec<u8>),
 }
 
-fn read_u32_le(b: &[u8]) -> u32 {
-    u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+fn read_u32_le(b: &[u8]) -> Option<u32> {
+    b.get(..4)
+        .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
 }
-fn read_u16_le(b: &[u8]) -> u16 {
-    u16::from_le_bytes([b[0], b[1]])
+fn read_u16_le(b: &[u8]) -> Option<u16> {
+    b.get(..2).map(|s| u16::from_le_bytes([s[0], s[1]]))
 }
 
 /// Parse a param.sfo file, returning a map of key → value.
@@ -28,14 +29,17 @@ pub fn parse_psf_bytes(data: &[u8]) -> Result<HashMap<String, PsfValue>, String>
         return Err("param.sfo too short".into());
     }
 
-    let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    let magic = data
+        .get(..4)
+        .map(|s| u32::from_be_bytes([s[0], s[1], s[2], s[3]]))
+        .unwrap_or(0);
     if magic != PSF_MAGIC {
         return Err(format!("bad PSF magic: 0x{:08X}", magic));
     }
 
-    let key_table_offset = read_u32_le(&data[8..12]) as usize;
-    let data_table_offset = read_u32_le(&data[12..16]) as usize;
-    let num_entries = read_u32_le(&data[16..20]) as usize;
+    let key_table_offset = read_u32_le(data.get(8..12).unwrap_or(&[])).unwrap_or(0) as usize;
+    let data_table_offset = read_u32_le(data.get(12..16).unwrap_or(&[])).unwrap_or(0) as usize;
+    let num_entries = read_u32_le(data.get(16..20).unwrap_or(&[])).unwrap_or(0) as usize;
 
     let mut result = HashMap::new();
 
@@ -44,59 +48,51 @@ pub fn parse_psf_bytes(data: &[u8]) -> Result<HashMap<String, PsfValue>, String>
         if off + 16 > data.len() {
             break;
         }
-        let key_off = read_u16_le(&data[off..off + 2]) as usize;
-        let param_fmt = read_u16_le(&data[off + 2..off + 4]);
-        let param_len = read_u32_le(&data[off + 4..off + 8]) as usize;
-        let data_off = read_u32_le(&data[off + 12..off + 16]) as usize;
+        let entry = &data[off..off + 16];
+        let key_off = read_u16_le(&entry[..2]).unwrap_or(0) as usize;
+        let param_fmt = read_u16_le(&entry[2..4]).unwrap_or(0);
+        let param_len = read_u32_le(&entry[4..8]).unwrap_or(0) as usize;
+        let data_off = read_u32_le(&entry[12..16]).unwrap_or(0) as usize;
 
-        // Read key string (null-terminated)
-        let key_start = key_table_offset + key_off;
-        let key_end = data[key_start..]
+        // Read key string (null-terminated); skip corrupt entries.
+        let key_start = key_table_offset.saturating_add(key_off);
+        let Some(key_rest) = data.get(key_start..) else {
+            break;
+        };
+        let key_end = key_rest
             .iter()
             .position(|&b| b == 0)
             .map(|p| key_start + p)
-            .unwrap_or(data.len());
-        let key = String::from_utf8_lossy(&data[key_start..key_end]).to_string();
+            .unwrap_or(data.len().min(key_start + 64));
+        let Some(key_bytes) = data.get(key_start..key_end) else {
+            break;
+        };
+        let key = String::from_utf8_lossy(key_bytes).to_string();
 
-        // Read data
-        let data_start = data_table_offset + data_off;
-        let data_end = data_start + param_len;
+        // Read data; truncated values fall back to empty/zero.
+        let data_start = data_table_offset.saturating_add(data_off);
+        let data_end = data_start.saturating_add(param_len);
+        let slice = if data_end <= data.len() {
+            &data[data_start..data_end]
+        } else {
+            &[]
+        };
 
         let value = match param_fmt {
             0x0204 => {
                 // Text (UTF-8, null-terminated)
-                let s = if data_end <= data.len() {
-                    let slice = &data[data_start..data_end];
-                    let nul = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
-                    String::from_utf8_lossy(&slice[..nul]).to_string()
-                } else {
-                    String::new()
-                };
-                PsfValue::Text(s)
+                let nul = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
+                PsfValue::Text(String::from_utf8_lossy(&slice[..nul]).to_string())
             }
             0x0404 => {
-                // Integer (i32 LE)
-                let val = if data_end <= data.len() {
-                    i32::from_le_bytes([
-                        data[data_start],
-                        data[data_start + 1],
-                        data[data_start + 2],
-                        data[data_start + 3],
-                    ])
-                } else {
-                    0
-                };
+                // Integer (i32 LE); short values read as zero.
+                let val = slice
+                    .get(..4)
+                    .map(|s| i32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+                    .unwrap_or(0);
                 PsfValue::Integer(val)
             }
-            _ => {
-                // Binary
-                let bytes = if data_end <= data.len() {
-                    data[data_start..data_end].to_vec()
-                } else {
-                    Vec::new()
-                };
-                PsfValue::Binary(bytes)
-            }
+            _ => PsfValue::Binary(slice.to_vec()),
         };
 
         result.insert(key, value);

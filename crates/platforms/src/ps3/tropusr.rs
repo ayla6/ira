@@ -75,48 +75,50 @@ pub fn parse_tropusr_bytes(data: &[u8]) -> Result<HashMap<u32, (bool, i64)>, Str
 
     let mut result = HashMap::new();
 
-    let header_start = HEADER_SIZE;
+    // Each table-6 entry is 0x70 bytes. Only the first 0x30 bytes carry useful data;
+    // the rest is padding.
+    const ENTRY6_SIZE: usize = 0x70;
     for i in 0..tables_count {
-        let th_off = header_start + i * TABLE_HEADER_SIZE;
+        let th_off = HEADER_SIZE + i * TABLE_HEADER_SIZE;
         if th_off + TABLE_HEADER_SIZE > data.len() {
             break;
         }
 
         let table_type = read_u32_be(data, th_off).unwrap_or(0);
-        let entries_count = read_u32_be(data, th_off + 12).unwrap_or(0) as usize;
-        let entries_offset = read_u64_be(data, th_off + 16).unwrap_or(0) as usize;
-
         if table_type != 6 {
             continue;
         }
+        let entries_count = read_u32_be(data, th_off + 12).unwrap_or(0) as usize;
+        let entries_offset = read_u64_be(data, th_off + 16).unwrap_or(0) as usize;
 
-        // Each table-6 entry is 0x70 bytes. Only the first 0x30 bytes carry useful data;
-        // the rest is padding.
-        const ENTRY6_SIZE: usize = 0x70;
         for j in 0..entries_count {
             let off = entries_offset + j * ENTRY6_SIZE;
             if off + 0x30 > data.len() {
                 break;
             }
-
-            let trophy_id = read_u32_be(data, off + 16).unwrap_or(0);
-            let trophy_state = read_u32_be(data, off + 20).unwrap_or(0);
-            // timestamp2 is the "official" unlock timestamp (per RPCS3's GetTrophyTimestamp).
-            let timestamp2 = read_u64_be(data, off + 32).unwrap_or(0);
-
-            let earned = trophy_state != 0;
-            let earned_time = if earned {
-                tick_to_unix_seconds(timestamp2)
-            } else {
-                0
-            };
-
-            result.insert(trophy_id, (earned, earned_time));
+            let (trophy_id, state) = parse_table6_entry(data, off);
+            result.insert(trophy_id, state);
         }
         break;
     }
 
     Ok(result)
+}
+
+/// Parse one table-6 entry at `off` into (trophy_id, (earned, unix_time)).
+fn parse_table6_entry(data: &[u8], off: usize) -> (u32, (bool, i64)) {
+    let trophy_id = read_u32_be(data, off + 16).unwrap_or(0);
+    let trophy_state = read_u32_be(data, off + 20).unwrap_or(0);
+    // timestamp2 is the "official" unlock timestamp (per RPCS3's GetTrophyTimestamp).
+    let timestamp2 = read_u64_be(data, off + 32).unwrap_or(0);
+
+    let earned = trophy_state != 0;
+    let earned_time = if earned {
+        tick_to_unix_seconds(timestamp2)
+    } else {
+        0
+    };
+    (trophy_id, (earned, earned_time))
 }
 
 #[cfg(test)]

@@ -36,6 +36,16 @@ pub struct AzaharGame {
     pub icon: Option<Vec<u8>>,
 }
 
+fn is_dir_entry(entry: &std::fs::DirEntry) -> bool {
+    entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+}
+
+fn is_rom_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ROM_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+}
+
 /// Collects ROM file paths below `path`; parsing is deferred so it can run
 /// concurrently.
 fn collect_rom_paths(path: &Path, depth_left: u32, out: &mut Vec<PathBuf>) {
@@ -46,15 +56,9 @@ fn collect_rom_paths(path: &Path, depth_left: u32, out: &mut Vec<PathBuf>) {
         return;
     };
     for entry in entries.flatten() {
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        if is_dir {
+        if is_dir_entry(&entry) {
             collect_rom_paths(&entry.path(), depth_left - 1, out);
-        } else if entry
-            .path()
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ROM_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
-        {
+        } else if is_rom_path(&entry.path()) {
             out.push(entry.path());
         }
     }
@@ -81,19 +85,12 @@ fn installed_title_roots(root: &Path) -> Vec<PathBuf> {
     if direct.is_dir() {
         roots.push(direct);
     }
-    let base = root.join("Nintendo 3DS");
-    let base = if base.is_dir() {
-        base
-    } else {
-        root.to_path_buf()
-    };
+    let n3ds = root.join("Nintendo 3DS");
+    let base = if n3ds.is_dir() { n3ds } else { root.to_path_buf() };
     let Ok(ids) = std::fs::read_dir(base) else {
         return roots;
     };
-    for id0 in ids
-        .flatten()
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-    {
+    for id0 in ids.flatten().filter(is_dir_entry) {
         let title_dir = id0.path().join("title");
         if title_dir.is_dir() {
             roots.push(title_dir);
@@ -102,15 +99,13 @@ fn installed_title_roots(root: &Path) -> Vec<PathBuf> {
         let Ok(id1s) = std::fs::read_dir(id0.path()) else {
             continue;
         };
-        for id1 in id1s
-            .flatten()
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        {
-            let title_dir = id1.path().join("title");
-            if title_dir.is_dir() {
-                roots.push(title_dir);
-            }
-        }
+        roots.extend(
+            id1s
+                .flatten()
+                .filter(is_dir_entry)
+                .map(|id1| id1.path().join("title"))
+                .filter(|p| p.is_dir()),
+        );
     }
     roots
 }
@@ -213,24 +208,19 @@ fn find_dump_by_name(dir: &Path, title_id: &str, depth_left: u32) -> Option<Path
     if depth_left == 0 {
         return None;
     }
+    let needle = title_id.to_ascii_lowercase();
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let path = entry.path();
-        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        if is_dir_entry(&entry) {
             if let Some(found) = find_dump_by_name(&path, title_id, depth_left - 1) {
                 return Some(found);
             }
             continue;
         }
-        let is_rom = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ROM_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()));
         let name_matches = path.file_name().is_some_and(|name| {
-            name.to_string_lossy()
-                .to_ascii_lowercase()
-                .contains(&title_id.to_ascii_lowercase())
+            name.to_string_lossy().to_ascii_lowercase().contains(&needle)
         });
-        if is_rom
+        if is_rom_path(&path)
             && name_matches
             && scan_rom_file(&path).is_some_and(|game| game.title_id == title_id)
         {

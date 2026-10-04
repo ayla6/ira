@@ -64,32 +64,30 @@ pub fn parse_persistent_settings(path: &Path) -> PersistentData {
 /// Returns None on parse failure.
 fn parse_iso8601(s: &str) -> Option<i64> {
     // Format: YYYY-MM-DDTHH:MM:SS (optionally with fractional seconds or timezone)
-    let s = s.trim();
-    let date_time = s.split('T').collect::<Vec<&str>>();
-    if date_time.len() != 2 {
+    let (date, time) = s.trim().split_once('T')?;
+    let mut date_parts = date.split('-');
+    let (Some(year_s), Some(month_s), Some(day_s)) = (date_parts.next(), date_parts.next(), date_parts.next()) else {
+        return None;
+    };
+    if date_parts.next().is_some() {
         return None;
     }
-    let date_parts: Vec<&str> = date_time[0].split('-').collect();
-    if date_parts.len() != 3 {
-        return None;
-    }
-    let year: i64 = date_parts[0].parse().ok()?;
-    let month: u32 = date_parts[1].parse().ok()?;
-    let day: u32 = date_parts[2].parse().ok()?;
+    let year: i64 = year_s.parse().ok()?;
+    let month: u32 = month_s.parse().ok()?;
+    let day: u32 = day_s.parse().ok()?;
 
     // Time part may have fractional seconds or timezone suffix; take HH:MM:SS only.
-    let time_str = date_time[1].split(['.', '+', '-']).next().unwrap_or("");
-    let time_parts: Vec<&str> = time_str.split(':').collect();
-    if time_parts.len() < 2 {
+    let time_str = time.split(['.', '+', '-']).next().unwrap_or("");
+    let mut time_parts = time_str.split(':');
+    let (Some(hour_s), Some(min_s)) = (time_parts.next(), time_parts.next()) else {
         return None;
-    }
-    let hour: i64 = time_parts[0].parse().ok()?;
-    let minute: i64 = time_parts[1].parse().ok()?;
-    let second: i64 = if time_parts.len() >= 3 {
-        time_parts[2].parse().ok()?
-    } else {
-        0
     };
+    let hour: i64 = hour_s.parse().ok()?;
+    let minute: i64 = min_s.parse().ok()?;
+    let second: i64 = time_parts
+        .next()
+        .map(|sec_s| sec_s.parse().ok())
+        .unwrap_or(Some(0))?;
 
     let days = days_from_civil(year, month, day);
     Some(days * 86400 + hour * 3600 + minute * 60 + second)

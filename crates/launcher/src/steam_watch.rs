@@ -13,10 +13,11 @@
 use std::collections::HashSet;
 use std::process::Child;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use ira_input::steam::{ProcessIdentity, SteamProcessScanner};
 
+use crate::procfs::unix_now;
 use crate::wrapper::{
     clear_game_log, finalize_game, get_game_log, log_launch_header, pipe_lines_to_log,
     MonitorContext,
@@ -33,13 +34,6 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 /// when its processes are actually gone — but a game that ignores
 /// steam://stop cannot hold the session open forever.
 const STOP_EXIT_CAP: Duration = Duration::from_secs(60);
-
-fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
 
 /// Session state for one tracked Steam launch. The game counts as running
 /// from the first poll on which any matching process exists — including
@@ -105,7 +99,7 @@ pub fn monitor_steam_launch(child: Option<Child>, app_id: String, mut ctx: Monit
         let game_id = ctx.game_id;
         clear_game_log(game_id);
         let log_buf = get_game_log(game_id);
-        log_launch_header(&ctx, &log_buf, "Started via Steam");
+        log_launch_header(&ctx.command, &ctx.env, &log_buf, "Started via Steam");
 
         let mut child = child;
         if let Some(child) = child.as_mut() {

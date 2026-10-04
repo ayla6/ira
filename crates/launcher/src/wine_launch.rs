@@ -11,6 +11,35 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     let is_proton = crate::wine_detect::is_proton_version(&wine.version)
         || crate::wine_detect::is_proton_binary(wine_exe);
 
+    push_base_env(&mut env, wine, wine_exe, is_proton);
+    push_sync_env(&mut env, wine);
+    push_feature_env(&mut env, wine);
+
+    let overrides_str = format_dll_overrides(&wine.dll_overrides, wine.desktop_integration);
+    if !overrides_str.is_empty() {
+        env.push(("WINEDLLOVERRIDES".to_string(), overrides_str));
+    }
+
+    if let Some(proton_path) = get_proton_path(&wine.version, wine_exe) {
+        env.push(("PROTONPATH".to_string(), proton_path));
+    }
+
+    if is_proton {
+        push_proton_env(&mut env, wine, wine_exe);
+    }
+
+    push_frame_env(&mut env, wine);
+
+    env
+}
+
+/// Identity and prefix: WINEDEBUG, WINE, WINEPREFIX, WINEARCH.
+fn push_base_env(
+    env: &mut Vec<(String, String)>,
+    wine: &WineConfig,
+    wine_exe: &str,
+    is_proton: bool,
+) {
     env.push(("WINEDEBUG".to_string(), wine.show_debug.clone()));
     env.push(("WINE".to_string(), wine_exe.to_string()));
 
@@ -24,7 +53,10 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     };
     env.push(("WINEPREFIX".to_string(), pfx));
     env.push(("WINEARCH".to_string(), arch));
+}
 
+/// Esync/fsync toggles plus their kernel-limit warnings.
+fn push_sync_env(env: &mut Vec<(String, String)>, wine: &WineConfig) {
     env.push((
         "WINEESYNC".to_string(),
         if wine.esync { "1" } else { "0" }.to_string(),
@@ -47,7 +79,10 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     if !wine.fsync {
         env.push(("PROTON_NO_FSYNC".to_string(), "1".to_string()));
     }
+}
 
+/// One-shot graphics/feature flags (FSR, NVAPI, Wayland, DXVK extras, …).
+fn push_feature_env(env: &mut Vec<(String, String)>, wine: &WineConfig) {
     if wine.fsr {
         env.push(("WINE_FULLSCREEN_FSR".to_string(), "1".to_string()));
     }
@@ -88,20 +123,11 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     } else if wine.show_debug == "+fps" {
         env.push(("DXVK_LOG_LEVEL".to_string(), "info".to_string()));
     }
+}
 
-    let overrides_str = format_dll_overrides(&wine.dll_overrides, wine.desktop_integration);
-    if !overrides_str.is_empty() {
-        env.push(("WINEDLLOVERRIDES".to_string(), overrides_str));
-    }
-
-    if let Some(proton_path) = get_proton_path(&wine.version, wine_exe) {
-        env.push(("PROTONPATH".to_string(), proton_path));
-    }
-
-    if is_proton {
-        push_proton_env(&mut env, wine, wine_exe);
-    }
-
+/// Frame pacing and HUD: DXVK frame rate cap, the always-explicit HUD
+/// toggle, and the Proton WoW64/NTSync switches.
+fn push_frame_env(env: &mut Vec<(String, String)>, wine: &WineConfig) {
     if wine.dxvk_frame_rate > 0 {
         env.push((
             "DXVK_FRAME_RATE".to_string(),
@@ -120,8 +146,6 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     if wine.proton_ntsync {
         env.push(("PROTON_USE_NTSYNC".to_string(), "1".to_string()));
     }
-
-    env
 }
 
 /// Env vars that only make sense under Proton/umu.

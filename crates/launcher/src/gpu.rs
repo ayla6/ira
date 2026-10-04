@@ -129,6 +129,9 @@ fn detect_gpus_uncached() -> Vec<GpuInfo> {
         Err(_) => return Vec::new(),
     };
 
+    // One lspci for every card: spawning it per card stalls multi-GPU
+    // machines behind N identical process spawns.
+    let lspci = run_lspci();
     let mut gpus: Vec<_> = entries
         .flatten()
         .filter_map(|entry| {
@@ -142,14 +145,14 @@ fn detect_gpus_uncached() -> Vec<GpuInfo> {
             if !suffix.chars().all(|c| c.is_ascii_digit()) || suffix.is_empty() {
                 return None;
             }
-            read_gpu_info(name_str)
+            read_gpu_info(name_str, lspci.as_deref())
         })
         .collect();
     gpus.sort_by(|a, b| a.card.cmp(&b.card));
     gpus
 }
 
-fn read_gpu_info(card: &str) -> Option<GpuInfo> {
+fn read_gpu_info(card: &str, lspci: Option<&str>) -> Option<GpuInfo> {
     let uevent_path = format!("/sys/class/drm/{}/device/uevent", card);
     let uevent = fs::read_to_string(&uevent_path).ok()?;
     let mut driver = String::new();
@@ -166,7 +169,7 @@ fn read_gpu_info(card: &str) -> Option<GpuInfo> {
         }
     }
     let is_nvidia = driver == "nvidia";
-    let name = get_gpu_name(&pci_slot).unwrap_or_else(|| format!("Unknown ({})", driver));
+    let name = get_gpu_name(&pci_slot, lspci).unwrap_or_else(|| format!("Unknown ({})", driver));
     Some(GpuInfo {
         card: card.to_string(),
         driver,
@@ -176,12 +179,19 @@ fn read_gpu_info(card: &str) -> Option<GpuInfo> {
     })
 }
 
-fn get_gpu_name(pci_slot: &str) -> Option<String> {
+fn run_lspci() -> Option<String> {
     let output = std::process::Command::new("lspci")
         .arg("-D")
         .output()
         .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn get_gpu_name(pci_slot: &str, lspci: Option<&str>) -> Option<String> {
+    let stdout = lspci?;
     for line in stdout.lines() {
         let parts: Vec<&str> = line.splitn(2, ' ').collect();
         if parts.len() == 2 {

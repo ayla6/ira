@@ -40,6 +40,13 @@ fn find_proton_wine(dir: &std::path::Path) -> Option<String> {
     None
 }
 
+/// The Proton installation root for a wine binary living at
+/// `<root>/dist/bin/wine` or `<root>/files/bin/wine`. `None` for anything
+/// else (system wine, custom paths, …).
+fn proton_root(wine_exe: &str) -> Option<std::path::PathBuf> {
+    let bin_dir = std::path::Path::new(wine_exe).parent()?;
+    bin_dir.parent()?.parent().map(|p| p.to_path_buf())
+}
 /// True if the wine version is a Proton build. This includes:
 /// - The "ge-proton" sentinel (downloaded on demand by umu)
 /// - Any version name containing "proton"
@@ -53,20 +60,9 @@ pub(crate) fn is_proton_version(version: &str) -> bool {
 /// True if the wine executable path lives inside a Proton installation
 /// (detected by the presence of a `proton` file in the installation root).
 pub(crate) fn is_proton_binary(wine_exe: &str) -> bool {
-    let path = std::path::Path::new(wine_exe);
-    // Proton wine lives at <root>/dist/bin/wine or <root>/files/bin/wine
-    // The <root> contains a file named "proton"
-    let bin_dir = match path.parent() {
-        Some(p) => p,
-        None => return false,
-    };
-    let root_candidate = bin_dir
-        .parent() // dist or files
-        .and_then(|p| p.parent()); // root
-    match root_candidate {
-        Some(root) => root.join("proton").is_file(),
-        None => false,
-    }
+    proton_root(wine_exe)
+        .map(|root| root.join("proton").is_file())
+        .unwrap_or(false)
 }
 
 /// Resolve PROTONPATH for a given wine version and executable.
@@ -80,16 +76,11 @@ pub(crate) fn get_proton_path(version: &str, wine_exe: &str) -> Option<String> {
     }
     // If the wine binary is inside a Proton directory, compute PROTONPATH from it
     if is_proton_binary(wine_exe) {
-        let path = std::path::Path::new(wine_exe);
-        let bin_dir = path.parent()?;
-        let proton_root = bin_dir.parent()?.parent()?;
-        return Some(proton_root.to_string_lossy().into_owned());
+        return proton_root(wine_exe).map(|p| p.to_string_lossy().into_owned());
     }
     // Fall back to version name check for names that contain "proton"
     if v.contains("proton") {
-        let path = std::path::Path::new(wine_exe);
-        let bin_dir = path.parent()?;
-        let proton_root = bin_dir.parent()?.parent()?;
+        let proton_root = proton_root(wine_exe)?;
         return Some(proton_root.to_string_lossy().into_owned());
     }
     None
@@ -144,39 +135,43 @@ pub fn find_wine_binary(version: &str, custom_path: &str) -> Result<String, Stri
             }
         }
         "ge-proton" => find_umu_binary(),
-        _ => {
-            if version.starts_with("wine-") {
-                let sys_path = format!("/usr/lib/{}/bin/wine", version);
-                if std::path::Path::new(&sys_path).is_file() {
-                    return Ok(sys_path);
-                }
-            }
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-            let lutris_path = format!(
-                "{}/.local/share/lutris/runners/wine/{}/bin/wine",
-                home, version
-            );
-            if std::path::Path::new(&lutris_path).is_file() {
-                return Ok(lutris_path);
-            }
-            let our_path = format!("{}/runners/wine/{}/bin/wine", home, version);
-            if std::path::Path::new(&our_path).is_file() {
-                return Ok(our_path);
-            }
-            for dir in steam_data_dirs() {
-                for sub in &["compatibilitytools.d", "steamapps/common"] {
-                    let p = std::path::Path::new(&dir).join(sub).join(version);
-                    if let Some(wine) = find_proton_wine(&p) {
-                        return Ok(wine);
-                    }
-                }
-            }
-            Err(format!(
-                "Wine version '{}' not found. Check Lutris runner dir or set a custom Wine path.",
-                version
-            ))
+        _ => find_runner_wine(version),
+    }
+}
+
+/// Wine from a versioned runner directory: system `/usr/lib/wine-*`,
+/// Lutris runners, our own runners dir, then Steam compat tools.
+fn find_runner_wine(version: &str) -> Result<String, String> {
+    if version.starts_with("wine-") {
+        let sys_path = format!("/usr/lib/{}/bin/wine", version);
+        if std::path::Path::new(&sys_path).is_file() {
+            return Ok(sys_path);
         }
     }
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let lutris_path = format!(
+        "{}/.local/share/lutris/runners/wine/{}/bin/wine",
+        home, version
+    );
+    if std::path::Path::new(&lutris_path).is_file() {
+        return Ok(lutris_path);
+    }
+    let our_path = format!("{}/runners/wine/{}/bin/wine", home, version);
+    if std::path::Path::new(&our_path).is_file() {
+        return Ok(our_path);
+    }
+    for dir in steam_data_dirs() {
+        for sub in &["compatibilitytools.d", "steamapps/common"] {
+            let p = std::path::Path::new(&dir).join(sub).join(version);
+            if let Some(wine) = find_proton_wine(&p) {
+                return Ok(wine);
+            }
+        }
+    }
+    Err(format!(
+        "Wine version '{}' not found. Check Lutris runner dir or set a custom Wine path.",
+        version
+    ))
 }
 
 pub fn find_umu_binary() -> Result<String, String> {
@@ -197,6 +192,26 @@ pub fn find_umu_binary() -> Result<String, String> {
         })
 }
 
+/// Collect `(label, version)` for every directory under `dir` that looks
+/// like a Proton install (a `proton` file inside), skipping `seen` names.
+fn scan_compat_dir(
+    dir: &std::path::Path,
+    seen: &mut std::collections::HashSet<String>,
+    versions: &mut Vec<(String, String)>,
+) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.join("proton").is_file() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if seen.insert(name.clone()) {
+                    versions.push((name.clone(), name));
+                }
+            }
+        }
+    }
+}
+
 fn scan_proton_versions() -> Vec<(String, String)> {
     let mut versions: Vec<(String, String)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -209,34 +224,13 @@ fn scan_proton_versions() -> Vec<(String, String)> {
 
     for dir in steam_data_dirs().iter().chain(extra_paths.iter()) {
         for sub in &["compatibilitytools.d", "steamapps/common"] {
-            let d = std::path::Path::new(dir).join(sub);
-            if let Ok(entries) = std::fs::read_dir(&d) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.join("proton").is_file() {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if seen.insert(name.clone()) {
-                            versions.push((name.clone(), name));
-                        }
-                    }
-                }
-            }
+            scan_compat_dir(&std::path::Path::new(dir).join(sub), &mut seen, &mut versions);
         }
     }
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let lutris_wine = format!("{}/.local/share/lutris/runners/wine", home);
-    if let Ok(entries) = std::fs::read_dir(&lutris_wine) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.join("proton").is_file() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if seen.insert(name.clone()) {
-                    versions.push((name.clone(), name));
-                }
-            }
-        }
-    }
+    scan_compat_dir(std::path::Path::new(&lutris_wine), &mut seen, &mut versions);
 
     versions
 }

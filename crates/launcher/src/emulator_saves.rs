@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 /// so the game can't tell saves were redirected.
 pub fn setup_gbe_saves(wine_prefix: &str, save_dir: &str) {
     let centralized = Path::new(save_dir).join("emulator_saves").join("gbe");
-    let _ = std::fs::create_dir_all(&centralized);
+    if let Err(e) = std::fs::create_dir_all(&centralized) {
+        eprintln!("Failed to create {}: {e}", centralized.display());
+        return;
+    }
 
     for user_dir in crate::game_saves::prefix_user_dirs(wine_prefix) {
         create_roaming_symlink(&user_dir, &centralized, "GSE Saves");
@@ -30,7 +33,10 @@ pub fn setup_gbe_saves(wine_prefix: &str, save_dir: &str) {
 /// NGE separates by `productid` internally.
 pub fn setup_nge_saves(wine_prefix: &str, save_dir: &str) {
     let centralized = Path::new(save_dir).join("emulator_saves").join("nge");
-    let _ = std::fs::create_dir_all(&centralized);
+    if let Err(e) = std::fs::create_dir_all(&centralized) {
+        eprintln!("Failed to create {}: {e}", centralized.display());
+        return;
+    }
 
     for user_dir in crate::game_saves::prefix_user_dirs(wine_prefix) {
         create_roaming_symlink(&user_dir, &centralized, "NemirtingasGalaxyEmu");
@@ -40,7 +46,10 @@ pub fn setup_nge_saves(wine_prefix: &str, save_dir: &str) {
 /// Create a symlink `<user_dir>/AppData/Roaming/<name>` → `centralized`.
 fn create_roaming_symlink(user_dir: &Path, centralized: &Path, name: &str) {
     let roaming = user_dir.join("AppData").join("Roaming");
-    let _ = std::fs::create_dir_all(&roaming);
+    if let Err(e) = std::fs::create_dir_all(&roaming) {
+        eprintln!("Failed to create {}: {e}", roaming.display());
+        return;
+    }
     create_save_symlink(&roaming, name, centralized);
 }
 
@@ -64,12 +73,21 @@ fn create_save_symlink(base: &Path, name: &str, centralized: &Path) {
             target.display()
         );
         ira_parser::safe_migrate_dir_contents(&target, centralized);
-        let _ = std::fs::remove_dir(&target);
+        if let Err(e) = std::fs::remove_dir(&target) {
+            eprintln!("Failed to remove {}: {e}", target.display());
+            return;
+        }
     }
 
     #[cfg(unix)]
     {
-        let _ = std::os::unix::fs::symlink(centralized, &target);
+        if let Err(e) = std::os::unix::fs::symlink(centralized, &target) {
+            eprintln!(
+                "Failed to link {} → {}: {e}",
+                target.display(),
+                centralized.display()
+            );
+        }
     }
 }
 
@@ -90,10 +108,16 @@ fn native_saves_base() -> PathBuf {
 /// `Goldberg SteamEmu Saves`) to `<save_dir>/emulator_saves/gbe/`.
 pub fn setup_gbe_saves_native(save_dir: &str) {
     let centralized = Path::new(save_dir).join("emulator_saves").join("gbe");
-    let _ = std::fs::create_dir_all(&centralized);
+    if let Err(e) = std::fs::create_dir_all(&centralized) {
+        eprintln!("Failed to create {}: {e}", centralized.display());
+        return;
+    }
 
     let base = native_saves_base();
-    let _ = std::fs::create_dir_all(&base);
+    if let Err(e) = std::fs::create_dir_all(&base) {
+        eprintln!("Failed to create {}: {e}", base.display());
+        return;
+    }
     create_save_symlink(&base, "GSE Saves", &centralized);
     create_save_symlink(&base, "Goldberg SteamEmu Saves", &centralized);
 }

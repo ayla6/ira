@@ -34,7 +34,7 @@ pub fn launch_via_daemon(
     if !matches!(input.mode, Some(ControllerInputMode::Enabled)) {
         return Err("input remapping is disabled".to_string());
     }
-    let binary = super::env_builder::input_binary_path()
+    let binary = super::input_wrap::input_binary_path()
         .ok_or_else(|| "ira-input binary was not found".to_string())?;
     // A daemon from an older build would misunderstand the protocol;
     // connect_daemon refuses it so the caller falls back instead of
@@ -60,7 +60,7 @@ pub fn launch_via_daemon(
 /// spawning one on demand. `Err` means no daemon is reachable and the idle
 /// controller keeps its native behaviour.
 pub fn desktop_client() -> Result<DaemonClient, String> {
-    let binary = super::env_builder::input_binary_path()
+    let binary = super::input_wrap::input_binary_path()
         .ok_or_else(|| "ira-input binary was not found".to_string())?;
     DaemonClient::connect_daemon(&binary)
 }

@@ -20,7 +20,7 @@ pub(crate) fn backup_path() -> PathBuf {
     config_path().with_extension("json.bak")
 }
 
-fn parse_config_file(path: &PathBuf) -> Option<Config> {
+fn parse_config_file(path: &std::path::Path) -> Option<Config> {
     // A read failure (permissions, I/O) must not pass for "fresh install" —
     // the next save would otherwise overwrite the real config with defaults.
     let data = match std::fs::read(path) {
@@ -98,17 +98,15 @@ pub fn load_config() -> Config {
             screenscraper_password.join().unwrap_or_default(),
         )
     });
-    if !steam_key.is_empty() {
-        c.steam_api_key = steam_key;
-    }
-    if !sgdb_key.is_empty() {
-        c.steam_griddb_api_key = sgdb_key;
-    }
-    if !ra_web_api_key.is_empty() {
-        c.ra_web_api_key = ra_web_api_key;
-    }
-    if !screenscraper_password.is_empty() {
-        c.screenscraper_password = screenscraper_password;
+    for (slot, secret) in [
+        (&mut c.steam_api_key, steam_key),
+        (&mut c.steam_griddb_api_key, sgdb_key),
+        (&mut c.ra_web_api_key, ra_web_api_key),
+        (&mut c.screenscraper_password, screenscraper_password),
+    ] {
+        if !secret.is_empty() {
+            *slot = secret;
+        }
     }
     c
 }

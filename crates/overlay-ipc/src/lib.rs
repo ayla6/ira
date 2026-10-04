@@ -40,8 +40,9 @@ pub use hotkey::{
 };
 pub use protocol::{
     AchievementEntry, InputEventRaw, NotificationEntry, NotificationType, ShmHeader,
-    DAEMON_TOGGLE_ENV, MAX_ACHIEVEMENTS, MAX_NOTIFICATIONS, OVERLAY_VISIBLE_OFFSET, SHM_MAGIC,
-    SHM_VERSION,
+    DAEMON_TOGGLE_ENV, EVT_KEY_PRESS, EVT_KEY_RELEASE, EVT_MOUSE_DOWN, EVT_MOUSE_MOVE,
+    EVT_MOUSE_UP, EVT_SCROLL, EVT_SCREENSHOT, EVT_TOGGLE_RECORD, MAX_ACHIEVEMENTS,
+    MAX_NOTIFICATIONS, OVERLAY_VISIBLE_OFFSET, SHM_MAGIC, SHM_VERSION,
 };
 pub use replay::{
     clamp_replay_buffer_seconds, replay_buffer_directory, replay_manifest_path, replay_window_size,

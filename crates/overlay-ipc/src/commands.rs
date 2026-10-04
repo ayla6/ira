@@ -98,7 +98,8 @@ impl CanvasAction {
 
 /// Converts an [`crate::protocol::InputEventRaw`] shim event into the
 /// equivalent canvas command. Only press/move/scroll cross the ring —
-/// releases (4) and capture hotkeys (5/6) are handled game-side by the layer.
+/// releases (`EVT_KEY_RELEASE`) and capture hotkeys (`EVT_SCREENSHOT` /
+/// `EVT_TOGGLE_RECORD`) are handled game-side by the layer.
 /// Returns `None` for anything else.
 pub fn command_from_raw(
     event_type: u32,
@@ -107,12 +108,15 @@ pub fn command_from_raw(
     button: u32,
     keycode: u32,
 ) -> Option<CanvasCommand> {
+    use crate::protocol::{
+        EVT_KEY_PRESS, EVT_MOUSE_DOWN, EVT_MOUSE_MOVE, EVT_MOUSE_UP, EVT_SCROLL,
+    };
     match event_type {
-        0 => Some(CanvasCommand::mouse_move(x as f32, y as f32)),
-        1 => Some(CanvasCommand::mouse_down(x as f32, y as f32, button)),
-        2 => Some(CanvasCommand::mouse_up(x as f32, y as f32, button)),
-        3 => nav_from_keycode(keycode),
-        7 => Some(CanvasCommand::scroll(y as f32)),
+        EVT_MOUSE_MOVE => Some(CanvasCommand::mouse_move(x as f32, y as f32)),
+        EVT_MOUSE_DOWN => Some(CanvasCommand::mouse_down(x as f32, y as f32, button)),
+        EVT_MOUSE_UP => Some(CanvasCommand::mouse_up(x as f32, y as f32, button)),
+        EVT_KEY_PRESS => nav_from_keycode(keycode),
+        EVT_SCROLL => Some(CanvasCommand::scroll(y as f32)),
         _ => None,
     }
 }

@@ -34,7 +34,7 @@ pub fn parse_gamepad_hotkey(hotkey: &str) -> Option<u32> {
         .split('+')
         .map(str::trim)
         .map(gamepad_button_mask_from_name)
-        .try_fold(0, |mask, button| button.map(|button| mask | button))
+        .try_fold(0, |mask, button| button.map(|bit| mask | bit))
         .filter(|mask| *mask != 0)
 }
 

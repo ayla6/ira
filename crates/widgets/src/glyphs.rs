@@ -247,8 +247,8 @@ pub fn source_badge(source: InputSource, family: ControllerFamily) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::source_asset_name;
-    use ira_input::{ControllerFamily, GamepadButton, InputSource};
+    use super::{source_asset_name, source_badge};
+    use ira_input::{AxisDirection, ControllerFamily, GamepadAxis, GamepadButton, InputSource};
 
     #[test]
     fn test_source_asset_name_uses_shared_standard_controls() {
@@ -312,5 +312,42 @@ mod tests {
                 Some(asset)
             );
         }
+    }
+
+    #[test]
+    fn test_source_badge_covers_buttons_axes_and_directions() {
+        let badge = |source| source_badge(source, ControllerFamily::Generic);
+        assert_eq!(badge(InputSource::Button(GamepadButton::A)), "A");
+        assert_eq!(
+            badge(InputSource::Button(GamepadButton::LeftShoulder)),
+            "LB"
+        );
+        assert_eq!(badge(InputSource::Button(GamepadButton::Paddle5)), "P5");
+        assert_eq!(badge(InputSource::Axis(GamepadAxis::LeftX)), "LX");
+        assert_eq!(
+            badge(InputSource::Axis(GamepadAxis::RightTrigger)),
+            "RT"
+        );
+        assert_eq!(
+            badge(InputSource::AxisDirection {
+                axis: GamepadAxis::LeftX,
+                direction: AxisDirection::Negative,
+            }),
+            "LX-"
+        );
+        assert_eq!(
+            source_badge(
+                InputSource::Button(GamepadButton::Back),
+                ControllerFamily::EightBitDo
+            ),
+            "-"
+        );
+        assert_eq!(
+            source_badge(
+                InputSource::Button(GamepadButton::Paddle1),
+                ControllerFamily::EightBitDo
+            ),
+            "R4"
+        );
     }
 }

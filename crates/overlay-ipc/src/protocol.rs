@@ -157,10 +157,11 @@ pub enum NotificationType {
 
 /// Raw input event — used by the LD_PRELOAD shim to pass captured input
 /// to the Vulkan layer via the exported C API (`ira_overlay_poll_events`).
+/// `event_type` is one of the `EVT_*` constants below.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct InputEventRaw {
-    /// 0=move, 1=button_down, 2=button_up, 3=key_press, 4=key_release
+    /// One of `EVT_*` below.
     pub event_type: u32,
     pub x: i32,
     pub y: i32,
@@ -169,6 +170,18 @@ pub struct InputEventRaw {
     /// X11 keycode (for key events).
     pub keycode: u32,
 }
+
+/// `InputEventRaw::event_type` values. Shared by the shim (producer),
+/// the layer's `convert_and_forward` (consumer), and
+/// [`crate::commands::command_from_raw`] (translator).
+pub const EVT_MOUSE_MOVE: u32 = 0;
+pub const EVT_MOUSE_DOWN: u32 = 1;
+pub const EVT_MOUSE_UP: u32 = 2;
+pub const EVT_KEY_PRESS: u32 = 3;
+pub const EVT_KEY_RELEASE: u32 = 4;
+pub const EVT_SCREENSHOT: u32 = 5;
+pub const EVT_TOGGLE_RECORD: u32 = 6;
+pub const EVT_SCROLL: u32 = 7;
 
 /// Offsets into the shared memory region for each section.
 pub const fn header_offset() -> usize {

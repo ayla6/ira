@@ -1,3 +1,5 @@
+//! Replay buffer sizing and paths — pure functions over seconds and dirs.
+
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_REPLAY_BUFFER_SECONDS: u32 = 5 * 60;

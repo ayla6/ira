@@ -79,9 +79,6 @@ pub fn set_bp_scale(scale: f64) {
 pub fn bp_ring_outset() -> f64 {
     (BP_RING_OUTSET * bp_scale()).round()
 }
-/// The big-picture UI's sizes, scaled from the 1080p reference by `s`. Everything
-/// is integer pixels: fractional font sizes render choppy. Split into
-/// per-area sections below; they all share the px helpers.
 /// The big-picture stylesheet at a viewport scale (1.0 = the 1080p
 /// reference). Includes the bundled-font rule; sizes scale, the desktop
 /// section does not (it lives with the app).
@@ -125,20 +122,26 @@ fn big_picture_css(s: f64) -> String {
     .concat()
 }
 
-/// Shared pixel helpers for the big-picture sections.
+/// Shared pixel helpers for the big-picture sections, scaled from the
+/// 1080p reference by `s`. Everything is whole pixels: fractional font
+/// sizes render choppy.
 struct BpPx {
-    /// Rounded and clamped to at least 1px (borders never vanish).
-    px: Box<dyn Fn(i32) -> String>,
-    /// Rounded, can shrink to 0.
-    pxs: Box<dyn Fn(i32) -> String>,
+    s: f64,
 }
 
 impl BpPx {
     fn new(s: f64) -> Self {
-        BpPx {
-            px: Box::new(move |v: i32| format!("{}px", (v as f64 * s).round().max(1.0))),
-            pxs: Box::new(move |v: i32| format!("{}px", (v as f64 * s).round())),
-        }
+        Self { s }
+    }
+
+    /// Rounded and clamped to at least 1px (borders never vanish).
+    fn px(&self, v: i32) -> String {
+        format!("{}px", (f64::from(v) * self.s).round().max(1.0))
+    }
+
+    /// Rounded, can shrink to 0.
+    fn pxs(&self, v: i32) -> String {
+        format!("{}px", (f64::from(v) * self.s).round())
     }
 }
 
@@ -150,12 +153,12 @@ fn bp_focus_ring(p: &BpPx) -> (String, String) {
     let ease = "cubic-bezier(0.25, 0.46, 0.45, 0.94)";
     let ring_rest = format!(
         "outline: 0 solid transparent;\n    outline-offset: {rest};\n    transition: outline-color 200ms {ease}, outline-width 200ms {ease}, outline-offset 200ms {ease};",
-        rest = (p.pxs)(4),
+        rest = p.pxs(4),
     );
     let ring_on = format!(
         "outline-color: alpha(@accent_color, 0.5);\n    outline-width: {width};\n    outline-offset: {offset};",
-        width = (p.pxs)(2),
-        offset = (p.pxs)(-2),
+        width = p.pxs(2),
+        offset = p.pxs(-2),
     );
     (ring_rest, ring_on)
 }
@@ -163,7 +166,6 @@ fn bp_focus_ring(p: &BpPx) -> (String, String) {
 /// Home screen: status bar, clock, bottom bar, prompt, titles.
 fn bp_css_header(s: f64) -> String {
     let p = BpPx::new(s);
-    let (px, pxs) = (&p.px, &p.pxs);
     format!(
         r#".bp-status {{
     background-color: @window_bg_color;
@@ -199,19 +201,19 @@ fn bp_css_header(s: f64) -> String {
 .bp-running-title {{ font-size: {page_title}; font-weight: 700; }}
 .bp-running-status {{ font-size: {subtitle}; }}
 "#,
-        status_pad_v = px(12),
-        status_pad_x = px(24),
-        clock_pad = pxs(2),
-        prompt_ring = pxs(2),
-        small = px(24),
-        pad_v = px(18),
-        pad_h = px(36),
-        min_h = px(72),
-        key = px(32),
-        key_font = px(16),
-        title = px(28),
-        page_title = px(30),
-        subtitle = px(22),
+        status_pad_v = p.px(12),
+        status_pad_x = p.px(24),
+        clock_pad = p.pxs(2),
+        prompt_ring = p.pxs(2),
+        small = p.px(24),
+        pad_v = p.px(18),
+        pad_h = p.px(36),
+        min_h = p.px(72),
+        key = p.px(32),
+        key_font = p.px(16),
+        title = p.px(28),
+        page_title = p.px(30),
+        subtitle = p.px(22),
     )
 }
 
@@ -219,7 +221,6 @@ fn bp_css_header(s: f64) -> String {
 /// focus-ring states.
 fn bp_css_tabs_menu(s: f64) -> String {
     let p = BpPx::new(s);
-    let px = &p.px;
     let (ring_rest, ring_on) = bp_focus_ring(&p);
     /* The tab picker: libadwaita's toggle-group metrics, ported from its
        stylesheet (3px group padding, 9px group radius, 34x28 toggles with
@@ -313,21 +314,21 @@ fn bp_css_tabs_menu(s: f64) -> String {
     box-shadow: none;
 }}
 "#,
-        tabs_group_pad = px(3),
-        tabs_radius = px(9),
-        tabs_min_w = px(34),
-        tabs_min_h = px(28),
-        tabs_toggle_radius = px(6),
-        tabs_pad_x = px(8),
-        tabs_pad_bottom = px(5),
-        tabs_spacing = px(6),
-        subtitle = px(22),
-        menu_radius = px(16),
-        menu_pad = px(22),
-        menu_optical = px(5),
-        hairline = px(1),
-        group_row_pad = px(14),
-        row_radius = px(10),
+        tabs_group_pad = p.px(3),
+        tabs_radius = p.px(9),
+        tabs_min_w = p.px(34),
+        tabs_min_h = p.px(28),
+        tabs_toggle_radius = p.px(6),
+        tabs_pad_x = p.px(8),
+        tabs_pad_bottom = p.px(5),
+        tabs_spacing = p.px(6),
+        subtitle = p.px(22),
+        menu_radius = p.px(16),
+        menu_pad = p.px(22),
+        menu_optical = p.px(5),
+        hairline = p.px(1),
+        group_row_pad = p.px(14),
+        row_radius = p.px(10),
         ring_rest = ring_rest,
         ring_on = ring_on,
     )
@@ -336,7 +337,6 @@ fn bp_css_tabs_menu(s: f64) -> String {
 /// The on-screen keyboard: shoulder buttons, keys, caret, badges.
 fn bp_css_keyboard(s: f64) -> String {
     let p = BpPx::new(s);
-    let (px, pxs) = (&p.px, &p.pxs);
     let (ring_rest, ring_on) = bp_focus_ring(&p);
     format!(
         r#".bp-shoulder {{
@@ -405,27 +405,51 @@ fn bp_css_keyboard(s: f64) -> String {
     font-size: {page_title};
 }}
 "#,
-        shoulder_pad_y = pxs(2),
-        shoulder_pad_x = px(10),
+        shoulder_pad_y = p.pxs(2),
+        shoulder_pad_x = p.px(10),
         // The badge rides the same optical center as the tab pill: the
         // bundled font's glyph mass sits low in its line box, and the same
         // extra bottom padding lifts the badge letters to match the tabs.
-        shoulder_pad_bottom = pxs(7),
-        shoulder_ring = pxs(2),
-        shoulder_radius = px(8),
-        small = px(24),
-        key_radius = px(8),
+        shoulder_pad_bottom = p.pxs(7),
+        shoulder_ring = p.pxs(2),
+        shoulder_radius = p.px(8),
+        small = p.px(24),
+        key_radius = p.px(8),
         ring_rest = ring_rest,
         ring_on = ring_on,
-        subtitle = px(22),
-        caret_width = px(2),
-        kbd_radius = px(16),
-        kbd_pad_top = px(10),
-        badge = px(22),
-        key_font = px(16),
-        group_row_pad = px(14),
-        preview_inset_x = px(22),
-        row_radius = px(10),
-        page_title = px(30),
+        subtitle = p.px(22),
+        caret_width = p.px(2),
+        kbd_radius = p.px(16),
+        kbd_pad_top = p.px(10),
+        badge = p.px(22),
+        key_font = p.px(16),
+        group_row_pad = p.px(14),
+        preview_inset_x = p.px(22),
+        row_radius = p.px(10),
+        page_title = p.px(30),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bp_css, bp_ring_outset, set_bp_scale};
+
+    #[test]
+    fn test_bp_css_scales_with_viewport() {
+        let base = bp_css(1.0);
+        assert!(base.contains("M PLUS 2"));
+        assert!(base.contains("font-size: 28px"));
+        let doubled = bp_css(2.0);
+        assert!(doubled.contains("font-size: 56px"));
+    }
+
+    #[test]
+    fn test_bp_ring_outset_follows_scale() {
+        let prev = super::bp_scale();
+        set_bp_scale(1.0);
+        assert_eq!(bp_ring_outset(), 11.0);
+        set_bp_scale(2.0);
+        assert_eq!(bp_ring_outset(), 22.0);
+        set_bp_scale(prev);
+    }
 }

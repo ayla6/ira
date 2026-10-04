@@ -7,7 +7,7 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::map::{map_fd as map_shm_fd, open_fd};
+use crate::map::{map_fd, open_fd};
 use crate::protocol::{
     achievements_offset, header_offset, notifications_offset, AchievementEntry, NotificationEntry,
     ShmHeader, SHM_MAGIC, SHM_SIZE, SHM_VERSION,
@@ -66,7 +66,7 @@ impl MappedShm {
     }
 
     fn map_shm_fd(fd: std::os::unix::io::RawFd, writable: bool) -> Result<Self, String> {
-        let ptr = map_shm_fd(fd, SHM_SIZE, writable, "shm")?;
+        let ptr = map_fd(fd, SHM_SIZE, writable, "shm")?;
         Ok(Self {
             ptr,
             size: SHM_SIZE,
@@ -121,8 +121,10 @@ impl MappedShm {
         std::slice::from_raw_parts_mut(base, len)
     }
 
-    /// Initializes the header with magic/version and zeros the rest.
-    /// Call this right after `create()`.
+    /// Initializes the header with magic/version and zeroes the rest.
+    /// Call this right after `create()`. Fresh mappings are already zeroed
+    /// (create unlinks first, so the kernel hands back a fresh zeroed inode);
+    /// this stamps the identity fields on top.
     pub fn init_header(&mut self, db_id: i64) {
         let hdr = self.header_mut();
         hdr.magic = SHM_MAGIC;

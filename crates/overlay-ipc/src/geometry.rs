@@ -5,6 +5,7 @@
 //! window, layer positions its quad).
 
 use super::canvas::{CANVAS_MAX_H, CANVAS_MAX_W};
+use crate::config::OverlayPosition;
 
 /// Computes the on-screen panel rect (x, y, w, h) for a canvas frame.
 /// Uniformly fit-scales the frame into the screen minus a 16px margin and
@@ -24,12 +25,15 @@ pub fn canvas_panel_rect(
     let scale = (avail_w / fw).min(avail_h / fh).min(1.0);
     let w = fw * scale;
     let h = fh * scale;
-    let (x, y) = match position {
-        1 => (screen_w as f32 - MARGIN - w, MARGIN),
-        2 => (MARGIN, screen_h as f32 - MARGIN - h),
-        3 => (screen_w as f32 - MARGIN - w, screen_h as f32 - MARGIN - h),
-        4 => ((screen_w as f32 - w) / 2.0, (screen_h as f32 - h) / 2.0),
-        _ => (MARGIN, MARGIN),
+    let (x, y) = match OverlayPosition::from_u32(position) {
+        OverlayPosition::TopRight => (screen_w as f32 - MARGIN - w, MARGIN),
+        OverlayPosition::BottomLeft => (MARGIN, screen_h as f32 - MARGIN - h),
+        OverlayPosition::BottomRight => (
+            screen_w as f32 - MARGIN - w,
+            screen_h as f32 - MARGIN - h,
+        ),
+        OverlayPosition::Center => ((screen_w as f32 - w) / 2.0, (screen_h as f32 - h) / 2.0),
+        OverlayPosition::TopLeft => (MARGIN, MARGIN),
     };
     (x.max(0.0), y.max(0.0), w, h)
 }
@@ -110,5 +114,16 @@ mod tests {
         let (w, h) = fit_panel_size(1920, 1080);
         let ratio = w as f64 / h as f64;
         assert!((ratio - 512.0 / 800.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_panel_rect_handles_zero_and_unknown() {
+        let (x, y, w, h) = canvas_panel_rect(0, 0, 0, 0, 99);
+        for v in [x, y, w, h] {
+            assert!(v.is_finite() && v >= 0.0);
+        }
+        assert!((w, h) != (0.0, 0.0));
+        let (x, y, _, _) = canvas_panel_rect(1920, 1080, 512, 800, 99);
+        assert_eq!((x, y), (16.0, 16.0));
     }
 }

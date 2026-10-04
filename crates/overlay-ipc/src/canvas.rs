@@ -16,7 +16,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::commands::{CanvasAction, CanvasCommand, MAX_CANVAS_ACTIONS, MAX_CANVAS_COMMANDS};
-use crate::map::{map_fd as map_shm_fd, open_fd, shm_file_path};
+use crate::map::{map_fd, open_fd, shm_file_path};
 
 pub const CANVAS_MAGIC: u32 = 0x49524143;
 /// Bumped when the header layout changes (cursor block added in v2,
@@ -104,7 +104,9 @@ unsafe impl Send for CanvasShm {}
 impl CanvasShm {
     pub fn create(db_id: i64) -> Result<Self, String> {
         let path = canvas_shm_path(db_id);
-        unsafe { libc::shm_unlink(std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?.as_ptr()) };
+        let c_path =
+            std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?;
+        unsafe { libc::shm_unlink(c_path.as_ptr()) };
         let fd = open_fd(&path, libc::O_RDWR | libc::O_CREAT, "canvas")?;
         Self::map_shm_fd(fd, true)
     }
@@ -123,7 +125,7 @@ impl CanvasShm {
     }
 
     fn map_shm_fd(fd: std::os::unix::io::RawFd, writable: bool) -> Result<Self, String> {
-        let ptr = map_shm_fd(fd, CANVAS_SHM_SIZE, writable, "canvas")?;
+        let ptr = map_fd(fd, CANVAS_SHM_SIZE, writable, "canvas")?;
         Ok(Self {
             ptr,
             size: CANVAS_SHM_SIZE,
@@ -238,11 +240,15 @@ impl CanvasShm {
     }
 
     /// Layer side: cursor metadata (w, h, xhot, yhot, seq) + pixel view.
-    /// Empty when unpublished (`w == 0`).
+    /// Empty when unpublished (`w == 0`). Corrupt extents clamp to the
+    /// published buffer instead of overflowing the length math.
     pub fn cursor_frame(&self) -> (u32, u32, i32, i32, u32, &[u8]) {
         let h = self.header();
-        let len = h.cursor_w as usize * h.cursor_h as usize * CANVAS_BPP;
-        let len = len.min(h.cursor_pixels.len());
+        let len = (h.cursor_w as usize)
+            .checked_mul(h.cursor_h as usize)
+            .and_then(|v| v.checked_mul(CANVAS_BPP))
+            .unwrap_or(usize::MAX)
+            .min(h.cursor_pixels.len());
         (
             h.cursor_w,
             h.cursor_h,
@@ -400,6 +406,19 @@ mod tests {
         assert_eq!(px, &[255; 16]);
         assert!(shm.publish_cursor(0, 2, 0, 0, &[]).is_err());
         assert!(shm.publish_cursor(999, 2, 0, 0, &[]).is_err());
+        cleanup(db_id);
+    }
+
+    #[test]
+    fn test_cursor_frame_clamps_corrupt_extent() {
+        let db_id = 414141414;
+        let mut shm = CanvasShm::create(db_id).unwrap();
+        shm.init_header();
+        shm.header_mut().cursor_w = u32::MAX;
+        shm.header_mut().cursor_h = u32::MAX;
+        let reader = CanvasShm::open(&canvas_shm_path(db_id)).unwrap();
+        let (_, _, _, _, _, px) = reader.cursor_frame();
+        assert_eq!(px.len(), CURSOR_MAX_BYTES);
         cleanup(db_id);
     }
 }

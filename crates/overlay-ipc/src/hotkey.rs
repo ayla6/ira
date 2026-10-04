@@ -34,24 +34,29 @@ pub const DEFAULT_RECORD_MODS: u32 = 0;
 /// (evdev_keycode, modifier_mask).
 /// Returns (0, 0) on parse failure — callers should treat 0 as "use defaults".
 pub fn parse_hotkey(s: &str) -> (u32, u32) {
-    let parts: Vec<&str> = s.split('+').map(str::trim).collect();
-    if parts.is_empty() {
-        return (0, 0);
-    }
-    let (mods, key) = parts.split_at(parts.len() - 1);
+    let (has_mods, mods_part, key_name) = match s.rsplit_once('+') {
+        Some((mods, key)) => (true, mods, key.trim()),
+        None => (false, "", s.trim()),
+    };
 
     let mut mod_mask = 0u32;
-    for m in mods {
-        mod_mask |= match m.to_lowercase().as_str() {
-            "shift" => MOD_SHIFT,
-            "ctrl" | "control" => MOD_CTRL,
-            "alt" => MOD_ALT,
-            "super" | "meta" | "win" => MOD_SUPER,
-            _ => return (0, 0),
-        };
+    if has_mods {
+        for m in mods_part.split('+') {
+            let m = m.trim();
+            if m.is_empty() {
+                return (0, 0);
+            }
+            mod_mask |= match m.to_lowercase().as_str() {
+                "shift" => MOD_SHIFT,
+                "ctrl" | "control" => MOD_CTRL,
+                "alt" => MOD_ALT,
+                "super" | "meta" | "win" => MOD_SUPER,
+                _ => return (0, 0),
+            };
+        }
     }
 
-    match key_name_to_evdev(key[0]) {
+    match key_name_to_evdev(key_name) {
         Some(kc) => (kc, mod_mask),
         None => (0, 0),
     }
@@ -344,6 +349,19 @@ mod tests {
         let (kc, mods) = parse_hotkey("nonsense");
         assert_eq!(kc, 0);
         assert_eq!(mods, 0);
+    }
+
+    #[test]
+    fn test_parse_hotkey_rejects_empty_segments() {
+        for bad in ["", " ", "+", "+Tab", "Shift+", "Shift++Tab", "Shift+Unknown"] {
+            assert_eq!(parse_hotkey(bad), (0, 0), "input {bad:?}");
+        }
+    }
+
+    #[test]
+    fn test_parse_hotkey_trims_whitespace() {
+        assert_eq!(parse_hotkey("  Shift + Tab  "), (15, MOD_SHIFT));
+        assert_eq!(parse_hotkey("  F12  "), (88, 0));
     }
 
     #[test]

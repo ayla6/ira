@@ -8,7 +8,7 @@ use std::ffi::CString;
 use std::os::unix::io::RawFd;
 
 /// `/dev/shm/<name>` filesystem path for debugging.
-pub fn shm_file_path(name: &str) -> String {
+pub(crate) fn shm_file_path(name: &str) -> String {
     format!("/dev/shm/{name}")
 }
 

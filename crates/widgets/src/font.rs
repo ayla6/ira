@@ -54,12 +54,16 @@ pub fn install() {
         let config = fc::FcConfigGetCurrent();
         for (name, bytes) in ACTIVE.1 {
             let path = dir.join(name);
-            if !path.exists() && std::fs::write(&path, bytes).is_err() {
-                eprintln!("ira-widgets: could not write the font to {}", path.display());
+            let stale = std::fs::metadata(&path).is_ok_and(|m| m.len() != bytes.len() as u64);
+            if (!path.exists() || stale)
+                && let Err(e) = std::fs::write(&path, bytes)
+            {
+                eprintln!("ira-widgets: could not write the font to {}: {e}", path.display());
                 continue;
             }
             let Ok(cpath) = std::ffi::CString::new(path.as_os_str().to_string_lossy().as_bytes())
             else {
+                eprintln!("ira-widgets: font path is not NUL-safe: {}", path.display());
                 continue;
             };
             if fc::FcConfigAppFontAddFile(config, cpath.as_ptr()) == 0 {

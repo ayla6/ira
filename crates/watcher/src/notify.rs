@@ -1,7 +1,7 @@
 use ira_models::MergedAchievement;
 use std::process::Command;
 
-pub fn notify_unlock(game_name: &str, ach: &MergedAchievement) {
+pub(crate) fn notify_unlock(game_name: &str, ach: &MergedAchievement) {
     let title = format!("{} — Trophy Unlocked", game_name);
     let body = if ach.description.is_empty() {
         ach.display_name.clone()

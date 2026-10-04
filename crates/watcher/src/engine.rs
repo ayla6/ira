@@ -92,19 +92,21 @@ impl AchievementWatcher {
         let already_watching = {
             let mut st = self.state.lock().unwrap();
             st.last_earned.insert(entry.id, earned);
-            st.dir_to_game.values().any(|wg| wg.entry.id == entry.id)
+            if st.dir_to_game.values().any(|wg| wg.entry.id == entry.id) {
+                true
+            } else {
+                st.dir_to_game.insert(
+                    watch_dir.clone(),
+                    WatchedGame {
+                        entry: entry.clone(),
+                        watch_filename,
+                    },
+                );
+                false
+            }
         };
 
         if !already_watching {
-            let mut st = self.state.lock().unwrap();
-            st.dir_to_game.insert(
-                watch_dir.clone(),
-                WatchedGame {
-                    entry: entry.clone(),
-                    watch_filename,
-                },
-            );
-            drop(st);
             let mut w = self.watcher.lock().unwrap();
             if let Err(e) = w.watch(&watch_dir, RecursiveMode::NonRecursive) {
                 eprintln!("Could not watch {:?} for live updates: {}", watch_dir, e);
@@ -176,13 +178,12 @@ fn handle_notify_event(
     if !is_create && !is_modify {
         return;
     }
-
+    let st = state.lock().unwrap();
     for path in &event.paths {
         let game_dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let st = state.lock().unwrap();
         if let Some(wg) = st.dir_to_game.get(&game_dir) {
             let filename = path.file_name().and_then(|n| n.to_str());
-            if filename == Some(&wg.watch_filename) {
+            if filename == Some(wg.watch_filename.as_str()) {
                 pending.insert(wg.entry.id, game_dir.clone());
             }
         }
@@ -218,7 +219,7 @@ fn process_reload(
 
     {
         let mut st = state.lock().unwrap();
-        let previous = st.last_earned.get(&db_id).cloned().unwrap_or_default();
+        let previous = st.last_earned.remove(&db_id).unwrap_or_default();
         let mut current = HashMap::new();
         for a in &game.achievements {
             current.insert(a.name.clone(), a.earned);

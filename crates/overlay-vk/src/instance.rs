@@ -69,6 +69,15 @@ pub unsafe extern "system" fn get_instance_proc_addr(
             super::device::destroy_device,
             unsafe extern "system" fn(vk::Device, *const vk::AllocationCallbacks)
         ),
+        _ => surface_proc(name.to_bytes())
+            .or_else(|| loader_gipa(instance).and_then(|gipa| gipa(instance, name.as_ptr()))),
+    }
+}
+
+/// Platform surface creators: Wayland + XWayland (XCB/Xlib). Split from
+/// the main proc-addr table so neither function exceeds the soft line cap.
+fn surface_proc(name: &[u8]) -> vk::PFN_vkVoidFunction {
+    match name {
         b"vkCreateWaylandSurfaceKHR" => {
             if crate::types::debug_log() {
                 eprintln!("ira-overlay: vkCreateWaylandSurfaceKHR queried");
@@ -111,7 +120,7 @@ pub unsafe extern "system" fn get_instance_proc_addr(
                 ) -> vk::Result
             )
         }
-        _ => loader_gipa(instance).and_then(|gipa| gipa(instance, name.as_ptr())),
+        _ => None,
     }
 }
 

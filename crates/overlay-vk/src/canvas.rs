@@ -17,13 +17,15 @@ use ira_overlay_ipc::{canvas_panel_rect, CanvasShm, CANVAS_MAX_H, CANVAS_MAX_W};
 
 use super::canvas_res::{self, CanvasTex, CursorTex};
 
+pub use super::canvas_cursor::{draw_cursor, prepare_cursor};
+
 /// 20-byte vertex: screen-space pos, texture uv, packed color.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct CanvasVertex {
-    pos: [f32; 2],
-    uv: [f32; 2],
-    color: [u8; 4],
+    pub(crate) pos: [f32; 2],
+    pub(crate) uv: [f32; 2],
+    pub(crate) color: [u8; 4],
 }
 
 const _: () = assert!(std::mem::size_of::<CanvasVertex>() == 20);
@@ -53,15 +55,15 @@ pub struct PanelDraw {
     pub size: (u32, u32),
 }
 
-struct CanvasEntry {
-    tex: CanvasTex,
-    cursor: Option<CursorTex>,
-    pipeline: vk::Pipeline,
-    pipeline_layout: vk::PipelineLayout,
+pub(crate) struct CanvasEntry {
+    pub(crate) tex: CanvasTex,
+    pub(crate) cursor: Option<CursorTex>,
+    pub(crate) pipeline: vk::Pipeline,
+    pub(crate) pipeline_layout: vk::PipelineLayout,
 }
 
 /// Per-swapchain canvas entries, keyed by raw swapchain handle.
-static CANVASES: Mutex<Option<HashMap<u64, CanvasEntry>>> = Mutex::new(None);
+pub(crate) static CANVASES: Mutex<Option<HashMap<u64, CanvasEntry>>> = Mutex::new(None);
 /// Last composited panel (x, y, scale) for screen→canvas input translation.
 /// `None` while nothing is drawn — input events are dropped then.
 static LAST_PANEL: Mutex<Option<(f32, f32, f32)>> = Mutex::new(None);
@@ -69,7 +71,7 @@ static LAST_PANEL: Mutex<Option<(f32, f32, f32)>> = Mutex::new(None);
 /// cursor; `None` until the first mouse event. All writers store the same
 /// client space the panel rect lives in (shim input translated, Wayland
 /// surface-local already client), so cursor and commands always agree.
-static LAST_MOUSE: Mutex<Option<(f32, f32)>> = Mutex::new(None);
+pub(crate) static LAST_MOUSE: Mutex<Option<(f32, f32)>> = Mutex::new(None);
 
 /// Publishes the swapchain extent for host window sizing: single writer
 /// here (present hook), single reader on the host tick.
@@ -123,7 +125,7 @@ pub unsafe fn create_bundle(
 )> {
     let tex = canvas_res::create(fns, device, physical_device)?;
     let (pipeline_layout, pipeline, shader_vert, shader_frag) =
-        canvas_res::create_pipeline(fns, device, render_pass, tex.set_layout);
+        super::canvas_pipe::create_pipeline(fns, device, render_pass, tex.set_layout);
     // A failed cursor only loses the pointer, never the panel.
     let cursor =
         canvas_res::create_cursor(fns, device, physical_device, tex.sampler, tex.set_layout);
@@ -238,97 +240,11 @@ pub unsafe fn destroy_canvas(fns: DeviceFns, device: vk::Device, swapchain: u64)
     }
 }
 
-/// Uploads the cursor image if `cursor_seq` advanced. Returns true when a
-/// cursor is ready to draw (published at least once).
-pub unsafe fn prepare_cursor(
-    fns: DeviceFns,
-    cmd: vk::CommandBuffer,
-    swapchain: u64,
-    shm: &CanvasShm,
-) -> bool {
-    let (w, h, xhot, yhot, seq, pixels) = shm.cursor_frame();
-    if w == 0 || h == 0 || seq == 0 || pixels.is_empty() {
-        return false;
-    }
-    let mut map = CANVASES.lock().unwrap();
-    let Some(entry) = map.as_mut().and_then(|m| m.get_mut(&swapchain)) else {
-        return false;
-    };
-    let Some(cursor) = entry.cursor.as_mut() else {
-        return false;
-    };
-    if seq != cursor.core.last_seq {
-        if crate::types::debug_log() {
-            eprintln!("ira-overlay: upload cursor {w}x{h} seq={seq}");
-        }
-        transition_and_copy(fns, cmd, cursor.core.upload_image(), pixels, w, h);
-        cursor.core.last_seq = seq;
-        cursor.w = w;
-        cursor.h = h;
-        cursor.xhot = xhot;
-        cursor.yhot = yhot;
-    }
-    true
-}
-
-/// Draws the cursor at the last seen pointer position (hotspot-adjusted,
-/// native size), but only over the panel itself: outside it the freed real
-/// cursor owns the screen, and a lagging double exposes exactly how drawn
-/// the overlay one is. Call inside an active render pass after the panel.
-pub unsafe fn draw_cursor(
-    fns: DeviceFns,
-    cmd: vk::CommandBuffer,
-    swapchain: u64,
-    extent: vk::Extent2D,
-    panel: (f32, f32, f32, f32),
-) {
-    let mouse = *LAST_MOUSE.lock().unwrap();
-    let map = CANVASES.lock().unwrap();
-    let Some(entry) = map.as_ref().and_then(|m| m.get(&swapchain)) else {
-        return;
-    };
-    let Some((verts, bind)) = cursor_verts(entry, mouse, extent, panel) else {
-        return;
-    };
-    draw_textured_quad(fns, cmd, bind, &verts, extent);
-}
-
-/// Resolves the cursor quad for this frame: mouse + entry + visibility +
-/// panel clipping. None means draw nothing.
-fn cursor_verts(
-    entry: &CanvasEntry,
-    mouse: Option<(f32, f32)>,
-    extent: vk::Extent2D,
-    panel: (f32, f32, f32, f32),
-) -> Option<([CanvasVertex; 4], QuadBind)> {
-    let (mx, my) = mouse?;
-    // Outside the game window the shim hears no motion (it only sees the
-    // game's windows), so a stale position would freeze the cursor here
-    // while the freed real cursor roams on. Hide instead: positions are
-    // client space, the extent is the client space.
-    if mx < 0.0 || my < 0.0 || mx >= extent.width as f32 || my >= extent.height as f32 {
-        return None;
-    }
-    // Outside the panel the real cursor is the interaction point; drawing
-    // ours next to it (a frame behind, possibly mid-transition) is what
-    // reads as fake. The panel rect is this same frame's, so the two can
-    // never disagree about where its edge is.
-    let (px, py, pw, ph) = panel;
-    if mx < px || my < py || mx >= px + pw || my >= py + ph {
-        return None;
-    };
-    let cursor = match &entry.cursor {
-        Some(c) if c.w > 0 && c.h > 0 => c,
-        _ => return None,
-    };
-    let x = mx - cursor.xhot as f32;
-    let y = my - cursor.yhot as f32;
-    let w = cursor.w as f32;
-    let h = cursor.h as f32;
-    let u1 = cursor.w as f32 / ira_overlay_ipc::CURSOR_MAX as f32;
-    let v1 = cursor.h as f32 / ira_overlay_ipc::CURSOR_MAX as f32;
+/// White textured quad from screen rect + uv extents. Shared by the panel
+/// and cursor draws, which differ only in geometry and texture resources.
+pub(crate) fn quad_verts(x: f32, y: f32, w: f32, h: f32, u1: f32, v1: f32) -> [CanvasVertex; 4] {
     let white = [255, 255, 255, 255];
-    let verts = [
+    [
         CanvasVertex {
             pos: [x, y],
             uv: [0.0, 0.0],
@@ -349,23 +265,12 @@ fn cursor_verts(
             uv: [0.0, v1],
             color: white,
         },
-    ];
-    Some((
-        verts,
-        QuadBind {
-            pipeline: entry.pipeline,
-            layout: entry.pipeline_layout,
-            vbo: cursor.core.vbo,
-            vbo_ptr: cursor.core.vbo_ptr,
-            ibo: cursor.core.ibo,
-            set: cursor.core.set,
-        },
-    ))
+    ]
 }
 
 /// Shared staging upload: CPU copy, layout transitions, buffer→image.
 /// Used by both the panel and cursor paths.
-unsafe fn transition_and_copy(
+pub(crate) unsafe fn transition_and_copy(
     fns: DeviceFns,
     cmd: vk::CommandBuffer,
     target: super::canvas_res::UploadImage<'_>,
@@ -455,19 +360,19 @@ unsafe fn transition_and_copy(
 /// descriptor set. Panel and cursor draws fill this from their own texture
 /// resources and share the record path below.
 #[derive(Clone, Copy)]
-struct QuadBind {
-    pipeline: vk::Pipeline,
-    layout: vk::PipelineLayout,
-    vbo: vk::Buffer,
-    vbo_ptr: *mut u8,
-    ibo: vk::Buffer,
-    set: vk::DescriptorSet,
+pub(crate) struct QuadBind {
+    pub(crate) pipeline: vk::Pipeline,
+    pub(crate) layout: vk::PipelineLayout,
+    pub(crate) vbo: vk::Buffer,
+    pub(crate) vbo_ptr: *mut u8,
+    pub(crate) ibo: vk::Buffer,
+    pub(crate) set: vk::DescriptorSet,
 }
 
 /// Binds one textured quad (vertices, pipeline, descriptor, push constants)
 /// and draws it. Shared by the panel and cursor paths, which differ only in
 /// geometry and texture resources.
-unsafe fn draw_textured_quad(
+pub(crate) unsafe fn draw_textured_quad(
     fns: DeviceFns,
     cmd: vk::CommandBuffer,
     bind: QuadBind,
@@ -529,29 +434,7 @@ unsafe fn draw(
     let (x, y, w, h) = rect;
     let u1 = frame.0 as f32 / CANVAS_MAX_W as f32;
     let v1 = frame.1 as f32 / CANVAS_MAX_H as f32;
-    let white = [255, 255, 255, 255];
-    let verts = [
-        CanvasVertex {
-            pos: [x, y],
-            uv: [0.0, 0.0],
-            color: white,
-        },
-        CanvasVertex {
-            pos: [x + w, y],
-            uv: [u1, 0.0],
-            color: white,
-        },
-        CanvasVertex {
-            pos: [x + w, y + h],
-            uv: [u1, v1],
-            color: white,
-        },
-        CanvasVertex {
-            pos: [x, y + h],
-            uv: [0.0, v1],
-            color: white,
-        },
-    ];
+    let verts = quad_verts(x, y, w, h, u1, v1);
     draw_textured_quad(
         fns,
         cmd,

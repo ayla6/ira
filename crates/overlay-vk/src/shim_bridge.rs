@@ -16,6 +16,8 @@ use ira_overlay::capture;
 use ira_overlay_ipc::{
     canvas_shm_path, command_from_raw, CanvasCommand, CanvasShm, InputEventRaw, MappedShm,
     ShmHeader, ACT_EXIT_GAME, ACT_HIDE_OVERLAY, ACT_SCREENSHOT, ACT_TOGGLE_RECORD,
+    EVT_KEY_PRESS, EVT_KEY_RELEASE, EVT_MOUSE_DOWN, EVT_MOUSE_MOVE, EVT_MOUSE_UP, EVT_SCROLL,
+    EVT_SCREENSHOT, EVT_TOGGLE_RECORD,
 };
 
 type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;
@@ -257,26 +259,26 @@ fn convert_and_forward(raw: &InputEventRaw, swapchain: u64) {
         // Mouse: root pixels become client pixels via the swapchain's game
         // window (identity for fullscreen), then canvas pixels. Screen
         // position always feeds the layer-drawn cursor.
-        0..=2 => forward_mouse(raw, swapchain),
+        EVT_MOUSE_MOVE | EVT_MOUSE_DOWN | EVT_MOUSE_UP => forward_mouse(raw, swapchain),
         // Key press — navigation keys become commands via the shared table.
-        3 => {
-            if let Some(cmd) = command_from_raw(3, 0, 0, 0, raw.keycode) {
+        EVT_KEY_PRESS => {
+            if let Some(cmd) = command_from_raw(EVT_KEY_PRESS, 0, 0, 0, raw.keycode) {
                 push_canvas_command(cmd);
             }
         }
         // Key release — not used by the host UI.
-        4 => {}
+        EVT_KEY_RELEASE => {}
         // Screenshot hotkey (F12).
-        5 => {
+        EVT_SCREENSHOT => {
             capture::request_screenshot();
         }
         // Recording toggle hotkey (F11).
-        6 => {
+        EVT_TOGGLE_RECORD => {
             capture::toggle_recording();
         }
         // Mouse scroll event.
-        7 => {
-            if let Some(cmd) = command_from_raw(7, 0, raw.y, 0, 0) {
+        EVT_SCROLL => {
+            if let Some(cmd) = command_from_raw(EVT_SCROLL, 0, raw.y, 0, 0) {
                 push_canvas_command(cmd);
             }
         }

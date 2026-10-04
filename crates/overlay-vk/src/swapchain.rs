@@ -53,6 +53,51 @@ fn log_vk(result: vk::Result, what: &str) {
     }
 }
 
+/// Fetches the swapchain images. Fail-open: empty on driver failure,
+/// the present hook checks handles before use.
+unsafe fn fetch_images(fns: DeviceFns, device: vk::Device, sc: vk::SwapchainKHR) -> Vec<vk::Image> {
+    let mut image_count = 0u32;
+    log_vk(
+        (fns.get_swapchain_images)(device, sc, &mut image_count, std::ptr::null_mut()),
+        "get_swapchain_images(count)",
+    );
+    let mut images = vec![vk::Image::null(); image_count as usize];
+    log_vk(
+        (fns.get_swapchain_images)(device, sc, &mut image_count, images.as_mut_ptr()),
+        "get_swapchain_images",
+    );
+    images
+}
+
+unsafe fn create_cmd_pool(fns: DeviceFns, device: vk::Device) -> vk::CommandPool {
+    let pool_info = vk::CommandPoolCreateInfo::default()
+        .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
+    let mut pool = vk::CommandPool::null();
+    log_vk(
+        (fns.create_command_pool)(device, &pool_info, std::ptr::null(), &mut pool),
+        "create_command_pool",
+    );
+    pool
+}
+
+unsafe fn alloc_cmd_buffers(
+    fns: DeviceFns,
+    device: vk::Device,
+    pool: vk::CommandPool,
+    count: u32,
+) -> Vec<vk::CommandBuffer> {
+    let mut cmd_buffers = vec![vk::CommandBuffer::null(); count as usize];
+    let alloc_info = vk::CommandBufferAllocateInfo::default()
+        .command_pool(pool)
+        .level(vk::CommandBufferLevel::PRIMARY)
+        .command_buffer_count(count);
+    log_vk(
+        (fns.allocate_cmd_buffers)(device, &alloc_info, cmd_buffers.as_mut_ptr()),
+        "allocate_cmd_buffers",
+    );
+    cmd_buffers
+}
+
 pub(crate) unsafe extern "system" fn create_swapchain(
     device: vk::Device,
     create_info: *const vk::SwapchainCreateInfoKHR,
@@ -91,16 +136,8 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     let create_info = &ci;
     let sc = *swapchain;
 
-    let mut image_count = 0u32;
-    log_vk(
-        (fns.get_swapchain_images)(device, sc, &mut image_count, std::ptr::null_mut()),
-        "get_swapchain_images(count)",
-    );
-    let mut images = vec![vk::Image::null(); image_count as usize];
-    log_vk(
-        (fns.get_swapchain_images)(device, sc, &mut image_count, images.as_mut_ptr()),
-        "get_swapchain_images",
-    );
+    let images = fetch_images(fns, device, sc);
+    let image_count = images.len() as u32;
 
     let format = create_info.image_format;
     let extent = create_info.image_extent;
@@ -118,28 +155,8 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     let (framebuffers, image_views) =
         create_framebuffers(fns, device, render_pass, &images, extent, format);
 
-    let cmd_pool = {
-        let pool_info = vk::CommandPoolCreateInfo::default()
-            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
-        let mut pool = vk::CommandPool::null();
-        log_vk(
-            (fns.create_command_pool)(device, &pool_info, std::ptr::null(), &mut pool),
-            "create_command_pool",
-        );
-        pool
-    };
-
-    let mut cmd_buffers = vec![vk::CommandBuffer::null(); image_count as usize];
-    {
-        let alloc_info = vk::CommandBufferAllocateInfo::default()
-            .command_pool(cmd_pool)
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(image_count);
-        log_vk(
-            (fns.allocate_cmd_buffers)(device, &alloc_info, cmd_buffers.as_mut_ptr()),
-            "allocate_cmd_buffers",
-        );
-    }
+    let cmd_pool = create_cmd_pool(fns, device);
+    let cmd_buffers = alloc_cmd_buffers(fns, device, cmd_pool, image_count);
 
     let (semaphores, fences) = alloc_sync_objects(fns, device, image_count);
 

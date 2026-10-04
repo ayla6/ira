@@ -1,4 +1,6 @@
 mod canvas;
+mod canvas_cursor;
+mod canvas_pipe;
 mod canvas_res;
 mod device;
 pub mod evdev;
@@ -9,4 +11,5 @@ pub mod shim_bridge;
 mod swapchain;
 pub mod types;
 mod wayland;
+mod wayland_input;
 mod xwin;

@@ -4,6 +4,7 @@ use ash::vk;
 use ash::vk::Handle;
 
 use crate::types::*;
+use ira_overlay::types::DeviceFns;
 
 /// Fail-closed kill switches: a failed composite path must degrade to "no
 /// overlay", never to a wedged game.
@@ -27,6 +28,42 @@ struct Frame {
     fence: vk::Fence,
     fb: vk::Framebuffer,
     image: vk::Image,
+}
+
+/// Per-present snapshot copied out of the swapchain map under one lock.
+/// Avoids cloning the full `SwapchainData` (six `Vec`s) on every frame at
+/// 60fps — only scalars and the current image's handles cross the lock.
+struct PresentCtx {
+    device: vk::Device,
+    fns: DeviceFns,
+    extent: vk::Extent2D,
+    render_pass: vk::RenderPass,
+    pipeline: vk::Pipeline,
+    ui_enabled: bool,
+    frame: Frame,
+}
+
+/// Emits one image barrier. The boilerplate (no semaphores, one range) is
+/// identical at every call site; only stages and the barrier vary.
+unsafe fn emit_barrier(
+    fns: DeviceFns,
+    cmd: vk::CommandBuffer,
+    src_stage: vk::PipelineStageFlags,
+    dst_stage: vk::PipelineStageFlags,
+    barrier: &vk::ImageMemoryBarrier<'_>,
+) {
+    (fns.cmd_pipeline_barrier)(
+        cmd,
+        src_stage,
+        dst_stage,
+        vk::DependencyFlags::empty(),
+        0,
+        std::ptr::null(),
+        0,
+        std::ptr::null(),
+        1,
+        barrier as *const vk::ImageMemoryBarrier<'_>,
+    );
 }
 
 /// Host-frame watchdog state (see `watch_host_frames`): kept at file scope
@@ -127,26 +164,42 @@ fn forward_frame_events(present_info: &vk::PresentInfoKHR) -> (bool, bool) {
     (overlay_visible, capture_active)
 }
 
-/// Looks up the first present swapchain. Returns (swapchain, image index,
-/// data); None chains straight through.
-fn load_swapchain(
+/// Looks up the first present swapchain and snapshots the scalars plus
+/// the current image's handles under one lock. None chains straight
+/// through. No `Vec` clones — the map stays locked only for the copy.
+fn load_present_ctx(
     present_info: &vk::PresentInfoKHR,
-) -> Option<(vk::SwapchainKHR, u32, SwapchainData)> {
+) -> Option<(vk::SwapchainKHR, PresentCtx)> {
     // Read up front: input polling translates coordinates per swapchain.
     let swapchain = unsafe { present_info.p_swapchains.read() };
-    let image_index = unsafe { *present_info.p_image_indices };
+    let image_index = unsafe { *present_info.p_image_indices } as usize;
     let map = SWAPCHAINS.lock().unwrap();
-    let sc = map
-        .as_ref()
-        .and_then(|m| m.get(&swapchain.as_raw()))
-        .cloned()?;
-    Some((swapchain, image_index, sc))
+    let sc = map.as_ref()?.get(&swapchain.as_raw())?;
+    let frame = Frame {
+        cmd: *sc.cmd_buffers.get(image_index)?,
+        sem: *sc.semaphores.get(image_index)?,
+        fence: *sc.fences.get(image_index)?,
+        fb: *sc.framebuffers.get(image_index)?,
+        image: *sc.images.get(image_index)?,
+    };
+    Some((
+        swapchain,
+        PresentCtx {
+            device: sc.device,
+            fns: sc.fns,
+            extent: sc.extent,
+            render_pass: sc.render_pass,
+            pipeline: sc.pipeline,
+            ui_enabled: sc.ui_enabled,
+            frame,
+        },
+    ))
 }
 
 /// Waits the frame fence, runs capture readback, and begins the command
 /// buffer. False chains straight through.
-unsafe fn begin_frame(sc: &SwapchainData, cmd: vk::CommandBuffer, fence: vk::Fence) -> bool {
-    let fence_result = (sc.fns.wait_for_fences)(sc.device, 1, &fence, vk::TRUE, 200_000_000);
+unsafe fn begin_frame(ctx: &PresentCtx, cmd: vk::CommandBuffer, fence: vk::Fence) -> bool {
+    let fence_result = (ctx.fns.wait_for_fences)(ctx.device, 1, &fence, vk::TRUE, 200_000_000);
     if fence_result != vk::Result::SUCCESS {
         if fence_result == vk::Result::TIMEOUT {
             // Occasional timeouts happen under load; a run of them means
@@ -168,12 +221,12 @@ unsafe fn begin_frame(sc: &SwapchainData, cmd: vk::CommandBuffer, fence: vk::Fen
     }
     FENCE_TIMEOUTS.store(0, Ordering::Relaxed);
     ira_overlay::capture::check_and_readback();
-    let _ = (sc.fns.reset_fences)(sc.device, 1, &fence);
-    let _ = (sc.fns.reset_cmd_buffer)(cmd, vk::CommandBufferResetFlags::empty());
+    let _ = (ctx.fns.reset_fences)(ctx.device, 1, &fence);
+    let _ = (ctx.fns.reset_cmd_buffer)(cmd, vk::CommandBufferResetFlags::empty());
 
     let begin_info =
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-    let _ = (sc.fns.begin_cmd_buffer)(cmd, &begin_info);
+    let _ = (ctx.fns.begin_cmd_buffer)(cmd, &begin_info);
     true
 }
 
@@ -181,18 +234,18 @@ unsafe fn begin_frame(sc: &SwapchainData, cmd: vk::CommandBuffer, fence: vk::Fen
 /// barriers: layout transitions on the canvas image must stay outside the
 /// render pass. Returns the panel draw when there is one.
 unsafe fn upload_canvas(
-    sc: &SwapchainData,
+    ctx: &PresentCtx,
     cmd: vk::CommandBuffer,
     swapchain: vk::SwapchainKHR,
 ) -> Option<crate::canvas::PanelDraw> {
     let position = crate::shim_bridge::overlay_position();
     let panel = crate::shim_bridge::with_canvas(|shm| unsafe {
-        crate::canvas::prepare_upload(sc.fns, cmd, swapchain.as_raw(), sc.extent, position, shm)
+        crate::canvas::prepare_upload(ctx.fns, cmd, swapchain.as_raw(), ctx.extent, position, shm)
     })
     .flatten();
     // Cursor texture upload rides along; drawn per-present when ready.
     crate::shim_bridge::with_canvas(|shm| unsafe {
-        crate::canvas::prepare_cursor(sc.fns, cmd, swapchain.as_raw(), shm)
+        crate::canvas::prepare_cursor(ctx.fns, cmd, swapchain.as_raw(), shm)
     });
     panel
 }
@@ -201,7 +254,7 @@ unsafe fn upload_canvas(
 /// cursor, and closes the pass. `src_layout` reflects whether capture
 /// already moved the image to TRANSFER_SRC_OPTIMAL.
 unsafe fn record_ui_pass(
-    sc: &SwapchainData,
+    ctx: &PresentCtx,
     swapchain: vk::SwapchainKHR,
     frame: Frame,
     panel: crate::canvas::PanelDraw,
@@ -226,53 +279,48 @@ unsafe fn record_ui_pass(
         src_access,
         vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
     );
-    (sc.fns.cmd_pipeline_barrier)(
+    emit_barrier(
+        ctx.fns,
         frame.cmd,
         src_stage,
         vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        vk::DependencyFlags::empty(),
-        0,
-        std::ptr::null(),
-        0,
-        std::ptr::null(),
-        1,
         &barrier,
     );
 
     let clear = vk::ClearValue::default();
     let rp_begin = vk::RenderPassBeginInfo::default()
-        .render_pass(sc.render_pass)
+        .render_pass(ctx.render_pass)
         .framebuffer(frame.fb)
         .render_area(vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
-            extent: sc.extent,
+            extent: ctx.extent,
         })
         .clear_values(std::slice::from_ref(&clear));
-    (sc.fns.cmd_begin_render_pass)(frame.cmd, &rp_begin, vk::SubpassContents::INLINE);
+    (ctx.fns.cmd_begin_render_pass)(frame.cmd, &rp_begin, vk::SubpassContents::INLINE);
 
     let viewport = vk::Viewport {
         x: 0.0,
         y: 0.0,
-        width: sc.extent.width as f32,
-        height: sc.extent.height as f32,
+        width: ctx.extent.width as f32,
+        height: ctx.extent.height as f32,
         min_depth: 0.0,
         max_depth: 1.0,
     };
-    (sc.fns.cmd_set_viewport)(frame.cmd, 0, 1, &viewport as *const vk::Viewport);
+    (ctx.fns.cmd_set_viewport)(frame.cmd, 0, 1, &viewport as *const vk::Viewport);
     let scissor = vk::Rect2D {
         offset: vk::Offset2D { x: 0, y: 0 },
-        extent: sc.extent,
+        extent: ctx.extent,
     };
-    (sc.fns.cmd_set_scissor)(frame.cmd, 0, 1, &scissor as *const vk::Rect2D);
-    crate::canvas::draw_quad(sc.fns, frame.cmd, swapchain.as_raw(), sc.extent, panel);
-    crate::canvas::draw_cursor(sc.fns, frame.cmd, swapchain.as_raw(), sc.extent, panel.rect);
+    (ctx.fns.cmd_set_scissor)(frame.cmd, 0, 1, &scissor as *const vk::Rect2D);
+    crate::canvas::draw_quad(ctx.fns, frame.cmd, swapchain.as_raw(), ctx.extent, panel);
+    crate::canvas::draw_cursor(ctx.fns, frame.cmd, swapchain.as_raw(), ctx.extent, panel.rect);
 
-    (sc.fns.cmd_end_render_pass)(frame.cmd);
+    (ctx.fns.cmd_end_render_pass)(frame.cmd);
 }
 
 /// Returns a capture-only frame to PRESENT_SRC_KHR after the blit moved it
 /// to TRANSFER_SRC_OPTIMAL. No render pass, no UI.
-unsafe fn record_capture_barrier(sc: &SwapchainData, cmd: vk::CommandBuffer, image: vk::Image) {
+unsafe fn record_capture_barrier(ctx: &PresentCtx, cmd: vk::CommandBuffer, image: vk::Image) {
     let barrier = crate::types::image_barrier(
         image,
         vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -280,16 +328,11 @@ unsafe fn record_capture_barrier(sc: &SwapchainData, cmd: vk::CommandBuffer, ima
         vk::AccessFlags::TRANSFER_READ,
         vk::AccessFlags::MEMORY_READ,
     );
-    (sc.fns.cmd_pipeline_barrier)(
+    emit_barrier(
+        ctx.fns,
         cmd,
         vk::PipelineStageFlags::TRANSFER,
         vk::PipelineStageFlags::BOTTOM_OF_PIPE,
-        vk::DependencyFlags::empty(),
-        0,
-        std::ptr::null(),
-        0,
-        std::ptr::null(),
-        1,
         &barrier,
     );
 }
@@ -299,14 +342,14 @@ unsafe fn record_capture_barrier(sc: &SwapchainData, cmd: vk::CommandBuffer, ima
 /// A failed submit bypasses permanently: the fence was already reset, so
 /// chaining on would orphan it and stall every later frame.
 unsafe fn submit_and_present(
-    sc: &SwapchainData,
+    ctx: &PresentCtx,
     queue: vk::Queue,
     cmd: vk::CommandBuffer,
     sem: vk::Semaphore,
     fence: vk::Fence,
     present_info: &vk::PresentInfoKHR,
 ) -> vk::Result {
-    let _ = (sc.fns.end_cmd_buffer)(cmd);
+    let _ = (ctx.fns.end_cmd_buffer)(cmd);
 
     let wait_sem_count = present_info.wait_semaphore_count;
     let wait_stages = [vk::PipelineStageFlags::ALL_COMMANDS; MAX_WAIT_SEMS];
@@ -322,7 +365,7 @@ unsafe fn submit_and_present(
         .command_buffers(std::slice::from_ref(&cmd))
         .signal_semaphores(std::slice::from_ref(&sem));
     let submit_result =
-        (sc.fns.queue_submit)(queue, 1, &submit_info as *const vk::SubmitInfo, fence);
+        (ctx.fns.queue_submit)(queue, 1, &submit_info as *const vk::SubmitInfo, fence);
     if submit_result != vk::Result::SUCCESS {
         engage_bypass(&format!("submit failed ({submit_result:?})"));
         return chain_present(queue, present_info);
@@ -332,7 +375,7 @@ unsafe fn submit_and_present(
     new_present_info.p_wait_semaphores = &sem;
     new_present_info.wait_semaphore_count = 1;
 
-    (sc.fns.queue_present)(queue, &new_present_info)
+    (ctx.fns.queue_present)(queue, &new_present_info)
 }
 
 pub unsafe extern "system" fn queue_present(
@@ -361,18 +404,13 @@ pub unsafe extern "system" fn queue_present(
         return chain_present(queue, present_info);
     }
 
-    let Some((swapchain, image_index, sc)) = load_swapchain(present_info) else {
+    let Some((swapchain, ctx)) = load_present_ctx(present_info) else {
         return chain_present(queue, present_info);
     };
 
-    let render_ui = overlay_visible && sc.ui_enabled;
+    let render_ui = overlay_visible && ctx.ui_enabled;
     if !render_ui && !capture_active {
         return chain_present(queue, present_info);
-    }
-
-    let idx = image_index as usize;
-    if idx >= sc.cmd_buffers.len() {
-        return (sc.fns.queue_present)(queue, present_info);
     }
 
     // Decided before touching fences: chaining after a fence reset without
@@ -381,26 +419,20 @@ pub unsafe extern "system" fn queue_present(
         return chain_present(queue, present_info);
     }
 
-    let frame = Frame {
-        cmd: sc.cmd_buffers[idx],
-        sem: sc.semaphores[idx],
-        fence: sc.fences[idx],
-        fb: sc.framebuffers[idx],
-        image: sc.images[idx],
-    };
+    let frame = ctx.frame;
 
-    if !begin_frame(&sc, frame.cmd, frame.fence) {
+    if !begin_frame(&ctx, frame.cmd, frame.fence) {
         return chain_present(queue, present_info);
     }
 
     // Canvas upload: runs before the swapchain barriers: layout transitions
     // on the canvas image must stay outside the render pass.
     let panel = if render_ui {
-        upload_canvas(&sc, frame.cmd, swapchain)
+        upload_canvas(&ctx, frame.cmd, swapchain)
     } else {
         None
     };
-    let captured = ira_overlay::capture::capture(frame.cmd, frame.image, frame.fence, sc.extent);
+    let captured = ira_overlay::capture::capture(frame.cmd, frame.image, frame.fence, ctx.extent);
     let src_layout = if captured {
         vk::ImageLayout::TRANSFER_SRC_OPTIMAL
     } else {
@@ -410,14 +442,14 @@ pub unsafe extern "system" fn queue_present(
     // Fail closed: a null pipeline/render-pass skips compositing rather
     // than reaching the driver.
     match panel {
-        Some(panel) if ui_usable(sc.render_pass, sc.pipeline) => {
-            record_ui_pass(&sc, swapchain, frame, panel, captured, src_layout)
+        Some(panel) if ui_usable(ctx.render_pass, ctx.pipeline) => {
+            record_ui_pass(&ctx, swapchain, frame, panel, captured, src_layout)
         }
-        _ if captured => record_capture_barrier(&sc, frame.cmd, frame.image),
+        _ if captured => record_capture_barrier(&ctx, frame.cmd, frame.image),
         _ => {}
     }
 
-    submit_and_present(&sc, queue, frame.cmd, frame.sem, frame.fence, present_info)
+    submit_and_present(&ctx, queue, frame.cmd, frame.sem, frame.fence, present_info)
 }
 
 unsafe fn chain_present(queue: vk::Queue, present_info: &vk::PresentInfoKHR) -> vk::Result {

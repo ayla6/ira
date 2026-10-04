@@ -154,20 +154,21 @@ fn find_exe_installers(dir: &Path) -> Vec<PathBuf> {
             continue;
         };
         for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
-            {
-                exes.push(path);
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                stack.push(entry.path());
+            } else if is_exe_path(&entry.path()) {
+                exes.push(entry.path());
             }
         }
     }
     exes.sort();
     exes
+}
+
+fn is_exe_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("exe"))
 }
 
 #[cfg(test)]

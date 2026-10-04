@@ -79,4 +79,19 @@ mod tests {
         // Suffixed `…\default` keys must not shadow the real value.
         assert_ne!(ini.get("Data Storage", "nand_directory"), Some("false"));
     }
+
+    #[test]
+    fn test_qt_ini_lookups_are_case_insensitive_and_skip_comments() {
+        let ini = QtIni::parse("; comment\n# hash\n[UI]\nTheme=Dark\n");
+        assert_eq!(ini.get("ui", "theme"), Some("Dark"));
+        assert_eq!(ini.get("UI", "THEME"), Some("Dark"));
+        assert_eq!(ini.get("UI", "missing"), None);
+        assert_eq!(ini.get("Missing", "theme"), None);
+    }
+
+    #[test]
+    fn test_percent_decode_keeps_invalid_escapes() {
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%41%42"), "AB");
+    }
 }

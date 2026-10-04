@@ -228,6 +228,29 @@ pub(crate) fn web_progress_to_data(
     )
 }
 
+/// One `MergedAchievement` row from its definition, unlock state and the
+/// already-resolved icon paths. Shared by the network and cache readers so
+/// the field mapping cannot drift between them.
+fn merged_achievement(
+    def: &RaAchievementDef,
+    unlock: RaUnlockInfo,
+    icon: String,
+    icon_gray: String,
+) -> MergedAchievement {
+    MergedAchievement {
+        name: def.id.to_string(),
+        display_name: def.title.clone(),
+        description: def.description.clone(),
+        hidden: false,
+        earned: unlock.earned,
+        earned_time: unlock.earned_time,
+        icon_path: icon,
+        icon_gray_path: icon_gray,
+        global_percent: def.rarity,
+        trophy_type: '\0',
+    }
+}
+
 pub fn build_ra_achievements(
     game_data: &RaGameData,
     unlocks: &HashMap<u32, RaUnlockInfo>,
@@ -279,18 +302,7 @@ pub fn build_ra_achievements(
             icon_gray_path = icon_gray.clone();
         }
 
-        achievements.push(MergedAchievement {
-            name: format!("{}", def.id),
-            display_name: def.title.clone(),
-            description: def.description.clone(),
-            hidden: false,
-            earned,
-            earned_time: unlock.earned_time,
-            icon_path: icon,
-            icon_gray_path: icon_gray,
-            global_percent: def.rarity,
-            trophy_type: '\0',
-        });
+        achievements.push(merged_achievement(def, unlock, icon, icon_gray));
     }
 
     (achievements, icon_path, icon_gray_path)
@@ -376,18 +388,7 @@ pub fn load_ra_achievements_from_cache(save_dir: &str, game_id: &str) -> Vec<Mer
             }
         };
 
-        achievements.push(MergedAchievement {
-            name: format!("{}", def.id),
-            display_name: def.title.clone(),
-            description: def.description.clone(),
-            hidden: false,
-            earned,
-            earned_time: unlock.earned_time,
-            icon_path: icon,
-            icon_gray_path: icon_gray,
-            global_percent: def.rarity,
-            trophy_type: '\0',
-        });
+        achievements.push(merged_achievement(def, unlock, icon, icon_gray));
     }
     achievements
 }

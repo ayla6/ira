@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use super::vdf::{get_str, get_value, parse_vdf, VdfValue};
+
 /// Find the Steam installation directory on Linux.
 /// Checks common locations: ~/.local/share/Steam, ~/.steam/steam, ~/.steam/root
 pub fn steam_install_dir() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
+    let home_path = PathBuf::from(&home);
     let candidates = [
-        PathBuf::from(&home).join(".local/share/Steam"),
-        PathBuf::from(&home).join(".steam/steam"),
-        PathBuf::from(&home).join(".steam/root"),
+        home_path.join(".local/share/Steam"),
+        home_path.join(".steam/steam"),
+        home_path.join(".steam/root"),
     ];
     for c in &candidates {
         if c.join("steamapps").is_dir() {
@@ -62,14 +65,13 @@ pub fn get_steam_user_ids() -> Vec<String> {
 pub fn get_most_recent_user_id() -> Option<String> {
     if let Some(path) = loginusers_path() {
         if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Some(super::vdf::VdfValue::Obj(users)) = super::vdf::parse_vdf(&text) {
+            if let Some(VdfValue::Obj(users)) = parse_vdf(&text) {
                 let mut best: Option<(i64, String)> = None;
                 for (id, value) in &users {
-                    if matches!(value, super::vdf::VdfValue::Obj(_)) {
-                        let most_recent = super::vdf::get_str(value, "MostRecent")
-                            .map(|s| s == "1")
-                            .unwrap_or(false);
-                        let timestamp = super::vdf::get_str(value, "Timestamp")
+                    if matches!(value, VdfValue::Obj(_)) {
+                        let most_recent =
+                            get_str(value, "MostRecent").map(|s| s == "1").unwrap_or(false);
+                        let timestamp = get_str(value, "Timestamp")
                             .and_then(|s: &str| s.parse::<i64>().ok())
                             .unwrap_or(0);
                         if most_recent || timestamp > best.as_ref().map(|(t, _)| *t).unwrap_or(0) {
@@ -116,6 +118,34 @@ pub fn stats_user_path(steam_id: &str, app_id: &str) -> Option<PathBuf> {
     stats_dir().map(|d| d.join(format!("UserGameStats_{}_{}.bin", steam_id, app_id)))
 }
 
+/// Playtime (hours) and last-played timestamp keyed by app ID, parsed from
+/// an already-parsed `localconfig.vdf` root. Minutes become hours here so
+/// every caller shares the conversion.
+fn parse_playtimes_from_vdf(parsed: &VdfValue) -> HashMap<String, (f64, i64)> {
+    let mut result = HashMap::new();
+    let apps = get_value(parsed, "Software")
+        .and_then(|s| get_value(s, "Valve"))
+        .and_then(|v| get_value(v, "Steam"))
+        .and_then(|s| get_value(s, "apps"));
+    let Some(VdfValue::Obj(app_map)) = apps else {
+        return result;
+    };
+    for (app_id, value) in app_map {
+        if let VdfValue::Obj(_) = value {
+            let pt = get_str(value, "Playtime")
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let lp = get_str(value, "LastPlayed")
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(0);
+            if pt > 0.0 || lp > 0 {
+                result.insert(app_id.clone(), (pt / 60.0, lp));
+            }
+        }
+    }
+    result
+}
+
 /// Read playtime (hours) and last played (unix timestamp) for ALL apps from
 /// localconfig.vdf in a single pass. Returns a map keyed by app_id string.
 /// Tries all Steam user IDs, preferring the most recent one.
@@ -147,7 +177,7 @@ pub fn read_all_playtimes() -> HashMap<String, (f64, i64)> {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Some(parsed) = super::vdf::parse_vdf(&text) else {
+        let Some(parsed) = parse_vdf(&text) else {
             eprintln!(
                 "[steam] read_all_playtimes: VDF parse failed for {}",
                 path.display()
@@ -155,32 +185,15 @@ pub fn read_all_playtimes() -> HashMap<String, (f64, i64)> {
             continue;
         };
 
-        let apps = super::vdf::get_value(&parsed, "Software")
-            .and_then(|s| super::vdf::get_value(s, "Valve"))
-            .and_then(|v| super::vdf::get_value(v, "Steam"))
-            .and_then(|s| super::vdf::get_value(s, "apps"));
-
-        let Some(super::vdf::VdfValue::Obj(app_map)) = apps else {
+        let playtimes = parse_playtimes_from_vdf(&parsed);
+        if playtimes.is_empty() {
             eprintln!(
-                "[steam] read_all_playtimes: Software/Valve/Steam/apps not found for user {}",
+                "[steam] read_all_playtimes: no playtimes found for user {}",
                 steam_id
             );
             continue;
-        };
-
-        for (app_id, value) in app_map {
-            if let super::vdf::VdfValue::Obj(_) = value {
-                let pt = super::vdf::get_str(value, "Playtime")
-                    .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(0.0);
-                let lp = super::vdf::get_str(value, "LastPlayed")
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .unwrap_or(0);
-                if pt > 0.0 || lp > 0 {
-                    result.insert(app_id.clone(), (pt / 60.0, lp));
-                }
-            }
         }
+        result.extend(playtimes);
 
         if !result.is_empty() {
             break;
@@ -235,31 +248,18 @@ mod tests {
     }
 }
 "#;
-        let parsed = super::super::vdf::parse_vdf(vdf).unwrap();
-        let apps = super::super::vdf::get_value(&parsed, "Software")
-            .and_then(|s| super::super::vdf::get_value(s, "Valve"))
-            .and_then(|v| super::super::vdf::get_value(v, "Steam"))
-            .and_then(|s| super::super::vdf::get_value(s, "apps"))
-            .unwrap();
-
-        let mut playtimes = HashMap::new();
-        if let super::super::vdf::VdfValue::Obj(app_map) = apps {
-            for (app_id, value) in app_map {
-                let pt = super::super::vdf::get_str(value, "Playtime")
-                    .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(0.0);
-                let lp = super::super::vdf::get_str(value, "LastPlayed")
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .unwrap_or(0);
-                if pt > 0.0 || lp > 0 {
-                    playtimes.insert(app_id.clone(), (pt / 60.0, lp));
-                }
-            }
-        }
+        let parsed = parse_vdf(vdf).unwrap();
+        let playtimes = parse_playtimes_from_vdf(&parsed);
 
         assert_eq!(playtimes.len(), 2);
         assert_eq!(playtimes["250900"], (5.0, 1700000000));
         assert_eq!(playtimes["440"], (20.0, 1700000001));
         assert!(!playtimes.contains_key("0"));
+    }
+
+    #[test]
+    fn test_parse_playtimes_missing_apps_is_empty() {
+        let parsed = parse_vdf("\"Root\"\n{\n\t\"Software\"\n\t{\n\t}\n}").unwrap();
+        assert!(parse_playtimes_from_vdf(&parsed).is_empty());
     }
 }

@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -80,7 +79,10 @@ impl RaClient {
     }
 
     fn rate_limit(&self) {
-        let mut last = self.last_request.lock().unwrap();
+        let mut last = match self.last_request.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let elapsed = last.elapsed();
         if elapsed < Duration::from_millis(RA_RATE_LIMIT_MS) {
             std::thread::sleep(Duration::from_millis(RA_RATE_LIMIT_MS) - elapsed);
@@ -147,8 +149,14 @@ impl RaClient {
         let resp: Vec<RaGameEntry> =
             serde_json::from_str(&text).map_err(|e| format!("parse game list: {}", e))?;
 
-        let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
-        let _ = std::fs::write(&cache, &text);
+        if let Some(parent) = cache.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("RA: failed to create cache dir: {}", e);
+            }
+        }
+        if let Err(e) = std::fs::write(&cache, &text) {
+            eprintln!("RA: failed to write console cache: {}", e);
+        }
 
         Ok(resp)
     }
@@ -179,7 +187,7 @@ impl RaClient {
         let Some(games) = self.console_games(save_dir, console_id) else {
             return Vec::new();
         };
-        let mut results = search_games(games.clone(), query);
+        let mut results = search_games(&games, query);
         if let Ok(id) = query.parse::<u32>() {
             if let Some(game) = games.into_iter().find(|g| g.id == id) {
                 if !results.iter().any(|g| g.id == id) {
@@ -247,8 +255,14 @@ impl RaClient {
         let progress: WebGameProgress =
             serde_json::from_str(&text).map_err(|e| format!("parse web progress: {}", e))?;
 
-        let _ = std::fs::create_dir_all(cache.parent().unwrap_or(Path::new(".")));
-        let _ = std::fs::write(&cache, &text);
+        if let Some(parent) = cache.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("RA: failed to create cache dir: {}", e);
+            }
+        }
+        if let Err(e) = std::fs::write(&cache, &text) {
+            eprintln!("RA: failed to write web progress cache: {}", e);
+        }
 
         Ok(super::api_types::web_progress_to_data(&progress))
     }
@@ -269,13 +283,19 @@ impl RaClient {
         if dest.is_file() {
             return dest.to_string_lossy().into_owned();
         }
-        let _ = std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")));
+        if let Some(parent) = dest.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("RA badge download: failed to create dir: {}", e);
+            }
+        }
         let suffix = if locked { "_lock" } else { "" };
         let url = format!("{}/{}{}.png", RA_BADGE_URL, badge_name, suffix);
         let tmp = dest.with_extension("png");
         match self.fetch_ra_bytes(&url) {
             Ok(bytes) => {
-                if std::fs::write(&tmp, &bytes).is_ok() {
+                if let Err(e) = std::fs::write(&tmp, &bytes) {
+                    eprintln!("RA badge download write error: {}", e);
+                } else {
                     ira_parser::convert_to_lossless_webp(&tmp);
                     return dest.to_string_lossy().into_owned();
                 }
@@ -354,16 +374,24 @@ impl RaClient {
                 return String::new();
             }
         };
-        let _ = std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")));
+        if let Some(parent) = dest.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                eprintln!("RA icon: failed to create dir: {}", e);
+                return String::new();
+            }
+        }
         let tmp = dest.with_extension("png");
-        if std::fs::write(&tmp, &bytes).is_ok() {
-            ira_parser::convert_to_lossless_webp(&tmp);
-            if dest.is_file() {
-                return dest.to_string_lossy().into_owned();
-            }
-            if tmp.is_file() {
-                return tmp.to_string_lossy().into_owned();
-            }
+        if let Err(e) = std::fs::write(&tmp, &bytes) {
+            eprintln!("RA icon: failed to write body: {}", e);
+            let _ = std::fs::remove_file(&tmp);
+            return String::new();
+        }
+        ira_parser::convert_to_lossless_webp(&tmp);
+        if dest.is_file() {
+            return dest.to_string_lossy().into_owned();
+        }
+        if tmp.is_file() {
+            return tmp.to_string_lossy().into_owned();
         }
         let _ = std::fs::remove_file(&tmp);
         String::new()
@@ -380,12 +408,13 @@ pub fn is_main_ra_entry(game: &RaGameEntry) -> bool {
 /// [`normalize_name`], so "Castlevania - Dawn of Sorrow" finds
 /// "Castlevania: Dawn of Sorrow" and "World Ends With You, The" finds
 /// "The World Ends With You". Hack/subset variants stay excluded.
-fn filter_ra_games(games: Vec<RaGameEntry>, q: &str) -> Vec<RaGameEntry> {
+fn filter_ra_games(games: &[RaGameEntry], q: &str) -> Vec<RaGameEntry> {
     let norm_q = normalize_name(q);
     games
-        .into_iter()
-        .filter(is_main_ra_entry)
+        .iter()
+        .filter(|g| is_main_ra_entry(g))
         .filter(|g| normalize_name(&g.title).contains(&norm_q))
+        .cloned()
         .collect()
 }
 
@@ -415,8 +444,8 @@ fn match_by_title(games: &[RaGameEntry], names: &[&str]) -> Option<RaGameEntry> 
 /// [`filter_ra_games`], broadened: when the full query has no hit, only the
 /// part before its first " - " is searched — file names hang region dumps
 /// and subtitles off it that RA titles spell with ":" or not at all.
-fn search_games(games: Vec<RaGameEntry>, query: &str) -> Vec<RaGameEntry> {
-    let results = filter_ra_games(games.clone(), query);
+fn search_games(games: &[RaGameEntry], query: &str) -> Vec<RaGameEntry> {
+    let results = filter_ra_games(games, query);
     if !results.is_empty() {
         return results;
     }
@@ -547,7 +576,7 @@ mod cache_tests {
             entry(3, "~Hack~ Super Mario"),
             entry(4, "Kirby's Dream Land"),
         ];
-        let result = filter_ra_games(games, "mario");
+        let result = filter_ra_games(&games, "mario");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, 1);
     }
@@ -556,7 +585,7 @@ mod cache_tests {
     fn test_filter_ra_games_empty_query_matches_all() {
         use super::filter_ra_games;
         let games = vec![entry(1, "Mario")];
-        let result = filter_ra_games(games, "");
+        let result = filter_ra_games(&games, "");
         assert_eq!(result.len(), 1);
     }
 
@@ -569,7 +598,7 @@ mod cache_tests {
         ];
         // File-name punctuation and trailing articles find the RA spelling.
         let hit = |q: &str, id: u32| {
-            let result = filter_ra_games(games.clone(), q);
+            let result = filter_ra_games(&games, q);
             assert_eq!(result.len(), 1, "query {q:?}");
             assert_eq!(result[0].id, id, "query {q:?}");
         };
@@ -590,7 +619,7 @@ mod cache_tests {
         ];
         // No title contains the whole file-name text ("USA" is outside any
         // bracket group), so the part before " - " decides.
-        let result = search_games(games, "Castlevania - Dawn of Sorrow USA");
+        let result = search_games(&games, "Castlevania - Dawn of Sorrow USA");
         assert_eq!(
             result.iter().map(|g| g.id).collect::<Vec<_>>(),
             [1, 2, 3]
@@ -604,7 +633,7 @@ mod cache_tests {
             entry(1, "Castlevania: Aria of Sorrow"),
             entry(2, "Castlevania: Dawn of Sorrow"),
         ];
-        let result = search_games(games, "Castlevania - Dawn of Sorrow");
+        let result = search_games(&games, "Castlevania - Dawn of Sorrow");
         assert_eq!(result.iter().map(|g| g.id).collect::<Vec<_>>(), [2]);
     }
 

@@ -45,6 +45,22 @@ pub fn get_value<'a>(value: &'a VdfValue, key: &str) -> Option<&'a VdfValue> {
     }
 }
 
+/// Read a string nested two levels deep (`outer/inner`), e.g. an app name
+/// under `UserConfig`. Returns None when either level is missing or not a string.
+pub fn get_nested_str<'a>(value: &'a VdfValue, outer: &str, inner: &str) -> Option<&'a str> {
+    get_obj(value, outer).and_then(|obj| match obj.get(inner) {
+        Some(VdfValue::Str(s)) => Some(s.as_str()),
+        _ => None,
+    })
+}
+
+/// Whether a directory entry name is a Steam app manifest (`appmanifest_*.acf`).
+/// Steam also writes in-progress manifests with a `.tmp` suffix; those never
+/// match and are skipped by every caller.
+pub fn is_app_manifest_file_name(name: &str) -> bool {
+    name.starts_with("appmanifest_") && name.ends_with(".acf")
+}
+
 struct VdfParser<'a> {
     chars: &'a [u8],
     pos: usize,
@@ -259,5 +275,27 @@ mod tests {
             .unwrap();
         assert_eq!(get_str(app, "Playtime"), Some("300"));
         assert_eq!(get_str(app, "LastPlayed"), Some("1700000000"));
+    }
+
+    #[test]
+    fn test_get_nested_str_reads_two_levels() {
+        let parsed = parse_vdf(
+            "\"AppState\"\n{\n\t\"UserConfig\"\n\t{\n\t\t\"name\"\t\t\"Fallback Name\"\n\t}\n}",
+        )
+        .unwrap();
+        assert_eq!(
+            get_nested_str(&parsed, "UserConfig", "name"),
+            Some("Fallback Name")
+        );
+        assert_eq!(get_nested_str(&parsed, "UserConfig", "missing"), None);
+        assert_eq!(get_nested_str(&parsed, "Missing", "name"), None);
+    }
+
+    #[test]
+    fn test_is_app_manifest_file_name_matches_acf_only() {
+        assert!(is_app_manifest_file_name("appmanifest_440.acf"));
+        assert!(!is_app_manifest_file_name("appmanifest_440.acf.tmp"));
+        assert!(!is_app_manifest_file_name("libraryfolders.vdf"));
+        assert!(!is_app_manifest_file_name("appmanifest_440.txt"));
     }
 }

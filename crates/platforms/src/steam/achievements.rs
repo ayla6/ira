@@ -1,8 +1,10 @@
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use super::paths;
 
 /// Full achievement data from the Steam librarycache.
+#[derive(Debug, Clone)]
 pub struct SteamAchievement {
     pub id: String,
     pub display_name: String,
@@ -15,6 +17,7 @@ pub struct SteamAchievement {
 }
 
 /// Result of reading Steam achievements: the list plus authoritative counts.
+#[derive(Debug, Clone, Default)]
 pub struct SteamAchievementData {
     pub achievements: Vec<SteamAchievement>,
     pub n_total: usize,
@@ -67,8 +70,8 @@ pub fn read_steam_achievements_full(app_id: &str, _save_dir: &str) -> SteamAchie
 /// contain the complete set. No API key or network access required.
 ///
 /// Returns a map of achievement API name → (earned, unlock_time).
-pub fn read_user_stats(app_id: &str) -> std::collections::HashMap<String, (bool, i64)> {
-    let mut result = std::collections::HashMap::new();
+pub fn read_user_stats(app_id: &str) -> HashMap<String, (bool, i64)> {
+    let mut result = HashMap::new();
 
     let Some(schema_path) = paths::stats_schema_path(app_id) else {
         eprintln!("[steam] read_user_stats: cannot find stats dir");
@@ -122,8 +125,10 @@ pub fn read_user_stats(app_id: &str) -> std::collections::HashMap<String, (bool,
         };
 
         for (bit_pos, name) in &bit_to_name {
-            let earned = achieved.contains_key(bit_pos);
-            let unlock_time = achieved.get(bit_pos).copied().unwrap_or(0);
+            let (earned, unlock_time) = achieved
+                .get(bit_pos)
+                .map(|t| (true, *t))
+                .unwrap_or((false, 0));
             result.insert(name.clone(), (earned, unlock_time));
         }
         break;
@@ -148,8 +153,8 @@ pub fn read_user_stats(app_id: &str) -> std::collections::HashMap<String, (bool,
 ///
 /// The schema contains one or more sections, each starting with a `bits` field
 /// that gives the starting bit offset. Achievement names follow as `\x01name\x00<API_NAME>\x00`.
-fn parse_schema(data: &[u8]) -> Result<std::collections::HashMap<usize, String>, String> {
-    let mut bit_to_name = std::collections::HashMap::new();
+fn parse_schema(data: &[u8]) -> Result<HashMap<usize, String>, String> {
+    let mut bit_to_name = HashMap::new();
 
     let mut pos = 0;
     while pos < data.len() {
@@ -206,8 +211,8 @@ fn parse_schema(data: &[u8]) -> Result<std::collections::HashMap<usize, String>,
 ///
 /// Entries are: `\x02<index_str>\x00<4-byte LE timestamp>`.
 /// Non-numeric entries (like "crc", "data", "PendingChanges") are skipped.
-fn parse_user_stats(data: &[u8]) -> Result<std::collections::HashMap<usize, i64>, String> {
-    let mut achieved = std::collections::HashMap::new();
+fn parse_user_stats(data: &[u8]) -> Result<HashMap<usize, i64>, String> {
+    let mut achieved = HashMap::new();
 
     let mut pos = 0;
     while pos < data.len() {
@@ -267,7 +272,7 @@ fn parse_librarycache_full(path: &Path) -> Result<(Vec<SteamAchievement>, usize,
     let arr: Vec<serde_json::Value> = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
 
     let mut result = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     let mut n_total = 0usize;
     let mut n_achieved = 0usize;
 
@@ -291,24 +296,18 @@ fn parse_librarycache_full(path: &Path) -> Result<(Vec<SteamAchievement>, usize,
             .unwrap_or(0) as usize;
 
         if let Some(obj) = data_obj.as_object() {
-            let vec_keys: Vec<String> = obj
-                .keys()
-                .filter(|k| k.starts_with("vec"))
-                .map(|k| k.to_string())
-                .collect();
-
-            for vec_name in &vec_keys {
+            for vec_name in obj.keys().filter(|k| k.starts_with("vec")) {
                 if let Some(vec) = data_obj.get(vec_name).and_then(|v| v.as_array()) {
                     for ach in vec {
                         let Some(id) = ach.get("strID").and_then(|s| s.as_str()) else {
                             continue;
                         };
-                        if !seen.insert(id.to_string()) {
+                        if !seen.insert(id.to_owned()) {
                             continue;
                         }
 
                         result.push(SteamAchievement {
-                            id: id.to_string(),
+                            id: id.to_owned(),
                             display_name: ach
                                 .get("strName")
                                 .and_then(|s| s.as_str())
@@ -451,5 +450,22 @@ mod tests {
         let earned_b = achieved.contains_key(&0);
         assert!(earned_a);
         assert!(earned_b);
+    }
+
+    #[test]
+    fn test_find_bytes_locates_pattern() {
+        let data = b"\x00bits\x00 rest \x01name\x00";
+        assert_eq!(find_bytes(data, b"bits\x00", 0), Some(1));
+        assert_eq!(find_bytes(data, b"\x01name\x00", 0), Some(12));
+        assert_eq!(find_bytes(data, b"missing", 0), None);
+        assert_eq!(find_bytes(data, b"bits\x00", data.len()), None);
+        assert_eq!(find_bytes(data, b"", 0), None);
+    }
+
+    #[test]
+    fn test_skip_nulls_advances_past_zeros() {
+        assert_eq!(skip_nulls(b"\x00\x00abc", 0), 2);
+        assert_eq!(skip_nulls(b"abc", 0), 0);
+        assert_eq!(skip_nulls(b"\x00\x00", 0), 2);
     }
 }

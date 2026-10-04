@@ -41,7 +41,9 @@ pub(super) fn rom_display_title(rom_name: &str) -> String {
 }
 
 pub(super) fn strip_disc_pattern(name: &str) -> Option<(String, i32)> {
-    let lower = name.to_lowercase();
+    // ASCII-only lowering: byte indices from `find` are reused to slice the
+    // original, and Unicode `to_lowercase` can change byte lengths.
+    let lower = name.to_ascii_lowercase();
     let keywords = ["disc ", "disk ", "cd "];
 
     for kw in keywords {
@@ -244,8 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn test_match_index_resolves_by_exact_hash() {
-        let games = vec![
+    fn test_match_index_resolves_by_exact_hash() {        let games = vec![
             entry(1, "Devil Survivor", 0, &["abc123"]),
             entry(2, "A Totally Different Game", 10, &[]),
         ];
@@ -356,5 +357,19 @@ mod tests {
         let conn = ira_db::init_db(tmp.path().join("ira.db").to_str().unwrap());
         std::mem::forget(tmp);
         conn
+    }
+
+    #[test]
+    fn test_remove_version_tags_strips_groups() {
+        assert_eq!(remove_version_tags("Game (USA) [En]"), "Game");
+        assert_eq!(remove_version_tags("No tags"), "No tags");
+    }
+
+    #[test]
+    fn test_strip_disc_pattern_matches_uppercase() {
+        assert_eq!(
+            strip_disc_pattern("Game (DISC 2)"),
+            Some(("Game".to_string(), 2))
+        );
     }
 }

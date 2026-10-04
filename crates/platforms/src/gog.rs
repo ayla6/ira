@@ -8,34 +8,63 @@ pub fn is_gog_game(folder: &str) -> bool {
     find_galaxy_dll(folder).is_some()
 }
 
+fn is_galaxy_dll_name(file_name: &str) -> bool {
+    let lower = file_name.to_lowercase();
+    lower == "galaxy.dll" || lower == "galaxy64.dll"
+}
+
 fn find_galaxy_dll(folder: &str) -> Option<PathBuf> {
-    let dll_names = ["galaxy.dll", "galaxy64.dll"];
-    if let Ok(entries) = std::fs::read_dir(folder) {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                if dll_names.contains(&name.to_lowercase().as_str()) {
-                    return Some(Path::new(folder).to_path_buf());
-                }
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return None;
+    };
+    let mut subdirs = Vec::new();
+    for entry in entries.flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            if is_galaxy_dll_name(name) {
+                return Some(Path::new(folder).to_path_buf());
             }
         }
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            subdirs.push(entry.path());
+        }
     }
-    if let Ok(entries) = std::fs::read_dir(folder) {
-        for entry in entries.flatten() {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                let sub = entry.path();
-                if let Ok(sub_entries) = std::fs::read_dir(&sub) {
-                    for se in sub_entries.flatten() {
-                        if let Some(name) = se.file_name().to_str() {
-                            if dll_names.contains(&name.to_lowercase().as_str()) {
-                                return Some(sub);
-                            }
-                        }
-                    }
+    for sub in subdirs {
+        let Ok(sub_entries) = std::fs::read_dir(&sub) else {
+            continue;
+        };
+        for se in sub_entries.flatten() {
+            if let Some(name) = se.file_name().to_str() {
+                if is_galaxy_dll_name(name) {
+                    return Some(sub.clone());
                 }
             }
         }
     }
     None
+}
+
+/// Parse one goggame-*.info file's product id and display name.
+/// Accepts both string and numeric ids, and both `rootGameId`/`gameId`
+/// and `name`/`title` keys.
+fn parse_gog_info_json(data: &str) -> Option<(String, String)> {
+    let json = serde_json::from_str::<serde_json::Value>(data).ok()?;
+    let product_id = json
+        .get("rootGameId")
+        .or_else(|| json.get("gameId"))
+        .and_then(|v| {
+            if let Some(s) = v.as_str() {
+                Some(s.to_string())
+            } else {
+                v.as_i64().map(|i| i.to_string())
+            }
+        })?;
+    let name = json
+        .get("name")
+        .or_else(|| json.get("title"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown GOG Game")
+        .to_string();
+    Some((product_id, name))
 }
 
 /// Walk up from `start` looking for a directory containing goggame-*.info files.
@@ -48,26 +77,8 @@ pub fn find_gog_info(start: &str) -> Option<(PathBuf, String, String)> {
                 if let Some(name) = entry.file_name().to_str() {
                     if name.starts_with("goggame-") && name.ends_with(".info") {
                         if let Ok(data) = std::fs::read_to_string(entry.path()) {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-                                let product_id = json
-                                    .get("rootGameId")
-                                    .or_else(|| json.get("gameId"))
-                                    .and_then(|v| {
-                                        if let Some(s) = v.as_str() {
-                                            Some(s.to_string())
-                                        } else {
-                                            v.as_i64().map(|i| i.to_string())
-                                        }
-                                    });
-                                let name = json
-                                    .get("name")
-                                    .or_else(|| json.get("title"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("Unknown GOG Game")
-                                    .to_string();
-                                if let Some(id) = product_id {
-                                    return Some((current, id, name));
-                                }
+                            if let Some((product_id, game_name)) = parse_gog_info_json(&data) {
+                                return Some((current, product_id, game_name));
                             }
                         }
                     }
@@ -87,17 +98,14 @@ const OLD_HASH_GALAXY64: u64 = 0xa511c62ff1db29d9;
 const OLD_HASH_GALAXY: u64 = 0x64b254c0a68a2718;
 
 fn find_galaxy_dll_file(folder: &str) -> Option<PathBuf> {
-    let dll_names = ["galaxy.dll", "galaxy64.dll"];
-    if let Ok(entries) = std::fs::read_dir(folder) {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                if dll_names.contains(&name.to_lowercase().as_str()) {
-                    return Some(entry.path());
-                }
-            }
-        }
-    }
-    None
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return None;
+    };
+    entries.flatten().find_map(|entry| {
+        let name = entry.file_name();
+        let name = name.to_str()?;
+        is_galaxy_dll_name(name).then(|| entry.path())
+    })
 }
 
 fn checksum_dll(path: &Path) -> Option<u64> {
@@ -105,33 +113,49 @@ fn checksum_dll(path: &Path) -> Option<u64> {
     Some(xxh3_64(&data))
 }
 
+fn galaxy_user_id() -> i64 {
+    GALAXY_ID.parse::<i64>().unwrap_or(100000000000000000)
+}
+
+fn parse_product_id(product_id: &str) -> i64 {
+    product_id.parse::<i64>().unwrap_or(0)
+}
+
+fn write_emu_json(settings_dir: &Path, config: serde_json::Value) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    std::fs::write(settings_dir.join("NemirtingasGalaxyEmu.json"), json).map_err(|e| e.to_string())
+}
+
 fn write_old_emu_config(settings_dir: &Path, product_id: &str) -> Result<(), String> {
-    let config = serde_json::json!({
+    write_emu_json(
+        settings_dir,
+        serde_json::json!({
         "api_version": "1.152.1.0",
         "disable_crashdump": true,
         "disable_online_networking": false,
         "enable_lan": true,
         "enable_overlay": false,
-        "galaxyid": GALAXY_ID.parse::<i64>().unwrap_or(100000000000000000),
+        "galaxyid": galaxy_user_id(),
         "ice_servers": [],
         "language": "english",
         "log_level": "off",
-        "productid": product_id.parse::<i64>().unwrap_or(0),
+        "productid": parse_product_id(product_id),
         "savepath": "appdata",
         "signaling_servers": [],
         "unlock_dlcs": true,
         "username": "DefaultName"
-    });
-    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(settings_dir.join("NemirtingasGalaxyEmu.json"), json).map_err(|e| e.to_string())
+        }),
+    )
 }
 
 fn write_new_emu_config(settings_dir: &Path, product_id: &str) -> Result<(), String> {
-    let config = serde_json::json!({
+    write_emu_json(
+        settings_dir,
+        serde_json::json!({
         "GalaxyEmu": {
             "Application": {
                 "ApiVersion": "1.152.11.0",
-                "AppId": product_id.parse::<i64>().unwrap_or(0),
+                "AppId": parse_product_id(product_id),
                 "DisableOnlineNetworking": false,
                 "LogLevel": "off",
                 "SavePath": "appdata"
@@ -147,15 +171,14 @@ fn write_new_emu_config(settings_dir: &Path, product_id: &str) -> Result<(), Str
                 }
             },
             "User": {
-                "GalaxyId": GALAXY_ID.parse::<i64>().unwrap_or(100000000000000000),
+                "GalaxyId": galaxy_user_id(),
                 "Language": "english",
                 "Languages": ["english"],
                 "UserName": ""
             }
         }
-    });
-    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(settings_dir.join("NemirtingasGalaxyEmu.json"), json).map_err(|e| e.to_string())
+        }),
+    )
 }
 
 /// Generate NemirtingasGalaxyEmu.json in the game's ngalaxye_settings folder.
@@ -226,5 +249,41 @@ mod tests {
     fn test_find_gog_info_none_without_manifest() {
         let tmp = TempDir::new().unwrap();
         assert!(find_gog_info(&tmp.path().to_string_lossy()).is_none());
+    }
+
+    #[test]
+    fn test_is_galaxy_dll_name_matches_case_insensitive() {
+        assert!(is_galaxy_dll_name("Galaxy.dll"));
+        assert!(is_galaxy_dll_name("GALAXY64.DLL"));
+        assert!(!is_galaxy_dll_name("galaxy.txt"));
+        assert!(!is_galaxy_dll_name(""));
+    }
+
+    #[test]
+    fn test_parse_gog_info_json_variants() {
+        let (id, name) =
+            parse_gog_info_json(r#"{"gameId":"42","name":"Game"}"#).unwrap();
+        assert_eq!(id, "42");
+        assert_eq!(name, "Game");
+        let (id, name) =
+            parse_gog_info_json(r#"{"rootGameId":99,"title":"Other"}"#).unwrap();
+        assert_eq!(id, "99");
+        assert_eq!(name, "Other");
+        assert!(parse_gog_info_json(r#"{"name":"No id"}"#).is_none());
+        assert!(parse_gog_info_json("not json").is_none());
+    }
+
+    #[test]
+    fn test_parse_product_id_defaults_to_zero() {
+        assert_eq!(parse_product_id("1207658924"), 1207658924);
+        assert_eq!(parse_product_id("abc"), 0);
+    }
+
+    #[test]
+    fn test_is_gog_game_detects_dll() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!is_gog_game(tmp.path().to_str().unwrap()));
+        std::fs::write(tmp.path().join("Galaxy64.dll"), b"x").unwrap();
+        assert!(is_gog_game(tmp.path().to_str().unwrap()));
     }
 }

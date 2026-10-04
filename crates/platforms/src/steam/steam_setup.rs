@@ -5,11 +5,10 @@ use ira_db::DbConn;
 
 /// Detect a Steam/Goldberg game by looking for steam_appid.txt.
 pub fn detect_app_id(folder: &str) -> Option<String> {
+    let folder_path = Path::new(folder);
     let candidates = [
-        Path::new(folder).join("steam_appid.txt"),
-        Path::new(folder)
-            .join("steam_settings")
-            .join("steam_appid.txt"),
+        folder_path.join("steam_appid.txt"),
+        folder_path.join("steam_settings").join("steam_appid.txt"),
     ];
     for p in &candidates {
         if let Ok(data) = std::fs::read_to_string(p) {
@@ -20,6 +19,10 @@ pub fn detect_app_id(folder: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn is_valid_app_id(app_id: &str) -> bool {
+    !app_id.is_empty() && app_id.parse::<i64>().is_ok()
 }
 
 pub fn add_game_from_folder(
@@ -35,7 +38,7 @@ pub fn add_game_from_folder(
     if folder.is_empty() {
         return Err("no folder selected".into());
     }
-    if app_id.is_empty() || app_id.parse::<i64>().is_err() {
+    if !is_valid_app_id(app_id) {
         return Err(format!("invalid Steam App ID {:?}", app_id));
     }
 
@@ -53,8 +56,10 @@ pub fn add_game_from_folder(
     // Create data/<app_id>/achievements/ as symlink to game's steam_settings
     let data_ach_dir = ira_parser::achievements_dir(save_dir, app_id);
     if !data_ach_dir.exists() {
-        std::fs::create_dir_all(data_ach_dir.parent().unwrap())
-            .map_err(|e| format!("could not create data dir: {}", e))?;
+        if let Some(parent) = data_ach_dir.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("could not create data dir: {}", e))?;
+        }
         #[cfg(unix)]
         std::os::unix::fs::symlink(&game_settings_dir, &data_ach_dir)
             .map_err(|e| format!("could not symlink achievements: {}", e))?;
@@ -88,4 +93,48 @@ pub fn add_game_from_folder(
     )?;
 
     Ok(saves_game_dir.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_app_id_rejects_bad_input() {
+        assert!(is_valid_app_id("440"));
+        assert!(!is_valid_app_id(""));
+        assert!(!is_valid_app_id("abc"));
+        assert!(!is_valid_app_id("12.5"));
+    }
+
+    #[test]
+    fn test_detect_app_id_reads_top_level_and_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(detect_app_id(dir.path().to_str().unwrap()).is_none());
+
+        std::fs::write(dir.path().join("steam_appid.txt"), "440\n").unwrap();
+        assert_eq!(
+            detect_app_id(dir.path().to_str().unwrap()).as_deref(),
+            Some("440")
+        );
+
+        let nested = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(nested.path().join("steam_settings")).unwrap();
+        std::fs::write(
+            nested.path().join("steam_settings").join("steam_appid.txt"),
+            "  570  ",
+        )
+        .unwrap();
+        assert_eq!(
+            detect_app_id(nested.path().to_str().unwrap()).as_deref(),
+            Some("570")
+        );
+    }
+
+    #[test]
+    fn test_detect_app_id_rejects_non_numeric() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("steam_appid.txt"), "not-an-id").unwrap();
+        assert!(detect_app_id(dir.path().to_str().unwrap()).is_none());
+    }
 }

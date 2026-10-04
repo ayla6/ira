@@ -459,18 +459,11 @@ fn build_ra_games_for_console(
                         .or_else(|| disc_owners.get(&path).copied())
                 })
                 .collect();
-            candidate_ids.sort_unstable();
-            candidate_ids.dedup();
 
             let id_from_key = ira_db::find_by_native_id(db, &app_id, console.def.id)
                 .ok()
                 .flatten()
                 .map(|entry| entry.id);
-            if let Some(id) = id_from_key {
-                candidate_ids.push(id);
-                candidate_ids.sort_unstable();
-                candidate_ids.dedup();
-            }
 
             // A matching content hash pins the file to the row it lived on
             // before its old file vanished — the reattachment path for a
@@ -478,11 +471,10 @@ fn build_ra_games_for_console(
             let id_from_hash = rom_hash
                 .and_then(|hash| existing_by_hash.get(hash))
                 .map(|entry| entry.id);
-            if let Some(id) = id_from_hash {
-                candidate_ids.push(id);
-                candidate_ids.sort_unstable();
-                candidate_ids.dedup();
-            }
+
+            candidate_ids.extend(id_from_key.into_iter().chain(id_from_hash));
+            candidate_ids.sort_unstable();
+            candidate_ids.dedup();
 
             let canonical_id = id_from_key
                 .or(id_from_hash)

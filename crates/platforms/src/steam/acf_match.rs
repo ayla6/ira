@@ -27,6 +27,40 @@ pub fn steamapps_in_path(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Candidate `[Steam]` manifest folders for a game folder: one directly
+/// inside it, plus one inside each of its immediate subfolders (release
+/// names like `Cave Story+ [Steam] [Build …]/Cave Story+/` nest them).
+fn manifest_candidate_dirs(folder: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![folder.join("[Steam]")];
+    if let Ok(entries) = std::fs::read_dir(folder) {
+        for entry in entries.flatten() {
+            dirs.push(entry.path().join("[Steam]"));
+        }
+    }
+    dirs
+}
+
+/// Whether `dir` holds at least one `appmanifest_*.acf`.
+fn dir_has_acf(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries.flatten().any(|e| {
+            vdf::is_app_manifest_file_name(&e.file_name().to_string_lossy())
+        })
+    })
+}
+
+/// Parse one `appmanifest_*.acf` file as `(appid, name, installdir)`.
+fn parse_acf_entry(path: &Path) -> Option<(String, String, String)> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let parsed = vdf::parse_vdf(&text)?;
+    let appid = vdf::get_str(&parsed, "appid")?.to_string();
+    let title = vdf::get_str(&parsed, "name").unwrap_or("").to_string();
+    let installdir = vdf::get_str(&parsed, "installdir")
+        .unwrap_or("")
+        .to_string();
+    Some((appid, title, installdir))
+}
+
 /// The `[Steam]` folders Goldberg-style game folders carry — release
 /// names like `Cave Story+ [Steam] [Build …]/Cave Story+/` keep their
 /// manifests directly inside a bracketed `[Steam]` subfolder (the
@@ -34,25 +68,10 @@ pub fn steamapps_in_path(path: &Path) -> Option<PathBuf> {
 /// sit right in `[Steam]`, with no `steamapps` level). Checked inside
 /// `folder` itself and one level down.
 pub fn steam_manifest_dirs_in_game_folder(folder: &Path) -> Vec<PathBuf> {
-    let mut candidates = vec![folder.join("[Steam]")];
-    if let Ok(entries) = std::fs::read_dir(folder) {
-        for entry in entries.flatten() {
-            candidates.push(entry.path().join("[Steam]"));
-        }
-    }
-    let has_acf = |dir: &Path| -> bool {
-        std::fs::read_dir(dir).is_ok_and(|entries| {
-            entries.flatten().any(|e| {
-                let n = e.file_name();
-                let n = n.to_string_lossy();
-                n.starts_with("appmanifest_") && n.ends_with(".acf")
-            })
-        })
-    };
     let mut seen = HashSet::new();
-    candidates
+    manifest_candidate_dirs(folder)
         .into_iter()
-        .filter(|c| has_acf(c))
+        .filter(|c| dir_has_acf(c))
         .filter(|c| seen.insert(c.clone()))
         .collect()
 }
@@ -65,20 +84,10 @@ fn acfs_in_dir(dir: &Path) -> Vec<(String, String, String)> {
     };
     entries
         .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            (name.starts_with("appmanifest_") && name.ends_with(".acf"))
-                .then_some(entry.path())
-                .and_then(|path| std::fs::read_to_string(path).ok())
-                .and_then(|text| vdf::parse_vdf(&text))
-                .and_then(|parsed| {
-                    let appid = vdf::get_str(&parsed, "appid")?.to_string();
-                    let title = vdf::get_str(&parsed, "name").unwrap_or("").to_string();
-                    let installdir = vdf::get_str(&parsed, "installdir").unwrap_or("").to_string();
-                    Some((appid, title, installdir))
-                })
+        .filter(|entry| {
+            vdf::is_app_manifest_file_name(&entry.file_name().to_string_lossy())
         })
+        .filter_map(|entry| parse_acf_entry(&entry.path()))
         .collect()
 }
 
@@ -88,30 +97,11 @@ fn acfs_in_dir(dir: &Path) -> Vec<(String, String, String)> {
 /// itself). A folder with a single manifest identifies the game
 /// outright.
 pub fn find_appid_in_game_folder(folder: &Path) -> Option<(String, String)> {
-    let mut dirs = vec![folder.join("[Steam]")];
-    if let Ok(entries) = std::fs::read_dir(folder) {
-        for entry in entries.flatten() {
-            dirs.push(entry.path().join("[Steam]"));
-        }
-    }
-
-    let normalize = |name: &str| -> String {
-        name.to_lowercase()
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
-            .collect()
-    };
+    let dirs = manifest_candidate_dirs(folder);
 
     let mut single: Option<(String, String)> = None;
     for dir in dirs {
-        let has_acf = std::fs::read_dir(&dir).is_ok_and(|entries| {
-            entries.flatten().any(|e| {
-                let n = e.file_name();
-                let n = n.to_string_lossy();
-                n.starts_with("appmanifest_") && n.ends_with(".acf")
-            })
-        });
-        if !has_acf {
+        if !dir_has_acf(&dir) {
             continue;
         }
         let owner = dir
@@ -130,9 +120,10 @@ pub fn find_appid_in_game_folder(folder: &Path) -> Option<(String, String)> {
             return Some((appid.clone(), name.clone()));
         }
         // Normalized installdir/title match second.
-        let normalized_owner = normalize(&owner);
+        let normalized_owner = normalize_name(&owner);
         if let Some((appid, name, _)) = acfs.iter().find(|(_, title, installdir)| {
-            normalize(installdir) == normalized_owner || normalize(title) == normalized_owner
+            normalize_name(installdir) == normalized_owner
+                || normalize_name(title) == normalized_owner
         }) {
             return Some((appid.clone(), name.clone()));
         }
@@ -169,26 +160,17 @@ pub fn find_appid_for_installdir(
     let normalized_target = normalize_name(installdir_name);
     let mut loose: Option<(String, String)> = None;
     for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if !name_str.starts_with("appmanifest_") || !name_str.ends_with(".acf") {
+        if !vdf::is_app_manifest_file_name(&entry.file_name().to_string_lossy()) {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(entry.path()) else {
+        let Some((appid, title, installdir)) = parse_acf_entry(&entry.path()) else {
             continue;
         };
-        let Some(parsed) = vdf::parse_vdf(&text) else {
-            continue;
-        };
-        let appid = vdf::get_str(&parsed, "appid").map(str::to_string);
-        let Some(appid) = appid else { continue };
-        let title = vdf::get_str(&parsed, "name").unwrap_or("").to_string();
-        let installdir = vdf::get_str(&parsed, "installdir").unwrap_or("");
         if installdir.to_lowercase() == target {
             return Some((appid, title));
         }
         if loose.is_none() {
-            let matched = normalize_name(installdir) == normalized_target
+            let matched = normalize_name(&installdir) == normalized_target
                 || normalize_name(&title) == normalized_target;
             if matched {
                 loose = Some((appid, title));

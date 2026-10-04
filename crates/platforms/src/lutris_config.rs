@@ -70,31 +70,28 @@ pub struct LutrisSystemSection {
     pub gamemode: bool,
 }
 
+fn home_dir() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
+}
+
 fn lutris_config_dir() -> PathBuf {
-    xdg::BaseDirectories::new()
-        .get_config_home()
-        .map(|p| p.join("lutris").join("games"))
-        .unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home)
-                .join(".config")
-                .join("lutris")
-                .join("games")
-        })
+    if let Some(base) = xdg::BaseDirectories::new().get_config_home() {
+        base.join("lutris").join("games")
+    } else {
+        home_dir().join(".config").join("lutris").join("games")
+    }
 }
 
 fn lutris_data_games_dir() -> PathBuf {
-    xdg::BaseDirectories::new()
-        .get_data_home()
-        .map(|p| p.join("lutris").join("games"))
-        .unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("lutris")
-                .join("games")
-        })
+    if let Some(base) = xdg::BaseDirectories::new().get_data_home() {
+        base.join("lutris").join("games")
+    } else {
+        home_dir()
+            .join(".local")
+            .join("share")
+            .join("lutris")
+            .join("games")
+    }
 }
 
 pub fn read_lutris_game_config(

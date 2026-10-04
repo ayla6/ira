@@ -66,14 +66,7 @@ fn parse_app_manifest(path: &Path) -> Option<SteamGame> {
 
     let app_id = vdf::get_str(&parsed, "appid")?.to_string();
     let name = vdf::get_str(&parsed, "name")
-        .or_else(|| {
-            vdf::get_obj(&parsed, "UserConfig")
-                .and_then(|uc| uc.get("name"))
-                .and_then(|v| match v {
-                    VdfValue::Str(s) => Some(s.as_str()),
-                    _ => None,
-                })
-        })
+        .or_else(|| vdf::get_nested_str(&parsed, "UserConfig", "name"))
         .unwrap_or("")
         .to_string();
     let installdir = vdf::get_str(&parsed, "installdir")
@@ -105,38 +98,34 @@ fn parse_app_manifest(path: &Path) -> Option<SteamGame> {
 pub fn discover_games() -> Vec<SteamGame> {
     let mut games = Vec::new();
 
-    let mut all_manifests = Vec::new();
+    let mut manifests = Vec::new();
     for apps_dir in all_steamapps_dirs() {
         let Ok(entries) = std::fs::read_dir(&apps_dir) else {
             continue;
         };
         for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if !name_str.starts_with("appmanifest_") || !name_str.ends_with(".acf") {
-                continue;
-            }
-            if name_str.ends_with(".tmp") {
+            let name_str = entry.file_name().to_string_lossy().into_owned();
+            if !vdf::is_app_manifest_file_name(&name_str) {
                 continue;
             }
             if let Some(game) = parse_app_manifest(&entry.path()) {
-                all_manifests.push(game);
+                manifests.push(game);
             }
         }
     }
 
-    let all_manifests = deduplicate_by_app_id(all_manifests);
-    if all_manifests.is_empty() {
+    let manifests = deduplicate_by_app_id(manifests);
+    if manifests.is_empty() {
         return games;
     }
 
-    let app_ids: Vec<u32> = all_manifests
+    let app_ids: Vec<u32> = manifests
         .iter()
         .filter_map(|g| g.app_id.parse::<u32>().ok())
         .collect();
     let app_types = super::appinfo::get_app_types(&app_ids);
 
-    for game in all_manifests {
+    for game in manifests {
         if let Ok(app_id) = game.app_id.parse::<u32>() {
             if let Some(app_type) = app_types.get(&app_id) {
                 if !super::appinfo::is_game_or_demo(app_type) {
@@ -159,7 +148,7 @@ fn deduplicate_by_app_id(games: Vec<SteamGame>) -> Vec<SteamGame> {
 
 #[cfg(test)]
 mod tests {
-    use super::{deduplicate_by_app_id, SteamGame};
+    use super::{deduplicate_by_app_id, parse_app_manifest, SteamGame};
 
     #[test]
     fn test_deduplicate_by_app_id_keeps_one_manifest() {
@@ -184,5 +173,45 @@ mod tests {
         assert_eq!(games.len(), 2);
         assert_eq!(games[0].name, "Game");
         assert_eq!(games[1].app_id, "456");
+    }
+
+    #[test]
+    fn test_parse_app_manifest_reads_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appmanifest_440.acf");
+        std::fs::write(
+            &path,
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"440\"\n\t\"name\"\t\t\"Team Fortress 2\"\n\t\"installdir\"\t\t\"Team Fortress 2\"\n\t\"StateFlags\"\t\t\"4\"\n}",
+        )
+        .unwrap();
+        let game = parse_app_manifest(&path).unwrap();
+        assert_eq!(game.app_id, "440");
+        assert_eq!(game.name, "Team Fortress 2");
+        assert!(game.install_dir.ends_with("common/Team Fortress 2"));
+    }
+
+    #[test]
+    fn test_parse_app_manifest_falls_back_to_userconfig_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appmanifest_440.acf");
+        std::fs::write(
+            &path,
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"440\"\n\t\"UserConfig\"\n\t{\n\t\t\"name\"\t\t\"Fallback Name\"\n\t}\n\t\"installdir\"\t\t\"Game\"\n\t\"StateFlags\"\t\t\"4\"\n}",
+        )
+        .unwrap();
+        let game = parse_app_manifest(&path).unwrap();
+        assert_eq!(game.name, "Fallback Name");
+    }
+
+    #[test]
+    fn test_parse_app_manifest_skips_not_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appmanifest_440.acf");
+        std::fs::write(
+            &path,
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"440\"\n\t\"name\"\t\t\"Game\"\n\t\"installdir\"\t\t\"Game\"\n\t\"StateFlags\"\t\t\"2\"\n}",
+        )
+        .unwrap();
+        assert!(parse_app_manifest(&path).is_none());
     }
 }

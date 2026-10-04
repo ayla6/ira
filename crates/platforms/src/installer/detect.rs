@@ -42,6 +42,17 @@ pub fn game_platform(path: &Path, itype: InstallerType) -> GamePlatform {
     }
 }
 
+/// Read up to `limit` bytes from the start of `path`.
+/// Returns an empty vector when the file cannot be opened or read.
+fn read_head(path: &Path, limit: usize) -> Vec<u8> {
+    let mut buf = vec![0u8; limit];
+    let n = std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf).or(Ok(0usize)))
+        .unwrap_or(0);
+    buf.truncate(n);
+    buf
+}
+
 /// Marker that appears in every GOG makeself/mojosetup installer.
 pub(super) const MAKESELF_FILESIZE_MARKER: &[u8] = b"filesizes=\"";
 pub(super) const MAKESELF_OFFSET_MARKER: &[u8] = b"offset=`head -n ";
@@ -54,16 +65,9 @@ const LINUXRULEZ_MARKER: &[u8] = b"YAD Simple Installer";
 /// Searches the first 10 KB for both the `filesizes="` and
 /// `offset=\`head -n ` markers that makeself embeds in its header.
 pub fn is_gog_makeself(path: &Path) -> bool {
-    let mut buf = vec![0u8; 10_240];
-    let n = match std::fs::File::open(path)
-        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf).or(Ok(0usize)))
-    {
-        Ok(n) => n,
-        Err(_) => return false,
-    };
-    let head = &buf[..n];
-    find_subsequence(head, MAKESELF_FILESIZE_MARKER).is_some()
-        && find_subsequence(head, MAKESELF_OFFSET_MARKER).is_some()
+    let head = read_head(path, 10_240);
+    find_subsequence(&head, MAKESELF_FILESIZE_MARKER).is_some()
+        && find_subsequence(&head, MAKESELF_OFFSET_MARKER).is_some()
 }
 
 /// Inno Setup's `SetupLoaderHeaderMagic` — the 4-byte string "Inno" at
@@ -77,22 +81,15 @@ const INNO_VERSION_STRING: &[u8] = b"Inno Setup Setup Data";
 /// the first 64 KB for the "Inno Setup Setup Data" version string (used by
 /// GOG Galaxy-wrapped installers where the header may be embedded deeper).
 pub fn is_inno_setup(path: &Path) -> bool {
-    let mut buf = vec![0u8; 65_536];
-    let n = match std::fs::File::open(path)
-        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf).or(Ok(0usize)))
-    {
-        Ok(n) => n,
-        Err(_) => return false,
-    };
-    let head = &buf[..n];
+    let head = read_head(path, 65_536);
 
-    if n >= INNO_MAGIC_OFFSET + INNO_MAGIC.len()
+    if head.len() >= INNO_MAGIC_OFFSET + INNO_MAGIC.len()
         && &head[INNO_MAGIC_OFFSET..INNO_MAGIC_OFFSET + INNO_MAGIC.len()] == INNO_MAGIC
     {
         return true;
     }
 
-    find_subsequence(head, INNO_VERSION_STRING).is_some()
+    find_subsequence(&head, INNO_VERSION_STRING).is_some()
 }
 
 /// Check whether a Linux `.sh` file is a LinuxRulez YAD Simple Installer.
@@ -100,18 +97,14 @@ pub fn is_inno_setup(path: &Path) -> bool {
 /// tar archive containing a Windows game. They run natively on Linux but the
 /// installed game is a Windows game.
 pub fn is_linuxrulez(path: &Path) -> bool {
-    let mut buf = vec![0u8; 10_240];
-    let n = match std::fs::File::open(path)
-        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf).or(Ok(0usize)))
-    {
-        Ok(n) => n,
-        Err(_) => return false,
-    };
-    let head = &buf[..n];
-    find_subsequence(head, LINUXRULEZ_MARKER).is_some()
+    let head = read_head(path, 10_240);
+    find_subsequence(&head, LINUXRULEZ_MARKER).is_some()
 }
 
 pub(super) fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
@@ -257,6 +250,7 @@ offset=`head -n 519 \"$0\" | wc -c | tr -d \" \"\n\
         assert_eq!(find_subsequence(b"hello world", b"world"), Some(6));
         assert_eq!(find_subsequence(b"hello world", b"xyz"), None);
         assert_eq!(find_subsequence(b"abc", b"abcd"), None);
+        assert_eq!(find_subsequence(b"abc", b""), Some(0));
     }
 
     #[test]

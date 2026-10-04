@@ -67,33 +67,27 @@ pub fn split_gog_installer(installer: &Path, out_dir: &Path) -> Result<PathBuf, 
 }
 
 fn parse_offset_lines(head: &[u8]) -> Result<u64, String> {
-    let marker_pos = find_subsequence(head, MAKESELF_OFFSET_MARKER)
-        .ok_or_else(|| "makeself offset marker not found".to_string())?;
-    let rest = &head[marker_pos + MAKESELF_OFFSET_MARKER.len()..];
-    let end = rest
-        .iter()
-        .position(|&b| !b.is_ascii_digit())
-        .ok_or_else(|| "offset line count not terminated".to_string())?;
-    let digits = &rest[..end];
-    std::str::from_utf8(digits)
-        .map_err(|e| format!("offset digits utf8: {e}"))?
-        .parse::<u64>()
-        .map_err(|e| format!("parse offset line count: {e}"))
+    parse_marker_u64(head, MAKESELF_OFFSET_MARKER, "offset line count")
 }
 
 fn parse_filesizes(head: &[u8]) -> Result<u64, String> {
-    let marker_pos = find_subsequence(head, MAKESELF_FILESIZE_MARKER)
-        .ok_or_else(|| "makeself filesizes marker not found".to_string())?;
-    let rest = &head[marker_pos + MAKESELF_FILESIZE_MARKER.len()..];
+    parse_marker_u64(head, MAKESELF_FILESIZE_MARKER, "filesizes")
+}
+
+/// Number after `marker` in the makeself header (`offset=\`head -n 519…`,
+/// `filesizes="877150"`): the digits run to the first non-digit byte.
+fn parse_marker_u64(head: &[u8], marker: &[u8], label: &str) -> Result<u64, String> {
+    let marker_pos =
+        find_subsequence(head, marker).ok_or_else(|| format!("makeself {label} marker not found"))?;
+    let rest = &head[marker_pos + marker.len()..];
     let end = rest
         .iter()
         .position(|&b| !b.is_ascii_digit())
-        .ok_or_else(|| "filesizes value not terminated".to_string())?;
-    let digits = &rest[..end];
-    std::str::from_utf8(digits)
-        .map_err(|e| format!("filesizes digits utf8: {e}"))?
+        .ok_or_else(|| format!("{label} value not terminated"))?;
+    std::str::from_utf8(&rest[..end])
+        .map_err(|e| format!("{label} digits utf8: {e}"))?
         .parse::<u64>()
-        .map_err(|e| format!("parse filesizes: {e}"))
+        .map_err(|e| format!("parse {label}: {e}"))
 }
 
 /// Extract `data.zip` (as produced by `split_gog_installer`) into `dest`.
@@ -158,20 +152,18 @@ pub fn extract_data_zip(
 }
 
 /// Strip leading `noarch/` and `data/` components from a GOG zip entry path.
-fn strip_gog_prefixes(path: &str) -> String {
-    let mut p = path;
+fn strip_gog_prefixes(mut path: &str) -> &str {
     loop {
-        if let Some(rest) = p.strip_prefix("noarch/") {
-            p = rest;
-        } else if let Some(rest) = p.strip_prefix("data/") {
-            p = rest;
-        } else if let Some(rest) = p.strip_prefix("/") {
-            p = rest;
+        if let Some(rest) = path.strip_prefix("noarch/") {
+            path = rest;
+        } else if let Some(rest) = path.strip_prefix("data/") {
+            path = rest;
+        } else if let Some(rest) = path.strip_prefix("/") {
+            path = rest;
         } else {
-            break;
+            break path;
         }
     }
-    p.to_string()
 }
 
 #[cfg(test)]

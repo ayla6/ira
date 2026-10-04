@@ -1,6 +1,6 @@
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, compute_relative, copy_file, detect_arch,
-    detect_folder_bitness, find_game_dll_folder, is_windows, restore_backup,
+    api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
+    find_game_dll_folder, is_windows, restore_backup,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
@@ -51,11 +51,7 @@ pub fn write_nge_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result
             apps["DlcList"] = serde_json::Value::Object(dlcs_map);
         }
     } else {
-        if any_disabled {
-            json["unlock_dlcs"] = serde_json::Value::Bool(false);
-        } else {
-            json["unlock_dlcs"] = serde_json::Value::Bool(true);
-        }
+        json["unlock_dlcs"] = serde_json::Value::Bool(!any_disabled);
     }
 
     let out = serde_json::to_string_pretty(&json)
@@ -141,72 +137,11 @@ pub fn has_original_gog_dlls(dll_folder: &Path) -> bool {
 /// pointing to it. If it doesn't exist, create it at the root. Then create
 /// symlinks from every directory containing Galaxy DLLs to the root settings.
 pub fn centralize_galaxy_settings(game_folder: &str) -> Result<Option<PathBuf>, String> {
-    let root = Path::new(game_folder);
-    let root_settings = root.join("ngalaxye_settings");
-
-    // If ngalaxye_settings/ is already at the root (real dir, not symlink), just symlink DLL dirs.
-    if root_settings.is_dir()
-        && !std::fs::symlink_metadata(&root_settings)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-    {
-        symlink_gog_dll_dirs_to_settings(root, &root_settings);
-        return Ok(Some(root_settings));
-    }
-
-    let found = find_galaxy_settings_recursive(root);
-
-    if let Some(found_dir) = found {
-        // ngalaxye_settings exists somewhere — symlink root to it (don't move)
-        #[cfg(unix)]
-        {
-            if !root_settings.exists() {
-                let rel = compute_relative(&root_settings, &found_dir);
-                let _ = std::os::unix::fs::symlink(&rel, &root_settings);
-            }
-        }
-        symlink_gog_dll_dirs_to_settings(root, &root_settings);
-        return Ok(Some(root_settings));
-    }
-
-    // No ngalaxye_settings found — create at root and symlink DLL dirs
-    std::fs::create_dir_all(&root_settings)
-        .map_err(|e| format!("create ngalaxye_settings at root: {e}"))?;
-    symlink_gog_dll_dirs_to_settings(root, &root_settings);
-    Ok(Some(root_settings))
-}
-
-fn find_galaxy_settings_recursive(root: &Path) -> Option<PathBuf> {
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    if path.file_name().and_then(|n| n.to_str()) == Some("ngalaxye_settings") {
-                        return Some(path);
-                    }
-                    stack.push(path);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn symlink_gog_dll_dirs_to_settings(root: &Path, settings_dir: &Path) {
-    let dll_dirs = find_gog_dlls_recursive(&root.to_string_lossy());
-    for dir in dll_dirs {
-        let link = dir.join("ngalaxye_settings");
-        if link.exists() {
-            continue;
-        }
-        #[cfg(unix)]
-        {
-            let rel = compute_relative(&dir, settings_dir);
-            let _ = std::os::unix::fs::symlink(&rel, &link);
-        }
-    }
+    crate::api_emulators_shared::centralize_settings(
+        game_folder,
+        "ngalaxye_settings",
+        GOG_DLL_NAMES,
+    )
 }
 
 
@@ -226,35 +161,11 @@ pub fn has_gog_emulator_backups(dir: &Path) -> bool {
 /// List available NGE versions under api_emulators/gog/
 pub fn list_gog_versions(save_dir: &str) -> Vec<String> {
     let root = api_emulators_dir(save_dir).join("gog");
-    let mut versions = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&root) {
-        for entry in entries.flatten() {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                if let Some(name) = entry.file_name().to_str() {
-                    versions.push(name.to_string());
-                }
-            }
-        }
-    }
-    versions.sort();
-    versions
+    crate::api_emulators_shared::list_version_dirs(&root, &[])
 }
 
 fn resolve_gog_version(save_dir: &str, version: &str) -> Result<PathBuf, String> {
-    let root = api_emulators_dir(save_dir).join("gog");
-    if version.is_empty() {
-        let versions = list_gog_versions(save_dir);
-        let v = versions
-            .first()
-            .ok_or_else(|| format!("No NGE versions found at {:?}", root))?;
-        Ok(root.join(v))
-    } else {
-        let dir = root.join(version);
-        if !dir.is_dir() {
-            return Err(format!("NGE version '{}' not found at {:?}", version, dir));
-        }
-        Ok(dir)
-    }
+    crate::api_emulators_shared::resolve_emu_version(save_dir, "gog", version, "NGE")
 }
 
 pub fn install_nge(
@@ -301,12 +212,8 @@ pub fn install_nge_from_folder(
         .find(|d| !is_nge_installed(d))
         .ok_or_else(|| "No unpatched GOG Galaxy DLLs found in game folder".to_string())?;
 
-    let is64 = detect_folder_bitness(
-        dll_folder,
-        &["Galaxy64.dll", "galaxy64.dll"],
-        &["Galaxy.dll", "galaxy.dll"],
-    )
-    .unwrap_or(false);
+    let is64 =
+        detect_folder_bitness(dll_folder, GALAXY_64_FILES, GALAXY_32_FILES).unwrap_or(false);
     install_nge_into_folder(save_dir, dll_folder, is64, product_id, version)
 }
 
@@ -339,12 +246,11 @@ fn install_nge_into_folder(
 }
 
 pub fn uninstall_nge(game_exe: &str, game_folder: &str) -> Result<(), String> {
-    let all_files: Vec<&str> = NGE_VERSION_FILES.to_vec();
-    let dll_folder = find_game_dll_folder(game_exe, game_folder, &all_files)
+    let dll_folder = find_game_dll_folder(game_exe, game_folder, NGE_VERSION_FILES)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
-    for file in &all_files {
+    for file in NGE_VERSION_FILES {
         let path = dll_folder.join(file);
         restore_backup(&path)?;
     }
@@ -371,5 +277,72 @@ mod tests {
         assert!(!is_nge_installed(dir));
         std::fs::write(dir.join("Galaxy64.dll.bak"), b"x").unwrap();
         assert!(is_nge_installed(dir));
+    }
+
+    fn nge_config(dir: &std::path::Path, body: &str) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("NemirtingasGalaxyEmu.json"), body).unwrap();
+    }
+
+    #[test]
+    fn test_read_nge_language_both_shapes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("s");
+        nge_config(&dir, r#"{"GalaxyEmu":{"User":{"Language":"german"}}}"#);
+        assert_eq!(read_nge_language(&dir).as_deref(), Some("german"));
+        nge_config(&dir, r#"{"language":"french"}"#);
+        assert_eq!(read_nge_language(&dir).as_deref(), Some("french"));
+        nge_config(&dir, r#"{}"#);
+        assert_eq!(read_nge_language(&dir), None);
+    }
+
+    #[test]
+    fn test_write_nge_language_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("s");
+        nge_config(&dir, r#"{"GalaxyEmu":{"User":{"Language":"english"}}}"#);
+        write_nge_language(&dir, "german").unwrap();
+        assert_eq!(read_nge_language(&dir).as_deref(), Some("german"));
+    }
+
+    #[test]
+    fn test_write_nge_dlc_config_unlock_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("s");
+        nge_config(&dir, r#"{"GalaxyEmu":{"Apps":{"UnlockDlcs":true,"DlcList":{}}}}"#);
+        let mut details = AppDetails {
+            name: String::new(),
+            languages: Vec::new(),
+            dlcs: std::collections::HashMap::new(),
+            ufs_savefiles: Vec::new(),
+            ufs_rootoverrides: Vec::new(),
+        };
+        details.dlcs.insert(
+            "1".to_string(),
+            ira_models::DlcInfo {
+                app_id: 10,
+                name: "Pack".to_string(),
+                image_url: String::new(),
+                enabled: false,
+            },
+        );
+        write_nge_dlc_config(&dir, &details).unwrap();
+        let data = std::fs::read_to_string(dir.join("NemirtingasGalaxyEmu.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(json["GalaxyEmu"]["Apps"]["UnlockDlcs"], false);
+        assert!(json["GalaxyEmu"]["Apps"]["DlcList"].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_find_galaxy_settings_walks_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        let sub = game.join("bin");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(game.join("ngalaxye_settings")).unwrap();
+        let exe = sub.join("game.exe");
+        std::fs::write(&exe, b"x").unwrap();
+        let found = find_galaxy_settings(&exe.to_string_lossy()).unwrap();
+        assert_eq!(found, game.join("ngalaxye_settings"));
     }
 }

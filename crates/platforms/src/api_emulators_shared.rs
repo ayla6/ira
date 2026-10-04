@@ -97,17 +97,11 @@ pub(crate) fn detect_arch(game_exe: &str) -> &'static str {
             || std::fs::metadata(game_exe)
                 .map(|m| m.len() > 1_500_000)
                 .unwrap_or(false);
-        if is64 {
-            "x64"
-        } else {
-            "x86"
-        }
+        if is64 { "x64" } else { "x86" }
+    } else if std::env::consts::ARCH == "x86_64" {
+        "x64"
     } else {
-        if std::env::consts::ARCH == "x86_64" {
-            "x64"
-        } else {
-            "x86"
-        }
+        "x86"
     }
 }
 
@@ -126,30 +120,33 @@ pub(crate) fn detect_folder_bitness(
     names_64: &[&str],
     names_32: &[&str],
 ) -> Option<bool> {
-    if dir_contains_any(dir, names_64) {
+    // Single directory read: the old code scanned the directory twice
+    // (once for 64-bit names, once for 32-bit names).
+    let files = dir_file_names_lower(dir)?;
+    if names_64.iter().any(|n| files.contains(&n.to_lowercase())) {
         return Some(true);
     }
     if folder_name_says_64(dir) {
         return Some(true);
     }
-    if dir_contains_any(dir, names_32) {
+    if names_32.iter().any(|n| files.contains(&n.to_lowercase())) {
         return Some(false);
     }
     None
 }
 
-/// Case-insensitive check whether `dir` directly contains any of `names`.
-fn dir_contains_any(dir: &Path, names: &[&str]) -> bool {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    let lower: Vec<String> = names.iter().map(|n| n.to_lowercase()).collect();
-    entries.flatten().any(|e| {
-        e.file_name()
-            .to_str()
-            .map(|s| lower.contains(&s.to_lowercase()))
-            .unwrap_or(false)
-    })
+/// Lowercased file names directly inside `dir`, or `None` when unreadable.
+fn dir_file_names_lower(dir: &Path) -> Option<std::collections::HashSet<String>> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let mut names = std::collections::HashSet::new();
+    for entry in entries.flatten() {
+        if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            if let Some(name) = entry.file_name().to_str() {
+                names.insert(name.to_lowercase());
+            }
+        }
+    }
+    Some(names)
 }
 
 /// Whether `dir`'s own name or its parent's name marks it as 64-bit:
@@ -169,34 +166,39 @@ fn folder_name_says_64(dir: &Path) -> bool {
 }
 
 pub(crate) fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Option<PathBuf> {
-    let exe_path = Path::new(game_exe);
-    let start = exe_path.parent()?;
-    if let Ok(entries) = std::fs::read_dir(start) {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                if dll_names.contains(&name.to_lowercase().as_str()) {
-                    return Some(start.to_path_buf());
-                }
-            }
-        }
+    let start = Path::new(game_exe).parent()?;
+    if dir_has_any_dll(start, dll_names) {
+        return Some(start.to_path_buf());
     }
     if let Ok(entries) = std::fs::read_dir(start) {
         for entry in entries.flatten() {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                let sub = entry.path();
-                if let Ok(sub_entries) = std::fs::read_dir(&sub) {
-                    for se in sub_entries.flatten() {
-                        if let Some(name) = se.file_name().to_str() {
-                            if dll_names.contains(&name.to_lowercase().as_str()) {
-                                return Some(sub);
-                            }
-                        }
-                    }
-                }
+            let sub = entry.path();
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                && dir_has_any_dll(&sub, dll_names)
+            {
+                return Some(sub);
             }
         }
     }
     None
+}
+
+/// Case-insensitive check whether `dir` directly contains any of `dll_names`.
+/// Both sides are lowercased: the old inline version only lowercased the
+/// directory entry, so mixed-case lists like `Galaxy.dll` never matched.
+fn dir_has_any_dll(dir: &Path, dll_names: &[&str]) -> bool {
+    let lower: Vec<String> = dll_names.iter().map(|n| n.to_lowercase()).collect();
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+                && entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| lower.contains(&name.to_lowercase()))
+        })
 }
 
 /// Recursively walk `base_folder` and return every directory that directly
@@ -295,6 +297,133 @@ pub fn ensure_skeleton(save_dir: &str) {
     for d in &dirs {
         let _ = std::fs::create_dir_all(root.join(d));
     }
+}
+
+/// Sorted names of subdirectories directly under `root`, skipping any in
+/// `exclude`. Shared by the GSE/NGE/Denuvo version listers.
+pub(crate) fn list_version_dirs(root: &Path, exclude: &[&str]) -> Vec<String> {
+    let mut versions = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if !exclude.contains(&name) {
+                        versions.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    versions.sort();
+    versions
+}
+
+/// Resolve an emulator version directory under
+/// `<save_dir>/api_emulators/<subdir>/`. An empty `version` picks the first
+/// (sorted) version available.
+pub(crate) fn resolve_emu_version(
+    save_dir: &str,
+    subdir: &str,
+    version: &str,
+    label: &str,
+) -> Result<PathBuf, String> {
+    let root = api_emulators_dir(save_dir).join(subdir);
+    if version.is_empty() {
+        let versions = list_version_dirs(&root, &[]);
+        let v = versions
+            .first()
+            .ok_or_else(|| format!("No {label} versions found at {root:?}"))?;
+        Ok(root.join(v))
+    } else {
+        let dir = root.join(version);
+        if !dir.is_dir() {
+            return Err(format!("{label} version '{version}' not found at {dir:?}"));
+        }
+        Ok(dir)
+    }
+}
+
+/// Recursively search for a settings directory called `name` under `root`.
+pub(crate) fn find_settings_recursive(root: &Path, name: &str) -> Option<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if path.file_name().and_then(|n| n.to_str()) == Some(name) {
+                        return Some(path);
+                    }
+                    stack.push(path);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Whether `path` is a real directory rather than a symlink.
+pub(crate) fn is_real_dir(path: &Path) -> bool {
+    if path.is_symlink() {
+        return false;
+    }
+    path.is_dir()
+}
+
+/// For every directory containing one of `dll_names` under `root`, create a
+/// relative symlink called `settings_name` to `settings_dir` unless one
+/// already exists.
+pub(crate) fn symlink_dll_dirs_to_settings(
+    root: &Path,
+    settings_dir: &Path,
+    settings_name: &str,
+    dll_names: &[&str],
+) {
+    for dir in find_dll_dirs_recursive(root, dll_names) {
+        let link = dir.join(settings_name);
+        if link.exists() {
+            continue;
+        }
+        #[cfg(unix)]
+        {
+            let rel = compute_relative(&dir, settings_dir);
+            let _ = std::os::unix::fs::symlink(&rel, &link);
+        }
+    }
+}
+
+/// Shared body of `centralize_steam_settings` / `centralize_galaxy_settings`:
+/// keep a nested settings dir in place with a root symlink to it, or create
+/// the settings dir at the root, then link every DLL directory to it.
+pub(crate) fn centralize_settings(
+    game_folder: &str,
+    settings_name: &str,
+    dll_names: &[&str],
+) -> Result<Option<PathBuf>, String> {
+    let root = Path::new(game_folder);
+    let root_settings = root.join(settings_name);
+
+    if is_real_dir(&root_settings) {
+        symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names);
+        return Ok(Some(root_settings));
+    }
+
+    if let Some(found_dir) = find_settings_recursive(root, settings_name) {
+        #[cfg(unix)]
+        {
+            if !root_settings.exists() {
+                let rel = compute_relative(&root_settings, &found_dir);
+                let _ = std::os::unix::fs::symlink(&rel, &root_settings);
+            }
+        }
+        symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names);
+        return Ok(Some(root_settings));
+    }
+
+    std::fs::create_dir_all(&root_settings)
+        .map_err(|e| format!("create {settings_name} at root: {e}"))?;
+    symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names);
+    Ok(Some(root_settings))
 }
 
 #[cfg(test)]
@@ -553,5 +682,125 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let versions = list_denuvo_versions(&tmp.path().to_string_lossy());
         assert!(versions.is_empty());
+    }
+
+    #[test]
+    fn test_is_windows_by_extension() {
+        assert!(is_windows("game.exe"));
+        assert!(is_windows("setup.bat"));
+        assert!(!is_windows("game.x86_64"));
+        assert!(!is_windows("game.sh"));
+    }
+
+    #[test]
+    fn test_detect_arch_windows_heuristic() {
+        assert_eq!(detect_arch("game64.exe"), "x64");
+        assert_eq!(detect_arch("game.exe"), "x86");
+    }
+
+    #[test]
+    fn test_backup_and_copy_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("emu.dll");
+        std::fs::write(&src, b"emu").unwrap();
+        let dir = tmp.path().join("game");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dst = dir.join("steam_api64.dll");
+        std::fs::write(&dst, b"orig").unwrap();
+
+        copy_file(&src, &dst).unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), b"emu");
+
+        backup_file(&dst).unwrap();
+        assert!(dir.join("steam_api64.dll.bak").exists());
+    }
+
+    #[test]
+    fn test_find_game_dll_folder_prefers_deepest_match() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let shallow = root.join("bin");
+        let deep = root.join("game").join("Binaries").join("Win64");
+        std::fs::create_dir_all(&shallow).unwrap();
+        std::fs::create_dir_all(&deep).unwrap();
+        let exe = root.join("game").join("launcher.exe");
+        std::fs::write(&exe, b"x").unwrap();
+        std::fs::write(shallow.join("steam_api.dll"), b"x").unwrap();
+        std::fs::write(deep.join("steam_api64.dll"), b"x").unwrap();
+
+        let found = find_game_dll_folder(
+            &exe.to_string_lossy(),
+            &root.to_string_lossy(),
+            &["steam_api.dll", "steam_api64.dll"],
+        )
+        .unwrap();
+        assert_eq!(found, deep);
+    }
+
+    #[test]
+    fn test_find_api_emu_dll_folder_matches_mixed_case_list() {
+        // NGE lists carry `Galaxy.dll` casing; a lowercase file on disk
+        // must still match (the old code lowercased only one side).
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("game.exe");
+        std::fs::write(&exe, b"x").unwrap();
+        std::fs::write(tmp.path().join("galaxy.dll"), b"x").unwrap();
+        let found =
+            find_api_emu_dll_folder(&exe.to_string_lossy(), &["Galaxy.dll", "Galaxy64.dll"]);
+        assert_eq!(found, Some(tmp.path().to_path_buf()));
+    }
+
+    #[test]
+    fn test_list_version_dirs_skips_excluded() {
+        let tmp = tempfile::tempdir().unwrap();
+        for name in ["b", "a", "generate_interfaces"] {
+            std::fs::create_dir_all(tmp.path().join(name)).unwrap();
+        }
+        assert_eq!(
+            list_version_dirs(tmp.path(), &["generate_interfaces"]),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_resolve_emu_version_picks_first_sorted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save = tmp.path().join("save");
+        let root = api_emulators_dir(&save.to_string_lossy()).join("steam");
+        std::fs::create_dir_all(root.join("v2")).unwrap();
+        std::fs::create_dir_all(root.join("v1")).unwrap();
+        let save_str = save.to_string_lossy().into_owned();
+        assert_eq!(
+            resolve_emu_version(&save_str, "steam", "", "GSE").unwrap(),
+            root.join("v1")
+        );
+        assert_eq!(
+            resolve_emu_version(&save_str, "steam", "v2", "GSE").unwrap(),
+            root.join("v2")
+        );
+        assert!(resolve_emu_version(&save_str, "steam", "missing", "GSE").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_compute_relative_sibling_dirs() {
+        let from = Path::new("/games/title/bin");
+        let to = Path::new("/games/title/steam_settings");
+        assert_eq!(
+            compute_relative(from, to),
+            PathBuf::from("../steam_settings")
+        );
+    }
+
+    #[test]
+    fn test_find_settings_recursive_finds_nested() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nested = tmp.path().join("a").join("b").join("steam_settings");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(
+            find_settings_recursive(tmp.path(), "steam_settings"),
+            Some(nested)
+        );
+        assert_eq!(find_settings_recursive(tmp.path(), "missing"), None);
     }
 }

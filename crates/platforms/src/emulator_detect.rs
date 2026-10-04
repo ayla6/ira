@@ -54,8 +54,6 @@ pub fn primehack_choices() -> Vec<DetectedEmulator> {
     )
 }
 
-
-
 #[derive(Clone)]
 pub struct RaCore {
     pub display_name: String,
@@ -103,7 +101,7 @@ pub(crate) fn detect_flatpak(flatpak_id: &str, display_name: &str) -> Option<Det
 
 fn detect_native_all(names: &[&str], display_name: &str) -> Vec<DetectedEmulator> {
     let mut choices = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     for name in names {
         if let Some(path) = which(name) {
             if seen.insert(path.clone()) {
@@ -175,7 +173,7 @@ pub fn detect_ra_cores_for_console(console: &str) -> Vec<RaCore> {
             let id = core_id(&core.path);
             names
                 .iter()
-                .any(|name| id == *name || id.starts_with(&format!("{name}_")))
+                .any(|name| id == *name || id.strip_prefix(name).is_some_and(|r| r.starts_with('_')))
         })
         .collect()
 }
@@ -236,7 +234,7 @@ pub fn detect_ra_cores() -> Vec<RaCore> {
 
 fn load_ra_cores() -> Vec<RaCore> {
     let mut cores = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     for dir in ra_core_dirs() {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {

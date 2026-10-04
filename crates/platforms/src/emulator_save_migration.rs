@@ -1,12 +1,15 @@
 use std::path::{Path, PathBuf};
 
+/// Legacy GBE save folder names (old and new) searched in XDG and Wine prefixes.
+const GBE_FOLDER_NAMES: &[&str] = &["GSE Saves", "Goldberg SteamEmu Saves"];
+
 /// Migrate existing GBE saves to `<save_dir>/emulator_saves/gbe/<appid>/`.
 pub fn migrate_gbe_saves(save_dir: &str, app_id: &str, wine_prefix: Option<&str>) {
-    let centralized = centralized_gbe_path(save_dir);
+    let centralized = centralized_path(save_dir, "gbe");
     let _ = std::fs::create_dir_all(&centralized);
     let target = centralized.join(app_id);
 
-    for folder_name in &["GSE Saves", "Goldberg SteamEmu Saves"] {
+    for folder_name in GBE_FOLDER_NAMES {
         if let Some(base) = xdg_save_base(folder_name) {
             let source = base.join(app_id);
             migrate_dir(&source, &target);
@@ -16,7 +19,7 @@ pub fn migrate_gbe_saves(save_dir: &str, app_id: &str, wine_prefix: Option<&str>
     if let Some(prefix) = wine_prefix {
         for user_dir in wine_user_dirs(prefix) {
             let roaming = user_dir.join("AppData").join("Roaming");
-            for folder_name in &["GSE Saves", "Goldberg SteamEmu Saves"] {
+            for folder_name in GBE_FOLDER_NAMES {
                 let source = roaming.join(folder_name).join(app_id);
                 migrate_dir(&source, &target);
             }
@@ -26,7 +29,7 @@ pub fn migrate_gbe_saves(save_dir: &str, app_id: &str, wine_prefix: Option<&str>
 
 /// Migrate existing NGE saves to `<save_dir>/emulator_saves/nge/`.
 pub fn migrate_nge_saves(save_dir: &str, wine_prefix: Option<&str>) {
-    let centralized = centralized_nge_path(save_dir);
+    let centralized = centralized_path(save_dir, "nge");
     let _ = std::fs::create_dir_all(&centralized);
 
     if let Some(prefix) = wine_prefix {
@@ -56,12 +59,8 @@ pub fn migrate_emulator_saves(
     }
 }
 
-fn centralized_gbe_path(save_dir: &str) -> PathBuf {
-    Path::new(save_dir).join("emulator_saves").join("gbe")
-}
-
-fn centralized_nge_path(save_dir: &str) -> PathBuf {
-    Path::new(save_dir).join("emulator_saves").join("nge")
+fn centralized_path(save_dir: &str, subdir: &str) -> PathBuf {
+    Path::new(save_dir).join("emulator_saves").join(subdir)
 }
 
 fn xdg_save_base(folder_name: &str) -> Option<PathBuf> {
@@ -99,13 +98,7 @@ fn wine_user_dirs(prefix: &str) -> Vec<PathBuf> {
 /// (not a symlink). Files that already exist at `target` are left in place.
 /// Uses copy+verify+delete for safety across filesystems.
 fn migrate_dir(source: &Path, target: &Path) {
-    let Ok(meta) = std::fs::symlink_metadata(source) else {
-        return;
-    };
-    if meta.file_type().is_symlink() {
-        return;
-    }
-    if !source.is_dir() {
+    if !is_migratable_dir(source) {
         return;
     }
     if target.exists() {
@@ -124,16 +117,21 @@ fn migrate_dir(source: &Path, target: &Path) {
 /// (not a symlink). Files already at `target` are not overwritten.
 /// Uses copy+verify+delete for safety.
 fn migrate_dir_contents(source: &Path, target: &Path) {
-    let Ok(meta) = std::fs::symlink_metadata(source) else {
-        return;
-    };
-    if meta.file_type().is_symlink() {
-        return;
-    }
-    if !source.is_dir() {
+    if !is_migratable_dir(source) {
         return;
     }
     ira_parser::safe_migrate_dir_contents(source, target);
+}
+
+/// True when `source` is a real directory (exists, not a symlink).
+fn is_migratable_dir(source: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(source) else {
+        return false;
+    };
+    if meta.file_type().is_symlink() {
+        return false;
+    }
+    source.is_dir()
 }
 
 #[cfg(test)]

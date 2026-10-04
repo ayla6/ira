@@ -12,17 +12,20 @@ pub fn is_archive_extension(ext: &str) -> bool {
     matches!(ext.to_ascii_lowercase().as_str(), "zip" | "7z" | "zst")
 }
 
+/// Lowercased extension of `path` (empty when none or non-UTF8).
+fn ext_of(path: &Path) -> String {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
 /// The inner ROM's byte count without reading its data: a plain file's
 /// length from metadata, an archive entry's declared size. The digest
 /// search pairs md5 with this count, and recomputing a digest just to
 /// learn a size re-read whole archives on every batch run.
 pub fn entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
-    let ext = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    match ext.as_str() {
+    match ext_of(path).as_str() {
         "zip" => zip_entry_size(path, pick),
         "7z" => sevenz_entry_size(path, pick),
         // A zstd stream declares no total; sizing it means decoding.
@@ -32,23 +35,32 @@ pub fn entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
 }
 
 fn zip_entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
+    let index = zip_matching_index(path, pick)?;
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
-    let matching: Vec<usize> = (0..archive.len())
-        .filter(|&i| {
-            archive
-                .by_index(i)
-                .map(|entry| pick(entry.name()))
-                .unwrap_or(false)
-        })
-        .collect();
-    if matching.len() != 1 {
-        return None;
+    archive.by_index(index).ok().map(|entry| entry.size())
+}
+
+/// The single entry index matching `pick`, or `None` when zero or several
+/// entries match. Opening the archive twice (scan, then read) keeps the
+/// borrow checker happy: `ZipArchive::by_index` borrows the archive.
+fn zip_matching_index(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<usize> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    let mut matching = None;
+    for i in 0..archive.len() {
+        let is_match = archive
+            .by_index(i)
+            .map(|entry| pick(entry.name()))
+            .unwrap_or(false);
+        if is_match {
+            if matching.is_some() {
+                return None;
+            }
+            matching = Some(i);
+        }
     }
-    archive
-        .by_index(matching[0])
-        .ok()
-        .map(|entry| entry.size())
+    matching
 }
 
 fn sevenz_entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
@@ -81,11 +93,7 @@ pub fn with_entry_reader<T, F>(path: &Path, pick: &dyn Fn(&str) -> bool, mut f: 
 where
     F: FnMut(&mut dyn Read) -> Option<T>,
 {
-    let ext = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let ext = ext_of(path);
     match ext.as_str() {
         "zip" => with_zip_entry(path, pick, &mut f),
         "7z" => with_sevenz_entry(path, pick, &mut f),
@@ -107,18 +115,8 @@ where
 {
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
-    let matching: Vec<usize> = (0..archive.len())
-        .filter(|&i| {
-            archive
-                .by_index(i)
-                .map(|entry| pick(entry.name()))
-                .unwrap_or(false)
-        })
-        .collect();
-    if matching.len() != 1 {
-        return None;
-    }
-    let mut entry = archive.by_index(matching[0]).ok()?;
+    let index = zip_matching_index(path, pick)?;
+    let mut entry = archive.by_index(index).ok()?;
     f(&mut entry)
 }
 
@@ -224,8 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_with_entry_reader_plain_file_passes_through() {
-        let file = temp_file(b"plain rom bytes");
+    fn test_with_entry_reader_plain_file_passes_through() {        let file = temp_file(b"plain rom bytes");
         let read = with_entry_reader(file.path(), &|_| true, |reader| {
             let mut buf = String::new();
             reader.read_to_string(&mut buf).ok()?;
@@ -315,5 +312,46 @@ mod tests {
         // The buffer is preallocated to the range length even before it is
         // filled — progress comes from filled(), not captured(..).len().
         assert_eq!(capture.captured(0).len(), 4);
+    }
+
+    #[test]
+    fn test_is_archive_extension_matches_containers_only() {
+        assert!(is_archive_extension("zip"));
+        assert!(is_archive_extension("7z"));
+        assert!(is_archive_extension("zst"));
+        assert!(is_archive_extension("ZIP"));
+        assert!(!is_archive_extension("gba"));
+        assert!(!is_archive_extension("iso"));
+        assert!(!is_archive_extension(""));
+    }
+
+    #[test]
+    fn test_entry_size_zst_and_missing_are_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let zst = dir.path().join("rom.zst");
+        std::fs::write(&zst, b"fake").unwrap();
+        assert_eq!(entry_size(&zst, &|_| true), None);
+        assert_eq!(
+            entry_size(dir.path().join("missing.zip").as_path(), &|_| true),
+            None
+        );
+    }
+
+    #[test]
+    fn test_with_entry_reader_zip_ambiguous_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("roms.zip");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        for name in ["a.gba", "b.gba"] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            std::io::Write::write_all(&mut zip, b"data").unwrap();
+        }
+        zip.finish().unwrap();
+        let read = with_entry_reader(&path, &|name| name.ends_with(".gba"), |_| {
+            Some(true)
+        });
+        assert_eq!(read, None);
     }
 }

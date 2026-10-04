@@ -1,4 +1,4 @@
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// Metadata parsed from a YSI (YAD Simple Installer) script header.
@@ -27,14 +27,25 @@ fn archive_offset(meta: &YsiMetadata) -> u64 {
 }
 
 /// Parse YSI metadata from the first lines of an installer script.
-/// Reads up to 700 lines (matching the robust_extract.sh approach).
+/// Reads up to 700 lines through a buffered stream (matching the
+/// robust_extract.sh approach) instead of loading the whole file: the
+/// installer carries a multi-gigabyte binary archive past the header, and
+/// that tail is not valid UTF-8, so a full read would both blow up memory
+/// and fail to parse.
 pub fn parse_ysi_metadata(path: &Path) -> Result<YsiMetadata, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("Failed to read installer: {e}"))?;
+    let file =
+        std::fs::File::open(path).map_err(|e| format!("Failed to read installer: {e}"))?;
+    let reader = std::io::BufReader::new(file);
 
     let mut vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
-    for line in content.lines().take(700) {
+    for line in reader.lines().take(700) {
+        // A non-UTF8 line means the script header is over (binary archive
+        // tail reached) — stop rather than fail.
+        let line = match line {
+            Ok(line) => line,
+            Err(_) => break,
+        };
         // Match lines like: app="Metaphor ReFantazio" or arcsz=40428517976
         if let Some(eq_pos) = line.find('=') {
             let key = line[..eq_pos].trim().to_string();
@@ -115,32 +126,29 @@ pub fn extract_ysi_installer(
     let meta = parse_ysi_metadata(installer_path)?;
     let offset = archive_offset(&meta);
 
-    let mut file = std::fs::File::open(installer_path)
+    let file = std::fs::File::open(installer_path)
         .map_err(|e| format!("Failed to open installer: {e}"))?;
-    file.seek(SeekFrom::Start(offset))
-        .map_err(|e| format!("Failed to seek to archive: {e}"))?;
-
-    // Read the compressed archive
-    let mut compressed = Vec::with_capacity(meta.arcsz as usize);
-    file.take(meta.arcsz)
-        .read_to_end(&mut compressed)
-        .map_err(|e| format!("Failed to read archive: {e}"))?;
-
-    // Verify we got the right amount of data
-    if compressed.len() as u64 != meta.arcsz {
-        // Some installers have slightly larger archives than declared
-        eprintln!(
-            "YSI: archive size mismatch (declared {}, got {}), proceeding with actual size",
-            meta.arcsz,
-            compressed.len()
-        );
+    let file_len = file
+        .metadata()
+        .map_err(|e| format!("Failed to stat installer: {e}"))?
+        .len();
+    if offset > file_len {
+        return Err(format!(
+            "Archive offset {offset} past end of installer ({file_len} bytes)"
+        ));
     }
+    let total = file_len - offset;
 
-    let total = compressed.len() as u64;
-
-    // Decompress zstd
-    let decoder = zstd::Decoder::with_buffer(&compressed[..])
-        .map_err(|e| format!("Failed to create zstd decoder: {e}"))?;
+    // Stream the embedded `.tar.zst` straight from disk through zstd into
+    // tar: the old code buffered all `arcsz` bytes in memory, which is tens
+    // of gigabytes for real installers.
+    let mut archive_file = file;
+    archive_file
+        .seek(SeekFrom::Start(offset))
+        .map_err(|e| format!("Failed to seek to archive: {e}"))?;
+    let limited = archive_file.take(total);
+    let decoder =
+        zstd::Decoder::new(limited).map_err(|e| format!("Failed to create zstd decoder: {e}"))?;
 
     // Extract tar stream
     std::fs::create_dir_all(dest_dir).map_err(|e| format!("Failed to create destination: {e}"))?;
@@ -279,5 +287,18 @@ app="Test Game"
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), b"not a script").unwrap();
         assert!(!is_ysi_installer(tmp.path()));
+    }
+
+    #[test]
+    fn test_parse_ysi_metadata_ignores_binary_tail() {
+        // Real installers append a multi-gigabyte non-UTF8 archive past
+        // the header: the parser must answer from the streamed header
+        // alone instead of failing the whole read.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut bytes = b"#!/usr/bin/env sh\napp=\"Tail Game\"\nicon=\"i\"\nver=\"1\"\nappurl=http://example.com\nappsz=1\narcsz=2\nysisz=0\npicsz=0\nyadsz=0\npvsz=0\nzstdsz=0\n".to_vec();
+        bytes.extend([0xff, 0xfe, 0x00, 0x89]);
+        std::fs::write(tmp.path(), &bytes).unwrap();
+        let meta = parse_ysi_metadata(tmp.path()).unwrap();
+        assert_eq!(meta.app, "Tail Game");
     }
 }

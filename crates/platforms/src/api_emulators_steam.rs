@@ -1,7 +1,6 @@
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, compute_relative, copy_file, detect_arch,
-    detect_folder_bitness, find_game_dll_folder, has_emulator_backups, is_windows,
-    restore_backup,
+    api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
+    find_game_dll_folder, has_emulator_backups, is_windows, restore_backup,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
@@ -42,79 +41,7 @@ pub fn find_steam_settings(game_exe: &str, save_dir: &str, app_id: &str) -> Opti
 /// This ensures GBE/GSE finds its config regardless of which subdirectory the
 /// Steam DLL lives in, without duplicating or moving config files.
 pub fn centralize_steam_settings(game_folder: &str) -> Result<Option<PathBuf>, String> {
-    let root = Path::new(game_folder);
-    let root_settings = root.join("steam_settings");
-
-    // If steam_settings/ is already at the root (real dir, not symlink), just symlink DLL dirs.
-    if root_settings.is_dir()
-        && !std::fs::symlink_metadata(&root_settings)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-    {
-        symlink_dll_dirs_to_settings(root, &root_settings);
-        return Ok(Some(root_settings));
-    }
-
-    // Search recursively for steam_settings/ in subdirectories
-    let found = find_steam_settings_recursive(root);
-
-    if let Some(found_dir) = found {
-        // steam_settings exists somewhere — symlink root to it (don't move)
-        #[cfg(unix)]
-        {
-            if !root_settings.exists() {
-                let rel = compute_relative(&root_settings, &found_dir);
-                let _ = std::os::unix::fs::symlink(&rel, &root_settings);
-            }
-        }
-        symlink_dll_dirs_to_settings(root, &root_settings);
-        return Ok(Some(root_settings));
-    }
-
-    // No steam_settings found — create at root and symlink DLL dirs
-    std::fs::create_dir_all(&root_settings)
-        .map_err(|e| format!("create steam_settings at root: {e}"))?;
-    symlink_dll_dirs_to_settings(root, &root_settings);
-    Ok(Some(root_settings))
-}
-
-/// Recursively search for a `steam_settings/` directory under `root`.
-fn find_steam_settings_recursive(root: &Path) -> Option<PathBuf> {
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    if path.file_name().and_then(|n| n.to_str()) == Some("steam_settings") {
-                        return Some(path);
-                    }
-                    stack.push(path);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// For every directory containing Steam DLLs under `root`, create a relative
-/// symlink to `settings_dir` if the directory doesn't already have one.
-fn symlink_dll_dirs_to_settings(root: &Path, settings_dir: &Path) {
-    let dll_dirs = super::api_emulators_shared::find_dll_dirs_recursive(
-        root,
-        &["steam_api.dll", "steam_api64.dll", "libsteam_api.so"],
-    );
-    for dir in dll_dirs {
-        let link = dir.join("steam_settings");
-        if link.exists() {
-            continue;
-        }
-        #[cfg(unix)]
-        {
-            let rel = compute_relative(&dir, settings_dir);
-            let _ = std::os::unix::fs::symlink(&rel, &link);
-        }
-    }
+    crate::api_emulators_shared::centralize_settings(game_folder, "steam_settings", STEAM_DLL_NAMES)
 }
 
 
@@ -278,37 +205,11 @@ pub fn has_steam_emulator_backups(dir: &Path) -> bool {
 /// List available GSE versions under api_emulators/steam/
 pub fn list_gse_versions(save_dir: &str) -> Vec<String> {
     let root = api_emulators_dir(save_dir).join("steam");
-    let mut versions = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&root) {
-        for entry in entries.flatten() {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                if let Some(name) = entry.file_name().to_str() {
-                    if name != "generate_interfaces" {
-                        versions.push(name.to_string());
-                    }
-                }
-            }
-        }
-    }
-    versions.sort();
-    versions
+    crate::api_emulators_shared::list_version_dirs(&root, &["generate_interfaces"])
 }
 
 fn resolve_gse_version(save_dir: &str, version: &str) -> Result<PathBuf, String> {
-    let root = api_emulators_dir(save_dir).join("steam");
-    if version.is_empty() {
-        let versions = list_gse_versions(save_dir);
-        let v = versions
-            .first()
-            .ok_or_else(|| format!("No GSE versions found at {:?}", root))?;
-        Ok(root.join(v))
-    } else {
-        let dir = root.join(version);
-        if !dir.is_dir() {
-            return Err(format!("GSE version '{}' not found at {:?}", version, dir));
-        }
-        Ok(dir)
-    }
+    crate::api_emulators_shared::resolve_emu_version(save_dir, "steam", version, "GSE")
 }
 
 pub fn install_gse(
@@ -457,7 +358,7 @@ const INTERFACE_PREFIXES: &[&str] = &[
 /// Returns full matches (prefix + trailing digits), deduplicated.
 fn find_prefix_matches(data: &[u8], prefix: &str) -> Vec<String> {
     let prefix_bytes = prefix.as_bytes();
-    let mut matches = Vec::new();
+    let mut found = Vec::new();
 
     let mut i = 0;
     while i + prefix_bytes.len() <= data.len() {
@@ -472,9 +373,9 @@ fn find_prefix_matches(data: &[u8], prefix: &str) -> Vec<String> {
                 // Must have at least one digit, unless the prefix itself is the full match
                 // (STEAMCONTROLLER_INTERFACE_VERSION has no digits in some SDKs)
                 if (s.len() > prefix.len() || prefix.ends_with("VERSION"))
-                    && !matches.contains(&s.to_string())
+                    && !found.contains(&s.to_string())
                 {
-                    matches.push(s.to_string());
+                    found.push(s.to_string());
                 }
             }
             i = j;
@@ -482,7 +383,7 @@ fn find_prefix_matches(data: &[u8], prefix: &str) -> Vec<String> {
             i += 1;
         }
     }
-    matches
+    found
 }
 
 fn install_gse_into_folder(
@@ -561,12 +462,11 @@ fn install_gse_into_folder(
 }
 
 pub fn uninstall_gse(game_exe: &str, game_folder: &str) -> Result<(), String> {
-    let all_files: Vec<&str> = GSE_VERSION_FILES.to_vec();
-    let dll_folder = find_game_dll_folder(game_exe, game_folder, &all_files)
+    let dll_folder = find_game_dll_folder(game_exe, game_folder, GSE_VERSION_FILES)
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
-    for file in &all_files {
+    for file in GSE_VERSION_FILES {
         let path = dll_folder.join(file);
         restore_backup(&path)?;
     }

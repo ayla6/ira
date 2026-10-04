@@ -102,27 +102,32 @@ fn is_game_root(dir: &Path) -> bool {
 /// Tries exact (case-insensitive), normalized, and acronym matching.
 fn match_by_title(base: &Path, title: &str) -> Option<PathBuf> {
     let entries = std::fs::read_dir(base).ok()?;
-    let dirs: Vec<String> = entries
+    let dirs: Vec<(String, String, String)> = entries
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+        .map(|d| {
+            let lower = d.to_lowercase();
+            let norm = normalize(&d);
+            (d, lower, norm)
+        })
         .collect();
 
     let title_lower = title.to_lowercase();
-    if let Some(dir) = dirs.iter().find(|d| d.to_lowercase() == title_lower) {
+    if let Some((dir, _, _)) = dirs.iter().find(|(_, lower, _)| *lower == title_lower) {
         return Some(base.join(dir));
     }
 
     let title_norm = normalize(title);
     if !title_norm.is_empty() {
-        if let Some(dir) = dirs.iter().find(|d| normalize(d) == title_norm) {
+        if let Some((dir, _, _)) = dirs.iter().find(|(_, _, norm)| *norm == title_norm) {
             return Some(base.join(dir));
         }
     }
 
     let acronym = make_acronym(title);
     if acronym.len() >= 2 {
-        if let Some(dir) = dirs.iter().find(|d| normalize(d) == acronym) {
+        if let Some((dir, _, _)) = dirs.iter().find(|(_, _, norm)| *norm == acronym) {
             return Some(base.join(dir));
         }
     }

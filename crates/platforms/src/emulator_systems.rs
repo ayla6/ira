@@ -152,7 +152,7 @@ pub fn core_names(console: &str) -> &'static [&'static str] {
         ],
         "ps2" => &["pcsx2"],
         "psp" => &["ppsspp"],
-        "nes" => &["mesen", "nestopia", "fceumm", "quicknes", "mesen", "fceumm"],
+        "nes" => &["mesen", "nestopia", "fceumm", "quicknes"],
         "snes" => &[
             "snes9x",
             "snes9x2010",
@@ -222,4 +222,44 @@ pub fn has_retroarch_cores(console: &str) -> bool {
         console,
         "ps3" | "ps4" | "psvita" | "switch" | "wiiu" | "xbox" | "zx81" | "zxnext"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn has_duplicates(names: &[&str]) -> bool {
+        let mut seen = HashSet::new();
+        names.iter().any(|n| !seen.insert(*n))
+    }
+
+    #[test]
+    fn test_native_names_known_consoles() {
+        assert!(native_names("gba").contains(&"mgba"));
+        assert!(native_names("ps2").contains(&"pcsx2"));
+        assert!(native_names("wiiu").contains(&"cemu"));
+        assert!(native_names("unknown-console").is_empty());
+    }
+
+    #[test]
+    fn test_core_names_have_no_duplicates() {
+        for console in [
+            "nes", "snes", "gb", "gbc", "gba", "n64", "nds", "psx", "arcade", "md",
+        ] {
+            assert!(
+                !has_duplicates(core_names(console)),
+                "{console} has duplicate cores"
+            );
+        }
+    }
+
+    #[test]
+    fn test_has_retroarch_cores_excludes_high_end() {
+        assert!(!has_retroarch_cores("switch"));
+        assert!(!has_retroarch_cores("ps4"));
+        assert!(!has_retroarch_cores("ps3"));
+        assert!(has_retroarch_cores("gba"));
+        assert!(has_retroarch_cores("snes"));
+    }
 }

@@ -5,7 +5,6 @@ use std::path::Path;
 
 use md5::{Digest, Md5};
 
-
 /// Streams a file through MD5 and returns the lowercase hex digest. This is
 /// the ROM's content identity: it lets a scan recognize a game whose file
 /// reappears under a different name or path. On consoles whose
@@ -33,12 +32,16 @@ pub fn content_md5_and_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<
     crate::archives::with_entry_reader(path, pick, |reader| {
         let mut buf = [0u8; 64 * 1024];
         loop {
-            let read = reader.read(&mut buf).unwrap_or(0);
-            if read == 0 {
-                break Some(());
+            match reader.read(&mut buf) {
+                Ok(0) => break Some(()),
+                Ok(read) => {
+                    hasher.update(&buf[..read]);
+                    bytes += read as u64;
+                }
+                // A short read error must fail the lookup, not silently
+                // return the hash of a truncated stream.
+                Err(_) => break None,
             }
-            hasher.update(&buf[..read]);
-            bytes += read as u64;
         }
     })?;
     Some((format!("{:x}", hasher.finalize()), bytes))
@@ -132,5 +135,21 @@ mod tests {
         let archive = tmp.path().join("rom.zip");
         write_zip(&archive, &[("readme.txt", b"not a rom")]);
         assert_eq!(content_md5(&archive, &is_gba), None);
+    }
+
+    #[test]
+    fn test_content_md5_and_size_reports_inner_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("rom.gba");
+        std::fs::write(&path, b"12345678").unwrap();
+        assert_eq!(
+            content_md5_and_size(&path, &is_gba).map(|(_, size)| size),
+            Some(8)
+        );
+        let archive = tmp.path().join("rom.zip");
+        write_zip(&archive, &[("rom.gba", b"12345678")]);
+        let (hash, size) = content_md5_and_size(&archive, &is_gba).unwrap();
+        assert_eq!(size, 8);
+        assert_eq!(Some(hash), file_md5(&path));
     }
 }

@@ -409,27 +409,7 @@ mod tests {
     #[test]
     fn test_extract_control_meta_round_trips_synthetic_nsp() {
         let nca = synthetic_control_nca(0x0100a9400c9c2000);
-
-        // PFS0 wrap: one entry, name in the string table.
-        let name = b"9c4f2b099c79dedff9426c2722d09b18.nca";
-        let mut table = Vec::new();
-        let name_offset = table.len() as u32;
-        table.extend_from_slice(name);
-        table.push(0);
-        while table.len() % 16 != 0 {
-            table.push(0);
-        }
-        let mut nsp = Vec::new();
-        nsp.extend_from_slice(b"PFS0");
-        nsp.extend_from_slice(&1u32.to_le_bytes());
-        nsp.extend_from_slice(&(table.len() as u32).to_le_bytes());
-        nsp.extend_from_slice(&0u32.to_le_bytes());
-        nsp.extend_from_slice(&0u64.to_le_bytes()); // entry data offset
-        nsp.extend_from_slice(&(nca.len() as u64).to_le_bytes());
-        nsp.extend_from_slice(&name_offset.to_le_bytes());
-        nsp.extend_from_slice(&0u32.to_le_bytes());
-        nsp.extend_from_slice(&table);
-        nsp.extend_from_slice(&nca);
+        let nsp = nsp_of(&[("9c4f2b099c79dedff9426c2722d09b18.nca", &nca)]);
 
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("game.nsp");
@@ -490,26 +470,7 @@ mod tests {
             entry[sizes_at + i * 4..sizes_at + i * 4 + 4]
                 .copy_from_slice(&size.to_le_bytes());
         }
-
-        let name = b"9c4f2b099c79dedff9426c2722d09b18.nca";
-        let mut table = Vec::new();
-        let name_offset = table.len() as u32;
-        table.extend_from_slice(name);
-        table.push(0);
-        while table.len() % 16 != 0 {
-            table.push(0);
-        }
-        let mut nsz = Vec::new();
-        nsz.extend_from_slice(b"PFS0");
-        nsz.extend_from_slice(&1u32.to_le_bytes());
-        nsz.extend_from_slice(&(table.len() as u32).to_le_bytes());
-        nsz.extend_from_slice(&0u32.to_le_bytes());
-        nsz.extend_from_slice(&0u64.to_le_bytes()); // entry data offset
-        nsz.extend_from_slice(&(entry.len() as u64).to_le_bytes());
-        nsz.extend_from_slice(&name_offset.to_le_bytes());
-        nsz.extend_from_slice(&0u32.to_le_bytes());
-        nsz.extend_from_slice(&table);
-        nsz.extend_from_slice(&entry);
+        let nsz = nsp_of(&[("9c4f2b099c79dedff9426c2722d09b18.nca", &entry)]);
 
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("game.nsz");
@@ -760,11 +721,13 @@ mod tests {
         nsp.extend_from_slice(&(entries.len() as u32).to_le_bytes());
         nsp.extend_from_slice(&(table.len() as u32).to_le_bytes());
         nsp.extend_from_slice(&0u32.to_le_bytes());
+        let mut data_offset = 0u64;
         for (i, (_, nca)) in entries.iter().enumerate() {
-            nsp.extend_from_slice(&0u64.to_le_bytes()); // offset
+            nsp.extend_from_slice(&data_offset.to_le_bytes());
             nsp.extend_from_slice(&(nca.len() as u64).to_le_bytes());
             nsp.extend_from_slice(&offsets[i].to_le_bytes());
             nsp.extend_from_slice(&0u32.to_le_bytes());
+            data_offset += nca.len() as u64;
         }
         nsp.extend_from_slice(&table);
         for (_, nca) in entries {

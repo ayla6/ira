@@ -136,6 +136,19 @@ pub fn title_id_from_xci(path: &Path) -> Option<String> {
     title_id_from_entries(&super::xci::content_entries(path)?)
 }
 
+/// The title id for a ROM file: container ticket/meta names first (no
+/// keys needed), then the dump file name. Update ids normalize onto
+/// their base title, exactly like the ROM library scan expects.
+pub fn title_id_for_path(path: &Path) -> Option<String> {
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    title_id_from_nsp(path)
+        .or_else(|| title_id_from_xci(path))
+        .or_else(|| title_id_from_filename(&stem))
+}
+
 /// The title id an entry name carries, if any.
 enum EntryId {
     /// `<rights id>.tik`/`.cert` — the most specific source.
@@ -299,6 +312,33 @@ mod tests {
         // DLC ids (001–7ff) are not updates.
         assert!(!is_update_title_id("010051f0207b2001"));
         assert!(!is_update_title_id("garbage"));
+    }
+
+    #[test]
+    fn test_title_id_for_path_prefers_container_then_filename() {
+        // A ticketed container wins over a conflicting file name.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("Zelda [01007ef00011e000][v0].nsp");
+        std::fs::write(
+            &path,
+            nsp_fixture(&["01000000000108000000000000000003.tik"]),
+        )
+        .unwrap();
+        assert_eq!(
+            title_id_for_path(&path),
+            Some("0100000000010000".to_string())
+        );
+        // Without a readable container the file name still resolves,
+        // with update ids normalized onto their base title.
+        let plain = std::path::Path::new("/roms/Game [0100000000010800][v0].nsp");
+        assert_eq!(
+            title_id_for_path(plain),
+            Some("0100000000010000".to_string())
+        );
+        assert_eq!(
+            title_id_for_path(std::path::Path::new("/roms/Just A Game.nsp")),
+            None
+        );
     }
 
     /// Fixture NSP: PFS0 header, two entries whose names live in the string

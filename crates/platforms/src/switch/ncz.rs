@@ -334,7 +334,8 @@ mod tests {
     }
 
     #[test]
-    fn test_read_range_rejects_bad_exponent() {        let mut fixture = ncz_fixture(&payload(100), None);
+    fn test_read_range_rejects_bad_exponent() {
+        let mut fixture = ncz_fixture(&payload(100), None);
         // Block-size exponent lives 3 bytes into the NCZBLOCK header.
         let at = fixture
             .windows(8)

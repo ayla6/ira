@@ -83,16 +83,9 @@ fn library_games_in(
     for base in base_dirs {
         for dir in config_game_dirs(base) {
             for rom in rom_files(&dir, compressed_switch_roms) {
-                let stem = rom
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default();
                 // Update NSPs normalize onto their base title here, exactly
                 // like they do in the ROM file scan.
-                let Some(title_id) = super::rom::title_id_from_nsp(&rom)
-                    .or_else(|| super::rom::title_id_from_xci(&rom))
-                    .or_else(|| super::rom::title_id_from_filename(&stem))
-                else {
+                let Some(title_id) = super::rom::title_id_for_path(&rom) else {
                     continue;
                 };
                 let Some(title) = caches

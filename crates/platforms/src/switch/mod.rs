@@ -274,15 +274,7 @@ pub fn discover_installed_games(
 /// its NSP ticket, title and icon from the emulator caches, or the NRO's
 /// own asset block for homebrew.
 pub fn rom_meta(rom: &Path, caches: &SwitchCaches) -> SwitchRomMeta {
-    let stem = rom
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-
-    if let Some(title_id) = rom::title_id_from_nsp(rom)
-        .or_else(|| rom::title_id_from_xci(rom))
-        .or_else(|| rom::title_id_from_filename(&stem))
-    {
+    if let Some(title_id) = rom::title_id_for_path(rom) {
         let mut meta = SwitchRomMeta::empty();
         meta.title_id = title_id.clone();
         meta.title = caches.title_for(&title_id).unwrap_or_default().to_string();
@@ -303,6 +295,10 @@ pub fn rom_meta(rom: &Path, caches: &SwitchCaches) -> SwitchRomMeta {
 
     // A clean dump file name matches a cached application title, which
     // supplies the id (and through it icon and title).
+    let stem = rom
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let name_key = normalize_name(&strip_tags(&stem));
     if let Some(title_id) = caches.id_for_name(&name_key) {
         let mut meta = SwitchRomMeta::empty();

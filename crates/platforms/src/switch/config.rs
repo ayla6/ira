@@ -167,6 +167,22 @@ mod tests {
         assert!(dirs.contains(&cache_home.join("eden/game_list")));
         assert!(dirs.contains(&cache_home.join("AppImage-Cache/eden/game_list")));
     }
+
+    #[test]
+    fn test_nand_dirs_probe_portable_before_xdg() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("eden.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let portable = tmp
+            .path()
+            .join("user/data/nand/System/Contents/Registered");
+
+        let dirs = nand_registered_dirs_in(&exe.to_string_lossy(), &[]);
+        assert_eq!(dirs.first(), Some(&portable));
+        assert!(dirs.contains(
+            &emu_dirs::data_home().join("eden/nand/System/Contents/Registered")
+        ));
+    }
 }
 
 

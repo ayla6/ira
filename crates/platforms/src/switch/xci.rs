@@ -85,3 +85,27 @@ fn read_hfs0(file: &mut std::fs::File, base: u64) -> Option<Vec<PfsEntry>> {
     }
     Some(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_xci_checks_head_magic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gamecard = tmp.path().join("game.xci");
+        std::fs::write(&gamecard, b"HEADpadding").unwrap();
+        assert!(is_xci(&gamecard));
+        let plain = tmp.path().join("game.nsp");
+        std::fs::write(&plain, b"PFS0padding").unwrap();
+        assert!(!is_xci(&plain));
+    }
+
+    #[test]
+    fn test_content_entries_rejects_non_gamecard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("game.xci");
+        std::fs::write(&path, b"not a gamecard at all").unwrap();
+        assert!(content_entries(&path).is_none());
+    }
+}

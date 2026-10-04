@@ -11,7 +11,6 @@ use crate::emu_dirs;
 
 #[derive(Default)]
 pub struct SwitchKeys {
-    master_keys: BTreeMap<u8, [u8; 16]>,
     titlekeks: BTreeMap<u8, [u8; 16]>,
     /// (kind, revision) → key; kind 0 = application, 1 = ocean, 2 = system.
     key_area_keys: BTreeMap<(u8, u8), [u8; 16]>,
@@ -68,13 +67,9 @@ impl SwitchKeys {
             self.header_key = value.as_slice().try_into().ok();
             return;
         }
-        if let Some(rev) = name
-            .strip_prefix("master_key_")
-            .and_then(|rev| u8::from_str_radix(rev, 16).ok())
-        {
-            if let Ok(key) = value.as_slice().try_into() {
-                self.master_keys.insert(rev, key);
-            }
+        // `master_key_<rev>` lines are accepted by the dump tools but play
+        // no role in control-NCA decryption here; they are ignored.
+        if name.starts_with("master_key_") {
             return;
         }
         if let Some(rev) = name

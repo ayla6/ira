@@ -102,9 +102,10 @@ impl SteamDataClient {
         if let Some(cached) = self.find_cached_icon(app_id) {
             return cached.to_string_lossy().into_owned();
         }
-        let candidates = crate::sgdb::sgdb_endpoint(AssetType::Icon, true, app_id)
-            .map(|endpoint| self.fetch_sgdb_candidates(&endpoint, &[]))
-            .unwrap_or_default();
+        let candidates = self.fetch_sgdb_candidates(
+            &crate::sgdb::sgdb_endpoint(AssetType::Icon, true, app_id),
+            &[],
+        );
         ira_parser::remove_image_variants(dir, AssetType::Icon.file_base());
         for url in candidates {
             let path = self.download_webp(dir, AssetType::Icon.file_base(), &url);
@@ -174,10 +175,7 @@ impl SteamDataClient {
         let _s = tracing::info_span!("force_download_sgdb", sgdb_id = id.as_str(), asset = %asset)
             .entered();
         let _ = std::fs::create_dir_all(dir);
-        let endpoint = match crate::sgdb::sgdb_endpoint(asset, id.is_steam(), id.as_str()) {
-            Some(e) => e,
-            None => return String::new(),
-        };
+        let endpoint = crate::sgdb::sgdb_endpoint(asset, id.is_steam(), id.as_str());
         let candidates = self.fetch_sgdb_candidates(&endpoint, asset.sgdb_dimensions());
         if candidates.is_empty() {
             return String::new();
@@ -344,24 +342,26 @@ impl SteamDataClient {
     /// Download `url`, decode it fully in memory, and persist as lossless
     /// WebP at `{base_name}.webp`. Returns "" on any failure.
     fn download_webp(&self, dir: &Path, base_name: &str, url: &str) -> String {
-        let dest_webp = dir.join(format!("{base_name}.webp"));
         match self
             .download_bytes(url)
             .ok()
             .filter(|bytes| ira_parser::is_decodable_image(bytes))
             .filter(|bytes| !ira_parser::is_dmca_placeholder(bytes))
-            .and_then(|bytes| ira_parser::convert_bytes_to_lossless_webp(&bytes))
         {
-            Some(webp) if std::fs::write(&dest_webp, &webp).is_ok() => {
-                dest_webp.to_string_lossy().into_owned()
-            }
-            _ => String::new(),
+            Some(bytes) => Self::write_webp_bytes(dir, base_name, &bytes),
+            None => String::new(),
         }
     }
 
     /// Re-encode already-downloaded image bytes as lossless WebP at
     /// `{base_name}.webp` in `dir`.
     fn store_image_bytes(&self, dir: &Path, base_name: &str, bytes: &[u8]) -> String {
+        Self::write_webp_bytes(dir, base_name, bytes)
+    }
+
+    /// Encode `bytes` as lossless WebP at `{base_name}.webp` in `dir`.
+    /// Returns "" when the bytes don't decode or the write fails.
+    fn write_webp_bytes(dir: &Path, base_name: &str, bytes: &[u8]) -> String {
         let dest_webp = dir.join(format!("{base_name}.webp"));
         match ira_parser::convert_bytes_to_lossless_webp(bytes) {
             Some(webp) if std::fs::write(&dest_webp, &webp).is_ok() => {

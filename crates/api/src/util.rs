@@ -20,15 +20,20 @@ pub const NEMIRTINGAS_BASE_URL: &str =
 pub const MIN_IMAGE_BYTES: u64 = 200;
 
 pub fn urlencode(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
-                c.to_string()
-            } else {
-                format!("%{:02X}", c as u8)
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '~') {
+            out.push(c);
+        } else {
+            // Percent-encode the UTF-8 bytes: `c as u8` would truncate
+            // anything outside Latin-1 (★ becomes garbage).
+            let mut buf = [0u8; 4];
+            for b in c.encode_utf8(&mut buf).as_bytes() {
+                out.push_str(&format!("%{b:02X}"));
             }
-        })
-        .collect()
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -86,6 +91,12 @@ mod tests {
     #[test]
     fn test_urlencode_special_chars() {
         assert_eq!(urlencode("a/b?c"), "a%2Fb%3Fc");
+    }
+
+    #[test]
+    fn test_urlencode_encodes_utf8_bytes_not_truncated_char() {
+        // ★ (U+2605) is UTF-8 E2 98 85; `c as u8` truncation would emit %05.
+        assert_eq!(urlencode("a★b"), "a%E2%98%85b");
     }
 
     #[test]

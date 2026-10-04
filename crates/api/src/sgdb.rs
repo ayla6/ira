@@ -45,20 +45,18 @@ impl SteamDataClient {
         endpoint: &str,
         dimensions: &[&str],
     ) -> Vec<String> {
-        let base = format!("https://www.steamgriddb.com/api/v2/{}", endpoint);
-        let url = if dimensions.is_empty() {
-            base
-        } else {
-            format!("{}?dimensions={}", base, dimensions.join(","))
-        };
+        let url = sgdb_url(endpoint, dimensions, 0);
         let Some(json) = self.sgdb_get_json(&url) else {
             return Vec::new();
         };
         let Some(data) = json.get("data").and_then(|d| d.as_array()) else {
             return Vec::new();
         };
-        let items = not_filtered(&data.iter().collect::<Vec<_>>(), &self.sgdb_filtered_users());
-        let items = not_style_filtered(&items, &self.sgdb_filtered_styles());
+        let users = self.sgdb_filtered_users();
+        let styles = self.sgdb_filtered_styles();
+        let refs: Vec<&serde_json::Value> = data.iter().collect();
+        let items = not_filtered(&refs, &users);
+        let items = not_style_filtered(&items, &styles);
         if items.is_empty() {
             return Vec::new();
         }
@@ -86,23 +84,7 @@ impl SteamDataClient {
         page: u32,
     ) -> (Vec<SgdbAsset>, bool) {
         let _s = tracing::info_span!("list_sgdb_assets", id, asset = %asset, page).entered();
-        let endpoint = match sgdb_endpoint(asset, is_steam_id, id) {
-            Some(e) => e,
-            None => return (Vec::new(), false),
-        };
-        let base = format!("https://www.steamgriddb.com/api/v2/{}", endpoint);
-        let mut params: Vec<String> = Vec::new();
-        if !dimensions.is_empty() {
-            params.push(format!("dimensions={}", dimensions.join(",")));
-        }
-        if page > 0 {
-            params.push(format!("page={}", page));
-        }
-        let url = if params.is_empty() {
-            base
-        } else {
-            format!("{}?{}", base, params.join("&"))
-        };
+        let url = sgdb_url(&sgdb_endpoint(asset, is_steam_id, id), dimensions, page);
         let json = match self.sgdb_get_json(&url) {
             Some(j) => j,
             None => return (Vec::new(), false),
@@ -112,51 +94,7 @@ impl SteamDataClient {
             Some(d) => d,
             None => return (Vec::new(), false),
         };
-        let items: Vec<SgdbAsset> = data
-            .iter()
-            .filter_map(|item| {
-                let url = item.get("url")?.as_str()?.to_string();
-                let thumb = item
-                    .get("thumb")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let width = item.get("width").and_then(|v| v.as_i64()).unwrap_or(0);
-                let height = item.get("height").and_then(|v| v.as_i64()).unwrap_or(0);
-                let style = item
-                    .get("style")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let author = item
-                    .get("author")
-                    .and_then(|a| a.get("name"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let author_steam64 = item
-                    .get("author")
-                    .and_then(|a| a.get("steam64"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let mime = item
-                    .get("mime")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                Some(SgdbAsset {
-                    url,
-                    thumb,
-                    width,
-                    height,
-                    style,
-                    author,
-                    author_steam64,
-                    mime,
-                })
-            })
-            .collect();
+        let items: Vec<SgdbAsset> = data.iter().filter_map(sgdb_asset_from).collect();
         // Filtered authors and styles stay visible in the manual picker but
         // sink to the bottom, so they are only reached when nothing else
         // fits.
@@ -192,6 +130,23 @@ impl SteamDataClient {
     }
 }
 
+/// Query string for an SGDB list endpoint: dimensions plus the page,
+/// whichever are set.
+fn sgdb_url(endpoint: &str, dimensions: &[&str], page: u32) -> String {
+    let base = format!("https://www.steamgriddb.com/api/v2/{endpoint}");
+    let mut params = Vec::new();
+    if !dimensions.is_empty() {
+        params.push(format!("dimensions={}", dimensions.join(",")));
+    }
+    if page > 0 {
+        params.push(format!("page={page}"));
+    }
+    if params.is_empty() {
+        base
+    } else {
+        format!("{}?{}", base, params.join("&"))
+    }
+}
 /// An SGDB response item's author display name, empty when absent.
 fn item_author(item: &serde_json::Value) -> &str {
     item.get("author")
@@ -200,10 +155,17 @@ fn item_author(item: &serde_json::Value) -> &str {
         .unwrap_or("")
 }
 
-/// Items not authored by a filtered user, preserving SGDB's order.
-fn not_filtered<'a>(
+/// An SGDB response item's style tag, empty when absent.
+fn item_style(item: &serde_json::Value) -> &str {
+    item.get("style").and_then(|v| v.as_str()).unwrap_or("")
+}
+
+/// Items whose `field` value is not on the filtered list (matched
+/// case-insensitively), preserving SGDB's order.
+fn exclude_by<'a>(
     items: &[&'a serde_json::Value],
     filtered: &[String],
+    field: fn(&serde_json::Value) -> &str,
 ) -> Vec<&'a serde_json::Value> {
     items
         .iter()
@@ -211,9 +173,17 @@ fn not_filtered<'a>(
         .filter(|item| {
             !filtered
                 .iter()
-                .any(|user| user.eq_ignore_ascii_case(item_author(item)))
+                .any(|blocked| blocked.eq_ignore_ascii_case(field(item)))
         })
         .collect()
+}
+
+/// Items not authored by a filtered user, preserving SGDB's order.
+fn not_filtered<'a>(
+    items: &[&'a serde_json::Value],
+    filtered: &[String],
+) -> Vec<&'a serde_json::Value> {
+    exclude_by(items, filtered, item_author)
 }
 
 /// Items whose style is not filtered out, preserving SGDB's order.
@@ -221,14 +191,7 @@ fn not_style_filtered<'a>(
     items: &[&'a serde_json::Value],
     filtered: &[String],
 ) -> Vec<&'a serde_json::Value> {
-    items
-        .iter()
-        .copied()
-        .filter(|item| {
-            let style = item.get("style").and_then(|v| v.as_str()).unwrap_or("");
-            !filtered.iter().any(|s| s.eq_ignore_ascii_case(style))
-        })
-        .collect()
+    exclude_by(items, filtered, item_style)
 }
 
 /// Best-icon rule: prefer the narrowest candidate at most 128px wide;
@@ -246,8 +209,36 @@ fn best_icon_item<'a>(items: &[&'a serde_json::Value]) -> Option<&'a serde_json:
     best.or_else(|| items.first().copied())
 }
 
-pub(super) fn sgdb_endpoint(asset: AssetType, is_steam_id: bool, id: &str) -> Option<String> {
-    Some(match (asset, is_steam_id) {
+/// One SGDB list item shaped into an asset; `None` when it has no URL.
+fn sgdb_asset_from(item: &serde_json::Value) -> Option<SgdbAsset> {
+    let url = item.get("url")?.as_str()?.to_string();
+    let str_field = |name: &str| {
+        item.get(name)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let author_field = |name: &str| {
+        item.get("author")
+            .and_then(|a| a.get(name))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    Some(SgdbAsset {
+        url,
+        thumb: str_field("thumb"),
+        width: item.get("width").and_then(|v| v.as_i64()).unwrap_or(0),
+        height: item.get("height").and_then(|v| v.as_i64()).unwrap_or(0),
+        style: str_field("style"),
+        author: author_field("name"),
+        author_steam64: author_field("steam64"),
+        mime: str_field("mime"),
+    })
+}
+
+pub(super) fn sgdb_endpoint(asset: AssetType, is_steam_id: bool, id: &str) -> String {
+    match (asset, is_steam_id) {
         (AssetType::Icon, true) => format!("icons/steam/{}", id),
         (AssetType::Icon, false) => format!("icons/game/{}", id),
         (AssetType::Hero, true) => format!("heroes/steam/{}", id),
@@ -260,7 +251,7 @@ pub(super) fn sgdb_endpoint(asset: AssetType, is_steam_id: bool, id: &str) -> Op
         | (AssetType::Square, false) => format!("grids/game/{}", id),
         (AssetType::Logo, true) => format!("logos/steam/{}", id),
         (AssetType::Logo, false) => format!("logos/game/{}", id),
-    })
+    }
 }
 
 #[cfg(test)]
@@ -336,82 +327,63 @@ mod tests {
     }
 
     #[test]
-    fn test_sgdb_endpoint_icon_steam() {
+    fn test_sgdb_endpoint_covers_every_asset_family() {
+        use AssetType::{Grid, Header, Hero, Icon, Logo, Square};
+        let cases = [
+            (Icon, true, "12345", "icons/steam/12345"),
+            (Icon, false, "12345", "icons/game/12345"),
+            (Hero, true, "67890", "heroes/steam/67890"),
+            (Hero, false, "67890", "heroes/game/67890"),
+            (Grid, true, "abc", "grids/steam/abc"),
+            (Grid, false, "abc", "grids/game/abc"),
+            (Header, true, "def", "grids/steam/def"),
+            (Header, false, "def", "grids/game/def"),
+            (Square, true, "sq", "grids/steam/sq"),
+            (Square, false, "sq", "grids/game/sq"),
+            (Logo, true, "xyz", "logos/steam/xyz"),
+            (Logo, false, "xyz", "logos/game/xyz"),
+        ];
+        for (asset, is_steam, id, expected) in cases {
+            assert_eq!(sgdb_endpoint(asset, is_steam, id), expected);
+        }
+    }
+
+    #[test]
+    fn test_sgdb_url_combines_dimensions_and_page() {
         assert_eq!(
-            sgdb_endpoint(AssetType::Icon, true, "12345").as_deref(),
-            Some("icons/steam/12345")
+            sgdb_url("icons/steam/1", &[], 0),
+            "https://www.steamgriddb.com/api/v2/icons/steam/1"
+        );
+        assert_eq!(
+            sgdb_url("grids/steam/1", &["600x900", "342x482"], 0),
+            "https://www.steamgriddb.com/api/v2/grids/steam/1?dimensions=600x900,342x482"
+        );
+        assert_eq!(
+            sgdb_url("grids/steam/1", &["600x900"], 2),
+            "https://www.steamgriddb.com/api/v2/grids/steam/1?dimensions=600x900&page=2"
         );
     }
 
     #[test]
-    fn test_sgdb_endpoint_icon_game() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Icon, false, "12345").as_deref(),
-            Some("icons/game/12345")
-        );
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_hero_steam() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Hero, true, "67890").as_deref(),
-            Some("heroes/steam/67890")
-        );
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_hero_game() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Hero, false, "67890").as_deref(),
-            Some("heroes/game/67890")
-        );
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_grid_steam() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Grid, true, "abc").as_deref(),
-            Some("grids/steam/abc")
-        );
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_grid_game() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Grid, false, "abc").as_deref(),
-            Some("grids/game/abc")
-        );
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_header_steam() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Header, true, "def").as_deref(),
-            Some("grids/steam/def")
-        );
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_header_game() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Header, false, "def").as_deref(),
-            Some("grids/game/def")
-        );
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_logo_steam() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Logo, true, "xyz").as_deref(),
-            Some("logos/steam/xyz")
-        );
-    }
-
-    #[test]
-    fn test_sgdb_endpoint_logo_game() {
-        assert_eq!(
-            sgdb_endpoint(AssetType::Logo, false, "xyz").as_deref(),
-            Some("logos/game/xyz")
-        );
+    fn test_sgdb_asset_from_reads_fields_with_defaults() {
+        let item = json!({
+            "url": "https://cdn.example/1.png",
+            "thumb": "https://cdn.example/1t.png",
+            "width": 600,
+            "height": 900,
+            "style": "alternate",
+            "author": {"name": "Kept", "steam64": "123"},
+            "mime": "image/png",
+        });
+        let asset = sgdb_asset_from(&item).unwrap();
+        assert_eq!(asset.url, "https://cdn.example/1.png");
+        assert_eq!(asset.author, "Kept");
+        assert_eq!(asset.author_steam64, "123");
+        assert_eq!(asset.width, 600);
+        // Missing fields default instead of dropping the item.
+        let bare = sgdb_asset_from(&json!({"url": "https://cdn.example/2.png"})).unwrap();
+        assert_eq!(bare.style, "");
+        assert_eq!(bare.width, 0);
+        assert!(sgdb_asset_from(&json!({"id": 3})).is_none());
     }
 }

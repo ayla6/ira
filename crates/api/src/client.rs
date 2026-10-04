@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use ira_models::AssetType;
 use serde::de::DeserializeOwned;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub struct SteamDataClient {
     pub(crate) api_key: Mutex<String>,
@@ -26,7 +26,7 @@ pub struct SteamDataClient {
     pub(crate) sgdb_filtered_styles: Mutex<Vec<String>>,
     /// Show filtered art dimmed at the bottom of manual pickers (on by
     /// default). Off hides it; automatic downloads always skip it.
-    pub(crate) sgdb_show_filtered: std::sync::atomic::AtomicBool,
+    pub(crate) sgdb_show_filtered: AtomicBool,
 }
 
 impl SteamDataClient {
@@ -45,7 +45,7 @@ impl SteamDataClient {
             sgdb_auto_mask: AtomicU64::new(u64::MAX),
             sgdb_filtered_users: Mutex::new(Vec::new()),
             sgdb_filtered_styles: Mutex::new(Vec::new()),
-            sgdb_show_filtered: std::sync::atomic::AtomicBool::new(true),
+            sgdb_show_filtered: AtomicBool::new(true),
         }
     }
 

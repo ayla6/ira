@@ -113,6 +113,32 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_auth_params_carries_account_only_when_both_set() {
+        let anon = ScraperCreds {
+            dev_id: "ira".into(),
+            dev_password: "devkey".into(),
+            ..Default::default()
+        };
+        assert_eq!(anon.auth_params(), "devid=ira&devpassword=devkey");
+        let full = ScraperCreds {
+            dev_id: "ira".into(),
+            dev_password: "devkey".into(),
+            user: "a b".into(),
+            password: "c&d".into(),
+        };
+        assert_eq!(
+            full.auth_params(),
+            "devid=ira&devpassword=devkey&ssid=a%20b&sspassword=c%26d"
+        );
+        // Half an account attributes nothing.
+        let half = ScraperCreds {
+            user: "aya".into(),
+            ..anon.clone()
+        };
+        assert!(!half.auth_params().contains("ssid"));
+    }
+
     /// Prints the scrambled arrays to paste into `DEV_ID_SCRAMBLED` and
     /// `DEV_PASSWORD_SCRAMBLED` once the developer account is granted:
     ///

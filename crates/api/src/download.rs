@@ -24,23 +24,36 @@ impl SteamDataClient {
     pub fn download_file(&self, url: &str, dest: &Path) -> Result<(), String> {
         let _s = tracing::info_span!("download_file", url, dest = %dest.display()).entered();
         std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")))
-            .map_err(|e| e.to_string())?;
-        let resp = self.http.get(url).send().map_err(|e| e.to_string())?;
+            .map_err(|e| format!("create dir for {url} failed: {e}"))?;
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .map_err(|e| format!("GET {url} failed: {e}"))?;
         if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
+            return Err(format!("GET {url} failed: HTTP {}", resp.status()));
         }
-        let bytes = resp.bytes().map_err(|e| e.to_string())?;
-        std::fs::write(dest, &bytes).map_err(|e| e.to_string())?;
+        let bytes = resp
+            .bytes()
+            .map_err(|e| format!("GET {url} failed: read error: {e}"))?;
+        std::fs::write(dest, &bytes)
+            .map_err(|e| format!("write {} failed: {e}", dest.display()))?;
         Ok(())
     }
 
     pub fn download_bytes(&self, url: &str) -> Result<Vec<u8>, String> {
         let _s = tracing::info_span!("download_bytes", url).entered();
-        let resp = self.http.get(url).send().map_err(|e| e.to_string())?;
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .map_err(|e| format!("GET {url} failed: {e}"))?;
         if !resp.status().is_success() {
-            return Err(format!("HTTP {}", resp.status()));
+            return Err(format!("GET {url} failed: HTTP {}", resp.status()));
         }
-        let bytes = resp.bytes().map_err(|e| e.to_string())?;
+        let bytes = resp
+            .bytes()
+            .map_err(|e| format!("GET {url} failed: read error: {e}"))?;
         Ok(bytes.to_vec())
     }
 

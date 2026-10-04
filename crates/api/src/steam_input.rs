@@ -141,6 +141,14 @@ pub struct SteamLayoutPage {
     pub total: i64,
 }
 
+/// Non-blank trimmed workshop tags; blank entries carry no filter meaning.
+fn clean_tags(tags: &[String]) -> Vec<&str> {
+    tags.iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .collect()
+}
+
 /// The `input_json` payload QueryFiles expects; split out so the encoding
 /// stays testable without network access.
 fn query_request_body(query: &SteamLayoutQuery) -> serde_json::Value {
@@ -182,21 +190,11 @@ fn query_request_body(query: &SteamLayoutQuery) -> serde_json::Value {
             .expect("required_kv_tags starts as an array")
             .push(serde_json::json!({"key": "app", "value": app_id}));
     }
-    let tags: Vec<&str> = query
-        .required_tags
-        .iter()
-        .map(|tag| tag.trim())
-        .filter(|tag| !tag.is_empty())
-        .collect();
+    let tags = clean_tags(&query.required_tags);
     if !tags.is_empty() {
         body["requiredtags"] = serde_json::json!(tags);
     }
-    let excluded: Vec<&str> = query
-        .excluded_tags
-        .iter()
-        .map(|tag| tag.trim())
-        .filter(|tag| !tag.is_empty())
-        .collect();
+    let excluded = clean_tags(&query.excluded_tags);
     if !excluded.is_empty() {
         body["excludedtags"] = serde_json::json!(excluded);
     }
@@ -249,7 +247,9 @@ impl SteamDataClient {
     pub fn fetch_steam_layout_vdf(&self, published_file_id: &str) -> Result<String, String> {
         // Workshop file ids are numeric; the POST body is hand-encoded
         // because our reqwest build has no form-encoding feature.
-        if !published_file_id.bytes().all(|b| b.is_ascii_digit()) || published_file_id.is_empty() {
+        if published_file_id.is_empty()
+            || !published_file_id.bytes().all(|b| b.is_ascii_digit())
+        {
             return Err(format!("invalid layout id {published_file_id}"));
         }
         let body = format!("itemcount=1&publishedfileids%5B0%5D={}", published_file_id);
@@ -295,6 +295,13 @@ impl SteamDataClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_clean_tags_trims_and_drops_blanks() {
+        let tags = vec![" controller_ps5 ".to_string(), "   ".to_string(), String::new()];
+        assert_eq!(clean_tags(&tags), vec!["controller_ps5"]);
+        assert!(clean_tags(&[]).is_empty());
+    }
 
     #[test]
     fn test_query_request_body_always_filters_public_and_alive() {
@@ -459,7 +466,7 @@ mod tests {
     fn test_flexible_i64_accepts_quoted_and_bare_numbers() {
         #[derive(serde::Deserialize)]
         struct Probe {
-            #[serde(deserialize_with = "crate::types::flexible_i64", default)]
+            #[serde(deserialize_with = "crate::types::input::flexible_i64", default)]
             value: Option<i64>,
         }
         let quoted: Probe = serde_json::from_str(r#"{"value": "42"}"#).unwrap();

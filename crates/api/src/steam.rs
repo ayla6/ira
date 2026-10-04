@@ -818,7 +818,7 @@ fn header_image_base(header_image: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::SteamCmdConfig;
+    use crate::types::steamcmd::SteamCmdConfig;
 
     #[test]
     fn test_store_extras_from_reads_genres_and_boards() {

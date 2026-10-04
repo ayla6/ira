@@ -145,7 +145,8 @@ impl DaemonClient {
 
     /// Hands a game to the daemon. `Err` means the daemon refused (busy,
     /// stale) and the caller should fall back to the wrapper launch.
-    pub fn begin_launch(&mut self, request: LaunchRequest) -> Result<u64, String> {        match self.request(Request::Launch(request))? {
+    pub fn begin_launch(&mut self, request: LaunchRequest) -> Result<u64, String> {
+        match self.request(Request::Launch(request))? {
             Response::Launched { session } => {
                 self.session = Some(session);
                 Ok(session)
@@ -268,4 +269,38 @@ fn spawn_daemon(binary: &str) -> Result<(), String> {
         .spawn()
         .map_err(|error| format!("spawn {binary} --daemon: {error}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DaemonClient;
+    use crate::protocol::Event;
+
+    #[test]
+    fn test_socket_path_ends_in_input_sock() {
+        assert!(super::socket_path().ends_with("input.sock"));
+    }
+
+    #[test]
+    fn test_event_is_ours_routes_session_and_presence_events() {
+        let ours = Event::SessionEnded {
+            session: 7,
+            code: 0,
+        };
+        let theirs = Event::SessionEnded {
+            session: 8,
+            code: 0,
+        };
+        let presence = Event::Controller {
+            connected: true,
+            name: "pad".to_string(),
+            path: "/dev/input/event0".to_string(),
+        };
+        assert!(DaemonClient::event_is_ours(Some(7), &ours));
+        assert!(!DaemonClient::event_is_ours(Some(7), &theirs));
+        // Daemon-wide presence events always count, even with a session.
+        assert!(DaemonClient::event_is_ours(Some(7), &presence));
+        // Without a session everything counts.
+        assert!(DaemonClient::event_is_ours(None, &theirs));
+    }
 }

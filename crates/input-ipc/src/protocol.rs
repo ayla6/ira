@@ -126,6 +126,11 @@ pub enum Wire {
 mod tests {
     use super::*;
 
+    fn roundtrip(message: &Wire) -> Wire {
+        let line = serde_json::to_string(message).unwrap();
+        serde_json::from_str(&line).unwrap()
+    }
+
     #[test]
     fn test_wire_request_roundtrip() {
         let request = Wire::Request(Request::Launch(LaunchRequest {
@@ -141,8 +146,7 @@ mod tests {
             steam_app_id: None,
             tag: Some(12),
         }));
-        let line = serde_json::to_string(&request).unwrap();
-        let parsed: Wire = serde_json::from_str(&line).unwrap();
+        let parsed = roundtrip(&request);
         match parsed {
             Wire::Request(Request::Launch(launch)) => {
                 assert_eq!(launch.command, ["game", "--fullscreen"]);
@@ -162,8 +166,7 @@ mod tests {
             tag: 12,
             profile: "/profiles/y.json".into(),
         });
-        let line = serde_json::to_string(&request).unwrap();
-        match serde_json::from_str::<Wire>(&line).unwrap() {
+        match roundtrip(&request) {
             Wire::Request(Request::ReloadProfile { tag, profile }) => {
                 assert_eq!(tag, 12);
                 assert_eq!(profile, "/profiles/y.json");
@@ -196,8 +199,7 @@ mod tests {
             calibration: Some("/calibration.json".into()),
             motion_port: Some(26760),
         });
-        let line = serde_json::to_string(&request).unwrap();
-        match serde_json::from_str::<Wire>(&line).unwrap() {
+        match roundtrip(&request) {
             Wire::Request(Request::DesktopDefault {
                 enabled,
                 profile,
@@ -216,8 +218,7 @@ mod tests {
     #[test]
     fn test_wire_hold_desktop_roundtrip() {
         let request = Wire::Request(Request::HoldDesktop { hold: true });
-        let line = serde_json::to_string(&request).unwrap();
-        match serde_json::from_str::<Wire>(&line).unwrap() {
+        match roundtrip(&request) {
             Wire::Request(Request::HoldDesktop { hold }) => assert!(hold),
             other => panic!("wrong wire message: {other:?}"),
         }
@@ -246,8 +247,7 @@ mod tests {
                 path: "/profiles/x.json".into(),
             },
         ] {
-            let line = serde_json::to_string(&Wire::Event(event)).unwrap();
-            match serde_json::from_str::<Wire>(&line).unwrap() {
+            match roundtrip(&Wire::Event(event)) {
                 Wire::Event(_) => {}
                 other => panic!("wrong wire message: {other:?}"),
             }

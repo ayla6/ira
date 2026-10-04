@@ -175,3 +175,29 @@ pub fn steam_language_name(code: &str) -> &str {
         .map(|l| l.english_name)
         .unwrap_or(code)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_steam_language_name_known_and_unknown() {
+        assert_eq!(steam_language_name("english"), "English");
+        assert_eq!(steam_language_name("schinese"), "Chinese (Simplified)");
+        assert_eq!(steam_language_name("koreana"), "Korean");
+        // Unknown codes pass through so the UI still shows something.
+        assert_eq!(steam_language_name("klingon"), "klingon");
+    }
+
+    #[test]
+    fn test_steam_languages_have_unique_codes() {
+        let mut codes: Vec<_> = STEAM_LANGUAGES.iter().map(|l| l.code).collect();
+        codes.sort();
+        codes.dedup();
+        assert_eq!(codes.len(), STEAM_LANGUAGES.len(), "duplicate codes");
+        for lang in STEAM_LANGUAGES {
+            assert!(!lang.code.is_empty());
+            assert!(!lang.english_name.is_empty(), "{}", lang.code);
+        }
+    }
+}

@@ -20,13 +20,6 @@ pub struct RomHashes {
 }
 
 impl RomHashes {
-    /// The md5 + size pair for the exact search, when both are known.
-    pub fn md5_with_size(&self) -> Option<(&str, i64)> {
-        (!self.md5.is_empty() && self.size > 0).then_some((self.md5.as_str(), self.size))
-    }
-}
-
-impl RomHashes {
     /// True when no consumer has a key yet.
     pub fn is_empty(&self) -> bool {
         self.md5.is_empty() && self.ra_md5.is_empty()
@@ -131,39 +124,21 @@ pub struct GameEntry {
     pub release_dates: String,
 }
 
-impl GameEntry {
-    /// The id this row's data dirs and external references key on: the
-    /// achievement identity (RA match, NPWR trophy id) for rows that
-    /// have one, the platform-native id (title id, serial, emulator
-    /// app id) for everything else.
-    pub fn external_id(&self) -> &str {
-        if self.trophy_id.is_empty() {
-            &self.native_id
-        } else {
-            &self.trophy_id
-        }
-    }
-
-    /// Build a minimal GameEntry for reloading a game from disk.
-    /// Callers can override specific fields (e.g. `entry.title = ...`) as needed.
-    pub fn for_reload(
-        db_id: i64,
-        kind: GameKind,
-        trophy_source: TrophySource,
-        steam_id: &str,
-        native_id: &str,
-        platform_id: &str,
-    ) -> Self {
+impl Default for GameEntry {
+    /// The baseline `for_reload` builds on: unknown scores stay
+    /// sentinel-valued (-1 / -1.0) rather than zero, so "never scraped"
+    /// never reads as "rated zero".
+    fn default() -> Self {
         GameEntry {
-            id: db_id,
-            kind,
-            trophy_source,
-            steam_id: steam_id.to_string(),
-            trophy_id: String::new(),
-            native_id: native_id.to_string(),
-            platform_id: platform_id.to_string(),
+            id: 0,
+            kind: GameKind::default(),
+            trophy_source: TrophySource::default(),
+            steam_id: String::new(),
+            platform_id: String::new(),
             title: String::new(),
             hidden: false,
+            trophy_id: String::new(),
+            native_id: String::new(),
             sgdb_id: None,
             logo_position: LogoPosition::BottomLeft.to_string(),
             logo_size: 0,
@@ -194,6 +169,41 @@ impl GameEntry {
             release_dates: String::new(),
         }
     }
+}
+
+impl GameEntry {
+    /// The id this row's data dirs and external references key on: the
+    /// achievement identity (RA match, NPWR trophy id) for rows that
+    /// have one, the platform-native id (title id, serial, emulator
+    /// app id) for everything else.
+    pub fn external_id(&self) -> &str {
+        if self.trophy_id.is_empty() {
+            &self.native_id
+        } else {
+            &self.trophy_id
+        }
+    }
+
+    /// Build a minimal GameEntry for reloading a game from disk.
+    /// Callers can override specific fields (e.g. `entry.title = ...`) as needed.
+    pub fn for_reload(
+        db_id: i64,
+        kind: GameKind,
+        trophy_source: TrophySource,
+        steam_id: &str,
+        native_id: &str,
+        platform_id: &str,
+    ) -> Self {
+        GameEntry {
+            id: db_id,
+            kind,
+            trophy_source,
+            steam_id: steam_id.to_string(),
+            native_id: native_id.to_string(),
+            platform_id: platform_id.to_string(),
+            ..Default::default()
+        }
+    }
 
     pub fn from_game(g: &super::game::Game) -> Self {
         GameEntry {
@@ -201,7 +211,6 @@ impl GameEntry {
             kind: g.kind,
             trophy_source: g.trophy_source,
             steam_id: g.steam_id.clone(),
-            trophy_id: String::new(),
             native_id: g.app_id.clone(),
             platform_id: g.platform_id.clone(),
             title: g.name.clone(),
@@ -229,15 +238,7 @@ impl GameEntry {
             playtime: g.playtime,
             cached_earned_count: g.earned_count as i64,
             cached_total_count: g.total_count as i64,
-            cached_achievement_mtime: 0,
-            hashes: RomHashes::default(),
-            title_trusted: false,
-            vanished: false,
-            players: String::new(),
-            synopsis: String::new(),
-            screenscraper_id: String::new(),
-            screenscraper_rating: -1.0,
-            release_dates: String::new(),
+            ..Default::default()
         }
     }
 

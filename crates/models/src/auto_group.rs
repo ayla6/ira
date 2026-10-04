@@ -302,7 +302,8 @@ mod tests {
     }
 
     #[test]
-    fn test_auto_console_matches_the_display_name() {        let g = game();
+    fn test_auto_console_matches_the_display_name() {
+        let g = game();
         let ctx = AutoGroupContext::default();
         let rule = AutoCriterion {
             dimension: AutoDimension::Console,

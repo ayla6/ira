@@ -9,6 +9,7 @@ mod consoles;
 pub mod disc;
 mod esde_consoles;
 mod fullscreen;
+mod helpers;
 mod game;
 mod game_entry;
 mod group;

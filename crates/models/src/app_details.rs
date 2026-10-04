@@ -23,7 +23,7 @@ pub struct DlcInfo {
     pub app_id: i64,
     #[serde(default)]
     pub image_url: String,
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::helpers::default_true")]
     pub enabled: bool,
 }
 
@@ -47,8 +47,4 @@ pub struct UfsRootOverride {
 pub struct UfsPathTransform {
     pub find: String,
     pub replace: String,
-}
-
-fn default_true() -> bool {
-    true
 }

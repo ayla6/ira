@@ -124,11 +124,11 @@ pub struct WineConfig {
     pub dxvk_frame_rate: i32,
     #[serde(default)]
     pub dxvk_hud: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::helpers::default_true")]
     pub proton_wow64: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::helpers::default_true")]
     pub proton_ntsync: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::helpers::default_true")]
     pub proton_disable_lsteamclient: bool,
     #[serde(default)]
     pub umu_enabled: bool,
@@ -138,10 +138,6 @@ pub struct WineConfig {
     pub denuvo_api: String,
     #[serde(default)]
     pub overridden_fields: Vec<String>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 impl Default for WineConfig {

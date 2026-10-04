@@ -236,13 +236,17 @@ mod tests {
         assert_eq!(AssetType::Grid.thumb_dims(), (300, 450));
         assert_eq!(AssetType::Header.thumb_dims(), (460, 215));
         assert_eq!(AssetType::Logo.thumb_dims(), (620, 620));
+        assert_eq!(AssetType::Square.thumb_dims(), (384, 384));
     }
 
     #[test]
     fn test_asset_type_display_name() {
         assert_eq!(AssetType::Icon.display_name(), "Icon");
+        assert_eq!(AssetType::Hero.display_name(), "Hero");
         assert_eq!(AssetType::Grid.display_name(), "Capsule");
+        assert_eq!(AssetType::Header.display_name(), "Header");
         assert_eq!(AssetType::Logo.display_name(), "Logo");
+        assert_eq!(AssetType::Square.display_name(), "Square");
     }
 
     #[test]

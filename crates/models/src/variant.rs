@@ -22,14 +22,10 @@ pub struct GameVariant {
     pub playtime: f64,
     #[serde(default)]
     pub last_played: i64,
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::helpers::default_true")]
     pub count_playtime: bool,
     #[serde(default)]
     pub logo_position: String,
     #[serde(default)]
     pub logo_size: i32,
-}
-
-fn default_true() -> bool {
-    true
 }

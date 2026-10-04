@@ -135,9 +135,21 @@ pub const BOARDS: &[RatingBoard] = &[
 pub fn find_board(kind: &str) -> Option<&'static RatingBoard> {
     let normalized = normalize(kind);
     BOARDS.iter().find(|board| {
-        normalize(board.id) == normalized
-            || board.aliases.iter().any(|alias| normalize(alias) == normalized)
+        kinds_equal(board.id, &normalized)
+            || board.aliases.iter().any(|alias| kinds_equal(alias, &normalized))
     })
+}
+
+/// Whether `candidate` (a board id or alias, e.g. "STEAM_GERMANY")
+/// names the already-normalized `input` ("steamgermany"): case,
+/// underscores and spaces fold away while comparing, so the
+/// compile-time-known side never allocates.
+fn kinds_equal(candidate: &str, input: &str) -> bool {
+    candidate
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .eq(input.chars())
 }
 
 /// The stored kind for a classification: the canonical board id from the
@@ -199,19 +211,22 @@ fn canonical_value(board: &RatingBoard, value: &str) -> Option<&'static str> {
 /// The value whose number matches ("+7 ans" and "7+" are both 7).
 /// Lettered values (M, AL, RP…) never match this way.
 fn fuzzy_by_digits(board: &RatingBoard, value: &str) -> Option<&'static str> {
-    let digits = digits_of(value);
-    if digits.is_empty() {
+    if !value.chars().any(|c| c.is_ascii_digit()) {
         return None;
     }
     board
         .values
         .iter()
-        .find(|candidate| digits_of(candidate) == digits)
+        .find(|candidate| digits_equal(candidate, value))
         .copied()
 }
 
-fn digits_of(value: &str) -> String {
-    value.chars().filter(|c| c.is_ascii_digit()).collect()
+/// Whether the two strings carry the same digits ("+7 ans" and "7+"
+/// agree) without allocating either digit string.
+fn digits_equal(a: &str, b: &str) -> bool {
+    a.chars()
+        .filter(|c| c.is_ascii_digit())
+        .eq(b.chars().filter(|c| c.is_ascii_digit()))
 }
 
 #[cfg(test)]

@@ -231,11 +231,6 @@ impl Game {
             None => self.db_id.to_string(),
         }
     }
-
-    /// Whether this is a variant pseudo-game entry (not a real game).
-    pub fn is_variant_entry(&self) -> bool {
-        self.variant_id.is_some()
-    }
 }
 
 /// Extract the db_id from a grid_id string ("123" or "123-v456").

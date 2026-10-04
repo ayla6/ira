@@ -32,6 +32,44 @@ where
     query_optional(conn, sql, params, |row| row.get(0))
 }
 
+/// Runs a query returning any number of rows, mapping each through `map.
+/// Consolidates the lock/prepare/collect pattern previously repeated in
+/// every list getter.
+pub(crate) fn query_all<T, P>(
+    conn: &DbConn,
+    sql: &str,
+    params: P,
+    map: impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
+) -> Result<Vec<T>, String>
+where
+    P: rusqlite::Params,
+{
+    let c = lock_db(conn)?;
+    let mut stmt = c.prepare(sql).map_err(err)?;
+    let rows = stmt.query_map(params, map).map_err(err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+}
+
+/// [`query_all`] for single-column rows.
+pub(crate) fn query_scalar_all<T, P>(
+    conn: &DbConn,
+    sql: &str,
+    params: P,
+) -> Result<Vec<T>, String>
+where
+    T: rusqlite::types::FromSql,
+    P: rusqlite::Params,
+{
+    query_all(conn, sql, params, |row| row.get(0))
+}
+
+/// Runs a single INSERT/UPDATE/DELETE statement, consolidating the
+/// lock/execute pattern previously repeated in every small setter.
+pub(crate) fn execute(conn: &DbConn, sql: &str, params: impl rusqlite::Params) -> Result<usize, String> {
+    let c = lock_db(conn)?;
+    c.execute(sql, params).map_err(err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

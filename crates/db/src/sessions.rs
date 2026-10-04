@@ -42,38 +42,29 @@ pub fn get_sessions_for_game(
     game_id: i64,
     variant_id: Option<i64>,
 ) -> Result<Vec<PlaySession>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    crate::query_all(
+        conn,
+        &format!(
             "SELECT {SESSION_COLUMNS} FROM play_sessions WHERE {GAME_VARIANT_WHERE} ORDER BY started_at DESC"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![game_id, variant_id], play_session_from_row)
-        .map_err(err)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+        ),
+        params![game_id, variant_id],
+        play_session_from_row,
+    )
 }
 
 pub fn get_sessions_range(conn: &DbConn, from: i64, to: i64) -> Result<Vec<PlaySession>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    crate::query_all(
+        conn,
+        &format!(
             "SELECT {SESSION_COLUMNS} FROM play_sessions WHERE started_at >= ?1 AND started_at < ?2 ORDER BY started_at DESC"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![from, to], play_session_from_row)
-        .map_err(err)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+        ),
+        params![from, to],
+        play_session_from_row,
+    )
 }
 
 pub fn delete_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "DELETE FROM play_sessions WHERE game_id = ?1",
-        params![game_id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "DELETE FROM play_sessions WHERE game_id = ?1", params![game_id])?;
     Ok(())
 }
 

@@ -44,12 +44,7 @@ pub fn add_game(conn: &DbConn, game: NewGame<'_>) -> Result<i64, String> {
 }
 
 pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET title = ?1 WHERE id = ?2",
-        params![title, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE games SET title = ?1 WHERE id = ?2", params![title, id])?;
     Ok(())
 }
 
@@ -62,55 +57,38 @@ pub fn update_game_ids(
     platform_id: &str,
 ) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
-    c.execute(
+    let tx = c.unchecked_transaction().map_err(err)?;
+    tx.execute(
         "UPDATE games SET steam_id = ?1, trophy_id = ?2, trophy_source = ?3, platform_id = ?4 WHERE id = ?5",
         params![steam_id, trophy_id, trophy_source.as_str(), platform_id, id],
     ).map_err(err)?;
     // The Steam identity may have moved: any earlier garnish consult
     // answered for a different store entry.
-    crate::clear_steam_garnish(conn, id)?;
+    tx.execute("DELETE FROM steam_garnish WHERE game_id = ?1", params![id])
+        .map_err(err)?;
+    tx.commit().map_err(err)?;
     Ok(())
 }
 
 /// Overwrite the platform-native id (title id, disc serial, emulator app
 /// id) without touching the achievement keys.
 pub fn update_native_id(conn: &DbConn, id: i64, native_id: &str) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET native_id = ?1 WHERE id = ?2",
-        params![native_id, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE games SET native_id = ?1 WHERE id = ?2", params![native_id, id])?;
     Ok(())
 }
 
 pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET sort_title = ?1 WHERE id = ?2",
-        params![sort_title, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE games SET sort_title = ?1 WHERE id = ?2", params![sort_title, id])?;
     Ok(())
 }
 
 pub fn update_game_folder(conn: &DbConn, id: i64, game_folder: &str) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET game_folder = ?1 WHERE id = ?2",
-        params![game_folder, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE games SET game_folder = ?1 WHERE id = ?2", params![game_folder, id])?;
     Ok(())
 }
 
 pub fn update_game_kind(conn: &DbConn, id: i64, kind: GameKind) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET kind = ?1 WHERE id = ?2",
-        params![kind.as_str(), id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE games SET kind = ?1 WHERE id = ?2", params![kind.as_str(), id])?;
     Ok(())
 }
 
@@ -121,33 +99,26 @@ pub fn update_achievement_counts(
     total: i64,
     mtime: i64,
 ) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
+    crate::execute(
+        conn,
         "UPDATE games SET cached_earned_count = ?1, cached_total_count = ?2, cached_achievement_mtime = ?3 WHERE id = ?4",
         params![earned, total, mtime, id],
-    ).map_err(err)?;
+    )?;
     Ok(())
 }
 
 pub fn set_manual_unmatch(conn: &DbConn, id: i64, value: bool) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET manual_unmatch = ?1 WHERE id = ?2",
-        params![value, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE games SET manual_unmatch = ?1 WHERE id = ?2", params![value, id])?;
     Ok(())
 }
 
 pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c.prepare(&format!("SELECT {} FROM games ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END", crate::GAME_COLUMNS))
-        .map_err(err)?;
-    let entries = stmt
-        .query_map([], crate::game_entry_from_row)
-        .map_err(err)?;
-
-    entries.collect::<Result<Vec<_>, _>>().map_err(err)
+    crate::query_all(
+        conn,
+        &format!("SELECT {} FROM games ORDER BY CASE WHEN sort_title != '' THEN sort_title ELSE title END", crate::GAME_COLUMNS),
+        [],
+        crate::game_entry_from_row,
+    )
 }
 
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
@@ -167,129 +138,19 @@ pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
 /// time this has no session row behind it, so it never appears in the play
 /// history chart; it just raises the total.
 pub fn add_playtime(conn: &DbConn, id: i64, hours: f64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET playtime = playtime + ?1 WHERE id = ?2",
-        params![hours, id],
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
-/// Copy-guarded UPDATE used when merging duplicates: moves child rows to the
-/// canonical game only if it has none yet, so its existing values win.
-fn copy_guarded_update_sql(table: &str) -> String {
-    format!(
-        "UPDATE {table} SET game_id = ?1\n             WHERE game_id = ?2 AND NOT EXISTS (\n                 SELECT 1 FROM {table} WHERE game_id = ?1\n             )"
-    )
-}
-
-/// Reassigns one owned-child table from a duplicate game to the canonical
-/// game (copy-guarded) and then deletes any leftovers from the duplicate.
-fn reassign_child_rows(
-    tx: &rusqlite::Transaction<'_>,
-    table: &str,
-    canonical_id: i64,
-    duplicate_id: i64,
-) -> Result<(), String> {
-    tx.execute(
-        &copy_guarded_update_sql(table),
-        params![canonical_id, duplicate_id],
-    )
-    .map_err(err)?;
-    tx.execute(
-        &format!("DELETE FROM {table} WHERE game_id = ?1"),
-        params![duplicate_id],
-    )
-    .map_err(err)?;
-    Ok(())
-}
-
-/// Merge duplicate game rows into `canonical_id` while keeping their related data.
-pub fn merge_duplicate_games(
-    conn: &DbConn,
-    canonical_id: i64,
-    duplicate_ids: &[i64],
-) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    let tx = c.unchecked_transaction().map_err(err)?;
-
-    for &duplicate_id in duplicate_ids {
-        if duplicate_id == canonical_id {
-            continue;
-        }
-        tx.execute(
-            "UPDATE games
-             SET title = CASE WHEN title = '' THEN (SELECT title FROM games WHERE id = ?2) ELSE title END,
-                  sort_title = CASE WHEN sort_title = '' THEN (SELECT sort_title FROM games WHERE id = ?2) ELSE sort_title END,
-                  hidden = MAX(hidden, (SELECT hidden FROM games WHERE id = ?2)),
-                  logo_position = CASE WHEN logo_position = 'bottom-left' THEN (SELECT logo_position FROM games WHERE id = ?2) ELSE logo_position END,
-                  logo_size = CASE WHEN logo_size = 50 THEN (SELECT logo_size FROM games WHERE id = ?2) ELSE logo_size END,
-                  playtime = playtime + (SELECT playtime FROM games WHERE id = ?2),
-                  last_played = MAX(last_played, (SELECT last_played FROM games WHERE id = ?2))
-             WHERE id = ?1",
-            params![canonical_id, duplicate_id],
-        )
-        .map_err(err)?;
-        tx.execute(
-            "INSERT OR IGNORE INTO game_groups (game_id, group_id)
-             SELECT ?1, group_id FROM game_groups WHERE game_id = ?2",
-            params![canonical_id, duplicate_id],
-        )
-        .map_err(err)?;
-        tx.execute(
-            "DELETE FROM game_groups WHERE game_id = ?1",
-            params![duplicate_id],
-        )
-        .map_err(err)?;
-        tx.execute(
-            "UPDATE game_variants SET game_id = ?1 WHERE game_id = ?2",
-            params![canonical_id, duplicate_id],
-        )
-        .map_err(err)?;
-        tx.execute(
-            "UPDATE play_sessions SET game_id = ?1 WHERE game_id = ?2",
-            params![canonical_id, duplicate_id],
-        )
-        .map_err(err)?;
-        tx.execute(
-            "UPDATE game_discs SET game_id = ?1 WHERE game_id = ?2",
-            params![canonical_id, duplicate_id],
-        )
-        .map_err(err)?;
-        for table in ["game_configs", "game_default_variant", "game_default_disc"] {
-            reassign_child_rows(&tx, table, canonical_id, duplicate_id)?;
-        }
-        tx.execute("DELETE FROM games WHERE id = ?1", params![duplicate_id])
-            .map_err(err)?;
-    }
-
-    // A duplicate carried a playtime link? Its row CASCADEd away with the
-    // deletion; prune whatever link that left incomplete.
-    crate::links::prune_incomplete_groups(&tx)?;
-    tx.commit().map_err(err)?;
+    crate::execute(conn, "UPDATE games SET playtime = playtime + ?1 WHERE id = ?2", params![hours, id])?;
     Ok(())
 }
 
 /// Cache of the resolved API-emulator DLL folder (Steam/GOG), empty if unknown.
 pub fn set_api_dll_folder(conn: &DbConn, id: i64, folder: &str) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET api_dll_folder = ?1 WHERE id = ?2",
-        params![folder, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE games SET api_dll_folder = ?1 WHERE id = ?2", params![folder, id])?;
     Ok(())
 }
 
 /// Cache of whether the game's UFS saves have been centralized.
 pub fn set_saves_centralized(conn: &DbConn, id: i64, centralized: bool) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE games SET saves_centralized = ?1 WHERE id = ?2",
-        params![centralized as i64, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE games SET saves_centralized = ?1 WHERE id = ?2", params![centralized as i64, id])?;
     Ok(())
 }
 
@@ -297,12 +158,8 @@ pub fn set_saves_centralized(conn: &DbConn, id: i64, centralized: bool) -> Resul
 mod tests {
     use super::super::find_by_db_id;
     use super::super::init_db;
-    use super::super::{
-        add_disc, add_game_to_group, create_group, get_all_groups, get_discs,
-        get_sessions_for_game, record_session, update_field,
-    };
     use super::*;
-    use ira_models::{GameDisc, GameKind, TrophySource};
+    use ira_models::{GameKind, TrophySource};
     use tempfile::TempDir;
 
     fn setup_db() -> (DbConn, TempDir) {
@@ -390,63 +247,6 @@ mod tests {
         assert_eq!(id1, id2);
         let game = find_by_db_id(&conn, id1).unwrap().unwrap();
         assert_eq!(game.title, "Updated Title");
-    }
-
-    #[test]
-    fn test_merge_duplicate_games_preserves_related_data() {
-        let (conn, _tmp) = setup_db();
-        let canonical = add_game(
-            &conn,
-            NewGame {
-                kind: GameKind::Retro,
-                trophy_source: TrophySource::Empty,
-                steam_id: "",
-                trophy_id: "",
-                native_id: "canonical",
-                platform_id: "saturn",
-                title: "Canonical",
-            },
-        )
-        .unwrap();
-        let duplicate = add_game(
-            &conn,
-            NewGame {
-                kind: GameKind::Retro,
-                trophy_source: TrophySource::Empty,
-                steam_id: "",
-                trophy_id: "",
-                native_id: "duplicate",
-                platform_id: "saturn",
-                title: "Duplicate",
-            },
-        )
-        .unwrap();
-        let group = create_group(&conn, "Favorites").unwrap();
-        add_game_to_group(&conn, duplicate, group).unwrap();
-        update_field(&conn, duplicate, "playtime", &0.1_f64).unwrap();
-        record_session(&conn, duplicate, None, 1000, 1301).unwrap();
-        add_disc(
-            &conn,
-            &GameDisc {
-                id: 0,
-                game_id: duplicate,
-                disc_number: 2,
-                rom_path: "disc2.chd".to_string(),
-                label: "Disc 2".to_string(),
-            },
-        )
-        .unwrap();
-
-        merge_duplicate_games(&conn, canonical, &[duplicate]).unwrap();
-
-        assert!(find_by_db_id(&conn, duplicate).unwrap().is_none());
-        assert_eq!(get_discs(&conn, canonical).unwrap().len(), 1);
-        assert_eq!(get_all_groups(&conn).unwrap()[0].id, group);
-        assert_eq!(
-            get_sessions_for_game(&conn, canonical, None).unwrap().len(),
-            1
-        );
-        assert!((find_by_db_id(&conn, canonical).unwrap().unwrap().playtime - 0.1).abs() < 0.001);
     }
 
     #[test]

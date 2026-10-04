@@ -7,18 +7,12 @@ fn find_all_games_by(
     where_clause: &str,
     params: &[&dyn rusqlite::ToSql],
 ) -> Result<Vec<GameEntry>, String> {
-    let c = lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
-            "SELECT {} FROM games WHERE {}",
-            crate::GAME_COLUMNS,
-            where_clause
-        ))
-        .map_err(err)?;
-    let entries = stmt
-        .query_map(params, crate::game_entry_from_row)
-        .map_err(err)?;
-    entries.collect::<Result<Vec<_>, _>>().map_err(err)
+    crate::query_all(
+        conn,
+        &format!("SELECT {} FROM games WHERE {}", crate::GAME_COLUMNS, where_clause),
+        params,
+        crate::game_entry_from_row,
+    )
 }
 
 fn find_game_by(
@@ -26,9 +20,12 @@ fn find_game_by(
     where_clause: &str,
     params: &[&dyn rusqlite::ToSql],
 ) -> Result<Option<GameEntry>, String> {
-    Ok(find_all_games_by(conn, where_clause, params)?
-        .into_iter()
-        .next())
+    crate::query_optional(
+        conn,
+        &format!("SELECT {} FROM games WHERE {}", crate::GAME_COLUMNS, where_clause),
+        params,
+        crate::game_entry_from_row,
+    )
 }
 
 /// The row carrying a Steam id on one platform: several platforms may

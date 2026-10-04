@@ -58,7 +58,7 @@ pub(crate) const FAMILIES: EntitySpec = EntitySpec {
 /// The tables backing a kind constant. Unknown kinds land on companies
 /// — the callers pass the constants above, and the match only keeps
 /// the stringly kind out of the SQL.
-fn spec(kind: &str) -> EntitySpec {
+pub(crate) fn spec(kind: &str) -> EntitySpec {
     match kind {
         KIND_GENRE => GENRES,
         KIND_FAMILY => FAMILIES,
@@ -66,10 +66,22 @@ fn spec(kind: &str) -> EntitySpec {
     }
 }
 
-/// Whether an id belongs to the source's namespace — real
-/// ScreenScraper ids are positive; hand-minted locals are negative.
-fn is_real_id(id: i64) -> bool {
-    id > 0
+/// The company-role predicate fragment for the entity index queries:
+/// `None` means every company, `Some` narrows to one credit column.
+fn role_filter_and(role: Option<&str>) -> String {
+    match role {
+        Some(role) => format!("AND gc.{role} = 1"),
+        None => String::new(),
+    }
+}
+
+/// Same predicate for queries joining from the lookup side, where the
+/// junction alias makes the fragment a `WHERE` instead of an `AND`.
+fn role_filter_where(role: Option<&str>) -> String {
+    match role {
+        Some(role) => format!("WHERE gc.{role} = 1"),
+        None => String::new(),
+    }
 }
 
 /// Remember `alias` as another name for the entity `target_id`. A
@@ -85,23 +97,17 @@ pub fn add_entity_alias(
     if alias.is_empty() {
         return Err("empty alias".to_string());
     }
-    let c = crate::lock_db(conn)?;
-    c.execute(
+    crate::execute(
+        conn,
         "INSERT INTO scraper_aliases (kind, alias, target_id) VALUES (?1, ?2, ?3)
          ON CONFLICT(kind, alias) DO UPDATE SET target_id = excluded.target_id",
         params![kind, alias, target_id],
-    )
-    .map_err(err)?;
+    )?;
     Ok(())
 }
 
 pub fn remove_entity_alias(conn: &DbConn, alias_id: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "DELETE FROM scraper_aliases WHERE id = ?1",
-        params![alias_id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "DELETE FROM scraper_aliases WHERE id = ?1", params![alias_id])?;
     Ok(())
 }
 
@@ -111,22 +117,102 @@ pub fn entity_aliases(
     kind: &str,
     target_id: i64,
 ) -> Result<Vec<(i64, String)>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(
-            "SELECT id, alias FROM scraper_aliases
+    crate::query_all(
+        conn,
+        "SELECT id, alias FROM scraper_aliases
              WHERE kind = ?1 AND target_id = ?2
              ORDER BY alias COLLATE NOCASE",
-        )
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![kind, target_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
+        params![kind, target_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+}
+
+/// Deduplicated non-empty alias spellings to look up — one batch instead
+/// of one query per entity.
+fn wanted_alias_names(entities: &[ira_models::ScraperEntity]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for entity in entities {
+        let alias = entity.name.trim();
+        if !alias.is_empty() && seen.insert(alias.to_lowercase()) {
+            out.push(alias.to_string());
+        }
+    }
+    out
+}
+
+/// Lowercased alias text to canonical target id, via one batched query.
+/// `None` means the lookup itself failed (caller falls back to input).
+fn load_alias_map(
+    c: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    spec: EntitySpec,
+    kind: &str,
+    wanted: &[String],
+) -> Option<std::collections::HashMap<String, i64>> {
+    let placeholders = wanted.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let mut alias_params: Vec<&dyn rusqlite::types::ToSql> = vec![&spec.kind];
+    for name in wanted {
+        alias_params.push(name);
+    }
+    let alias_sql = format!(
+        "SELECT alias, target_id FROM scraper_aliases WHERE kind = ?1 AND alias IN ({placeholders}) COLLATE NOCASE"
+    );
+    let mut stmt = match c.prepare(&alias_sql) {
+        Ok(stmt) => stmt,
+        Err(e) => {
+            eprintln!("resolve_entities: alias lookup failed for kind {kind}: {e}");
+            return None;
+        }
+    };
+    let rows = match stmt.query_map(alias_params.as_slice(), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    }) {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("resolve_entities: alias lookup failed for kind {kind}: {e}");
+            return None;
+        }
+    };
+    let mut alias_map: std::collections::HashMap<String, i64> = Default::default();
+    for row in rows.filter_map(Result::ok) {
+        alias_map.insert(row.0.to_lowercase(), row.1);
+    }
+    Some(alias_map)
+}
+
+/// Canonical target id to current lookup-table name. Missing rows stay
+/// missing — the caller keeps the incoming name rather than dropping data.
+fn load_name_map(
+    c: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    spec: EntitySpec,
+    kind: &str,
+    targets: &[i64],
+) -> std::collections::HashMap<i64, String> {
+    let placeholders = targets.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let target_params: Vec<&dyn rusqlite::types::ToSql> =
+        targets.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+    let mut name_map: std::collections::HashMap<i64, String> = Default::default();
+    match c.prepare(&format!(
+        "SELECT id, name FROM {} WHERE id IN ({placeholders})",
+        spec.lookup
+    )) {
+        Ok(mut stmt) => match stmt.query_map(target_params.as_slice(), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        }) {
+            Ok(rows) => {
+                for (id, name) in rows.filter_map(Result::ok) {
+                    name_map.insert(id, name);
+                }
+            }
+            Err(e) => {
+                eprintln!("resolve_entities: name lookup failed for kind {kind}: {e}");
+            }
+        },
+        Err(e) => {
+            eprintln!("resolve_entities: name lookup failed for kind {kind}: {e}");
+        }
+    }
+    name_map
 }
 
 /// Resolve entities through the alias table: a name some alias spells
@@ -140,33 +226,34 @@ pub fn resolve_entities(
 ) -> Vec<ira_models::ScraperEntity> {
     let spec = spec(kind);
     let Ok(c) = crate::lock_db(conn) else {
+        eprintln!("resolve_entities: failed to lock db for kind {kind}");
         return entities.to_vec();
     };
+    // Batch the alias and name lookups: two queries total no matter how
+    // many entities arrive, instead of two per entity.
+    let wanted = wanted_alias_names(entities);
+    if wanted.is_empty() {
+        return entities.to_vec();
+    }
+    let Some(alias_map) = load_alias_map(&c, spec, kind, &wanted) else {
+        return entities.to_vec();
+    };
+    if alias_map.is_empty() {
+        return entities.to_vec();
+    }
+    let targets: Vec<i64> = {
+        let mut seen = std::collections::HashSet::new();
+        alias_map.values().filter(|id| seen.insert(**id)).copied().collect()
+    };
+    let name_map = load_name_map(&c, spec, kind, &targets);
     entities
         .iter()
         .map(|entity| {
             let alias = entity.name.trim();
-            if alias.is_empty() {
-                return entity.clone();
-            }
-            let target: Option<i64> = c
-                .query_row(
-                    "SELECT target_id FROM scraper_aliases
-                     WHERE kind = ?1 AND alias = ?2 COLLATE NOCASE",
-                    params![spec.kind, alias],
-                    |row| row.get(0),
-                )
-                .ok();
-            let Some(target_id) = target else {
+            let Some(target_id) = alias_map.get(&alias.to_lowercase()).copied() else {
                 return entity.clone();
             };
-            let name: String = c
-                .query_row(
-                    &format!("SELECT name FROM {} WHERE id = ?1", spec.lookup),
-                    params![target_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or_else(|_| entity.name.clone());
+            let name = name_map.get(&target_id).cloned().unwrap_or_else(|| entity.name.clone());
             ira_models::ScraperEntity {
                 id: target_id.to_string(),
                 name,
@@ -230,13 +317,12 @@ pub fn entity_fetched_at(conn: &DbConn, kind: &str) -> Result<Option<i64>, Strin
 
 /// Record a completed whole-table fetch.
 pub fn set_entity_fetched(conn: &DbConn, kind: &str, at: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
+    crate::execute(
+        conn,
         "INSERT INTO scraper_fetch_log (kind, fetched_at) VALUES (?1, ?2)
          ON CONFLICT(kind) DO UPDATE SET fetched_at = excluded.fetched_at",
         params![kind, at],
-    )
-    .map_err(err)?;
+    )?;
     Ok(())
 }
 
@@ -249,13 +335,10 @@ pub fn game_entity_names(
     role: Option<&str>,
 ) -> Result<std::collections::HashMap<i64, String>, String> {
     let spec = spec(kind);
-    let role_sql = match role {
-        Some(role) => format!("AND gc.{role} = 1"),
-        None => String::new(),
-    };
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    let role_sql = role_filter_and(role);
+    let rows: Vec<(i64, String)> = crate::query_all(
+        conn,
+        &format!(
             "SELECT gc.game_id, MIN(c.name)
              FROM {junction} gc
              JOIN {lookup} c ON c.id = gc.{col}
@@ -264,13 +347,10 @@ pub fn game_entity_names(
             junction = spec.junction,
             lookup = spec.lookup,
             col = spec.column,
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
+        ),
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
     Ok(rows.into_iter().collect())
 }
 
@@ -283,13 +363,10 @@ pub fn game_entity_names_all(
     role: Option<&str>,
 ) -> Result<std::collections::HashMap<i64, Vec<String>>, String> {
     let spec = spec(kind);
-    let role_sql = match role {
-        Some(role) => format!("AND gc.{role} = 1"),
-        None => String::new(),
-    };
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    let role_sql = role_filter_and(role);
+    let rows: Vec<(i64, String)> = crate::query_all(
+        conn,
+        &format!(
             "SELECT gc.game_id, c.name
              FROM {junction} gc
              JOIN {lookup} c ON c.id = gc.{col}
@@ -298,15 +375,10 @@ pub fn game_entity_names_all(
             junction = spec.junction,
             lookup = spec.lookup,
             col = spec.column,
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
+        ),
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
     let mut map: std::collections::HashMap<i64, Vec<String>> = Default::default();
     for (game_id, name) in rows {
         map.entry(game_id).or_default().push(name);
@@ -322,27 +394,19 @@ pub fn distinct_entity_names(
     role: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let spec = spec(kind);
-    let role_sql = match role {
-        Some(role) => format!("WHERE gc.{role} = 1"),
-        None => String::new(),
-    };
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    let role_sql = role_filter_where(role);
+    crate::query_scalar_all(
+        conn,
+        &format!(
             "SELECT DISTINCT c.name FROM {lookup} c
              JOIN {junction} gc ON gc.{col} = c.id {role_sql}
              ORDER BY c.name COLLATE NOCASE",
             junction = spec.junction,
             lookup = spec.lookup,
             col = spec.column,
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
+        ),
+        [],
+    )
 }
 
 /// A user rename: the new spelling lands and latches the row, so the
@@ -352,15 +416,14 @@ pub fn rename_entity(conn: &DbConn, kind: &str, id: i64, name: &str) -> Result<(
     if name.is_empty() {
         return Err("empty name".to_string());
     }
-    let c = crate::lock_db(conn)?;
-    c.execute(
+    crate::execute(
+        conn,
         &format!(
             "UPDATE {} SET name = ?1, user_renamed = 1 WHERE id = ?2",
             spec(kind).lookup
         ),
         params![name, id],
-    )
-    .map_err(err)?;
+    )?;
     Ok(())
 }
 
@@ -372,23 +435,17 @@ pub fn list_entities(
     filter: &str,
 ) -> Result<Vec<(i64, String)>, String> {
     let spec = spec(kind);
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    crate::query_all(
+        conn,
+        &format!(
             "SELECT id, name FROM {}
              WHERE name LIKE '%' || ?1 || '%' COLLATE NOCASE
              ORDER BY name COLLATE NOCASE",
             spec.lookup
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![filter.trim()], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(rows)
+        ),
+        params![filter.trim()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
 }
 
 /// How many games reference each entity of a kind, for the manager's
@@ -398,125 +455,17 @@ pub fn entity_usage(
     kind: &str,
 ) -> Result<std::collections::HashMap<i64, i64>, String> {
     let spec = spec(kind);
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
+    let rows: Vec<(i64, i64)> = crate::query_all(
+        conn,
+        &format!(
             "SELECT {col}, COUNT(*) FROM {junction} GROUP BY {col}",
             col = spec.column,
             junction = spec.junction,
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
+        ),
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
     Ok(rows.into_iter().collect())
-}
-
-/// Merge `absorbed` into `survivor`: every game reference moves over
-/// (a company's developer/publisher roles take the stronger of the
-/// two), aliases re-point, and the absorbed name stays behind as an
-/// alias so future matches collapse onto the survivor. When exactly
-/// one of the two carries a real ScreenScraper id, that row wins the
-/// survivor role no matter which was picked — the source owns the id
-/// space. Returns the id that survived.
-pub fn merge_entities(
-    conn: &DbConn,
-    kind: &str,
-    survivor: i64,
-    absorbed: i64,
-) -> Result<i64, String> {
-    let spec = spec(kind);
-    if survivor == absorbed {
-        return Err("cannot merge an entity into itself".to_string());
-    }
-    // The source's id outranks a hand-minted local one — the roles
-    // swap together with the survivor.
-    let (survivor, absorbed) = if !is_real_id(survivor) && is_real_id(absorbed) {
-        (absorbed, survivor)
-    } else {
-        (survivor, absorbed)
-    };
-
-    let mut c = crate::lock_db(conn)?;
-    let tx = c
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(err)?;
-
-    // A game holding both rows keeps one reference with the union of
-    // the flags; companies only — genres and families have no roles.
-    if spec.kind == KIND_COMPANY {
-        tx.execute(
-            &format!(
-                "UPDATE {junction} AS dst
-                 SET is_developer = MAX(dst.is_developer,
-                     COALESCE((SELECT src.is_developer FROM {junction} src
-                               WHERE src.game_id = dst.game_id AND src.{col} = ?1), 0)),
-                     is_publisher = MAX(dst.is_publisher,
-                     COALESCE((SELECT src.is_publisher FROM {junction} src
-                               WHERE src.game_id = dst.game_id AND src.{col} = ?1), 0))
-                 WHERE {col} = ?2
-                   AND EXISTS (SELECT 1 FROM {junction} src
-                               WHERE src.game_id = dst.game_id AND src.{col} = ?1)",
-                junction = spec.junction,
-                col = spec.column,
-            ),
-            params![survivor, absorbed],
-        )
-        .map_err(err)?;
-    }
-    tx.execute(
-        &format!(
-            "INSERT OR IGNORE INTO {junction} (game_id, {col})
-             SELECT game_id, ?1 FROM {junction} WHERE {col} = ?2",
-            junction = spec.junction,
-            col = spec.column,
-        ),
-        params![survivor, absorbed],
-    )
-    .map_err(err)?;
-    tx.execute(
-        &format!(
-            "DELETE FROM {junction} WHERE {col} = ?1",
-            junction = spec.junction,
-            col = spec.column,
-        ),
-        params![absorbed],
-    )
-    .map_err(err)?;
-
-    // Aliases follow the references, and the absorbed spelling itself
-    // becomes the survivor's alias — the dedupe's whole point.
-    tx.execute(
-        "UPDATE scraper_aliases SET target_id = ?1
-         WHERE kind = ?2 AND target_id = ?3",
-        params![survivor, spec.kind, absorbed],
-    )
-    .map_err(err)?;
-    let absorbed_name: Option<String> = tx
-        .query_row(
-            &format!("SELECT name FROM {} WHERE id = ?1", spec.lookup),
-            params![absorbed],
-            |row| row.get(0),
-        )
-        .ok();
-    if let Some(name) = absorbed_name.filter(|n| !n.trim().is_empty()) {
-        tx.execute(
-            "INSERT INTO scraper_aliases (kind, alias, target_id) VALUES (?1, ?2, ?3)
-             ON CONFLICT(kind, alias) DO UPDATE SET target_id = excluded.target_id",
-            params![spec.kind, name.trim(), survivor],
-        )
-        .map_err(err)?;
-    }
-
-    tx.execute(
-        &format!("DELETE FROM {} WHERE id = ?1", spec.lookup),
-        params![absorbed],
-    )
-    .map_err(err)?;
-    tx.commit().map_err(err)?;
-    Ok(survivor)
 }
 
 #[cfg(test)]
@@ -599,13 +548,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            crate::metadata::entity_search(&conn, GENRES.lookup, "RPG")
+            crate::entity_search(&conn, GENRES.lookup, "RPG")
                 .unwrap()
                 .len(),
             1
         );
         assert_eq!(
-            crate::metadata::entity_search(&conn, GENRES.lookup, "Role Playing")
+            crate::entity_search(&conn, GENRES.lookup, "Role Playing")
                 .unwrap()
                 .len(),
             0
@@ -619,60 +568,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            crate::metadata::entity_search(&conn, GENRES.lookup, "Adventure")
+            crate::entity_search(&conn, GENRES.lookup, "Adventure")
                 .unwrap()
                 .len(),
             1
         );
-    }
-
-    #[test]
-    fn test_merge_moves_references_and_leaves_an_alias() {
-        let (conn, _tmp) = setup_db();
-        let a = add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "", trophy_id: "", native_id: "", platform_id: "", title: "One" }).unwrap();
-        let b = add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "", trophy_id: "", native_id: "", platform_id: "", title: "Two" }).unwrap();
-        crate::store_scraper_metadata(
-            &conn,
-            a,
-            &genre_metadata(vec![entity(-3, "RPG")]),
-        )
-        .unwrap();
-        crate::store_scraper_metadata(
-            &conn,
-            b,
-            &genre_metadata(vec![entity(2620, "Role Playing Game")]),
-        )
-        .unwrap();
-
-        // Merging the local row into the real one: the real id wins.
-        let survivor = merge_entities(&conn, KIND_GENRE, -3, 2620).unwrap();
-        assert_eq!(survivor, 2620);
-        assert_eq!(entity_usage(&conn, KIND_GENRE).unwrap().get(&2620), Some(&2));
-        assert_eq!(entity_usage(&conn, KIND_GENRE).unwrap().get(&-3), None);
-        // The absorbed spelling stays behind as an alias of the
-        // survivor: the next match bringing "RPG" resolves to 2620.
-        assert!(entity_aliases(&conn, KIND_GENRE, 2620)
-            .unwrap()
-            .iter()
-            .any(|(_, text)| text == "RPG"));
-        let resolved = resolve_entities(&conn, KIND_GENRE, &[entity(-3, "RPG")]);
-        assert_eq!(resolved[0].id, "2620");
-        // An explicit alias outranks the merge trail — the user said
-        // so, and the user is who the table serves.
-        add_entity_alias(&conn, KIND_GENRE, "Role Playing Game", -3).unwrap();
-        let resolved = resolve_entities(&conn, KIND_GENRE, &[entity(2620, "Role Playing Game")]);
-        assert_eq!(resolved[0].id, "-3");
-    }
-
-    #[test]
-    fn test_merge_prefers_the_real_id_whichever_way_it_was_asked() {
-        let (conn, _tmp) = setup_db();
-        // Picking the local row as the target: the real id survives.
-        assert_eq!(merge_entities(&conn, KIND_GENRE, -3, 2620).unwrap(), 2620);
-        // Two locals, or two reals: the user's target wins.
-        assert_eq!(merge_entities(&conn, KIND_GENRE, -7, -3).unwrap(), -7);
-        assert_eq!(merge_entities(&conn, KIND_GENRE, 2620, 2406).unwrap(), 2620);
-        // Merging a row into itself is refused.
-        assert!(merge_entities(&conn, KIND_GENRE, 2620, 2620).is_err());
     }
 }

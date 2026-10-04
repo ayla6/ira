@@ -71,16 +71,12 @@ pub fn unlink_game(conn: &DbConn, game_id: i64) -> Result<(), String> {
 
 /// Every link membership as `(game_id, group_id)`.
 pub fn playtime_links(conn: &DbConn) -> Result<Vec<(i64, i64)>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
-            "SELECT game_id, group_id FROM {LINK_TABLE} ORDER BY game_id"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(err)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+    crate::query_all(
+        conn,
+        &format!("SELECT game_id, group_id FROM {LINK_TABLE} ORDER BY game_id"),
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
 }
 
 /// The members of `game_id`'s link, the game itself included; empty when
@@ -94,16 +90,11 @@ pub fn link_members(conn: &DbConn, game_id: i64) -> Result<Vec<i64>, String> {
     let Some(group) = group else {
         return Ok(Vec::new());
     };
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(&format!(
-            "SELECT game_id FROM {LINK_TABLE} WHERE group_id = ?1 ORDER BY game_id"
-        ))
-        .map_err(err)?;
-    let rows = stmt
-        .query_map(params![group], |row| row.get(0))
-        .map_err(err)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+    crate::query_scalar_all(
+        conn,
+        &format!("SELECT game_id FROM {LINK_TABLE} WHERE group_id = ?1 ORDER BY game_id"),
+        params![group],
+    )
 }
 
 #[cfg(test)]

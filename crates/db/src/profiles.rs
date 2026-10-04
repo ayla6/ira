@@ -24,41 +24,33 @@ fn wine_profile_from_row(row: &rusqlite::Row) -> rusqlite::Result<WineProfile> {
 }
 
 pub fn get_all_profiles(conn: &DbConn) -> Result<Vec<WineProfile>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c.prepare(
+    crate::query_all(
+        conn,
         "SELECT id, name, wine_version, custom_wine_path, prefix, arch, umu_enabled FROM wine_profiles ORDER BY name",
-    ).map_err(err)?;
-    let rows = stmt.query_map([], wine_profile_from_row).map_err(err)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+        [],
+        wine_profile_from_row,
+    )
 }
 
 pub fn update_profile(conn: &DbConn, profile: &WineProfile) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
+    crate::execute(
+        conn,
         "UPDATE wine_profiles SET name = ?1, wine_version = ?2, custom_wine_path = ?3, prefix = ?4, arch = ?5, umu_enabled = ?6 WHERE id = ?7",
         params![profile.name, profile.wine_version, profile.custom_wine_path, profile.prefix, profile.arch, profile.umu_enabled, profile.id],
-    ).map_err(err)?;
+    )?;
     Ok(())
 }
 
 pub fn delete_profile(conn: &DbConn, id: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute("DELETE FROM wine_profiles WHERE id = ?1", params![id])
-        .map_err(err)?;
+    crate::execute(conn, "DELETE FROM wine_profiles WHERE id = ?1", params![id])?;
     Ok(())
 }
 
 pub fn get_profile(conn: &DbConn, id: i64) -> Result<Option<WineProfile>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c.prepare(
+    crate::query_optional(
+        conn,
         "SELECT id, name, wine_version, custom_wine_path, prefix, arch, umu_enabled FROM wine_profiles WHERE id = ?1",
-    ).map_err(err)?;
-    let mut rows = stmt
-        .query_map(params![id], wine_profile_from_row)
-        .map_err(err)?;
-    if let Some(row) = rows.next() {
-        row.map_err(err).map(Some)
-    } else {
-        Ok(None)
-    }
+        params![id],
+        wine_profile_from_row,
+    )
 }

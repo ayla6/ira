@@ -10,12 +10,7 @@ pub fn create_group(conn: &DbConn, name: &str) -> Result<i64, String> {
 }
 
 pub fn rename_group(conn: &DbConn, id: i64, name: &str) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE groups SET name = ?1 WHERE id = ?2",
-        params![name, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE groups SET name = ?1 WHERE id = ?2", params![name, id])?;
     Ok(())
 }
 
@@ -38,59 +33,42 @@ fn group_from_row(row: &rusqlite::Row) -> rusqlite::Result<Group> {
 }
 
 pub fn get_all_groups(conn: &DbConn) -> Result<Vec<Group>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare("SELECT id, name FROM groups ORDER BY name COLLATE NOCASE")
-        .map_err(err)?;
-    let groups = stmt.query_map([], group_from_row).map_err(err)?;
-    groups.collect::<Result<Vec<_>, _>>().map_err(err)
+    crate::query_all(
+        conn,
+        "SELECT id, name FROM groups ORDER BY name COLLATE NOCASE",
+        [],
+        group_from_row,
+    )
 }
 
 pub fn add_game_to_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "INSERT OR IGNORE INTO game_groups (game_id, group_id) VALUES (?1, ?2)",
-        params![game_id, group_id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "INSERT OR IGNORE INTO game_groups (game_id, group_id) VALUES (?1, ?2)", params![game_id, group_id])?;
     Ok(())
 }
 
 pub fn remove_game_from_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "DELETE FROM game_groups WHERE game_id = ?1 AND group_id = ?2",
-        params![game_id, group_id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "DELETE FROM game_groups WHERE game_id = ?1 AND group_id = ?2", params![game_id, group_id])?;
     Ok(())
 }
 
 pub fn get_groups_for_game(conn: &DbConn, game_id: i64) -> Result<Vec<Group>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare(
-            "SELECT g.id, g.name FROM groups g
+    crate::query_all(
+        conn,
+        "SELECT g.id, g.name FROM groups g
              JOIN game_groups gg ON g.id = gg.group_id
              WHERE gg.game_id = ?1
              ORDER BY g.name COLLATE NOCASE",
-        )
-        .map_err(err)?;
-    let groups = stmt
-        .query_map(params![game_id], group_from_row)
-        .map_err(err)?;
-    groups.collect::<Result<Vec<_>, _>>().map_err(err)
+        params![game_id],
+        group_from_row,
+    )
 }
 
 pub fn get_game_ids_in_group(conn: &DbConn, group_id: i64) -> Result<Vec<i64>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare("SELECT game_id FROM game_groups WHERE group_id = ?1")
-        .map_err(err)?;
-    let ids = stmt
-        .query_map(params![group_id], |row| row.get(0))
-        .map_err(err)?;
-    ids.collect::<Result<Vec<_>, _>>().map_err(err)
+    crate::query_scalar_all(
+        conn,
+        "SELECT game_id FROM game_groups WHERE group_id = ?1",
+        params![group_id],
+    )
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use crate::{err, lock_db, DbConn};
+use crate::{lock_db, DbConn};
 use rusqlite::params;
 
 /// A disc serial cached for one ROM file version.
@@ -12,8 +12,14 @@ pub struct RomSerial {
 /// files. `None` means "not cached", including when a previous probe found
 /// no serial.
 pub fn lookup_rom_serial(conn: &DbConn, path: &str, size: i64, mtime: i64) -> Option<RomSerial> {
-    let c = lock_db(conn).ok()?;
-    c.query_row(
+    let c = match lock_db(conn) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("lookup_rom_serial: failed to lock db for {path}: {e}");
+            return None;
+        }
+    };
+    match c.query_row(
         "SELECT serial, title FROM rom_serials
          WHERE rom_path = ?1 AND size = ?2 AND mtime = ?3",
         params![path, size, mtime],
@@ -23,8 +29,14 @@ pub fn lookup_rom_serial(conn: &DbConn, path: &str, size: i64, mtime: i64) -> Op
                 title: row.get(1)?,
             })
         },
-    )
-    .ok()
+    ) {
+        Ok(hit) => Some(hit),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => {
+            eprintln!("lookup_rom_serial: query failed for {path}: {e}");
+            None
+        }
+    }
 }
 
 /// Caches the probe result for one ROM file version; an empty serial means
@@ -37,16 +49,15 @@ pub fn store_rom_serial(
     serial: &str,
     title: &str,
 ) -> Result<(), String> {
-    let c = lock_db(conn)?;
-    c.execute(
+    crate::execute(
+        conn,
         "INSERT INTO rom_serials (rom_path, size, mtime, serial, title)
          VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(rom_path) DO UPDATE SET
              size = excluded.size, mtime = excluded.mtime,
              serial = excluded.serial, title = excluded.title",
         params![path, size, mtime, serial, title],
-    )
-    .map_err(err)?;
+    )?;
     Ok(())
 }
 

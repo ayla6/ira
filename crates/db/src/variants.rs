@@ -52,50 +52,52 @@ fn positional_placeholders(count: usize) -> String {
         .join(", ")
 }
 
-pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c.prepare(&format!(
-        "SELECT {VARIANT_SELECT_COLUMNS} FROM game_variants WHERE game_id = ?1 ORDER BY sort_order, id"
-    )).map_err(err)?;
-    let rows = stmt
-        .query_map(params![game_id], |row| {
-            let env_str: String = row.get(6)?;
-            let variant_id: i64 = row.get(0)?;
-            let env_vars: Vec<(String, String)> =
-                serde_json::from_str(&env_str).unwrap_or_else(|e| {
-                    eprintln!(
-                        "Corrupt env_vars JSON for variant {variant_id} of game {game_id}: {e}"
-                    );
-                    Vec::new()
-                });
-            Ok(GameVariant {
-                id: row.get(0)?,
-                game_id: row.get(1)?,
-                name: row.get(2)?,
-                exe: row.get(3)?,
-                working_dir: row.get(4)?,
-                args: row.get(5)?,
-                env_vars,
-                sort_order: row.get(7)?,
-                pre_launch: row.get(8)?,
-                custom_images: row.get::<_, i64>(9)? != 0,
-                show_as_entry: row.get::<_, i64>(10)? != 0,
-                playtime: row.get(11)?,
-                last_played: row.get(12)?,
-                count_playtime: row.get::<_, i64>(13)? != 0,
-                logo_position: row.get(14)?,
-                logo_size: row.get(15)?,
-            })
-        })
-        .map_err(err)?;
+fn variant_from_row(row: &rusqlite::Row, game_id: i64) -> rusqlite::Result<GameVariant> {
+    let env_str: String = row.get(6)?;
+    let variant_id: i64 = row.get(0)?;
+    let env_vars: Vec<(String, String)> =
+        serde_json::from_str(&env_str).unwrap_or_else(|e| {
+            eprintln!("Corrupt env_vars JSON for variant {variant_id} of game {game_id}: {e}");
+            Vec::new()
+        });
+    Ok(GameVariant {
+        id: variant_id,
+        game_id: row.get(1)?,
+        name: row.get(2)?,
+        exe: row.get(3)?,
+        working_dir: row.get(4)?,
+        args: row.get(5)?,
+        env_vars,
+        sort_order: row.get(7)?,
+        pre_launch: row.get(8)?,
+        custom_images: row.get::<_, i64>(9)? != 0,
+        show_as_entry: row.get::<_, i64>(10)? != 0,
+        playtime: row.get(11)?,
+        last_played: row.get(12)?,
+        count_playtime: row.get::<_, i64>(13)? != 0,
+        logo_position: row.get(14)?,
+        logo_size: row.get(15)?,
+    })
+}
 
-    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, String> {
+    crate::query_all(
+        conn,
+        &format!(
+            "SELECT {VARIANT_SELECT_COLUMNS} FROM game_variants WHERE game_id = ?1 ORDER BY sort_order, id"
+        ),
+        params![game_id],
+        |row| variant_from_row(row, game_id),
+    )
 }
 
 pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> {
     let env_str = serde_json::to_string(&variant.env_vars).map_err(err)?;
     let c = crate::lock_db(conn)?;
-    let sort_order: i32 = c
+    // One transaction around the MAX+INSERT: two concurrent adds must not
+    // land on the same sort_order.
+    let tx = c.unchecked_transaction().map_err(err)?;
+    let sort_order: i32 = tx
         .query_row(
             "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM game_variants WHERE game_id = ?1",
             params![variant.game_id],
@@ -113,7 +115,7 @@ pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> 
         variant_insert_columns(),
         positional_placeholders(VARIANT_WRITE_COLUMNS.len() + 2),
     );
-    c.execute(
+    tx.execute(
         &sql,
         params![
             variant.game_id,
@@ -132,18 +134,20 @@ pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> 
         ],
     )
     .map_err(err)?;
-    Ok(c.last_insert_rowid())
+    let rowid = tx.last_insert_rowid();
+    tx.commit().map_err(err)?;
+    Ok(rowid)
 }
 
 pub fn update_variant(conn: &DbConn, variant: &GameVariant) -> Result<(), String> {
     let env_str = serde_json::to_string(&variant.env_vars).map_err(err)?;
-    let c = crate::lock_db(conn)?;
     let sql = format!(
         "UPDATE game_variants SET {} WHERE id=?{}",
         variant_set_clause(1),
         VARIANT_WRITE_COLUMNS.len() + 1,
     );
-    c.execute(
+    crate::execute(
+        conn,
         &sql,
         params![
             variant.name,
@@ -159,8 +163,7 @@ pub fn update_variant(conn: &DbConn, variant: &GameVariant) -> Result<(), String
             variant.logo_size,
             variant.id
         ],
-    )
-    .map_err(err)?;
+    )?;
     Ok(())
 }
 
@@ -179,12 +182,7 @@ pub fn reorder_variants(conn: &DbConn, ordered_ids: &[i64]) -> Result<(), String
 }
 
 pub fn delete_variant(conn: &DbConn, variant_id: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "DELETE FROM game_variants WHERE id = ?1",
-        params![variant_id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "DELETE FROM game_variants WHERE id = ?1", params![variant_id])?;
     Ok(())
 }
 
@@ -224,12 +222,7 @@ pub fn update_variant_playtime(
     variant_id: i64,
     playtime: f64,
 ) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE game_variants SET playtime = ?1 WHERE id = ?2",
-        params![playtime, variant_id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE game_variants SET playtime = ?1 WHERE id = ?2", params![playtime, variant_id])?;
     Ok(())
 }
 
@@ -238,12 +231,7 @@ pub fn set_variant_last_played(
     variant_id: i64,
     last_played: i64,
 ) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE game_variants SET last_played = ?1 WHERE id = ?2",
-        params![last_played, variant_id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE game_variants SET last_played = ?1 WHERE id = ?2", params![last_played, variant_id])?;
     Ok(())
 }
 

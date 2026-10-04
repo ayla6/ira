@@ -34,9 +34,8 @@ pub fn update_field(
     if !UPDATABLE_COLUMNS.contains(&column) {
         return Err(format!("update_field: unknown column {column}"));
     }
-    let c = crate::lock_db(conn)?;
     let sql = format!("UPDATE games SET {column} = ?1 WHERE id = ?2");
-    c.execute(&sql, rusqlite::params![value, id]).map_err(err)?;
+    crate::execute(conn, &sql, rusqlite::params![value, id])?;
     Ok(())
 }
 
@@ -53,8 +52,24 @@ pub fn init_db(db_path: &str) -> DbConn {
 
     {
         let conn = pool.get().expect("failed to get connection from pool");
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS games (
+        create_tables(&conn);
+        create_kind_indexes(&conn);
+    }
+
+    pool
+}
+
+/// Creates every table and index the app reads; no migrations — a schema
+/// change edits this batch directly and old databases are dropped.
+fn create_tables(conn: &Connection) {
+    conn.execute_batch(SCHEMA_SQL)
+        .expect("failed to create tables");
+}
+
+/// Every table and index the app reads, as one batch so a fresh database
+/// lands in a single step. Edited directly on schema changes — Ira is
+/// pre-release with a single user, so no migrations.
+const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS games (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind TEXT NOT NULL,
                 trophy_source TEXT NOT NULL DEFAULT '',
@@ -89,9 +104,6 @@ pub fn init_db(db_path: &str) -> DbConn {
                 hashes TEXT NOT NULL DEFAULT '',
                 title_trusted INTEGER NOT NULL DEFAULT 0,
                 vanished INTEGER NOT NULL DEFAULT 0,
-                developer TEXT NOT NULL DEFAULT '',
-                publisher TEXT NOT NULL DEFAULT '',
-                genre TEXT NOT NULL DEFAULT '',
                 players TEXT NOT NULL DEFAULT '',
                 synopsis TEXT NOT NULL DEFAULT '',
                 screenscraper_id TEXT NOT NULL DEFAULT '',
@@ -249,22 +261,20 @@ pub fn init_db(db_path: &str) -> DbConn {
                 mtime INTEGER NOT NULL,
                 serial TEXT NOT NULL DEFAULT '',
                 title TEXT NOT NULL DEFAULT ''
-            );",
-        ).expect("failed to create tables");
-        // Serial-number indexes keyed by the models' kind strings — raw
-        // literals here would silently diverge from GameKind's serialized form.
-        // Serials live in native_id (platform_id is the system scope, one
-        // value per kind, so it can no longer disambiguate installs).
-        conn.execute_batch(&format!(
+            );";
+
+/// Serial-number indexes keyed by the models' kind strings — raw
+/// literals here would silently diverge from GameKind's serialized form.
+/// Serials live in native_id (platform_id is the system scope, one
+/// value per kind, so it can no longer disambiguate installs).
+fn create_kind_indexes(conn: &Connection) {
+    conn.execute_batch(&format!(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps4_serial ON games(kind, native_id) WHERE kind = '{}';
              CREATE UNIQUE INDEX IF NOT EXISTS idx_games_ps3_serial ON games(kind, native_id) WHERE kind = '{}';",
             ira_models::GameKind::Ps4.as_str(),
             ira_models::GameKind::Ps3.as_str(),
         ))
         .expect("failed to create kind serial indexes");
-    }
-
-    pool
 }
 
 #[derive(Debug)]

@@ -38,17 +38,28 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
         cached_earned_count: row.get("cached_earned_count")?,
         cached_total_count: row.get("cached_total_count")?,
         cached_achievement_mtime: row.get("cached_achievement_mtime")?,
-        hashes: serde_json::from_str(
-            &row.get::<_, String>("hashes")?,
-        )
-        .unwrap_or_default(),
+        hashes: {
+            let raw: String = row.get("hashes")?;
+            if raw.is_empty() {
+                Default::default()
+            } else {
+                serde_json::from_str(&raw).unwrap_or_else(|e| {
+                    let id: rusqlite::Result<i64> = row.get("id");
+                    eprintln!(
+                        "Corrupt hashes JSON for game {:?}: {e}",
+                        id.unwrap_or(-1)
+                    );
+                    Default::default()
+                })
+            }
+        },
         vanished: row.get("vanished")?,
         players: row.get("players")?,
         synopsis: row.get("synopsis")?,
         screenscraper_id: row.get("screenscraper_id")?,
         screenscraper_rating: row.get("screenscraper_rating")?,
         release_dates: row.get("release_dates")?,
-        title_trusted: row.get::<_, i64>("title_trusted")? != 0,
+        title_trusted: row.get("title_trusted")?,
         native_id: row.get::<_, String>("native_id")?,
     })
 }

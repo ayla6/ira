@@ -6,39 +6,34 @@
 use crate::{err, DbConn};
 use ira_models::{AutoGroup, AutoNode};
 use rusqlite::params;
-use rusqlite::OptionalExtension;
 
 fn group_from_row(row: &rusqlite::Row) -> rusqlite::Result<AutoGroup> {
     let id: i64 = row.get(0)?;
     let name: String = row.get(1)?;
     let json: String = row.get(2)?;
-    let root: AutoNode = serde_json::from_str(&json).unwrap_or_default();
+    let root: AutoNode = serde_json::from_str(&json).unwrap_or_else(|e| {
+        eprintln!("Corrupt auto_group criteria JSON for group {id}: {e}");
+        Default::default()
+    });
     Ok(AutoGroup { id, name, root })
 }
 
 pub fn get_all_auto_groups(conn: &DbConn) -> Result<Vec<AutoGroup>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare("SELECT id, name, criteria FROM auto_groups ORDER BY name COLLATE NOCASE")
-        .map_err(err)?;
-    let groups = stmt
-        .query_map([], group_from_row)
-        .map_err(err)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(err)?;
-    Ok(groups)
+    crate::query_all(
+        conn,
+        "SELECT id, name, criteria FROM auto_groups ORDER BY name COLLATE NOCASE",
+        [],
+        group_from_row,
+    )
 }
 
 pub fn get_auto_group(conn: &DbConn, id: i64) -> Result<Option<AutoGroup>, String> {
-    let c = crate::lock_db(conn)?;
-    let mut stmt = c
-        .prepare("SELECT id, name, criteria FROM auto_groups WHERE id = ?1")
-        .map_err(err)?;
-    let group = stmt
-        .query_row(params![id], group_from_row)
-        .optional()
-        .map_err(err)?;
-    Ok(group)
+    crate::query_optional(
+        conn,
+        "SELECT id, name, criteria FROM auto_groups WHERE id = ?1",
+        params![id],
+        group_from_row,
+    )
 }
 
 /// A name collision loses to the UNIQUE constraint and surfaces as the
@@ -58,19 +53,12 @@ pub fn create_auto_group(conn: &DbConn, name: &str, root: &AutoNode) -> Result<i
 /// the full list, so a diff would only re-encode it.
 pub fn update_auto_group(conn: &DbConn, id: i64, name: &str, root: &AutoNode) -> Result<(), String> {
     let json = serde_json::to_string(root).map_err(err)?;
-    let c = crate::lock_db(conn)?;
-    c.execute(
-        "UPDATE auto_groups SET name = ?1, criteria = ?2 WHERE id = ?3",
-        params![name, json, id],
-    )
-    .map_err(err)?;
+    crate::execute(conn, "UPDATE auto_groups SET name = ?1, criteria = ?2 WHERE id = ?3", params![name, json, id])?;
     Ok(())
 }
 
 pub fn delete_auto_group(conn: &DbConn, id: i64) -> Result<(), String> {
-    let c = crate::lock_db(conn)?;
-    c.execute("DELETE FROM auto_groups WHERE id = ?1", params![id])
-        .map_err(err)?;
+    crate::execute(conn, "DELETE FROM auto_groups WHERE id = ?1", params![id])?;
     Ok(())
 }
 

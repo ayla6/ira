@@ -169,6 +169,10 @@ pub struct Config {
     pub group_order: ira_models::GroupOrder,
     #[serde(default)]
     pub sort_descending: bool,
+    /// The mass matcher's "hide done and failed" toggle, remembered
+    /// across openings like any other view preference.
+    #[serde(default)]
+    pub mass_match_hide_done: bool,
     #[serde(default)]
     pub ra_enabled: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -268,6 +272,7 @@ impl Default for Config {
             group_by: ira_models::GroupBy::default(),
             group_order: ira_models::GroupOrder::default(),
             sort_descending: false,
+            mass_match_hide_done: false,
             ra_enabled: false,
             ra_username: String::new(),
             ra_web_api_key: String::new(),
@@ -488,6 +493,7 @@ mod tests {
             show_hidden_games: true,
             grid_cover_width: 300,
             sort_descending: true,
+            mass_match_hide_done: true,
             save_dir: "/tmp/test_save_dir".to_string(),
             roms_folder: "/tmp/roms".to_string(),
             extra_roms_folders: vec!["/mnt/hdd/roms".to_string()],
@@ -505,6 +511,7 @@ mod tests {
         assert_eq!(loaded.show_hidden_games, cfg.show_hidden_games);
         assert_eq!(loaded.grid_cover_width, cfg.grid_cover_width);
         assert_eq!(loaded.sort_descending, cfg.sort_descending);
+        assert_eq!(loaded.mass_match_hide_done, cfg.mass_match_hide_done);
         assert_eq!(loaded.save_dir, cfg.save_dir);
         assert_eq!(loaded.roms_folder, cfg.roms_folder);
         assert_eq!(loaded.extra_roms_folders, cfg.extra_roms_folders);

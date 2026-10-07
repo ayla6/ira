@@ -538,8 +538,7 @@ mod tests {
 
     #[test]
     fn test_tile_measure_matches_flow_columns() {
-        let _ = gtk4::init();
-        if !gtk4::is_initialized() {
+        if !crate::ui::helpers::ensure_gtk_for_tests() {
             return;
         }
         // The production layout-warning filter must swallow REAL measure

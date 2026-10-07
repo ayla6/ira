@@ -1122,6 +1122,16 @@ pub fn matching_sgdb_result(
         .cloned()
 }
 
+/// Initialize GTK once for widget tests, across test threads: a second
+/// `gtk4::init()` from another thread panics, so the first caller wins
+/// and everyone else reuses the verdict. `false` (headless) skips the
+/// test like a missing display always did.
+#[cfg(test)]
+pub fn ensure_gtk_for_tests() -> bool {
+    static GTK_INIT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *GTK_INIT.get_or_init(|| gtk4::init().is_ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

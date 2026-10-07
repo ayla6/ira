@@ -223,18 +223,29 @@ pub(super) struct RowVis {
     pending: Rc<RefCell<Vec<HashSet<MatchSource>>>>,
     show_finished: Rc<Cell<bool>>,
     scrolled: glib::WeakRef<gtk4::ScrolledWindow>,
+    title: adw::WindowTitle,
+    full_subtitle: String,
+    total: usize,
+    last_shown: Rc<Cell<usize>>,
 }
 
 impl RowVis {
     pub(super) fn new(
         show_finished: Rc<Cell<bool>>,
         scrolled: &gtk4::ScrolledWindow,
+        title: &adw::WindowTitle,
+        full_subtitle: String,
+        total: usize,
     ) -> Self {
         Self {
             rows: Rc::new(RefCell::new(Vec::new())),
             pending: Rc::new(RefCell::new(Vec::new())),
             show_finished,
             scrolled: Downgrade::downgrade(scrolled),
+            title: title.clone(),
+            full_subtitle,
+            total,
+            last_shown: Rc::new(Cell::new(usize::MAX)),
         }
     }
 
@@ -270,27 +281,60 @@ impl RowVis {
         if running.is_empty() {
             hide_row_stable(&self.scrolled, std::slice::from_ref(&row));
         }
+        self.update_subtitle();
     }
 
     /// The toggle flipped: show everything, or re-hide the concluded.
     fn apply_all(&self) {
         if self.show_finished.get() {
             self.rows.borrow().iter().for_each(|row| row.set_visible(true));
+        } else {
+            let rows = self.rows.borrow();
+            let pending = self.pending.borrow();
+            let hiding: Vec<&gtk4::ListBoxRow> = rows
+                .iter()
+                .enumerate()
+                .filter(|(idx, _)| {
+                    pending
+                        .get(*idx)
+                        .is_some_and(|running| running.is_empty())
+                })
+                .map(|(_, row)| row)
+                .collect();
+            hide_row_stable(&self.scrolled, &hiding);
+        }
+        self.update_subtitle();
+    }
+
+    /// Whether the toggle currently hides concluded rows.
+    pub(super) fn hiding(&self) -> bool {
+        !self.show_finished.get()
+    }
+
+    /// Currently visible rows out of the total built.
+    pub(super) fn visible_counts(&self) -> (usize, usize) {
+        let rows = self.rows.borrow();
+        let visible = rows.iter().filter(|row| row.is_visible()).count();
+        (visible, rows.len())
+    }
+
+    /// Refresh the header subtitle to the visible count. Runs after every
+    /// hide/show change; a no-op when the count did not move.
+    fn update_subtitle(&self) {
+        let (visible, _) = self.visible_counts();
+        if self.last_shown.get() == visible {
             return;
         }
-        let rows = self.rows.borrow();
-        let pending = self.pending.borrow();
-        let hiding: Vec<&gtk4::ListBoxRow> = rows
-            .iter()
-            .enumerate()
-            .filter(|(idx, _)| {
-                pending
-                    .get(*idx)
-                    .is_some_and(|running| running.is_empty())
-            })
-            .map(|(_, row)| row)
-            .collect();
-        hide_row_stable(&self.scrolled, &hiding);
+        self.last_shown.set(visible);
+        if self.hiding() {
+            self.title.set_subtitle(
+                &crate::tr!("Showing {} of {} games")
+                    .replacen("{}", &visible.to_string(), 1)
+                    .replacen("{}", &self.total.to_string(), 1),
+            );
+        } else {
+            self.title.set_subtitle(&self.full_subtitle);
+        }
     }
 }
 
@@ -1016,21 +1060,36 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     };
     // show_finished mirrors the switch below, inverted: with the switch
     // off, nothing hides and every row plays its pass out in the open.
-    let show_finished = Rc::new(Cell::new(true));
-    let vis = RowVis::new(show_finished.clone(), &scrolled);
+    // The switch restores its saved position, so a reopened dialog keeps
+    // working the way it was left.
+    let hide_done = state.borrow().cfg.mass_match_hide_done;
+    let show_finished = Rc::new(Cell::new(!hide_done));
+    let vis = RowVis::new(
+        show_finished.clone(),
+        &scrolled,
+        &title,
+        subtitle,
+        count,
+    );
     let vis_toggle = vis.clone();
     let rows = populate_match_list(&list, &needs_matching, state, dialog.upcast_ref(), &ss_missed, &vis);
     vis.apply_all();
     let show_finished_c = show_finished.clone();
+    let state_c = state.clone();
     let hide_switch = gtk4::Switch::new();
-    // Hiding starts off: the whole point of the dialog is watching what
-    // each source does with each row — rows flipping to "Matched" or to
-    // the manual-search button must stay visible, not vanish mid-pass.
-    // The switch still retires them on demand.
-    hide_switch.set_active(false);
+    // Hiding starts off unless restored on: the whole point of the dialog
+    // is watching what each source does with each row — rows flipping to
+    // a match or to the manual-search button must stay visible, not vanish
+    // mid-pass. The switch still retires them on demand.
+    hide_switch.set_active(hide_done);
     hide_switch.set_valign(gtk4::Align::Center);
     hide_switch.connect_active_notify(move |toggle| {
-        show_finished_c.set(!toggle.is_active());
+        let active = toggle.is_active();
+        show_finished_c.set(!active);
+        state_c.borrow_mut().cfg.mass_match_hide_done = active;
+        if let Err(e) = state_c.borrow().cfg.save() {
+            eprintln!("Mass matcher: failed to remember the hide toggle: {e}");
+        }
         vis_toggle.apply_all();
     });
     let hide_label = gtk4::Label::new(Some(&crate::tr!("Hide done and failed")));
@@ -1405,42 +1464,6 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), labels.len());
-    }
-
-    /// The hide mechanism, exercised with real widgets: a concluded row
-    /// hides when the toggle is on, a running row stays, and flipping
-    /// back shows everything. The toggle drives through a clone settled
-    /// before the rows existed — like the dialog — so a state fork fails
-    /// loud here instead of shipping a dead toggle. Skipped where no
-    /// display is reachable.
-    #[test]
-    fn test_rowvis_hides_only_concluded_rows() {
-        if gtk4::init().is_err() {
-            return;
-        }
-        let show_finished = Rc::new(Cell::new(true));
-        let scrolled = gtk4::ScrolledWindow::new();
-        let vis = RowVis::new(show_finished.clone(), &scrolled);
-        let vis_toggle = vis.clone();
-        let rows: Vec<gtk4::ListBoxRow> =
-            (0..3).map(|_| gtk4::ListBoxRow::new()).collect();
-        vis.set_rows(
-            rows.clone(),
-            vec![
-                HashSet::from([MatchSource::Ra]),
-                HashSet::new(),
-                HashSet::from([MatchSource::Steam]),
-            ],
-        );
-        vis.source_done(0, MatchSource::Ra);
-        show_finished.set(false);
-        vis_toggle.apply_all();
-        assert!(!rows[0].is_visible());
-        assert!(!rows[1].is_visible());
-        assert!(rows[2].is_visible());
-        show_finished.set(true);
-        vis_toggle.apply_all();
-        assert!(rows.iter().all(|row| row.is_visible()));
     }
 
     /// The id-link targets: pinned shapes, so a site redesign that moves

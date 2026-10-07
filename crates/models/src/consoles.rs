@@ -1,6 +1,6 @@
 use crate::kind::GameKind;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ConsoleDef {
     pub id: &'static str,
     pub display_name: &'static str,
@@ -390,7 +390,7 @@ pub fn find_console(id: &str) -> Option<&'static ConsoleDef> {
 /// emulator-library discovery, no RA). `Unknown` keeps forward
 /// compatibility with ids no known source issued (title ids stored as
 /// the platform on legacy rows): they render raw, exactly as before.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Platform {
     /// A console-table entry (ROM-library and emulator-library consoles).
     Console(&'static ConsoleDef),
@@ -434,6 +434,11 @@ impl Platform {
         }
     }
 
+    /// Whether this platform carries no id at all (the empty unknown).
+    pub fn is_empty(&self) -> bool {
+        self.id().is_empty()
+    }
+
     /// The name shown anywhere a platform renders: the console's full
     /// name, the fixed friendly name, or the raw id. No lookup involved.
     pub fn display_name(&self) -> &str {
@@ -446,6 +451,72 @@ impl Platform {
             Self::ThreeDS => "Nintendo 3DS",
             Self::Unknown(raw) => raw,
         }
+    }
+
+    /// Whether RetroAchievements covers this platform at all. Unlike
+    /// [`console_has_ra`], this never scans: the answer rode in at parse
+    /// time.
+    pub fn has_ra(&self) -> bool {
+        matches!(self, Self::Console(def) if def.ra_console_id != 0)
+    }
+
+    /// The console-table entry, if this platform is a table console.
+    /// Unlike [`find_console`], this never scans.
+    pub fn find_console_def(&self) -> Option<&'static ConsoleDef> {
+        match self {
+            Self::Console(def) => Some(def),
+            _ => None,
+        }
+    }
+}
+
+impl Default for Platform {
+    /// The empty id parses like every other unknown one.
+    fn default() -> Self {
+        Self::Unknown(String::new())
+    }
+}
+
+impl From<&str> for Platform {
+    /// Parse at the boundary: `"switch".into()` is `parse` spelled for
+    /// struct literals and test fixtures.
+    fn from(platform_id: &str) -> Self {
+        Platform::parse(platform_id)
+    }
+}
+
+impl std::str::FromStr for Platform {
+    /// Infallible: unknown ids ride through as [`Platform::Unknown`].
+    type Err = std::convert::Infallible;
+
+    fn from_str(platform_id: &str) -> Result<Self, Self::Err> {
+        Ok(Platform::parse(platform_id))
+    }
+}
+
+/// String comparisons keep working through the id, so call sites read
+/// unchanged while the value stays parsed: `platform == "switch"`.
+impl PartialEq<&str> for Platform {
+    fn eq(&self, other: &&str) -> bool {
+        self.id() == *other
+    }
+}
+
+impl PartialEq<Platform> for &str {
+    fn eq(&self, other: &Platform) -> bool {
+        *self == other.id()
+    }
+}
+
+impl PartialEq<String> for Platform {
+    fn eq(&self, other: &String) -> bool {
+        self.id() == other
+    }
+}
+
+impl PartialEq<Platform> for String {
+    fn eq(&self, other: &Platform) -> bool {
+        self.as_str() == other.id()
     }
 }
 
@@ -471,7 +542,7 @@ pub fn is_compressed_switch_extension(ext: &str) -> bool {
 /// with an `ra_console_id` of 0 (Nintendo Switch, and other ESDE-sourced
 /// entries without an RA mapping) must never be offered RA matching.
 pub fn console_has_ra(platform_id: &str) -> bool {
-    find_console(platform_id).is_some_and(|def| def.ra_console_id != 0)
+    Platform::parse(platform_id).has_ra()
 }
 
 #[cfg(test)]

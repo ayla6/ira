@@ -97,7 +97,7 @@ impl AutoCriterion {
                 values_overlap(&self.values, ctx.publishers.get(&game.db_id))
             }
             AutoDimension::Console => {
-                let console = crate::platform_display_name(&game.platform_id);
+                let console = game.platform_id.display_name();
                 self.values.iter().any(|v| {
                     // Goldberg games hide inside the Wine/Linux
                     // platforms: the value names the trophy source.
@@ -108,7 +108,7 @@ impl AutoCriterion {
                     // before the friendly names ("Wine" still matches
                     // wine games now shown as Windows).
                     v.eq_ignore_ascii_case(console.trim())
-                        || v.eq_ignore_ascii_case(&game.platform_id)
+                        || v.eq_ignore_ascii_case(game.platform_id.id())
                 })
             }
             // ISO dates and bare years compare correctly as strings —
@@ -242,12 +242,13 @@ impl AutoGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::consoles::Platform;
     use crate::find_console;
 
     fn game() -> Game {
         Game {
             db_id: 7,
-            platform_id: "snes".to_string(),
+            platform_id: Platform::parse("snes"),
             name: "Chrono Trigger".to_string(),
             release_date: "1995-03-11".to_string(),
             release_timestamp: 794_870_400,
@@ -331,7 +332,7 @@ mod tests {
             ("gog", "GOG"),
         ] {
             let mut g = game();
-            g.platform_id = platform.to_string();
+            g.platform_id = Platform::parse(platform);
             let rule = AutoCriterion {
                 dimension: AutoDimension::Console,
                 values: vec![value.to_string()],
@@ -347,7 +348,7 @@ mod tests {
         // matching wine games now shown as Windows.
         let ctx = AutoGroupContext::default();
         let mut g = game();
-        g.platform_id = "wine".to_string();
+        g.platform_id = Platform::Wine;
         let rule = AutoCriterion {
             dimension: AutoDimension::Console,
             values: vec!["Wine".to_string()],
@@ -367,14 +368,14 @@ mod tests {
             ..Default::default()
         };
         let mut goldberg = game();
-        goldberg.platform_id = "wine".to_string();
+        goldberg.platform_id = Platform::Wine;
         goldberg.trophy_source = TrophySource::Gse;
         assert!(rule.matches(&goldberg, &ctx));
         let mut plain = game();
-        plain.platform_id = "wine".to_string();
+        plain.platform_id = Platform::Wine;
         assert!(!rule.matches(&plain, &ctx));
         let mut native = game();
-        native.platform_id = "steam".to_string();
+        native.platform_id = Platform::Steam;
         native.trophy_source = TrophySource::SteamNative;
         assert!(!rule.matches(&native, &ctx));
     }

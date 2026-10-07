@@ -123,7 +123,7 @@ fn open_settings_dialog(
         state
             .games
             .iter()
-            .map(|game| game.platform_id.clone())
+            .map(|game| game.platform_id.id().to_string())
             .collect()
     };
     let params = SettingsDialogParams {

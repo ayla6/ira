@@ -1235,7 +1235,7 @@ mod tests {
             shadps4_version: "/new/shadps4".to_string(),
             ra_core: "snes9x".to_string(),
             emulator_override: "/new/emu".to_string(),
-            platform_id: "NEWPID".to_string(),
+            platform_id: ira_models::Platform::parse("NEWPID"),
             trophy_source: ira_models::TrophySource::Ra,
             sgdb_id: "12345".to_string(),
             rom_path: "/new/rom.sfc".to_string(),
@@ -1246,7 +1246,7 @@ mod tests {
         };
 
         let enriched = Game {
-            platform_id: "OLDPID".to_string(),
+            platform_id: ira_models::Platform::parse("OLDPID"),
             trophy_source: ira_models::TrophySource::SteamNative,
             logo_position: LogoPosition::BottomLeft.to_string(),
             logo_size: 50,

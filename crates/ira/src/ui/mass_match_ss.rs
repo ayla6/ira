@@ -180,7 +180,7 @@ pub(super) fn attach_ss_actions(
     dialog: &gtk4::Widget,
     missed: bool,
 ) {
-    let console = ira_models::scraper_console_id(game.kind, &game.platform_id);
+    let console = ira_models::scraper_console_id(game.kind, game.platform_id.id());
     if missed {
         // Already tombstoned by an earlier pass: terminal from the start.
         show_unmatched(
@@ -233,7 +233,7 @@ pub(super) fn start_ss_batch_matching(
             if missed.contains(&g.db_id) {
                 continue;
             }
-            show_unmatched(&ss_box, state, g.db_id, &g.name, &g.platform_id, dialog);
+            show_unmatched(&ss_box, state, g.db_id, &g.name, g.platform_id.id(), dialog);
             vis.source_done(i, super::mass_match_dialog::MatchSource::ScreenScraper);
         }
         return;
@@ -250,7 +250,7 @@ pub(super) fn start_ss_batch_matching(
             if missed.contains(&g.db_id) {
                 continue;
             }
-            show_background_match(&ss_box, state, g.db_id, &g.name, &g.platform_id, dialog);
+            show_background_match(&ss_box, state, g.db_id, &g.name, g.platform_id.id(), dialog);
             // The background job owns the answer from here: the row is
             // done as far as this dialog is concerned.
             vis.source_done(i, super::mass_match_dialog::MatchSource::ScreenScraper);
@@ -404,7 +404,7 @@ pub(super) fn start_ss_batch_matching(
                         .games
                         .iter()
                         .find(|g| g.db_id == item.db_id)
-                        .map(|g| g.platform_id.clone())
+                        .map(|g| g.platform_id.id().to_string())
                         .unwrap_or_default();
                     show_unmatched(
                         &ss_box, &state, item.db_id, &item.name, &platform_id, &dialog,
@@ -448,7 +448,7 @@ fn resolve(
         }
     };
     // PS3/PS4 games carry a native product code here, not a console.
-    let platform_id = ira_models::scraper_console_id(entry.kind, &entry.platform_id);
+    let platform_id = ira_models::scraper_console_id(entry.kind, entry.platform_id.id());
     // PC games search ScreenScraper's own Windows/Linux systems and fall
     // back to a cross-platform lookup diffed against their Steam data.
     if entry.kind.is_pc() {
@@ -1375,7 +1375,7 @@ fn apply_hit(
         .games
         .iter()
         .find(|g| g.db_id == hit.db_id)
-        .map(|g| ira_models::scraper_console_id(g.kind, &g.platform_id))
+        .map(|g| ira_models::scraper_console_id(g.kind, g.platform_id.id()))
         .unwrap_or_default();
     match hit.matched {
         Some(SsOutcome::Hit(game)) => {
@@ -1499,7 +1499,7 @@ mod tests {
                     continue;
                 }
             };
-            let console = ira_models::scraper_console_id(entry.kind, &entry.platform_id);
+            let console = ira_models::scraper_console_id(entry.kind, entry.platform_id.id());
             let system = ira_models::screenscraper_system_id(&console);
             let abs = cfg
                 .resolve_rom_path(&console, &entry.rom_path)

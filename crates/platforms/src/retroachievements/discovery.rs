@@ -557,7 +557,7 @@ fn build_ra_games_for_console(
                                 native_id: app_id.clone(),
                                 kind: console.def.game_kind(),
                                 trophy_source,
-                                platform_id: console.def.id.to_string(),
+                                platform_id: ira_models::Platform::parse(console.def.id),
                                 db_id: id,
                                 name: title.clone(),
                                 name_lower: title.to_lowercase(),

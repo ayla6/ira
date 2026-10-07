@@ -262,7 +262,7 @@ pub(super) fn setup_open_gog_status_action(
             "{}/emulator_saves/nge/{}/{}",
             save_dir,
             ira_parser::GALAXY_ID,
-            game.platform_id
+            game.platform_id.id()
         );
         open_folder(&path);
     });

@@ -250,7 +250,7 @@ fn maybe_show_disc_picker(
             s.db.clone(),
             s.cfg.clone(),
             game.kind,
-            game.platform_id.clone(),
+            game.platform_id.id().to_string(),
             game.emulator_override.clone(),
             game.name.clone(),
         )
@@ -343,7 +343,7 @@ fn launch_game_with_disc(
                     g.shadps4_version.clone(),
                     g.db_id,
                     g.steam_api_id().to_string(),
-                    g.platform_id.clone(),
+                    g.platform_id.id().to_string(),
                     g.ra_core.clone(),
                     g.emulator_override.clone(),
                     g.trophy_source,
@@ -653,7 +653,7 @@ pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), Stri
                     g.kind,
                     g.name.clone(),
                     g.shadps4_version.clone(),
-                    g.platform_id.clone(),
+                    g.platform_id.id().to_string(),
                     g.emulator_override.clone(),
                     g.trophy_source,
                 )

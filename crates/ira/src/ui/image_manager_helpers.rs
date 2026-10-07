@@ -225,7 +225,7 @@ pub(super) fn native_icon_bytes(
     let game_root_owned;
     let game_root: &std::path::Path =
         if matches!(
-            (game.kind, game.platform_id.as_str()),
+            (game.kind, game.platform_id.id()),
             (ira_models::GameKind::Retro, "nds")
                 | (ira_models::GameKind::Switch, _)
         ) {
@@ -237,7 +237,7 @@ pub(super) fn native_icon_bytes(
                 // directories, so they resolve even when the file sits
                 // outside Ira's ROM roots.
                 game_root_owned = cfg
-                    .resolve_rom_path(&game.platform_id, &game.game_path)
+                    .resolve_rom_path(game.platform_id.id(), &game.game_path)
                     .or_else(|| {
                         ira_platforms::switch::resolve_rom(&game.game_path, switch_executable)
                     })?;
@@ -250,7 +250,7 @@ pub(super) fn native_icon_bytes(
         ira_models::GameKind::Retro if game.platform_id == "nds" => decode_nds_icon(game_root),
         ira_models::GameKind::Switch => decode_switch_icon(game_root, switch_executable),
         ira_models::GameKind::ThreeDS => decode_smdh_icon(game_root).or_else(|| {
-            ira_platforms::azahar::find_title_path_for(azahar_executable, &game.platform_id)
+            ira_platforms::azahar::find_title_path_for(azahar_executable, game.platform_id.id())
                 .and_then(|path| decode_smdh_icon(&path))
         }),
         ira_models::GameKind::Ps4 => {
@@ -261,7 +261,7 @@ pub(super) fn native_icon_bytes(
             if game_root.join("meta/iconTex.tga").is_file() {
                 import_image_bytes(&game_root.join("meta").join("iconTex.tga"))
             } else {
-                ira_platforms::cemu::find_title_dir(cemu_executable, &game.platform_id)
+                ira_platforms::cemu::find_title_dir(cemu_executable, game.platform_id.id())
                     .map(|dir| dir.join("meta").join("iconTex.tga"))
                     .filter(|icon| icon.is_file())
                     .and_then(|icon| import_image_bytes(&icon))
@@ -362,7 +362,7 @@ mod tests {
     fn nds_game(game_path: &str, db_id: i64) -> Game {
         Game {
             kind: GameKind::Retro,
-            platform_id: "nds".to_string(),
+            platform_id: ira_models::Platform::parse("nds"),
             game_path: game_path.to_string(),
             db_id,
             ..Default::default()

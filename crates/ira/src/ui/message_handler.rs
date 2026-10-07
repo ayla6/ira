@@ -210,7 +210,7 @@ fn handle_game_started(state: &SharedState, db_id: i64) {
                 game.trophy_source,
                 &game.app_id,
                 "",
-                &game.platform_id,
+                game.platform_id.id(),
             );
             watcher.watch(&entry, &watch_file, &game.achievements);
         }
@@ -340,7 +340,7 @@ fn handle_shadps4_playtime_changed(state: &SharedState) {
                     let mut updated_ids = Vec::new();
                     for g in s.games.iter_mut() {
                         if g.kind == ira_models::GameKind::Ps4 {
-                            let serial = &g.platform_id;
+                            let serial = g.platform_id.id();
                             if let Some(time_str) = play_times.get(serial) {
                                 let new_playtime = ira_platforms::ps4::parse_playtime(time_str);
                                 if (g.playtime - new_playtime).abs() > 0.001 {
@@ -386,7 +386,7 @@ fn handle_rpcs3_playtime_changed(state: &SharedState) {
                     let mut updated_ids = Vec::new();
                     for g in s.games.iter_mut() {
                         if g.kind == ira_models::GameKind::Ps3 {
-                            let serial = &g.platform_id;
+                            let serial = g.platform_id.id();
                             let new_playtime = persistent
                                 .playtime_ms
                                 .get(serial)

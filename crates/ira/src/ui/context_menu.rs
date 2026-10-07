@@ -57,7 +57,7 @@ fn resolve_game_locations(
             return p.to_string();
         }
         s.cfg
-            .resolve_rom_path(&game.platform_id, p)
+            .resolve_rom_path(game.platform_id.id(), p)
             .map(|resolved| resolved.to_string_lossy().into_owned())
             .unwrap_or_else(|| p.to_string())
     };

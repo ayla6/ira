@@ -51,7 +51,7 @@ fn main() {
         let root: &Path = if Path::new(&e.rom_path).is_absolute() {
             Path::new(&e.rom_path)
         } else {
-            match cfg.resolve_rom_path(&e.platform_id, &e.rom_path) {
+            match cfg.resolve_rom_path(e.platform_id.id(), &e.rom_path) {
                 Some(r) => {
                     resolved = r;
                     &resolved

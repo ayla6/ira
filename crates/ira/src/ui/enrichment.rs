@@ -225,7 +225,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
     // PC games: even with no ScreenScraper match, the store synopsis and
     // the company cache's ids can fill the metadata record.
     if game.kind.is_pc() {
-        if let Ok(app_id) = game.platform_id.parse::<u32>() {
+        if let Ok(app_id) = game.platform_id.id().parse::<u32>() {
             phases.enter(2, &crate::tr!("Fetching store metadata…"));
             garnish_pc_ss_metadata(&db, &steam, game.db_id, app_id);
         }

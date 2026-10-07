@@ -105,7 +105,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
             trophy_source_for_reload,
             steam_id,
             game_id,
-            &platform_id_for_reload,
+            platform_id_for_reload.id(),
         );
         let sender = sender.clone();
         let save_dir = save_dir.clone();
@@ -174,7 +174,7 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                     state,
                     game.trophy_source,
                     &game.app_id,
-                    &game.platform_id,
+                    game.platform_id.id(),
                     ach,
                     &reload,
                 ))
@@ -220,14 +220,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                     let mclick = gtk4::GestureClick::new();
                     mclick.set_button(3);
                     mclick.connect_pressed(move |_, _, _, _| {
-                        super::matching::confirm_mark_unlocked(
-                            &state_inner,
-                            trophy_source_inner,
-                            &app_id_inner,
-                            &platform_id_inner,
-                            &ach_clone,
-                            reload_inner.clone(),
-                        );
+                            super::matching::confirm_mark_unlocked(
+                                &state_inner,
+                                trophy_source_inner,
+                                &app_id_inner,
+                                platform_id_inner.id(),
+                                &ach_clone,
+                                reload_inner.clone(),
+                            );
                     });
                     ach_row.add_controller(mclick);
                 }

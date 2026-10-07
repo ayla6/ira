@@ -75,7 +75,7 @@ pub(super) fn persist_ra_match(
         enrich_game_async(EnrichGameParams {
             app_id: g.app_id.clone(),
             trophy_source: g.trophy_source,
-            platform_id: g.platform_id.clone(),
+            platform_id: g.platform_id.id().to_string(),
             db_id: g.db_id,
             title: g.name,
             steam,

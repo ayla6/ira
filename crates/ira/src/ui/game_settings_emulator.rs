@@ -140,7 +140,7 @@ pub(super) fn add_emulator_dropdown_section(
         ira_models::GameKind::ThreeDS => "3ds",
         ira_models::GameKind::WiiU => "wiiu",
         ira_models::GameKind::Ps3 => "ps3",
-        _ => &game.platform_id,
+        _ => game.platform_id.id(),
     };
     let emulators = ira_platforms::emulator_detect::detect_emulators(console_id);
     let cores = ira_platforms::emulator_detect::detect_ra_cores_for_console(console_id);

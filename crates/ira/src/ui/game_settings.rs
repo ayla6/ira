@@ -40,7 +40,7 @@ fn build_ra_section(
     // Platforms without RA support (Nintendo Switch) get no match UI at
     // all; already-linked games keep their Unmatch row wherever they run.
     if game.trophy_source == ira_models::TrophySource::Empty
-        && !ira_models::console_has_ra(&game.platform_id)
+        && !game.platform_id.has_ra()
     {
         return ra_group;
     }
@@ -95,7 +95,7 @@ fn build_ra_section(
         let sc = state.clone();
         let db_id = game.db_id;
         let gn = game.name.clone();
-        let pid = game.platform_id.clone();
+        let pid = game.platform_id.id().to_string();
         let pw = Downgrade::downgrade(win);
         match_btn.connect_clicked(move |_| {
             let Some(pw) = pw.upgrade() else {
@@ -180,9 +180,9 @@ fn game_file_path_for_display(game: &Game) -> String {
                 .components()
                 .next()
                 .and_then(|component| component.as_os_str().to_str())
-                != Some(game.platform_id.as_str())
+                != Some(game.platform_id.id())
         {
-            return format!("{}/{}", game.platform_id, game.game_path);
+            return format!("{}/{}", game.platform_id.id(), game.game_path);
         }
     }
     game.game_path.clone()
@@ -761,7 +761,7 @@ mod tests {
     fn test_game_file_path_for_display_prefixes_retro_console() {
         let game = Game {
             kind: ira_models::GameKind::Retro,
-            platform_id: "saturn".to_string(),
+            platform_id: ira_models::Platform::parse("saturn"),
             game_path: "Soul Hackers/disc1.chd".to_string(),
             ..Default::default()
         };
@@ -776,7 +776,7 @@ mod tests {
     fn test_game_file_path_for_display_keeps_absolute_path() {
         let game = Game {
             kind: ira_models::GameKind::Retro,
-            platform_id: "saturn".to_string(),
+            platform_id: ira_models::Platform::parse("saturn"),
             game_path: "/roms/saturn/disc1.chd".to_string(),
             ..Default::default()
         };
@@ -788,7 +788,7 @@ mod tests {
     fn test_game_file_path_for_display_prefixes_switch() {
         let game = Game {
             kind: ira_models::GameKind::Switch,
-            platform_id: "switch".to_string(),
+            platform_id: ira_models::Platform::parse("switch"),
             game_path: "Pikmin™ 1 [0100AA80194B0000][v0][Base].nsp".to_string(),
             ..Default::default()
         };

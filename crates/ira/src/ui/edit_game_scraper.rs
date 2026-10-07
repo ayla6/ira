@@ -89,7 +89,7 @@ pub(super) fn build_scraper_section(
     // Every game the SS pass can touch gets the rows: consoles on mapped
     // platforms, and PC games whose diff search fills them too. PS3/PS4
     // games carry a product code here, not a console.
-    let console = ira_models::scraper_console_id(game.kind, &game.platform_id);
+    let console = ira_models::scraper_console_id(game.kind, game.platform_id.id());
     let eligible =
         game.kind.is_pc() || ira_models::screenscraper_system_id(&console).is_some();
     if metadata.is_none() && !eligible {
@@ -1032,7 +1032,7 @@ fn search_row(
     // A Steam-backed PC game can run the whole automated matching —
     // system search, cross-platform diff, garnish — from here, without
     // waiting for the next mass-matcher opening.
-    let auto_matchable = game.kind.is_pc() && game.platform_id.parse::<u32>().is_ok();
+    let auto_matchable = game.kind.is_pc() && game.platform_id.id().parse::<u32>().is_ok();
     row.set_subtitle(&crate::tr!("Not matched"));
 
     if auto_matchable {
@@ -1064,7 +1064,7 @@ fn search_row(
     {
         let state = state.clone();
         let name = game.name.clone();
-        let platform_id = ira_models::scraper_console_id(game.kind, &game.platform_id);
+        let platform_id = ira_models::scraper_console_id(game.kind, game.platform_id.id());
         let db_id = game.db_id;
         let win = win.clone();
         let slot = slot.clone();

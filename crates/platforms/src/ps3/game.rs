@@ -51,7 +51,7 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
         app_id: npwr_id.clone(),
         native_id: serial.clone(),
         kind: ira_models::GameKind::Ps3,
-        platform_id: ira_models::GameKind::Ps3.as_str().to_string(),
+        platform_id: ira_models::Platform::parse(ira_models::GameKind::Ps3.as_str()),
         db_id,
         name: if meta.title.is_empty() {
             game.title.clone()

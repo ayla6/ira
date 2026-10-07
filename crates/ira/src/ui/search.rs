@@ -60,7 +60,11 @@ impl SearchQuery {
         if self.is_empty() {
             return true;
         }
-        let fields = [&game.name, &game.sort_title, &game.platform_id];
+        let fields = [
+            game.name.as_str(),
+            game.sort_title.as_str(),
+            game.platform_id.id(),
+        ];
         if !self.words.is_empty() {
             let spaced: Vec<String> = fields.iter().map(|f| normalize_name(f)).collect();
             let joined: Vec<String> = spaced.iter().map(|h| joined_form(h)).collect();
@@ -237,7 +241,7 @@ mod tests {
             name: "Halo".to_string(),
             name_lower: "halo".to_string(),
             sort_title: "Halo 2".to_string(),
-            platform_id: "xbox".to_string(),
+            platform_id: ira_models::Platform::parse("xbox"),
             ..Default::default()
         };
         assert!(SearchQuery::parse("2").matches(&g));

@@ -54,7 +54,7 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
 
     let Some(path) = profile_path else {
         // The console's own layout is what the game inherits at launch.
-        let parent_profile = cfg.console(&game.platform_id).controller_profile.clone();
+        let parent_profile = cfg.console(game.platform_id.id()).controller_profile.clone();
         let parent = if parent_profile.is_empty() {
             None
         } else {
@@ -245,7 +245,7 @@ fn show_editor(
     let scope_id = if !game.native_id.is_empty() {
         game.native_id.clone()
     } else {
-        game.platform_id.clone()
+        game.platform_id.id().to_string()
     };
     super::input_profile_editor::show_input_profile_editor(
         window,
@@ -386,7 +386,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     let profile_scope_id = if !profile_game.native_id.is_empty() {
         profile_game.native_id.clone()
     } else {
-        profile_game.platform_id.clone()
+        profile_game.platform_id.id().to_string()
     };
     let current_path = params.launch.input_profile.as_deref().map(PathBuf::from);
     let (labels, paths, selected) =

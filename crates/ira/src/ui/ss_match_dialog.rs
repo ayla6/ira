@@ -118,7 +118,7 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
 fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
     let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten()?;
     // PS3/PS4 games carry a product code here, not a console.
-    let console = ira_models::scraper_console_id(entry.kind, &entry.platform_id);
+    let console = ira_models::scraper_console_id(entry.kind, entry.platform_id.id());
     // PC titles come from Steam or the user; switch and the other
     // consoles whose internal titles are authoritative search from the
     // title first. Every other console searches from the ROM file name.
@@ -142,7 +142,7 @@ pub(super) fn entry_title_trusted(state: &SharedState, db_id: i64) -> Option<boo
         .flatten()?
         .title_trusted;
     let platform_id = &s.games.iter().find(|g| g.db_id == db_id)?.platform_id;
-    Some(db_title_trusted || ira_models::title_from_trusted_source(platform_id))
+    Some(db_title_trusted || ira_models::title_from_trusted_source(platform_id.id()))
 }
 
 fn apply_ss_match(

@@ -285,7 +285,7 @@ impl BackgroundCtx {
                 (
                     g.app_id.clone(),
                     g.trophy_source,
-                    g.platform_id.clone(),
+                    g.platform_id.id().to_string(),
                     g.db_id,
                     g.name.clone(),
                     g.clone(),
@@ -300,7 +300,7 @@ impl BackgroundCtx {
                     && g.trophy_source == ira_models::TrophySource::Ra
                     && !g.app_id.is_empty()
             })
-            .map(|g| (g.db_id, g.app_id.clone(), g.platform_id.clone()))
+            .map(|g| (g.db_id, g.app_id.clone(), g.platform_id.id().to_string()))
             .collect::<Vec<_>>();
         let sgdb_games = s
             .games
@@ -795,7 +795,7 @@ pub fn switch_to_game(state: &SharedState, db_id: i64, variant_id: Option<i64>) 
             enrich_game_async(crate::ui::enrichment::EnrichGameParams {
                 app_id: game.app_id.clone(),
                 trophy_source: game.trophy_source,
-                platform_id: game.platform_id.clone(),
+                platform_id: game.platform_id.id().to_string(),
                 db_id: game.db_id,
                 title: game.name,
                 steam,

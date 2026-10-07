@@ -1286,10 +1286,10 @@ fn enrich_added_game(
     game: &Game,
     progress: crate::ui::enrichment::EnrichProgress,
 ) {
-    crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
+        crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
         app_id: game.app_id.clone(),
         trophy_source: game.trophy_source,
-        platform_id: game.platform_id.clone(),
+        platform_id: game.platform_id.id().to_string(),
         db_id: game.db_id,
         // load_and_publish_game already set this exact name on the game.
         title: game.name.clone(),

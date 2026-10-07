@@ -30,7 +30,7 @@ pub(super) fn attach_ra_actions(
         ra_box.append(&status_label(&crate::tr!("Searching…"), CSS_DIM_LABEL));
     } else {
         // Nothing will run for this row: terminal from the start.
-        show_unmatched(ra_box, state, game.db_id, &game.name, &game.platform_id, dialog);
+        show_unmatched(ra_box, state, game.db_id, &game.name, game.platform_id.id(), dialog);
     }
 }
 
@@ -208,7 +208,7 @@ fn resolve(
     item: &BatchItem,
 ) -> Option<(String, String)> {
     let entry = ira_db::find_by_db_id(db, item.db_id).ok().flatten()?;
-    let console_id = ira_models::find_console(&entry.platform_id)?.ra_console_id;
+    let console_id = entry.platform_id.find_console_def()?.ra_console_id;
     if console_id == 0 {
         return None;
     }
@@ -240,7 +240,7 @@ fn apply_hit(
         .games
         .iter()
         .find(|g| g.db_id == hit.db_id)
-        .map(|g| g.platform_id.clone())
+        .map(|g| g.platform_id.id().to_string())
         .unwrap_or_default();
     match hit.matched {
         Some((id, title)) => {

@@ -84,7 +84,7 @@ fn needs_ra_match(g: &Game) -> bool {
     g.kind == ira_models::GameKind::Retro
         && g.trophy_source == ira_models::TrophySource::Empty
         && !g.manual_unmatch
-        && ira_models::console_has_ra(&g.platform_id)
+        && g.platform_id.has_ra()
 }
 
 /// Games the ScreenScraper matcher can enrich: console games on platforms
@@ -97,7 +97,7 @@ fn needs_ss_match(g: &Game) -> bool {
     if g.manual_unmatch || !g.screenscraper_id.is_empty() || !has_searchable_name(&g.name) {
         return false;
     }
-    let console = ira_models::scraper_console_id(g.kind, &g.platform_id);
+    let console = ira_models::scraper_console_id(g.kind, g.platform_id.id());
     match g.kind {
         GameKind::Wine | GameKind::Linux | GameKind::Steam => true,
         _ => {
@@ -1147,7 +1147,7 @@ fn create_match_row(
     title.set_tooltip_text(Some(&game.name));
     header.append(&title);
     let platform =
-        gtk4::Label::new(Some(&ira_models::platform_display_name(&game.platform_id)));
+        gtk4::Label::new(Some(game.platform_id.display_name()));
     platform.set_halign(gtk4::Align::End);
     platform.set_valign(gtk4::Align::BaselineCenter);
     platform.add_css_class(CSS_DIM_LABEL);
@@ -1304,7 +1304,7 @@ mod tests {
             );
             let mut ss = game(ira_models::GameKind::Switch);
             ss.name = name.to_string();
-            ss.platform_id = "switch".to_string();
+            ss.platform_id = ira_models::Platform::parse("switch");
             assert!(!needs_ss_match(&ss), "ss must not search {name:?}");
         }
         assert!(has_searchable_name("Twilight Syndrome: Saikai"));
@@ -1313,7 +1313,7 @@ mod tests {
     #[test]
     fn test_switch_is_never_ra_matchable() {
         let mut g = game(ira_models::GameKind::Switch);
-        g.platform_id = "switch".to_string();
+        g.platform_id = ira_models::Platform::parse("switch");
         assert!(!needs_ra_match(&g), "the Switch has no RA support at all");
     }
 
@@ -1347,14 +1347,14 @@ mod tests {
         // ScreenScraper candidate.
         let mut g = game(ira_models::GameKind::ThreeDS);
         g.name = "Kid Icarus: Uprising".to_string();
-        g.platform_id = "3ds".to_string();
+        g.platform_id = ira_models::Platform::parse("3ds");
         assert!(needs_ss_match(&g));
         // The live shape: a 3DS game carries its title id as the platform
         // id and usually an SGDB id already — neither may keep the SS pass
         // away, or the game silently never gets searched.
         let mut live = game(ira_models::GameKind::ThreeDS);
         live.name = "The Legend of Zelda: Ocarina of Time 3D".to_string();
-        live.platform_id = "0004000000038800".to_string();
+        live.platform_id = ira_models::Platform::parse("0004000000038800");
         live.sgdb_id = "37340".to_string();
         assert!(needs_ss_match(&live));
         // Once metadata is on record, the pass leaves it alone.
@@ -1365,7 +1365,7 @@ mod tests {
         assert!(!needs_ss_match(&g));
         // Console kinds on platforms ScreenScraper has no system for.
         let mut unmapped = game(ira_models::GameKind::Switch);
-        unmapped.platform_id = "madeup".to_string();
+        unmapped.platform_id = ira_models::Platform::parse("madeup");
         assert!(!needs_ss_match(&unmapped));
     }
 
@@ -1395,11 +1395,11 @@ mod tests {
         // the kind is what names the console.
         let mut g = game(ira_models::GameKind::Ps4);
         g.name = "Bloodborne".to_string();
-        g.platform_id = "CUSA12112".to_string();
+        g.platform_id = ira_models::Platform::parse("CUSA12112");
         assert!(needs_ss_match(&g));
         let mut g = game(ira_models::GameKind::Ps3);
         g.name = "Demon's Souls".to_string();
-        g.platform_id = "NPUB30698".to_string();
+        g.platform_id = ira_models::Platform::parse("NPUB30698");
         assert!(needs_ss_match(&g));
     }
 
@@ -1425,7 +1425,7 @@ mod tests {
     fn test_match_sources_for_unmatched_retro_game() {
         let mut g = game(ira_models::GameKind::Retro);
         g.name = "Chrono Trigger".to_string();
-        g.platform_id = "snes".to_string();
+        g.platform_id = ira_models::Platform::parse("snes");
         let sources = match_sources_for(&g);
         assert!(sources.contains(&MatchSource::Sgdb));
         assert!(sources.contains(&MatchSource::ScreenScraper));

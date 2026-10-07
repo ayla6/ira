@@ -348,7 +348,7 @@ fn spawn_add_worker(params: AddWorkerParams) {
                             crate::ui::enrichment::EnrichGameParams {
                                 app_id: game.app_id.clone(),
                                 trophy_source: game.trophy_source,
-                                platform_id: game.platform_id.clone(),
+                                platform_id: game.platform_id.id().to_string(),
                                 db_id: game.db_id,
                                 title: g_name,
                                 steam: steam_c,

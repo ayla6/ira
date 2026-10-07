@@ -1,4 +1,5 @@
 use super::asset_type::LogoPosition;
+use super::consoles::Platform;
 use super::kind::{GameKind, TrophySource};
 
 /// The ROM's hashes, keyed by what they hash: `md5` is the whole-file
@@ -42,10 +43,11 @@ pub struct GameEntry {
     pub kind: GameKind,
     pub trophy_source: TrophySource,
     pub steam_id: String,
-    /// The system scope: console id (`psx`, `switch`, `3ds`…​) for
-    /// emulator rows, the kind id (`wine`, `steam`…​) for PC rows. Never
-    /// a game id — product ids and title ids live in `native_id`.
-    pub platform_id: String,
+    /// The system scope as a parsed [`Platform`]: console id (`psx`,
+    /// `switch`…​) for emulator rows, the kind id (`wine`, `steam`…​) for
+    /// PC rows. Never a game id — product ids and title ids live in
+    /// `native_id`.
+    pub platform_id: Platform,
     pub title: String,
     pub hidden: bool,
     /// Achievement identity: the RetroAchievements game id once matched,
@@ -134,7 +136,7 @@ impl Default for GameEntry {
             kind: GameKind::default(),
             trophy_source: TrophySource::default(),
             steam_id: String::new(),
-            platform_id: String::new(),
+            platform_id: Platform::default(),
             title: String::new(),
             hidden: false,
             trophy_id: String::new(),
@@ -200,7 +202,7 @@ impl GameEntry {
             trophy_source,
             steam_id: steam_id.to_string(),
             native_id: native_id.to_string(),
-            platform_id: platform_id.to_string(),
+            platform_id: Platform::parse(platform_id),
             ..Default::default()
         }
     }
@@ -353,7 +355,7 @@ mod tests {
             steam_id: "steam456".to_string(),
             kind: GameKind::Steam,
             trophy_source: TrophySource::Gse,
-            platform_id: "plat1".to_string(),
+            platform_id: Platform::parse("plat1"),
             db_id: 99,
             name: "Test Game".to_string(),
             hidden: true,

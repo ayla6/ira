@@ -639,7 +639,7 @@ fn rom_entry_has_file(cfg: &Config, entry: &GameEntry, discs: &[ira_models::Game
 
     let mut checked_path = false;
     for path in paths {
-        let Some(path) = cfg.resolve_rom_path(&entry.platform_id, path) else {
+        let Some(path) = cfg.resolve_rom_path(entry.platform_id.id(), path) else {
             continue;
         };
         checked_path = true;
@@ -870,7 +870,7 @@ fn scan_console_games<D>(
 fn load_console_entry_map(
     db: &db::DbConn,
     kind: GameKind,
-) -> Option<std::collections::HashMap<(String, String), GameEntry>> {
+) -> Option<std::collections::HashMap<(String, ira_models::Platform), GameEntry>> {
     match db::load_games_by_kind(db, kind) {
         Ok(entries) => Some(
             entries
@@ -895,10 +895,11 @@ fn find_or_create_console_entry_cached(
     native_id: &str,
     title: &str,
     include_version: bool,
-    known_entries: &mut std::collections::HashMap<(String, String), GameEntry>,
+    known_entries: &mut std::collections::HashMap<(String, ira_models::Platform), GameEntry>,
 ) -> Option<ConsoleDbMeta> {
     let platform_id = kind.as_str();
-    let key = (native_id.to_string(), platform_id.to_string());
+    let platform = ira_models::Platform::parse(platform_id);
+    let key = (native_id.to_string(), platform.clone());
     if let Some(entry) = known_entries.get(&key) {
         return Some(ConsoleDbMeta::from_entry(entry, include_version));
     }
@@ -927,7 +928,7 @@ fn find_or_create_console_entry_cached(
                 trophy_source: ira_models::TrophySource::Empty,
                 trophy_id: trophy_id.to_string(),
                 native_id: native_id.to_string(),
-                platform_id: platform_id.to_string(),
+                platform_id: platform.clone(),
                 title: title.to_string(),
                 logo_position: ira_models::LogoPosition::BottomLeft.to_string(),
                 logo_size: 50,
@@ -993,7 +994,7 @@ fn reconcile_console_presence(db: &db::DbConn, kind: GameKind, seen: &[(String, 
         .map(|(native_id, platform_id)| (native_id.as_str(), platform_id.as_str()))
         .collect();
     for entry in &entries {
-        let present = seen.contains(&(entry.native_id.as_str(), entry.platform_id.as_str()));
+        let present = seen.contains(&(entry.native_id.as_str(), entry.platform_id.id()));
         if present == entry.vanished {
             if let Err(error) = db::set_game_vanished(db, entry.id, !present) {
                 eprintln!("Failed to mark {kind} game {}: {error}", entry.id);

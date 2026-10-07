@@ -1,5 +1,6 @@
 use super::achievement::MergedAchievement;
 use super::asset_type::{AssetType, LogoPosition};
+use super::consoles::Platform;
 use super::kind::{GameKind, TrophySource};
 
 #[derive(Debug, Clone)]
@@ -20,7 +21,7 @@ pub struct Game {
     pub native_id: String,
     pub kind: GameKind,
     pub trophy_source: TrophySource,
-    pub platform_id: String,
+    pub platform_id: Platform,
     /// The system scope: console id (`psx`, `switch`…​) or kind id
     /// (`wine`, `steam`…​). Never a game id.
     pub db_id: i64,
@@ -88,7 +89,7 @@ impl Default for Game {
             steam_id: String::new(),
             kind: GameKind::default(),
             trophy_source: TrophySource::default(),
-            platform_id: String::new(),
+            platform_id: Platform::default(),
             native_id: String::new(),
             db_id: 0,
             name: String::new(),
@@ -178,7 +179,7 @@ impl Game {
             | GameKind::WiiU
             | GameKind::ThreeDS
             | GameKind::Switch => Some(self.kind.as_str()),
-            GameKind::Retro => Some(self.platform_id.as_str()),
+            GameKind::Retro => Some(self.platform_id.id()),
             GameKind::Wine | GameKind::Linux | GameKind::Other => None,
         }
     }
@@ -252,12 +253,12 @@ mod tests {
             kind: GameKind::Retro,
             ..Default::default()
         };
-        g.platform_id = "psx".to_string();
+        g.platform_id = Platform::parse("psx");
         assert!(g.is_ps1());
-        g.platform_id = "snes".to_string();
+        g.platform_id = Platform::parse("snes");
         assert!(!g.is_ps1());
         g.kind = GameKind::Wine;
-        g.platform_id = "psx".to_string();
+        g.platform_id = Platform::parse("psx");
         assert!(!g.is_ps1());
     }
 
@@ -342,7 +343,7 @@ mod tests {
         assert_eq!(g.overlay_source_id(), Some("switch"));
         g.kind = GameKind::Retro;
         assert_eq!(g.overlay_source_id(), Some(""));
-        g.platform_id = "psx".to_string();
+        g.platform_id = Platform::parse("psx");
         assert_eq!(g.overlay_source_id(), Some("psx"));
         g.kind = GameKind::Wine;
         assert_eq!(g.overlay_source_id(), None);

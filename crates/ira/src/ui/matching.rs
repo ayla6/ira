@@ -36,7 +36,7 @@ pub fn match_game_to_steam(
             .flatten()
             .map(|entry| {
                 if entry.kind == ira_models::GameKind::Retro {
-                    entry.platform_id
+                    entry.platform_id.id().to_string()
                 } else {
                     entry.kind.as_str().to_string()
                 }

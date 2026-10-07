@@ -143,7 +143,7 @@ fn build_launch_wine_advanced_pages(
         let pause_def = match game.kind {
             ira_models::GameKind::Wine => s.cfg.wine_pause_game_on_overlay,
             ira_models::GameKind::Linux => s.cfg.linux_pause_game_on_overlay,
-            _ => s.cfg.console(&game.platform_id).pause_game_on_overlay,
+            _ => s.cfg.console(game.platform_id.id()).pause_game_on_overlay,
         }
         .unwrap_or(s.cfg.pause_game_on_overlay);
         (
@@ -529,7 +529,7 @@ fn build_dialog_contents(
     let game_folder = game.game_folder.clone();
     let trophy_source = game.trophy_source;
     let game_kind = game.kind;
-    let saved_platform_id_s = game.platform_id.clone();
+    let saved_platform_id_s = game.platform_id.id().to_string();
     let save_dir_s = save_dir.clone();
     let logo_controls_s = logo_controls.clone();
     let dlc_switches_s = dlc_switches.clone();

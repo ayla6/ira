@@ -1,5 +1,5 @@
 use crate::DbConn;
-use ira_models::{GameEntry, GameKind, TrophySource};
+use ira_models::{GameEntry, GameKind, Platform, TrophySource};
 use r2d2_sqlite::SqliteConnectionManager;
 
 /// Every games column the app reads, in one place so queries and the
@@ -15,7 +15,12 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
         trophy_source: TrophySource::from_string(&row.get::<_, String>("trophy_source")?),
         steam_id: row.get("steam_id")?,
         trophy_id: row.get("trophy_id")?,
-        platform_id: row.get("platform_id")?,
+        platform_id: {
+            // The parse happens once here, at the database boundary —
+            // everything downstream reads the value, never the string.
+            let raw: String = row.get("platform_id")?;
+            Platform::parse(&raw)
+        },
         title: row.get("title")?,
         hidden: row.get("hidden")?,
         sgdb_id: row.get("sgdb_id")?,

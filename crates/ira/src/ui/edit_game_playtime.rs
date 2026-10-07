@@ -396,7 +396,7 @@ fn identity_line(entry: &GameEntry) -> String {
         entry.kind,
         &entry.steam_id,
         entry.external_id(),
-        &entry.platform_id,
+        entry.platform_id.id(),
         &entry.rom_path,
         &entry.game_folder,
     )

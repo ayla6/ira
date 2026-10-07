@@ -70,7 +70,7 @@ fn base_game(shad: &ShadPS4Game, db_id: i64, meta: &ShadPS4GameMeta, playtime: f
         app_id: shad.npwr_id.clone(),
         native_id: shad.serial.clone(),
         kind: ira_models::GameKind::Ps4,
-        platform_id: ira_models::GameKind::Ps4.as_str().to_string(),
+        platform_id: ira_models::Platform::parse(ira_models::GameKind::Ps4.as_str()),
         db_id,
         name: if meta.title.is_empty() {
             shad.title.clone()

@@ -10,7 +10,7 @@ use super::state::{PendingImage, SharedState};
 use super::wine_config_env_dll::{collect_dll_overrides, collect_env_vars};
 use super::wine_config_widget::WineConfigWidgets;
 use adw::prelude::*;
-use ira_models::{AssetType, GameLaunchConfig, TrophySource, WineConfig};
+use ira_models::{AssetType, GameLaunchConfig, Platform, TrophySource, WineConfig};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -565,7 +565,7 @@ fn update_game_state_in_memory(
         if app_id_result.new_val.is_empty() {
             g.app_id.clear();
             g.trophy_source = TrophySource::Empty;
-            g.platform_id.clear();
+            g.platform_id = Platform::default();
             g.achievements.clear();
             g.earned_count = 0;
             g.total_count = 0;
@@ -573,7 +573,7 @@ fn update_game_state_in_memory(
         } else {
             state.game_names.lock().unwrap().remove(&params.app_id);
             g.app_id = app_id_result.new_val.clone();
-            g.platform_id = app_id_result.new_val.clone();
+            g.platform_id = Platform::parse(&app_id_result.new_val);
             g.manual_unmatch = false;
             g.achievements.clear();
             g.earned_count = 0;

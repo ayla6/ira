@@ -156,9 +156,7 @@ pub(super) fn handle_steam_search_result(
             replace_row_actions(&ab, |ab| ab.append(&status_label(&text, CSS_SUCCESS_LABEL)));
         });
 
-        let steam_btn = super::mass_match_dialog::search_icon_button(
-            super::mass_match_dialog::MatchSource::Steam,
-        );
+        let steam_btn = super::mass_match_dialog::search_text_button();
         let sc2 = state.clone();
         let name2 = game_name.to_string();
         let steam2 = steam.clone();

@@ -28,9 +28,7 @@ fn manual_sgdb_search_button(
     let action_box = action_box.clone();
     let parent_dialog = parent_dialog.clone();
     let game_name = game_name.to_string();
-    let btn = super::mass_match_dialog::search_icon_button(
-        super::mass_match_dialog::MatchSource::Sgdb,
-    );
+    let btn = super::mass_match_dialog::search_text_button();
     btn.connect_clicked(move |_| {
         let cb: MatchCallback = Rc::new({
             let action_box = action_box.clone();

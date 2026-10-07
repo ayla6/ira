@@ -177,15 +177,13 @@ pub(super) fn match_site_uri(source: MatchSource, id: &str) -> String {
     }
 }
 
-/// The manual-search affordance on every mass-match line: a magnifier
-/// icon button instead of a repeated "Search" word — the line label
-/// already names the source, and the tooltip carries the full text.
-pub(super) fn search_icon_button(source: MatchSource) -> gtk4::Button {
-    let button = gtk4::Button::from_icon_name("edit-find-symbolic");
+/// The manual-search affordance on every mass-match line: a short
+/// "Search" text button. The line label already names the source, and
+/// every neighboring action is text too — an icon would save space no
+/// line needs while breaking the row's visual language.
+pub(super) fn search_text_button() -> gtk4::Button {
+    let button = gtk4::Button::with_label(&crate::tr!("Search"));
     button.set_valign(gtk4::Align::Center);
-    button.set_tooltip_text(Some(
-        &crate::tr!("Search {}").replacen("{}", &source_label(source), 1),
-    ));
     button
 }
 /// The matched line's identity: the match id as a flat accent-colored

@@ -425,9 +425,7 @@ fn unmatched_actions(
     if !label.is_empty() {
         ab.append(&status_label(label, CSS_DIM_LABEL));
     }
-    let btn = super::mass_match_dialog::search_icon_button(
-        super::mass_match_dialog::MatchSource::ScreenScraper,
-    );
+    let btn = super::mass_match_dialog::search_text_button();
     btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     let gn = game_name.to_string();

@@ -366,20 +366,17 @@ fn fetch_ss_media_bytes(
 
 /// Persist ScreenScraper bytes into the game's data dir under the
 /// asset's own file base, next to whatever the other sources landed.
-/// Returns the path when a file landed on disk.
+/// The bytes arrive already normalized by `fetch_ss_media_bytes` — no
+/// second conversion. Returns the path when a file landed on disk.
 fn persist_ss_media(
     dir: &std::path::Path,
     bytes: &[u8],
     asset: ira_models::AssetType,
 ) -> String {
-    let webp = match ira_parser::convert_bytes_to_lossless_webp(bytes) {
-        Some(webp) => webp,
-        None => return String::new(),
-    };
     let _ = std::fs::create_dir_all(dir);
     ira_parser::remove_image_variants(dir, asset.file_base());
     let dest = dir.join(format!("{}.webp", asset.file_base()));
-    if std::fs::write(&dest, &webp).is_ok() {
+    if std::fs::write(&dest, bytes).is_ok() {
         dest.to_string_lossy().into_owned()
     } else {
         String::new()

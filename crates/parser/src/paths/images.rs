@@ -77,28 +77,79 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     if find_image_file(dir, &format!("{}_small", base_name)).is_some() {
         return;
     }
-    let small_name = format!("{}_small", base_name);
     let Some(source) = find_image_file(dir, base_name) else {
         return;
     };
 
+    let Some(img) = decode_image_file(&source) else {
+        return;
+    };
+    write_small_variant(dir, base_name, &source, max_w, max_h, &img);
+}
+
+/// Normalize a just-written image file and its thumbnail in a single
+/// decode: WebP/JPEG sources stay as-is and only gain a thumbnail (the
+/// old convert-then-ensure sequence skipped them too), while every other
+/// format converts to lossless WebP first — decoded once, written as the
+/// full image and its small variant, with the original removed. A source
+/// that does not decode is left untouched, exactly as before.
+pub fn finalize_stored_image(dest: &Path, max_w: u32, max_h: u32) {
+    let _s = tracing::info_span!("finalize_stored_image", path = %dest.display()).entered();
+    let dir = dest.parent().unwrap_or(Path::new("."));
+    let base = dest.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if base.is_empty() {
+        return;
+    }
+    let ext = dest
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if ext == "webp" || ext == "jpg" {
+        ensure_small_image(dir, base, max_w, max_h);
+        return;
+    }
+    let Some(img) = decode_image_file(dest) else {
+        return;
+    };
+    let full = dir.join(format!("{base}.webp"));
+    if !write_lossless_webp(&full, &img) {
+        // The conversion failed with the original still on disk: fall back
+        // to thumbnailing it, like the old sequence did.
+        ensure_small_image(dir, base, max_w, max_h);
+        return;
+    }
+    let _ = std::fs::remove_file(dest);
+    // Typed by the converted file, not the original: a ".jpeg" source is
+    // already WebP here, so the ≥2× smaller-of-both rule applies to it.
+    write_small_variant(dir, base, &full, max_w, max_h, &img);
+}
+
+/// Write the `_small` thumbnail variant of an already-decoded image.
+/// `source` is the file the pixels came from — only its extension matters
+/// (JPEG sources copy instead of re-encoding when already small enough).
+fn write_small_variant(
+    dir: &Path,
+    base_name: &str,
+    source: &Path,
+    max_w: u32,
+    max_h: u32,
+    img: &image::DynamicImage,
+) {
+    let small_name = format!("{}_small", base_name);
     let is_jpeg = source
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"));
     let is_icon = base_name == ira_models::AssetType::Icon.file_base();
-
-    let Some(img) = decode_image_file(&source) else {
-        return;
-    };
     let (w, h) = (img.width(), img.height());
 
     let dest = dir.join(format!("{}.webp", small_name));
     if w <= max_w && h <= max_h {
         if is_jpeg {
-            let _ = std::fs::copy(&source, dir.join(format!("{}.jpg", small_name)));
+            let _ = std::fs::copy(source, dir.join(format!("{}.jpg", small_name)));
             return;
         }
-        write_lossless_webp(&dest, &img);
+        write_lossless_webp(&dest, img);
         return;
     }
 
@@ -214,6 +265,52 @@ mod tests {
         let pixels = vec![0u8; (w * h * 4) as usize];
         let encoded = encode_lossless_webp(&pixels, w, h);
         std::fs::write(dir.join(name), encoded).unwrap();
+    }
+
+    fn write_png_source(dir: &std::path::Path, name: &str, w: u32, h: u32) {
+        let img = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 200, 30, 255]));
+        img.save(dir.join(name)).unwrap();
+    }
+
+    #[test]
+    fn test_finalize_stored_image_converts_png_and_thumbnails_once() {
+        // Arrange: a PNG hero as the save thread leaves it.
+        let tmp = tempfile::tempdir().unwrap();
+        write_png_source(tmp.path(), "hero.png", 480, 155);
+        // Act
+        finalize_stored_image(&tmp.path().join("hero.png"), 240, 78);
+        // Assert: converted in place with a small variant beside it.
+        assert!(!tmp.path().join("hero.png").is_file());
+        assert!(tmp.path().join("hero.webp").is_file());
+        assert!(tmp.path().join("hero_small.webp").is_file());
+    }
+
+    #[test]
+    fn test_finalize_stored_image_keeps_jpeg_and_only_thumbnails() {
+        // Arrange
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("hero.jpg");
+        let img = image::DynamicImage::new_rgb8(4, 4);
+        img.save_with_format(&dest, image::ImageFormat::Jpeg).unwrap();
+        // Act
+        finalize_stored_image(&tmp.path().join("hero.jpg"), 240, 78);
+        // Assert: the JPEG stays; only the small copy is added.
+        assert!(tmp.path().join("hero.jpg").is_file());
+        assert!(!tmp.path().join("hero.webp").is_file());
+        assert!(tmp.path().join("hero_small.jpg").is_file());
+    }
+
+    #[test]
+    fn test_finalize_stored_image_leaves_garbage_alone() {
+        // Arrange: undecodable bytes convert to nothing and gain no small.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("hero.png"), b"not an image").unwrap();
+        // Act
+        finalize_stored_image(&tmp.path().join("hero.png"), 240, 78);
+        // Assert
+        assert!(tmp.path().join("hero.png").is_file());
+        assert!(!tmp.path().join("hero.webp").is_file());
+        assert!(!tmp.path().join("hero_small.webp").is_file());
     }
 
     #[test]

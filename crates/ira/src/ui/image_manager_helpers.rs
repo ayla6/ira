@@ -306,10 +306,11 @@ pub(super) fn write_native_icon_to_disk(
     true
 }
 
-/// Decodes an icon file into lossless WebP bytes.
+/// Decodes an icon file into lossless WebP bytes. Only PNG and TGA reach
+/// here (Vita/PS3 icons, Wii U iconTex), and the converter decodes those
+/// itself — no separate validation pass needed.
 fn import_image_bytes(source: &std::path::Path) -> Option<Vec<u8>> {
     let data = std::fs::read(source).ok()?;
-    ira_parser::load_image_bytes(&data)?;
     ira_parser::convert_bytes_to_lossless_webp(&data)
 }
 

@@ -600,6 +600,18 @@ fn update_game_names(
     }
 }
 
+/// Whether the file at `path` is an ICO container, reading only its magic
+/// header: picked heroes can be multi-megabyte files the old whole-file
+/// read paid for just to answer four bytes.
+fn is_ico_file(path: &str) -> bool {
+    use std::io::Read;
+    let mut magic = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic).map(|_| magic))
+        .map(|magic| ira_parser::is_ico_data(&magic))
+        .unwrap_or(false)
+}
+
 fn spawn_image_copy_thread(
     images: Vec<(String, PendingImage)>,
     cloud_dir: std::path::PathBuf,
@@ -630,7 +642,7 @@ fn spawn_image_copy_thread(
 
             let dest = match img {
                 PendingImage::Path(src_path) => {
-                    if ira_parser::is_ico_data(&std::fs::read(src_path).unwrap_or_default()) {
+                    if is_ico_file(src_path) {
                         let ico_path = cloud_dir.join(format!("{}.ico", base_name));
                         if let Err(e) = std::fs::copy(src_path, &ico_path) {
                             eprintln!("Failed to copy {}: {e}", ico_path.display());
@@ -672,15 +684,9 @@ fn spawn_image_copy_thread(
                 }
             };
             if dest.is_file() {
-                let ext = dest
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                if ext != "webp" && ext != "jpg" {
-                    ira_parser::convert_to_lossless_webp(&dest);
-                }
-                ira_parser::ensure_small_image(&cloud_dir, &base_name, max_w, max_h);
+                // One decode for convert plus thumbnail, whatever the source
+                // format (WebP/JPEG sources only gain a thumbnail).
+                ira_parser::finalize_stored_image(&dest, max_w, max_h);
                 converted.push(base_name.clone());
             }
             if let Some(progress) = &progress {

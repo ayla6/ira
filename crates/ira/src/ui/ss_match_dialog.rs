@@ -449,7 +449,7 @@ fn unmatched_actions(
 
 pub(super) fn show_matched(ss_box: &gtk4::Box) {
     replace_row_actions(ss_box, |ab| {
-        ab.append(&status_label(&crate::tr!("SS: matched"), CSS_SUCCESS_LABEL));
+        ab.append(&status_label(&crate::tr!("Matched"), CSS_SUCCESS_LABEL));
     });
 }
 

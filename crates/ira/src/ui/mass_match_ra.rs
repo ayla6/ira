@@ -15,29 +15,25 @@ use super::steam_search_dialog::status_label;
 use crate::Game;
 use ira_platforms::retroachievements::api::RaClient;
 
-/// The RA status box of a match-list row, added as a second suffix so the
-/// Steam/SGDB result in the main box stays independent. Starts at
-/// "Searching RA..." when a pass will run, else straight at not-matched
-/// with the manual search button.
+/// The RA status line of a match-list row: the attach fills the line's
+/// action box, which the row builder already placed under an RA label.
+/// Starts at "Searching…" when a pass will run, else straight at
+/// not-matched with the manual search button.
 pub(super) fn attach_ra_actions(
-    row: &adw::ActionRow,
+    ra_box: &gtk4::Box,
     state: &SharedState,
     game: &Game,
     dialog: &gtk4::Widget,
     will_search: bool,
     vis: &super::mass_match_dialog::RowVis,
-) -> gtk4::Box {
-    let ra_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    ra_box.set_valign(gtk4::Align::Center);
+) {
     if will_search {
-        ra_box.append(&status_label(&crate::tr!("Searching RA..."), CSS_DIM_LABEL));
+        ra_box.append(&status_label(&crate::tr!("Searching…"), CSS_DIM_LABEL));
     } else {
         // Nothing will run for this row: terminal from the start.
         vis.mark_attempted(game.db_id);
-        show_unmatched(&ra_box, state, game.db_id, &game.name, &game.platform_id, dialog);
+        show_unmatched(ra_box, state, game.db_id, &game.name, &game.platform_id, dialog);
     }
-    row.add_suffix(&ra_box);
-    ra_box
 }
 
 /// Whether the RA pass can run at all: the integration is on and the
@@ -72,16 +68,74 @@ fn show_unmatched(
             &gn,
             &pid,
             &dlg,
-            Some(Rc::new(move || show_matched(&inner))),
+            Some(Rc::new(move || paint_matched(&inner))),
         );
     });
     ra_box.append(&btn);
 }
 
-fn show_matched(ra_box: &gtk4::Box) {
+fn paint_matched(ra_box: &gtk4::Box) {
     replace_row_actions(ra_box, |ab| {
-        ab.append(&status_label(&crate::tr!("RA: matched"), CSS_SUCCESS_LABEL));
+        ab.append(&status_label(
+            &crate::tr!("Matched"),
+            CSS_SUCCESS_LABEL,
+        ));
     });
+}
+
+/// Unmatch for an automatically applied RA match: clear the ids and block
+/// every automatic pass like the settings unmatch does, then offer the
+/// manual search again. Manual picks repaint through `show_unmatched`
+/// without a veto — the user just chose them.
+fn append_ra_veto(
+    state: &SharedState,
+    ra_box: &gtk4::Box,
+    db_id: i64,
+    platform_id: &str,
+    game_name: &str,
+    dialog: &gtk4::Widget,
+) {
+    let unmatch = gtk4::Button::with_label(&crate::tr!("Unmatch"));
+    unmatch.add_css_class(CSS_DESTRUCTIVE_ACTION);
+    unmatch.set_valign(gtk4::Align::Center);
+    {
+        let state = state.clone();
+        let ra_box = ra_box.clone();
+        let platform_id = platform_id.to_string();
+        let game_name = game_name.to_string();
+        let dialog = dialog.clone();
+        unmatch.connect_clicked(move |_| {
+            let db = state.borrow().db.clone();
+            if let Err(e) = ira_db::update_game_ids(
+                &db,
+                db_id,
+                "",
+                "",
+                ira_models::TrophySource::Empty,
+                &platform_id,
+            ) {
+                eprintln!("RA veto: failed to clear the match: {e}");
+            }
+            if let Err(e) = ira_db::set_manual_unmatch(&db, db_id, true) {
+                eprintln!("RA veto: failed to block re-matching: {e}");
+            }
+            if let Some(g) = state
+                .borrow_mut()
+                .games
+                .iter_mut()
+                .find(|g| g.db_id == db_id)
+            {
+                g.app_id.clear();
+                g.trophy_source = ira_models::TrophySource::Empty;
+                g.achievements.clear();
+                g.earned_count = 0;
+                g.total_count = 0;
+                g.manual_unmatch = true;
+            }
+            show_unmatched(&ra_box, &state, db_id, &game_name, &platform_id, &dialog);
+        });
+    }
+    ra_box.append(&unmatch);
 }
 
 /// Runs the RA pass over every row that has an RA box. The worker resolves
@@ -182,7 +236,8 @@ fn apply_hit(
                 Ok(trophy_id) => persist_ra_match(state, hit.db_id, &platform_id, trophy_id, &title),
                 Err(e) => eprintln!("RA batch: bad game id {id:?}: {e}"),
             }
-            show_matched(&ra_box);
+            paint_matched(&ra_box);
+            append_ra_veto(state, &ra_box, hit.db_id, &platform_id, &hit.name, dialog);
         }
         None => replace_row_actions(&ra_box, |ab| {
             show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);

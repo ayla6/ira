@@ -28,20 +28,23 @@ pub(super) struct BatchHit<T> {
 /// The `row_idx` of a pass's completion sentinel.
 pub(super) const BATCH_FINISHED: usize = usize::MAX;
 
-/// The action boxes of one match-list row: `main` takes the Steam or SGDB
-/// result, `ra` (retro games on RA-covered consoles only) the
-/// RetroAchievements one, and `ss` (console games ScreenScraper covers)
-/// the ScreenScraper one, so the sources never overwrite each other.
-#[derive(Clone)]
+/// The action boxes of one match-list row: one per applicable source, so
+/// sources never overwrite each other and each line repaints on its own.
+#[derive(Clone, Default)]
 pub(super) struct RowActions {
     pub(super) row: gtk4::ListBoxRow,
-    pub(super) main: gtk4::Box,
+    /// PC games whose Steam identity the store pass resolves.
+    pub(super) steam: Option<gtk4::Box>,
+    /// Games SteamGridDB can name art for.
+    pub(super) sgdb: Option<gtk4::Box>,
+    /// Retro games on RA-covered consoles.
     pub(super) ra: Option<gtk4::Box>,
+    /// Games on consoles ScreenScraper covers.
     pub(super) ss: Option<gtk4::Box>,
     /// Console games whose metadata Steam can garnish, linked by exact
-    /// title — additive to the SS/RA boxes, and the link repoints the
+    /// title — additive to the other boxes, and the link repoints the
     /// Steam identity only, never the console one.
-    pub(super) steam: Option<gtk4::Box>,
+    pub(super) steam_link: Option<gtk4::Box>,
 }
 
 /// A panic payload's message, for the batch's panic logs. Takes the

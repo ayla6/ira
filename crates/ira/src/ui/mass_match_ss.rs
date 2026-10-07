@@ -169,26 +169,24 @@ pub(crate) fn refetch_one(
     }
 }
 
-/// The status box of a match-list row's ScreenScraper pass, added as its
-/// own suffix so the Steam/SGDB/RA boxes stay independent. Rows the source
-/// already missed skip straight to the manual search button instead of
-/// burning the request again.
+/// The status line of a match-list row's ScreenScraper pass: the attach
+/// fills the line's action box, which the row builder already placed under
+/// a ScreenScraper label. Rows the source already missed skip straight to
+/// the manual search button instead of burning the request again.
 pub(super) fn attach_ss_actions(
-    row: &adw::ActionRow,
+    ss_box: &gtk4::Box,
     state: &SharedState,
     game: &Game,
     dialog: &gtk4::Widget,
     missed: bool,
     vis: &super::mass_match_dialog::RowVis,
-) -> gtk4::Box {
-    let ss_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
-    ss_box.set_valign(gtk4::Align::Center);
+) {
     let console = ira_models::scraper_console_id(game.kind, &game.platform_id);
     if missed {
         // Already tombstoned by an earlier pass: terminal from the start.
         vis.mark_attempted(game.db_id);
         show_unmatched(
-            &ss_box,
+            ss_box,
             state,
             game.db_id,
             &game.name,
@@ -197,12 +195,10 @@ pub(super) fn attach_ss_actions(
         );
     } else {
         ss_box.append(&status_label(
-            &crate::tr!("Searching SS..."),
+            &crate::tr!("Searching…"),
             CSS_DIM_LABEL,
         ));
     }
-    row.add_suffix(&ss_box);
-    ss_box
 }
 
 /// Runs the ScreenScraper pass over every row that has an SS box. The
@@ -1313,6 +1309,50 @@ fn containment_ok(short: &str, long: &str) -> bool {
         .any(|word| word.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// Unmatch for an automatically applied ScreenScraper match: clear the
+/// stored match and block every automatic pass like the settings unmatch
+/// does, then offer the manual search again. Manual picks repaint through
+/// `show_unmatched` without a veto — the user just chose them.
+fn append_ss_veto(
+    state: &SharedState,
+    ss_box: &gtk4::Box,
+    db_id: i64,
+    platform_id: &str,
+    game_name: &str,
+    dialog: &gtk4::Widget,
+) {
+    let unmatch = gtk4::Button::with_label(&crate::tr!("Unmatch"));
+    unmatch.add_css_class(CSS_DESTRUCTIVE_ACTION);
+    unmatch.set_valign(gtk4::Align::Center);
+    {
+        let state = state.clone();
+        let ss_box = ss_box.clone();
+        let platform_id = platform_id.to_string();
+        let game_name = game_name.to_string();
+        let dialog = dialog.clone();
+        unmatch.connect_clicked(move |_| {
+            let db = state.borrow().db.clone();
+            if let Err(e) = ira_db::clear_screenscraper_match(&db, db_id) {
+                eprintln!("SS veto: failed to clear the match: {e}");
+            }
+            if let Err(e) = ira_db::set_manual_unmatch(&db, db_id, true) {
+                eprintln!("SS veto: failed to block re-matching: {e}");
+            }
+            if let Some(g) = state
+                .borrow_mut()
+                .games
+                .iter_mut()
+                .find(|g| g.db_id == db_id)
+            {
+                g.screenscraper_id.clear();
+                g.manual_unmatch = true;
+            }
+            show_unmatched(&ss_box, &state, db_id, &game_name, &platform_id, &dialog);
+        });
+    }
+    ss_box.append(&unmatch);
+}
+
 /// UI loop: persist a hit's result, and repaint the row's SS box when
 /// the dialog still shows it. Persistence runs regardless — the pass
 /// keeps working with the dialog or the whole window closed — and only a
@@ -1342,6 +1382,7 @@ fn apply_hit(
             super::edit_game_scraper::refresh_scraper_section(state, hit.db_id);
             if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {
                 show_matched(&ss_box);
+                append_ss_veto(state, &ss_box, hit.db_id, &platform_id, &hit.name, dialog);
             }
             vis.pass_done(hit.row_idx);
         }

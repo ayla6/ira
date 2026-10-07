@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-03 13:09-0300\n"
+"POT-Creation-Date: 2026-10-07 11:32-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,7 +18,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #: crates/ira/src/game_list.rs:273
-#: crates/ira/src/ui/message_helpers.rs:202
+#: crates/ira/src/ui/message_helpers.rs:227
 #: crates/ira/src/ui/window.rs:292
 msgid "Preparing game library…"
 msgstr ""
@@ -98,9 +98,9 @@ msgstr ""
 msgid "Loaded ROM library"
 msgstr ""
 
-#: crates/ira/src/game_loader.rs:131
-#: crates/ira/src/game_loader.rs:172
-#: crates/ira/src/game_loader.rs:614
+#: crates/ira/src/game_loader.rs:210
+#: crates/ira/src/game_loader.rs:248
+#: crates/ira/src/game_loader.rs:706
 #: crates/ira/src/ui/edit_game_pages.rs:122
 #: crates/ira/src/ui/steam_search_dialog.rs:348
 #: crates/ira/src/ui/steam_search.rs:23
@@ -108,11 +108,11 @@ msgstr ""
 msgid "App ID: {}"
 msgstr ""
 
-#: crates/ira/src/game_loader.rs:412
+#: crates/ira/src/game_loader.rs:494
 msgid "No description available."
 msgstr ""
 
-#: crates/ira/src/game_loader.rs:500
+#: crates/ira/src/game_loader.rs:592
 #, rust-format
 msgid "{} - {}"
 msgstr ""
@@ -200,7 +200,7 @@ msgstr ""
 #: crates/ira/src/ui/big_picture/keyboard.rs:619
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:205
 #: crates/ira/src/ui/edit_game_playtime.rs:258
-#: crates/ira/src/ui/fetch_images.rs:884
+#: crates/ira/src/ui/fetch_images.rs:881
 #: crates/ira/src/ui/group_dialog.rs:20
 #: crates/ira/src/ui/group_dialog.rs:70
 #: crates/ira/src/ui/helpers.rs:107
@@ -478,7 +478,8 @@ msgstr ""
 #: crates/ira/src/ui/image_manager.rs:205
 #: crates/ira/src/ui/image_manager.rs:235
 #: crates/ira/src/ui/image_manager.rs:259
-#: crates/ira/src/ui/image_manager.rs:324
+#: crates/ira/src/ui/image_manager.rs:329
+#: crates/ira/src/ui/mass_match_dialog.rs:158
 #: crates/ira/src/ui/settings_dialog_pages.rs:328
 #: crates/ira/src/ui/settings_pages.rs:158
 #: crates/ira/src/ui/steam_search_dialog.rs:193
@@ -581,7 +582,7 @@ msgstr ""
 
 #: crates/ira/src/ui/auto_add_dialog.rs:1746
 #: crates/ira/src/ui/installer_add_dialog.rs:661
-#: crates/ira/src/ui/mass_match_dialog.rs:669
+#: crates/ira/src/ui/mass_match_dialog.rs:834
 msgid "Skip"
 msgstr ""
 
@@ -596,9 +597,9 @@ msgstr ""
 
 #: crates/ira/src/ui/auto_add_dialog.rs:1863
 #: crates/ira/src/ui/auto_add_dialog.rs:1874
-#: crates/ira/src/ui/big_picture/all_games.rs:781
+#: crates/ira/src/ui/big_picture/all_games.rs:778
 #: crates/ira/src/ui/big_picture/keyboard.rs:405
-#: crates/ira/src/ui/mass_match_dialog.rs:730
+#: crates/ira/src/ui/mass_match_dialog.rs:896
 #: crates/ira/src/ui/message_handler.rs:111
 msgid "OK"
 msgstr ""
@@ -729,36 +730,36 @@ msgstr ""
 msgid "Quit"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:248
+#: crates/ira/src/ui/big_picture/all_games.rs:245
 #: crates/ira/src/ui/big_picture/game_menu.rs:232
 #: crates/ira/src/ui/input_profile_search_filters.rs:100
 #: crates/ira/src/ui/window.rs:226
 msgid "Sort by"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:273
+#: crates/ira/src/ui/big_picture/all_games.rs:270
 msgid "Recent"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:280
-#: crates/ira/src/ui/big_picture/home.rs:647
+#: crates/ira/src/ui/big_picture/all_games.rs:277
+#: crates/ira/src/ui/big_picture/home.rs:641
 msgid "Everything"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:287
+#: crates/ira/src/ui/big_picture/all_games.rs:284
 #: crates/ira/src/ui/context_menu_actions.rs:442
 #: crates/ira/src/ui/context_menu.rs:177
 #: crates/ira/src/ui/context_menu.rs:255
 msgid "Groups"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:399
+#: crates/ira/src/ui/big_picture/all_games.rs:396
 msgid "No games yet"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:776
-#: crates/ira/src/ui/big_picture/all_games.rs:787
-#: crates/ira/src/ui/big_picture/all_games.rs:792
+#: crates/ira/src/ui/big_picture/all_games.rs:773
+#: crates/ira/src/ui/big_picture/all_games.rs:784
+#: crates/ira/src/ui/big_picture/all_games.rs:789
 #: crates/ira/src/ui/big_picture/view.rs:128
 #: crates/ira/src/ui/context_menu.rs:126
 #: crates/ira/src/ui/play_button.rs:28
@@ -766,30 +767,30 @@ msgstr ""
 msgid "Play"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:779
+#: crates/ira/src/ui/big_picture/all_games.rs:776
 msgid "Delete Group"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:780
+#: crates/ira/src/ui/big_picture/all_games.rs:777
 #: crates/ira/src/ui/edit_game_entity_dialog.rs:144
 #: crates/ira/src/ui/group_dialog.rs:71
 #: crates/ira/src/ui/sidebar.rs:737
 msgid "Rename"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:785
+#: crates/ira/src/ui/big_picture/all_games.rs:782
 #: crates/overlay-ui/src/ui.rs:314
 msgid "Back"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/all_games.rs:786
-#: crates/ira/src/ui/big_picture/all_games.rs:791
+#: crates/ira/src/ui/big_picture/all_games.rs:783
+#: crates/ira/src/ui/big_picture/all_games.rs:788
 msgid "Options"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/disc_picker.rs:277
 #: crates/ira/src/ui/disc_picker.rs:132
-#: crates/ira/src/ui/image_manager.rs:1007
+#: crates/ira/src/ui/image_manager.rs:1012
 #: crates/ira/src/ui/play_button.rs:837
 #, rust-format
 msgid "Disc {}"
@@ -808,7 +809,7 @@ msgstr ""
 msgid "Delete {}?"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/groups.rs:283
+#: crates/ira/src/ui/big_picture/groups.rs:293
 msgid "New Group"
 msgstr ""
 
@@ -884,11 +885,11 @@ msgstr ""
 msgid "Ira"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/view.rs:492
+#: crates/ira/src/ui/big_picture/view.rs:502
 msgid "Name the group"
 msgstr ""
 
-#: crates/ira/src/ui/big_picture/view.rs:517
+#: crates/ira/src/ui/big_picture/view.rs:527
 msgid "Rename the group"
 msgstr ""
 
@@ -1195,9 +1196,9 @@ msgid "Create new profile…"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_dialog.rs:379
-#: crates/ira/src/ui/image_manager.rs:830
-#: crates/ira/src/ui/image_manager.rs:1045
-#: crates/ira/src/ui/image_manager.rs:1193
+#: crates/ira/src/ui/image_manager.rs:835
+#: crates/ira/src/ui/image_manager.rs:1050
+#: crates/ira/src/ui/image_manager.rs:1198
 msgid "Images"
 msgstr ""
 
@@ -1650,7 +1651,7 @@ msgstr ""
 #: crates/ira/src/ui/edit_game_playtime.rs:141
 #: crates/ira/src/ui/edit_game_playtime.rs:259
 #: crates/ira/src/ui/game_settings.rs:447
-#: crates/ira/src/ui/mass_match_dialog.rs:667
+#: crates/ira/src/ui/mass_match_dialog.rs:832
 msgid "Link"
 msgstr ""
 
@@ -1736,6 +1737,7 @@ msgid "Nothing written yet"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:958
+#: crates/ira/src/ui/mass_match_dialog.rs:161
 #: crates/ira/src/ui/settings_dialog_pages.rs:309
 msgid "ScreenScraper"
 msgstr ""
@@ -1771,6 +1773,10 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:1017
 #: crates/ira/src/ui/game_settings.rs:61
+#: crates/ira/src/ui/mass_match_dialog.rs:540
+#: crates/ira/src/ui/mass_match_dialog.rs:590
+#: crates/ira/src/ui/mass_match_ra.rs:98
+#: crates/ira/src/ui/mass_match_ss.rs:1324
 msgid "Unmatch"
 msgstr ""
 
@@ -1970,33 +1976,33 @@ msgstr ""
 msgid "Fetching missing images…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:680
+#: crates/ira/src/ui/fetch_images.rs:677
 #, rust-format
 msgid "{} games needed new art"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:685
+#: crates/ira/src/ui/fetch_images.rs:682
 msgid "Images fetched"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:766
+#: crates/ira/src/ui/fetch_images.rs:763
 msgid "Saving images…"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:769
+#: crates/ira/src/ui/fetch_images.rs:766
 #, rust-format
 msgid "Saving images for {}"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:778
+#: crates/ira/src/ui/fetch_images.rs:775
 msgid "Images saved"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:781
+#: crates/ira/src/ui/fetch_images.rs:778
 msgid "Edited images saved"
 msgstr ""
 
-#: crates/ira/src/ui/fetch_images.rs:941
+#: crates/ira/src/ui/fetch_images.rs:938
 msgid "Cancelled"
 msgstr ""
 
@@ -2134,7 +2140,7 @@ msgid "Reset to base game"
 msgstr ""
 
 #: crates/ira/src/ui/game_logo.rs:264
-#: crates/ira/src/ui/image_manager.rs:1237
+#: crates/ira/src/ui/image_manager.rs:1242
 #: crates/ira/src/ui/input_calibration_settings.rs:165
 msgid "Reset"
 msgstr ""
@@ -2172,6 +2178,7 @@ msgid "Override the emulator for this game"
 msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:48
+#: crates/ira/src/ui/mass_match_dialog.rs:160
 #: crates/ira/src/ui/settings_dialog_pages.rs:376
 msgid "RetroAchievements"
 msgstr ""
@@ -2302,19 +2309,19 @@ msgstr ""
 msgid "All games"
 msgstr ""
 
-#: crates/ira/src/ui/grid_view.rs:684
+#: crates/ira/src/ui/grid_view.rs:687
 msgid "Loading game library"
 msgstr ""
 
-#: crates/ira/src/ui/grid_view.rs:752
+#: crates/ira/src/ui/grid_view.rs:755
 msgid "No games found"
 msgstr ""
 
-#: crates/ira/src/ui/grid_view.rs:754
+#: crates/ira/src/ui/grid_view.rs:757
 msgid "Try a different title, platform, or sort title"
 msgstr ""
 
-#: crates/ira/src/ui/grid_view.rs:768
+#: crates/ira/src/ui/grid_view.rs:771
 #, rust-format
 msgid "{} of {} sources"
 msgstr ""
@@ -2388,100 +2395,100 @@ msgstr ""
 
 #: crates/ira/src/ui/image_manager.rs:216
 #: crates/ira/src/ui/image_manager.rs:270
-#: crates/ira/src/ui/image_manager.rs:574
-#: crates/ira/src/ui/image_manager.rs:642
-#: crates/ira/src/ui/image_manager.rs:720
+#: crates/ira/src/ui/image_manager.rs:579
+#: crates/ira/src/ui/image_manager.rs:647
+#: crates/ira/src/ui/image_manager.rs:725
 #: crates/ira/src/ui/sgdb_picker.rs:110
 #: crates/ira/src/ui/sgdb_picker.rs:120
 msgid "Downloading…"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:369
+#: crates/ira/src/ui/image_manager.rs:374
 msgid "SGDB…"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:440
+#: crates/ira/src/ui/image_manager.rs:445
 #: crates/ira/src/ui/settings_dialog_console.rs:429
 msgid "PS4"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:441
+#: crates/ira/src/ui/image_manager.rs:446
 #: crates/ira/src/ui/settings_dialog_console.rs:420
 msgid "PS3"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:442
+#: crates/ira/src/ui/image_manager.rs:447
 msgid "3DS"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:443
+#: crates/ira/src/ui/image_manager.rs:448
 #: crates/ira/src/ui/settings_dialog_console.rs:194
 #: crates/ira/src/ui/settings_dialog_console.rs:447
 msgid "Wii U"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:444
+#: crates/ira/src/ui/image_manager.rs:449
 #: crates/ira/src/ui/settings_pages.rs:203
 msgid "Switch"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:445
+#: crates/ira/src/ui/image_manager.rs:450
 msgid "NDS"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:555
-#: crates/ira/src/ui/image_manager.rs:601
+#: crates/ira/src/ui/image_manager.rs:560
+#: crates/ira/src/ui/image_manager.rs:606
 msgid "RA"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:591
+#: crates/ira/src/ui/image_manager.rs:596
 msgid "No RA icon available"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:626
+#: crates/ira/src/ui/image_manager.rs:631
 msgid "Download square box art from ScreenScraper"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:701
+#: crates/ira/src/ui/image_manager.rs:706
 msgid "Download logo from ScreenScraper"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:703
+#: crates/ira/src/ui/image_manager.rs:708
 msgid "Download header from ScreenScraper"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:827
-#: crates/ira/src/ui/image_manager.rs:1042
-#: crates/ira/src/ui/image_manager.rs:1190
+#: crates/ira/src/ui/image_manager.rs:832
+#: crates/ira/src/ui/image_manager.rs:1047
+#: crates/ira/src/ui/image_manager.rs:1195
 msgid "Select image"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:965
+#: crates/ira/src/ui/image_manager.rs:970
 msgid "Discs"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:1051
+#: crates/ira/src/ui/image_manager.rs:1056
 msgid "Select image file"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:1069
+#: crates/ira/src/ui/image_manager.rs:1074
 msgid "Download missing disc art from ScreenScraper"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:1113
+#: crates/ira/src/ui/image_manager.rs:1118
 #, rust-format
 msgid "Downloaded {}"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:1117
+#: crates/ira/src/ui/image_manager.rs:1122
 msgid "Disc art is up to date"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:1119
+#: crates/ira/src/ui/image_manager.rs:1124
 msgid "No disc art found"
 msgstr ""
 
-#: crates/ira/src/ui/image_manager.rs:1261
+#: crates/ira/src/ui/image_manager.rs:1266
 msgid "SGDB"
 msgstr ""
 
@@ -4365,6 +4372,10 @@ msgid "Search community layouts…"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_search.rs:225
+#: crates/ira/src/ui/mass_match_dialog.rs:379
+#: crates/ira/src/ui/mass_match_dialog.rs:677
+#: crates/ira/src/ui/mass_match_ra.rs:31
+#: crates/ira/src/ui/mass_match_ss.rs:198
 msgid "Searching…"
 msgstr ""
 
@@ -4921,95 +4932,87 @@ msgstr ""
 msgid "No log output yet. The log will populate when the game is launched."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:328
-#: crates/ira/src/ui/mass_match_dialog.rs:510
-msgid "Searching Steam..."
+#: crates/ira/src/ui/mass_match_dialog.rs:159
+#: crates/ira/src/ui/settings_dialog_pages.rs:301
+#: crates/ira/src/ui/steam_search_dialog.rs:214
+msgid "SteamGridDB"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:330
-msgid "Searching SGDB..."
+#: crates/ira/src/ui/mass_match_dialog.rs:162
+msgid "Steam link"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:559
-#: crates/ira/src/ui/mass_match_ss.rs:357
+#: crates/ira/src/ui/mass_match_dialog.rs:606
+#: crates/ira/src/ui/mass_match_dialog.rs:871
+msgid "Skipped"
+msgstr ""
+
+#: crates/ira/src/ui/mass_match_dialog.rs:724
+#: crates/ira/src/ui/mass_match_ss.rs:353
 msgid "Matching games…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:560
-#: crates/ira/src/ui/mass_match_ss.rs:358
+#: crates/ira/src/ui/mass_match_dialog.rs:725
+#: crates/ira/src/ui/mass_match_ss.rs:354
 msgid "Matching unmatched games…"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:632
+#: crates/ira/src/ui/mass_match_dialog.rs:797
 #, rust-format
 msgid "{} Steam candidates"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:634
-#: crates/ira/src/ui/mass_match_ss.rs:385
+#: crates/ira/src/ui/mass_match_dialog.rs:799
+#: crates/ira/src/ui/mass_match_ss.rs:381
 msgid "Matching finished"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:657
+#: crates/ira/src/ui/mass_match_dialog.rs:822
 msgid "No Steam match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:681
-msgid "Steam: matched"
+#: crates/ira/src/ui/mass_match_dialog.rs:846
+#: crates/ira/src/ui/mass_match_ra.rs:80
+#: crates/ira/src/ui/ss_match_dialog.rs:452
+msgid "Matched"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:705
-msgid "Skipped"
-msgstr ""
-
-#: crates/ira/src/ui/mass_match_dialog.rs:725
+#: crates/ira/src/ui/mass_match_dialog.rs:891
 msgid "Nothing to match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:727
+#: crates/ira/src/ui/mass_match_dialog.rs:893
 msgid "Every game already has a trophy source and image assets linked."
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:738
-#: crates/ira/src/ui/mass_match_dialog.rs:752
+#: crates/ira/src/ui/mass_match_dialog.rs:904
+#: crates/ira/src/ui/mass_match_dialog.rs:918
 #: crates/ira/src/ui/window.rs:343
 msgid "Match unmatched games"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:748
+#: crates/ira/src/ui/mass_match_dialog.rs:914
 msgid "1 game to match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:750
+#: crates/ira/src/ui/mass_match_dialog.rs:916
 #, rust-format
 msgid "{} games to match"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:762
+#: crates/ira/src/ui/mass_match_dialog.rs:928
 msgid "Fetch missing metadata"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_dialog.rs:804
+#: crates/ira/src/ui/mass_match_dialog.rs:970
 msgid "Hide done and failed"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ra.rs:33
-msgid "Searching RA..."
-msgstr ""
-
-#: crates/ira/src/ui/mass_match_ra.rs:60
+#: crates/ira/src/ui/mass_match_ra.rs:56
 msgid "Search RA"
 msgstr ""
 
-#: crates/ira/src/ui/mass_match_ra.rs:83
-msgid "RA: matched"
-msgstr ""
-
-#: crates/ira/src/ui/mass_match_ss.rs:200
-msgid "Searching SS..."
-msgstr ""
-
-#: crates/ira/src/ui/mass_match_ss.rs:383
+#: crates/ira/src/ui/mass_match_ss.rs:379
 #, rust-format
 msgid "{} games matched"
 msgstr ""
@@ -5529,11 +5532,6 @@ msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_pages.rs:294
 msgid "Metadata"
-msgstr ""
-
-#: crates/ira/src/ui/settings_dialog_pages.rs:301
-#: crates/ira/src/ui/steam_search_dialog.rs:214
-msgid "SteamGridDB"
 msgstr ""
 
 #: crates/ira/src/ui/settings_dialog_pages.rs:313
@@ -6246,10 +6244,6 @@ msgstr ""
 
 #: crates/ira/src/ui/ss_match_dialog.rs:428
 msgid "Search SS"
-msgstr ""
-
-#: crates/ira/src/ui/ss_match_dialog.rs:452
-msgid "SS: matched"
 msgstr ""
 
 #: crates/ira/src/ui/steam_search_dialog.rs:41

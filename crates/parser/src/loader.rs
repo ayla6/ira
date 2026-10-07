@@ -38,14 +38,23 @@ pub fn populate_image_paths(image_dir: &Path, game: &mut Game) {
         let (max_w, max_h) = at.thumb_dims();
         let small_webp = format!("{}_small.webp", base);
         let small_jpg = format!("{}_small.jpg", base);
-        if !files.contains(&small_webp) && !files.contains(&small_jpg) {
-            super::paths::ensure_small_image(image_dir, base, max_w, max_h);
-            if image_dir.join(&small_webp).is_file() {
-                files.insert(small_webp);
-            }
-            if image_dir.join(&small_jpg).is_file() {
-                files.insert(small_jpg);
-            }
+        if files.contains(&small_webp) || files.contains(&small_jpg) {
+            continue;
+        }
+        // The directory listing already proves whether a source exists:
+        // calling ensure when it does not just re-stats the same names
+        // before returning without writing anything.
+        let has_source =
+            files.contains(&format!("{base}.webp")) || files.contains(&format!("{base}.jpg"));
+        if !has_source {
+            continue;
+        }
+        super::paths::ensure_small_image(image_dir, base, max_w, max_h);
+        if image_dir.join(&small_webp).is_file() {
+            files.insert(small_webp);
+        }
+        if image_dir.join(&small_jpg).is_file() {
+            files.insert(small_jpg);
         }
     }
 

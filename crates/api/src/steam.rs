@@ -620,17 +620,20 @@ fn parse_appdetails_response(data: &[u8]) -> Option<SteamCmdResponse> {
     }
 }
 
-/// Convert Steam's CamelCase pinned_position to kebab-case.
-/// "BottomCenter" → "bottom-center", "BottomLeft" → "bottom-left"
-fn convert_pinned_position(s: &str) -> String {
-    let mut result = String::new();
+/// Convert Steam's CamelCase pinned_position to a logo position.
+/// "BottomCenter" → BottomCenter; empty (Steam names none) → None.
+fn convert_pinned_position(s: &str) -> Option<ira_models::LogoPosition> {
+    if s.is_empty() {
+        return None;
+    }
+    let mut kebab = String::new();
     for (i, c) in s.chars().enumerate() {
         if i > 0 && c.is_uppercase() {
-            result.push('-');
+            kebab.push('-');
         }
-        result.push(c.to_ascii_lowercase());
+        kebab.push(c.to_ascii_lowercase());
     }
-    result
+    Some(ira_models::LogoPosition::from_string(&kebab))
 }
 
 /// Collect launch entries sorted by their numeric key (0, 1, 2, …) so that
@@ -1040,10 +1043,20 @@ mod tests {
 
     #[test]
     fn test_convert_pinned_position() {
-        assert_eq!(convert_pinned_position("BottomLeft"), "bottom-left");
-        assert_eq!(convert_pinned_position("BottomCenter"), "bottom-center");
-        assert_eq!(convert_pinned_position("TopLeft"), "top-left");
-        assert_eq!(convert_pinned_position("Center"), "center");
-        assert_eq!(convert_pinned_position(""), "");
+        use ira_models::LogoPosition;
+        assert_eq!(
+            convert_pinned_position("BottomLeft"),
+            Some(LogoPosition::BottomLeft)
+        );
+        assert_eq!(
+            convert_pinned_position("BottomCenter"),
+            Some(LogoPosition::BottomCenter)
+        );
+        assert_eq!(
+            convert_pinned_position("TopLeft"),
+            Some(LogoPosition::TopLeft)
+        );
+        assert_eq!(convert_pinned_position("Center"), Some(LogoPosition::Center));
+        assert_eq!(convert_pinned_position(""), None);
     }
 }

@@ -43,8 +43,10 @@ pub struct Game {
     pub playtime: f64,
     /// Unix timestamp of last play.
     pub last_played: i64,
-    /// Logo overlay position (e.g. "bottom-left", "center", etc.).
-    pub logo_position: String,
+    /// Logo overlay position. Always concrete — the database defaults
+    /// new rows to the bottom-left, so only freshly constructed games
+    /// (never loaded) could disagree with storage.
+    pub logo_position: LogoPosition,
     /// Logo overlay pixel size.
     pub logo_size: i32,
     /// True if user manually unmatched — don't auto-rematch.
@@ -107,7 +109,7 @@ impl Default for Game {
             slug: String::new(),
             playtime: 0.0,
             last_played: 0,
-            logo_position: LogoPosition::BottomLeft.to_string(),
+            logo_position: LogoPosition::BottomLeft,
             logo_size: 50,
             manual_unmatch: false,
             sort_title: String::new(),

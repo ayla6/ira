@@ -61,8 +61,9 @@ pub struct GameEntry {
     pub native_id: String,
     /// SteamGridDB id for games with no achievement source but need images.
     pub sgdb_id: Option<String>,
-    /// Per-game logo overlay position (e.g. "bottom-left").
-    pub logo_position: String,
+    /// Per-game logo overlay position, parsed once at the database
+    /// boundary — everything downstream reads the value.
+    pub logo_position: LogoPosition,
     /// Per-game logo height constraint in pixels.
     pub logo_size: i32,
     /// Set when user manually unmatches — prevents auto-rematching.
@@ -142,7 +143,7 @@ impl Default for GameEntry {
             trophy_id: String::new(),
             native_id: String::new(),
             sgdb_id: None,
-            logo_position: LogoPosition::BottomLeft.to_string(),
+            logo_position: LogoPosition::BottomLeft,
             logo_size: 0,
             manual_unmatch: false,
             sort_title: String::new(),
@@ -222,7 +223,7 @@ impl GameEntry {
             } else {
                 Some(g.sgdb_id.clone())
             },
-            logo_position: g.logo_position.clone(),
+            logo_position: g.logo_position,
             logo_size: g.logo_size,
             manual_unmatch: g.manual_unmatch,
             sort_title: g.sort_title.clone(),
@@ -260,7 +261,7 @@ impl GameEntry {
             hidden: self.hidden,
             playtime: self.playtime,
             last_played: self.last_played,
-            logo_position: self.logo_position.clone(),
+            logo_position: self.logo_position,
             logo_size: self.logo_size,
             manual_unmatch: self.manual_unmatch,
             sort_title: self.sort_title.clone(),
@@ -299,7 +300,7 @@ mod tests {
         assert_eq!(entry.steam_id, "sid");
         assert_eq!(entry.native_id, "gid");
         assert_eq!(entry.platform_id, "pid");
-        assert_eq!(entry.logo_position, LogoPosition::BottomLeft.to_string());
+        assert_eq!(entry.logo_position, LogoPosition::BottomLeft);
         assert_eq!(entry.title, "");
         assert!(!entry.hidden);
         assert!(entry.sgdb_id.is_none());
@@ -360,7 +361,7 @@ mod tests {
             name: "Test Game".to_string(),
             hidden: true,
             sgdb_id: "sgdb_1".to_string(),
-            logo_position: "center".to_string(),
+            logo_position: LogoPosition::Center,
             logo_size: 80,
             manual_unmatch: true,
             sort_title: "SortKey".to_string(),
@@ -422,6 +423,6 @@ mod tests {
         assert!(entry.steam_id.is_empty());
         assert!(entry.native_id.is_empty());
         assert!(entry.platform_id.is_empty());
-        assert_eq!(entry.logo_position, LogoPosition::BottomLeft.to_string());
+        assert_eq!(entry.logo_position, LogoPosition::BottomLeft);
     }
 }

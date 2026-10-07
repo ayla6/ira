@@ -1240,7 +1240,7 @@ mod tests {
             sgdb_id: "12345".to_string(),
             rom_path: "/new/rom.sfc".to_string(),
             sort_title: "My Sort".to_string(),
-            logo_position: "center".to_string(),
+            logo_position: LogoPosition::Center,
             logo_size: 75,
             ..Default::default()
         };
@@ -1248,7 +1248,7 @@ mod tests {
         let enriched = Game {
             platform_id: ira_models::Platform::parse("OLDPID"),
             trophy_source: ira_models::TrophySource::SteamNative,
-            logo_position: LogoPosition::BottomLeft.to_string(),
+            logo_position: LogoPosition::BottomLeft,
             logo_size: 50,
             ..Default::default()
         };
@@ -1263,7 +1263,7 @@ mod tests {
         assert_eq!(result.sgdb_id, "12345");
         assert_eq!(result.rom_path, "/new/rom.sfc");
         assert_eq!(result.sort_title, "My Sort");
-        assert_eq!(result.logo_position, "center");
+        assert_eq!(result.logo_position, LogoPosition::Center);
         assert_eq!(result.logo_size, 75);
     }
 

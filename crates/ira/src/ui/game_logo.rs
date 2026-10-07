@@ -7,7 +7,7 @@ use std::sync::mpsc;
 
 pub(super) type LogoControls = (
     gtk4::Box,
-    Rc<RefCell<String>>,
+    Rc<RefCell<ira_models::LogoPosition>>,
     gtk4::Adjustment,
     Rc<Cell<bool>>,
 );
@@ -24,16 +24,16 @@ pub(super) fn build_game_logo_page(
     game: &Game,
     show_reset: bool,
     steam_reset: Option<SteamLogoReset>,
+    inherited: bool,
 ) -> Option<LogoControls> {
     let logo_page = gtk4::Box::new(gtk4::Orientation::Vertical, 16);
 
-    let inherited = game.logo_position.is_empty();
-    let pos_str = if inherited {
-        ira_models::LogoPosition::DEFAULT.to_string()
+    let pos = if inherited {
+        ira_models::LogoPosition::DEFAULT
     } else {
-        game.logo_position.clone()
+        game.logo_position
     };
-    let selected_pos: Rc<RefCell<String>> = Rc::new(RefCell::new(pos_str));
+    let selected_pos: Rc<RefCell<ira_models::LogoPosition>> = Rc::new(RefCell::new(pos));
     let modified: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
     let size_pct = if inherited { 50 } else { game.logo_size }.clamp(5, 100);
@@ -96,8 +96,8 @@ pub(super) fn build_game_logo_page(
                 return;
             }
             let pct = adj_for_draw.value() as i32;
-            let pos = pos_for_draw.borrow().clone();
-            let (halign, valign) = super::game_display::logo_position_align(&pos);
+            let pos = *pos_for_draw.borrow();
+            let (halign, valign) = super::game_display::logo_position_align(pos);
             let (x, y, lw, lh) =
                 super::game_display::logo_rect(w, h, pb_w, pb_h, pct, halign, valign);
             let _ = cr.save();
@@ -121,12 +121,12 @@ pub(super) fn build_game_logo_page(
     pos_grid.set_hexpand(true);
     pos_grid.set_vexpand(true);
 
-    let current_pos = selected_pos.borrow().clone();
+    let current_pos = *selected_pos.borrow();
     let mut all_btns: Vec<gtk4::Button> = Vec::new();
     for (i, &pos) in logo_positions.iter().enumerate() {
         let btn = gtk4::Button::new();
         btn.add_css_class(CSS_LOGO_POS_OVERLAY_BTN);
-        if pos.to_string() == current_pos {
+        if pos == current_pos {
             btn.add_css_class(CSS_SELECTED);
         }
         btn.set_hexpand(true);
@@ -142,7 +142,7 @@ pub(super) fn build_game_logo_page(
     for (i, &pos) in logo_positions.iter().enumerate() {
         let btns_c = btns.clone();
         let selected_pos_c = selected_pos.clone();
-        let pos_owned = pos.to_string();
+        let pos_owned = pos;
         let preview_clone = preview_draw.clone();
         let modified_c = modified.clone();
         let Some(button) = btns[i].upgrade() else {
@@ -153,7 +153,7 @@ pub(super) fn build_game_logo_page(
                 b.remove_css_class(CSS_SELECTED);
             }
             btn.add_css_class(CSS_SELECTED);
-            *selected_pos_c.borrow_mut() = pos_owned.clone();
+            *selected_pos_c.borrow_mut() = pos_owned;
             modified_c.set(true);
             preview_clone.queue_draw();
         });
@@ -185,7 +185,7 @@ pub(super) fn build_game_logo_page(
         let preview_reset = preview_draw.clone();
         let modified_reset = modified.clone();
         reset_btn.connect_clicked(move |_| {
-            *selected_pos_reset.borrow_mut() = ira_models::LogoPosition::DEFAULT.to_string();
+            *selected_pos_reset.borrow_mut() = ira_models::LogoPosition::DEFAULT;
             size_adj_reset.set_value(50.0);
             modified_reset.set(false);
             for b in btns_reset.iter().filter_map(|b| b.upgrade()) {
@@ -252,7 +252,7 @@ fn build_logo_size_row(
 
 fn build_steam_reset_button(
     info: SteamLogoReset,
-    selected_pos: &Rc<RefCell<String>>,
+    selected_pos: &Rc<RefCell<ira_models::LogoPosition>>,
     size_adj: &gtk4::Adjustment,
     btns: &Rc<Vec<glib::WeakRef<gtk4::Button>>>,
     preview_draw: &gtk4::DrawingArea,
@@ -276,7 +276,7 @@ fn build_steam_reset_button(
         if let Some(btn) = btn_weak.upgrade() {
             btn.set_sensitive(false);
         }
-        let (tx, rx) = mpsc::channel::<Option<(String, i32)>>();
+        let (tx, rx) = mpsc::channel::<Option<(Option<ira_models::LogoPosition>, i32)>>();
         let app_id = app_id_clone.clone();
         let steam = steam_clone.clone();
         std::thread::spawn(move || {
@@ -310,7 +310,7 @@ fn build_steam_reset_button(
 
 struct SteamLogoApply {
     btn_weak: glib::WeakRef<gtk4::Button>,
-    selected_weak: std::rc::Weak<RefCell<String>>,
+    selected_weak: std::rc::Weak<RefCell<ira_models::LogoPosition>>,
     size_weak: glib::WeakRef<gtk4::Adjustment>,
     modified_weak: std::rc::Weak<Cell<bool>>,
     btns_weak: std::rc::Weak<Vec<glib::WeakRef<gtk4::Button>>>,
@@ -320,7 +320,7 @@ struct SteamLogoApply {
     db_id: i64,
 }
 
-type LogoFetchRx = Rc<RefCell<mpsc::Receiver<Option<(String, i32)>>>>;
+type LogoFetchRx = Rc<RefCell<mpsc::Receiver<Option<(Option<ira_models::LogoPosition>, i32)>>>>;
 
 fn apply_steam_logo_result(ctx: &SteamLogoApply) -> glib::ControlFlow {
     let (
@@ -343,27 +343,23 @@ fn apply_steam_logo_result(ctx: &SteamLogoApply) -> glib::ControlFlow {
     };
     match ctx.rx.borrow_mut().try_recv() {
         Ok(Some((pos, size))) => {
-            let pos_str = if pos.is_empty() {
-                ira_models::LogoPosition::DEFAULT.to_string()
-            } else {
-                pos
-            };
-            *selected.borrow_mut() = pos_str.clone();
+            // Steam naming nothing resets to the default, same as before.
+            let pos = pos.unwrap_or(ira_models::LogoPosition::DEFAULT);
+            *selected.borrow_mut() = pos;
             size_adj.set_value(size.clamp(5, 100) as f64);
             modified.set(true);
             for b in btns.iter().filter_map(|b| b.upgrade()) {
                 b.remove_css_class(CSS_SELECTED);
             }
-            let target = ira_models::LogoPosition::from_string(&pos_str);
             for (i, &p) in ira_models::LogoPosition::all().iter().enumerate() {
-                if p == target {
+                if p == pos {
                     if let Some(b) = btns[i].upgrade() {
                         b.add_css_class(CSS_SELECTED);
                     }
                 }
             }
             preview.queue_draw();
-            let _ = ira_db::set_logo_settings(&ctx.db, ctx.db_id, &pos_str, size.clamp(5, 100));
+            let _ = ira_db::set_logo_settings(&ctx.db, ctx.db_id, pos.as_str(), size.clamp(5, 100));
             btn.set_sensitive(true);
             glib::ControlFlow::Break
         }

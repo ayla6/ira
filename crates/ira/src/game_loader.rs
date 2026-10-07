@@ -555,8 +555,8 @@ pub fn apply_variant_images_for(
     ira_parser::populate_image_paths(&var_dir, &mut var_game);
     apply_non_empty_images(&var_game, game);
 
-    if !var.logo_position.is_empty() {
-        game.logo_position = var.logo_position.clone();
+    if let Some(pos) = var.logo_position {
+        game.logo_position = pos;
     }
     if var.logo_size != 0 {
         game.logo_size = var.logo_size;
@@ -595,8 +595,8 @@ fn build_variant_entries_from_slice(
             );
             entry.playtime = v.playtime;
             entry.last_played = v.last_played;
-            if !v.logo_position.is_empty() {
-                entry.logo_position = v.logo_position.clone();
+            if let Some(pos) = v.logo_position {
+                entry.logo_position = pos;
             }
             if v.logo_size != 0 {
                 entry.logo_size = v.logo_size;

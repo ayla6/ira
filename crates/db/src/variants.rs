@@ -1,5 +1,5 @@
 use crate::{err, DbConn};
-use ira_models::GameVariant;
+use ira_models::{GameVariant, LogoPosition};
 use rusqlite::params;
 
 /// Full column list of the get_variants SELECT, in row-index order (see the
@@ -67,7 +67,15 @@ fn variant_from_row(row: &rusqlite::Row, game_id: i64) -> rusqlite::Result<GameV
         playtime: row.get(11)?,
         last_played: row.get(12)?,
         count_playtime: row.get::<_, i64>(13)? != 0,
-        logo_position: row.get(14)?,
+        logo_position: {
+            // Empty means inherit — only a real position becomes a value.
+            let raw: String = row.get(14)?;
+            if raw.is_empty() {
+                None
+            } else {
+                Some(LogoPosition::from_string(&raw))
+            }
+        },
         logo_size: row.get(15)?,
     })
 }
@@ -156,7 +164,7 @@ pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> 
             variant.custom_images as i64,
             variant.show_as_entry as i64,
             variant.count_playtime as i64,
-            variant.logo_position,
+            variant.logo_position.map(|p| p.as_str()).unwrap_or(""),
             variant.logo_size
         ],
     )
@@ -186,7 +194,7 @@ pub fn update_variant(conn: &DbConn, variant: &GameVariant) -> Result<(), String
             variant.custom_images as i64,
             variant.show_as_entry as i64,
             variant.count_playtime as i64,
-            variant.logo_position,
+            variant.logo_position.map(|p| p.as_str()).unwrap_or(""),
             variant.logo_size,
             variant.id
         ],

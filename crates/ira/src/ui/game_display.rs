@@ -175,17 +175,18 @@ pub(crate) fn logo_rect(
     (x, y, lw, lh)
 }
 
-pub(crate) fn logo_position_align(pos: &str) -> (gtk4::Align, gtk4::Align) {
-    match ira_models::LogoPosition::from_string(pos) {
-        ira_models::LogoPosition::BottomCenter => (gtk4::Align::Center, gtk4::Align::End),
-        ira_models::LogoPosition::BottomRight => (gtk4::Align::End, gtk4::Align::End),
-        ira_models::LogoPosition::CenterLeft => (gtk4::Align::Start, gtk4::Align::Center),
-        ira_models::LogoPosition::Center => (gtk4::Align::Center, gtk4::Align::Center),
-        ira_models::LogoPosition::CenterRight => (gtk4::Align::End, gtk4::Align::Center),
-        ira_models::LogoPosition::TopLeft => (gtk4::Align::Start, gtk4::Align::Start),
-        ira_models::LogoPosition::TopCenter => (gtk4::Align::Center, gtk4::Align::Start),
-        ira_models::LogoPosition::TopRight => (gtk4::Align::End, gtk4::Align::Start),
-        _ => (gtk4::Align::Start, gtk4::Align::End),
+pub(crate) fn logo_position_align(pos: ira_models::LogoPosition) -> (gtk4::Align, gtk4::Align) {
+    use ira_models::LogoPosition::*;
+    match pos {
+        BottomCenter => (gtk4::Align::Center, gtk4::Align::End),
+        BottomLeft => (gtk4::Align::Start, gtk4::Align::End),
+        BottomRight => (gtk4::Align::End, gtk4::Align::End),
+        CenterLeft => (gtk4::Align::Start, gtk4::Align::Center),
+        Center => (gtk4::Align::Center, gtk4::Align::Center),
+        CenterRight => (gtk4::Align::End, gtk4::Align::Center),
+        TopLeft => (gtk4::Align::Start, gtk4::Align::Start),
+        TopCenter => (gtk4::Align::Center, gtk4::Align::Start),
+        TopRight => (gtk4::Align::End, gtk4::Align::Start),
     }
 }
 

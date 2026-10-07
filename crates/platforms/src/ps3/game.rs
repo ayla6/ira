@@ -18,7 +18,7 @@ use super::tropusr::parse_tropusr;
 pub struct Rpcs3GameMeta {
     pub title: String,
     pub hidden: bool,
-    pub logo_position: String,
+    pub logo_position: ira_models::LogoPosition,
     pub logo_size: i32,
     pub sort_title: String,
     pub sgdb_id: String,
@@ -62,7 +62,7 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
         slug: serial.clone(),
         playtime,
         last_played,
-        logo_position: meta.logo_position.clone(),
+        logo_position: meta.logo_position,
         logo_size: meta.logo_size,
         sort_title: meta.sort_title.clone(),
         game_path: game.game_path.to_string_lossy().into_owned(),

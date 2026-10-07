@@ -64,7 +64,9 @@ pub(super) struct IdentifiedGame {
     pub game_folder: PathBuf,
     pub exe: String,
     pub variants: Vec<String>,
-    pub logo_position: String,
+    /// Steam's logo position, when it names one — the game keeps its
+    /// default otherwise.
+    pub logo_position: Option<ira_models::LogoPosition>,
     pub logo_size: i32,
 }
 
@@ -744,7 +746,7 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf, name: S
                 game_folder: folder_c.clone(),
                 exe,
                 variants: Vec::new(),
-                logo_position: String::new(),
+                logo_position: None,
                 logo_size: 0,
             },
             None,
@@ -1229,8 +1231,8 @@ fn add_game_record(params: AddGameRecordParams<'_>) -> Result<i64, String> {
         save_dir,
     })?;
 
-    if !game.logo_position.is_empty() {
-        let _ = ira_db::set_logo_settings(db, db_id, &game.logo_position, game.logo_size);
+    if let Some(pos) = game.logo_position {
+        let _ = ira_db::set_logo_settings(db, db_id, pos.as_str(), game.logo_size);
     }
     add_game_variants(db, db_id, game);
     Ok(db_id)

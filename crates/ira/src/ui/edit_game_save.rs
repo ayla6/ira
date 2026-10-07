@@ -31,7 +31,7 @@ pub(super) struct SaveGameSettingsParams {
     pub game_kind: ira_models::GameKind,
     pub var_widgets: Rc<RefCell<Vec<VarW>>>,
     pub save_dir: String,
-    pub logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)>,
+    pub logo_controls: Option<(Rc<RefCell<ira_models::LogoPosition>>, gtk4::Adjustment)>,
     pub dlc_switches: Vec<adw::SwitchRow>,
     pub pending_copies: Rc<RefCell<HashMap<String, PendingImage>>>,
     pub old_wine: WineConfig,
@@ -443,10 +443,10 @@ fn handle_unmatch(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
 
 fn save_logo_settings(db: &ira_db::DbConn, params: &SaveGameSettingsParams) {
     if let Some((ref selected_pos, ref size_adj)) = params.logo_controls {
-        let pos = selected_pos.borrow().clone();
+        let pos = *selected_pos.borrow();
         let size = size_adj.value() as i32;
         if params.db_id != 0 {
-            if let Err(e) = ira_db::set_logo_settings(db, params.db_id, &pos, size) {
+            if let Err(e) = ira_db::set_logo_settings(db, params.db_id, pos.as_str(), size) {
                 eprintln!("Failed to update logo settings: {}", e);
             }
         }

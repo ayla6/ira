@@ -200,9 +200,10 @@ pub struct SteamCmdInfo {
     /// Sorted launch entries (launch.0 is the default). Empty if none.
     #[serde(default)]
     pub launches: Vec<SteamCmdLaunchInfo>,
-    /// Logo position from Steam library_assets (kebab-case, e.g. "bottom-left").
+    /// Logo position from Steam library_assets. None when Steam names
+    /// none — the wizard skips the logo write and the game keeps its default.
     #[serde(default)]
-    pub logo_position: String,
+    pub logo_position: Option<ira_models::LogoPosition>,
     /// Logo width percentage from Steam (0 if not available).
     #[serde(default)]
     pub logo_size: i32,

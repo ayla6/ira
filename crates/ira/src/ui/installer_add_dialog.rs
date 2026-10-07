@@ -959,7 +959,7 @@ fn show_manual_fallback(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<Installer
             game_folder: folder,
             exe: String::new(),
             variants: Vec::new(),
-            logo_position: String::new(),
+            logo_position: None,
             logo_size: 0,
         };
         let profile_id = ist.borrow().profile_id;

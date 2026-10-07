@@ -4,7 +4,7 @@ use std::rc::Rc;
 use glib::clone::Downgrade;
 
 type VariantImagesSectionResult = (
-    Option<Rc<RefCell<String>>>,
+    Option<Rc<RefCell<ira_models::LogoPosition>>>,
     Option<gtk4::Adjustment>,
     Option<Rc<std::cell::Cell<bool>>>,
 );
@@ -13,7 +13,7 @@ use super::helpers;
 use super::settings_pages;
 use super::state::SharedState;
 use adw::prelude::*;
-use ira_models::{AssetType, GameVariant};
+use ira_models::{AssetType, GameVariant, LogoPosition};
 
 pub(super) struct VarW {
     pub(super) id: Option<i64>,
@@ -25,7 +25,7 @@ pub(super) struct VarW {
     pub(super) custom_images: adw::SwitchRow,
     pub(super) show_as_entry: adw::SwitchRow,
     pub(super) count_playtime: adw::SwitchRow,
-    pub(super) logo_position: Rc<RefCell<String>>,
+    pub(super) logo_position: Rc<RefCell<LogoPosition>>,
     pub(super) logo_size: gtk4::Adjustment,
     pub(super) logo_modified: Rc<std::cell::Cell<bool>>,
     pub(super) group: adw::PreferencesGroup,
@@ -157,7 +157,7 @@ fn build_variant_images_and_logo_section(
     db_id: i64,
     win: &adw::Window,
 ) -> VariantImagesSectionResult {
-    let mut logo_position_cell: Option<Rc<RefCell<String>>> = None;
+    let mut logo_position_cell: Option<Rc<RefCell<LogoPosition>>> = None;
     let mut logo_size_adj_cell: Option<gtk4::Adjustment> = None;
     let mut logo_modified_cell: Option<Rc<std::cell::Cell<bool>>> = None;
 
@@ -220,14 +220,14 @@ fn build_variant_images_and_logo_section(
                     }
                 }
             }
-            var_game.logo_position = v.logo_position.clone();
+            var_game.logo_position = v.logo_position.unwrap_or(LogoPosition::DEFAULT);
             var_game.logo_size = v.logo_size;
             if let Some((logo_ui, logo_pos, logo_size_adj, logo_mod)) =
-                super::game_logo::build_game_logo_page(&var_game, true, None)
+                super::game_logo::build_game_logo_page(&var_game, true, None, v.logo_position.is_none())
             {
                 let logo_expander = adw::ExpanderRow::new();
                 logo_expander.set_title(&crate::tr!("Logo position"));
-                let subtitle = if v.logo_position.is_empty() {
+                let subtitle = if v.logo_position.is_none() {
                     crate::tr!("Inherited from base game")
                 } else {
                     String::new()
@@ -389,7 +389,7 @@ fn build_variant_card(
         show_as_entry: show_as_entry_row,
         count_playtime: count_playtime_row,
         logo_position: logo_position_cell
-            .unwrap_or_else(|| Rc::new(RefCell::new(v.logo_position.clone()))),
+            .unwrap_or_else(|| Rc::new(RefCell::new(v.logo_position.unwrap_or_default()))),
         logo_size: logo_size_adj_cell.unwrap_or_else(|| {
             gtk4::Adjustment::new(v.logo_size as f64, 5.0, 100.0, 1.0, 5.0, 0.0)
         }),
@@ -527,9 +527,9 @@ pub(super) fn save_variants(db: &ira_db::DbConn, db_id: i64, var_widgets: &Rc<Re
             show_as_entry: vw.show_as_entry.is_active(),
             count_playtime: vw.count_playtime.is_active(),
             logo_position: if vw.logo_modified.get() {
-                vw.logo_position.borrow().clone()
+                Some(*vw.logo_position.borrow())
             } else {
-                String::new()
+                None
             },
             logo_size: if vw.logo_modified.get() {
                 vw.logo_size.value() as i32

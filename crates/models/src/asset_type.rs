@@ -198,6 +198,19 @@ impl Default for LogoPosition {
     }
 }
 
+impl Serialize for LogoPosition {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for LogoPosition {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Ok(LogoPosition::from_string(&s))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +269,19 @@ mod tests {
             let back = LogoPosition::from_string(s);
             assert_eq!(pos, back);
         }
+    }
+
+    #[test]
+    fn test_logo_position_serde_roundtrip() {
+        for &pos in LogoPosition::all() {
+            let json = serde_json::to_string(&pos).unwrap();
+            assert_eq!(json, format!("\"{}\"", pos.as_str()));
+            let back: LogoPosition = serde_json::from_str(&json).unwrap();
+            assert_eq!(pos, back);
+        }
+        // Unknown strings fall back to the default, like the DB parse.
+        let back: LogoPosition = serde_json::from_str("\"garbage\"").unwrap();
+        assert_eq!(back, LogoPosition::BottomLeft);
     }
 
     #[test]

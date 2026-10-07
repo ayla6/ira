@@ -385,7 +385,7 @@ fn build_dialog_contents(
         );
     }
 
-    let logo_controls: Option<(Rc<RefCell<String>>, gtk4::Adjustment)> = {
+    let logo_controls: Option<(Rc<RefCell<ira_models::LogoPosition>>, gtk4::Adjustment)> = {
         let steam_reset = if game.trophy_source.has_steam_enrichment()
             && !game.steam_api_id().is_empty()
         {
@@ -400,7 +400,7 @@ fn build_dialog_contents(
             None
         };
         if let Some((logo_page, selected_pos, size_adj, _modified)) =
-            super::game_logo::build_game_logo_page(&game, false, steam_reset)
+            super::game_logo::build_game_logo_page(&game, false, steam_reset, false)
         {
             sidebar.append(&super::settings_pages::settings_sidebar_row(
                 "preferences-desktop-wallpaper-symbolic",

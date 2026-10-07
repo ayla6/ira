@@ -425,7 +425,7 @@ fn make_hero_picture(hero_path: &str, has_hero: bool) -> gtk4::Picture {
 
 fn make_logo_layer(game: &Game) -> gtk4::DrawingArea {
     let logo_pct = game.logo_size.clamp(5, 100);
-    let logo_pos = game.logo_position.clone();
+    let logo_pos = game.logo_position;
     let logo_area = gtk4::DrawingArea::new();
     logo_area.set_halign(gtk4::Align::Fill);
     logo_area.set_valign(gtk4::Align::Fill);
@@ -447,7 +447,7 @@ fn make_logo_layer(game: &Game) -> gtk4::DrawingArea {
     }
 
     logo_area.set_draw_func(move |_area, cr, area_w, area_h| {
-        draw_game_logo(cr, area_w, area_h, &pixbuf_cell, &logo_pos, logo_pct);
+        draw_game_logo(cr, area_w, area_h, &pixbuf_cell, logo_pos, logo_pct);
     });
     logo_area
 }
@@ -457,7 +457,7 @@ fn draw_game_logo(
     area_w: i32,
     area_h: i32,
     pixbuf_cell: &Rc<RefCell<Option<Pixbuf>>>,
-    logo_pos: &str,
+    logo_pos: ira_models::LogoPosition,
     logo_pct: i32,
 ) {
     let Some(ref pixbuf) = *pixbuf_cell.borrow() else {

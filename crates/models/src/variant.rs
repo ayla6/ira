@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::asset_type::LogoPosition;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameVariant {
     pub id: i64,
@@ -24,8 +26,10 @@ pub struct GameVariant {
     pub last_played: i64,
     #[serde(default = "crate::helpers::default_true")]
     pub count_playtime: bool,
+    /// Logo overlay override. None inherits the base game's position
+    /// (the database stores this as an empty string); Some pins one.
     #[serde(default)]
-    pub logo_position: String,
+    pub logo_position: Option<LogoPosition>,
     #[serde(default)]
     pub logo_size: i32,
 }

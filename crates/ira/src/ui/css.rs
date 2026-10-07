@@ -55,6 +55,9 @@ pub const CSS_TITLE_1: &str = "title-1";
 pub const CSS_TITLE_3: &str = "title-3";
 pub const CSS_TOOLBAR: &str = "toolbar";
 pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
+pub const CSS_MASS_MATCH_ID_LINK: &str = "mass-match-id-link";
+pub const CSS_MASS_MATCH_LINE: &str = "mass-match-line";
+pub const CSS_MASS_MATCH_TITLE: &str = "mass-match-title";
 pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";
 pub const CSS_SOURCE_BADGE: &str = "source-badge";
 pub const CSS_SQUARE_BUTTON: &str = "square-button";
@@ -85,6 +88,11 @@ pub const APP_CSS: &str = "
   .sidebar-sticky-selected { background-color: alpha(@theme_fg_color, 0.07); border-radius: 9px; }
   .sidebar-sticky-hover { background-color: alpha(@theme_fg_color, 0.04); border-radius: 9px; }
 .play-btn-label { font-size: 1.15em; }
+.mass-match-title { font-size: 1.1em; }
+/* Every source line stands as tall as a button row, so button-less
+   states (status text, id links) never collapse next to their siblings. */
+.mass-match-line { min-height: 34px; }
+.mass-match-id-link { text-decoration-line: none; }
 
 .disc-tile { padding: 12px; }
 .disc-number {

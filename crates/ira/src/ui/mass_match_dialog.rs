@@ -183,6 +183,7 @@ pub(super) fn match_site_uri(source: MatchSource, id: &str) -> String {
 pub(super) fn match_id_link(source: MatchSource, id: &str, name: &str) -> gtk4::LinkButton {
     let link = gtk4::LinkButton::with_label(&match_site_uri(source, id), id);
     link.set_valign(gtk4::Align::Center);
+    link.add_css_class(CSS_MASS_MATCH_ID_LINK);
     if !name.is_empty() {
         link.set_tooltip_text(Some(name));
     }
@@ -535,6 +536,19 @@ fn start_steam_batch_matching(
                             db_id: hit.db_id,
                             parent_dialog: parent_dialog.clone(),
                         },
+                    );
+                } else {
+                    // No match: the manual buttons, exactly like a manual
+                    // miss always painted — without this the line sits on
+                    // its "Searching…" placeholder forever.
+                    handle_steam_search_result(
+                        &state,
+                        &steam_box,
+                        &steam,
+                        &hit.name,
+                        hit.db_id,
+                        None,
+                        &parent_dialog,
                     );
                 }
                 // The pass spoke its final word for this row —
@@ -1036,7 +1050,7 @@ fn create_match_row(
     game: &Game,
 ) -> (gtk4::Box, RowActions) {
     let row = gtk4::ListBoxRow::new();
-    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+    let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     outer.set_margin_top(6);
     outer.set_margin_bottom(6);
 
@@ -1049,7 +1063,7 @@ fn create_match_row(
     title.set_halign(gtk4::Align::Start);
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     title.set_single_line_mode(true);
-    title.add_css_class(CSS_HEADING);
+    title.add_css_class(CSS_MASS_MATCH_TITLE);
     title.set_tooltip_text(Some(&game.name));
     header.append(&title);
     let platform =
@@ -1059,7 +1073,7 @@ fn create_match_row(
     header.append(&platform);
     outer.append(&header);
 
-    let sources = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
+    let sources = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
     outer.append(&sources);
 
     row.set_child(Some(&outer));
@@ -1077,6 +1091,7 @@ fn create_match_row(
 /// action box, right-aligned so every line scans the same way.
 fn source_sub_row(sources: &gtk4::Box, source: MatchSource) -> gtk4::Box {
     let line = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+    line.add_css_class(CSS_MASS_MATCH_LINE);
     line.set_margin_start(12);
     line.set_margin_end(12);
     let label = gtk4::Label::new(Some(&source_label(source)));

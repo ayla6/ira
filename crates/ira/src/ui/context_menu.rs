@@ -362,8 +362,16 @@ fn reset_game_image(state: &SharedState, game: &Game, base: &str) {
         return;
     };
     let dir = ira_parser::entry_data_dir(&save_dir, &entry);
+    // Capture before removal: the texture cache keys on paths, and the
+    // lookup below would only ever find files that survived — which, after
+    // a full-variant removal, is nothing. Without this a later image
+    // landing on the same path resurrects the deleted bytes from cache.
+    let doomed: Vec<std::path::PathBuf> = [base.to_string(), format!("{base}_small")]
+        .iter()
+        .filter_map(|candidate| ira_parser::find_image_file(&dir, candidate))
+        .collect();
     ira_parser::remove_image_variants(&dir, base);
-    if let Some(path) = ira_parser::find_image_file(&dir, base) {
+    for path in &doomed {
         ira_images::invalidate_texture(&path.to_string_lossy());
     }
 

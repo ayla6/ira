@@ -282,11 +282,13 @@ fn build_steam_icon_button(
                 });
             if let Some(clienticon) = clienticon {
                 let dest_webp = ira_parser::data_dir(&save_dir_c, &id_c).join("icon.webp");
-                // An explicit click is a re-download: a stale icon.webp
-                // from an earlier failed attempt must not short-circuit it.
-                let _ = std::fs::remove_file(&dest_webp);
+                // An explicit click is a re-download: stale files from an
+                // earlier attempt must not short-circuit it — and a stale
+                // `_small` thumbnail would keep showing the old icon, since
+                // the loader prefers it over the full image.
                 if let Some(parent) = dest_webp.parent() {
                     let _ = std::fs::create_dir_all(parent);
+                    ira_parser::remove_image_variants(parent, "icon");
                 }
                 let ico_bytes = {
                     let ico_path = ira_platforms::steam::steam_install_dir()
@@ -304,6 +306,9 @@ fn build_steam_icon_button(
                 } else if let Some(webp) = ira_parser::convert_bytes_to_lossless_webp(&ico_bytes) {
                     if let Err(e) = std::fs::write(&dest_webp, &webp) {
                         eprintln!("Failed to write steam icon {}: {e}", dest_webp.display());
+                    } else if let Some(parent) = dest_webp.parent() {
+                        let (sw, sh) = ira_models::AssetType::Icon.thumb_dims();
+                        ira_parser::ensure_small_image(parent, "icon", sw, sh);
                     }
                 } else {
                     eprintln!("steam icon download failed for {id_c}: undecodable icon bytes");

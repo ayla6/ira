@@ -34,7 +34,7 @@ fn manual_sgdb_search_button(
             let action_box = action_box.clone();
             move |sgdb_id, matched_name| {
                 replace_row_actions(&action_box, |ab| {
-                    ab.append(&super::mass_match_dialog::match_id_link(
+                    ab.append(&super::mass_match_dialog::match_id_button(
                         super::mass_match_dialog::MatchSource::Sgdb,
                         sgdb_id,
                         matched_name,
@@ -73,7 +73,7 @@ pub(super) fn handle_unified_sgdb_result(
         {
             g.sgdb_id = sgdb_id.clone();
         }
-        action_box.append(&super::mass_match_dialog::match_id_link(
+        action_box.append(&super::mass_match_dialog::match_id_button(
             super::mass_match_dialog::MatchSource::Sgdb,
             &sgdb_id,
             &matched_name,

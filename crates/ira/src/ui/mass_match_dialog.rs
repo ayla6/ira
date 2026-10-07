@@ -177,17 +177,22 @@ pub(super) fn match_site_uri(source: MatchSource, id: &str) -> String {
     }
 }
 
-/// The matched line's identity: the match id linking to its site page,
-/// the matched name riding the tooltip. Replaces the old bare "Matched"
-/// label — the Unmatch button beside it already says what happened.
-pub(super) fn match_id_link(source: MatchSource, id: &str, name: &str) -> gtk4::LinkButton {
-    let link = gtk4::LinkButton::with_label(&match_site_uri(source, id), id);
-    link.set_valign(gtk4::Align::Center);
-    link.add_css_class(CSS_MASS_MATCH_ID_LINK);
+/// The matched line's identity: the match id as a flat accent-colored
+/// button opening its site page — visibly clickable with no underline
+/// for any theme to render badly — the matched name riding the tooltip.
+pub(super) fn match_id_button(source: MatchSource, id: &str, name: &str) -> gtk4::Button {
+    let button = gtk4::Button::with_label(id);
+    button.add_css_class(CSS_FLAT);
+    button.add_css_class(CSS_MASS_MATCH_ID_LINK);
+    button.set_valign(gtk4::Align::Center);
     if !name.is_empty() {
-        link.set_tooltip_text(Some(name));
+        button.set_tooltip_text(Some(name));
     }
-    link
+    let uri = match_site_uri(source, id);
+    button.connect_clicked(move |button| {
+        super::helpers::open_uri(button.upcast_ref(), &uri);
+    });
+    button
 }
 
 /// Per-dialog visibility for the match list: every row tracks the sources
@@ -609,7 +614,7 @@ fn paint_steam_matched(
         });
     }
     replace_row_actions(steam_box, |ab| {
-        ab.append(&match_id_link(MatchSource::Steam, sid, match_name));
+        ab.append(&match_id_button(MatchSource::Steam, sid, match_name));
         ab.append(&unmatch);
     });
 }
@@ -889,7 +894,7 @@ fn start_steam_title_matching(
                     link_btn.connect_clicked(move |_| {
                         if super::fetch_metadata::store_steam_link(&state, db_id, &id) {
                             replace_row_actions(&steam_box, |ab| {
-                                ab.append(&match_id_link(MatchSource::SteamLink, &id, &candidate));
+                                ab.append(&match_id_button(MatchSource::SteamLink, &id, &candidate));
                                 append_steam_link_veto(&state, &steam_box, db_id, row_idx, &vis);
                             });
                             vis.source_done(row_idx, MatchSource::SteamLink);
@@ -1054,21 +1059,22 @@ fn create_match_row(
     outer.set_margin_top(6);
     outer.set_margin_bottom(6);
 
-    // Plain labels, not an ActionRow: the title gets heading size and the
-    // platform full body size instead of the row's fixed small subtitle.
-    // Game titles are shown as typed — "Fear & Hunger" is not markup.
-    let header = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    // Plain labels, not an ActionRow: default sizes, title left and
+    // platform far right on one line.
+    let header = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     header.set_margin_start(12);
+    header.set_margin_end(12);
     let title = gtk4::Label::new(Some(&game.name));
     title.set_halign(gtk4::Align::Start);
+    title.set_hexpand(true);
     title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     title.set_single_line_mode(true);
-    title.add_css_class(CSS_MASS_MATCH_TITLE);
     title.set_tooltip_text(Some(&game.name));
     header.append(&title);
     let platform =
         gtk4::Label::new(Some(&ira_models::platform_display_name(&game.platform_id)));
-    platform.set_halign(gtk4::Align::Start);
+    platform.set_halign(gtk4::Align::End);
+    platform.set_valign(gtk4::Align::BaselineCenter);
     platform.add_css_class(CSS_DIM_LABEL);
     header.append(&platform);
     outer.append(&header);

@@ -461,7 +461,7 @@ fn unmatched_actions(
 
 pub(super) fn show_matched(ss_box: &gtk4::Box, id: &str, name: &str) {
     replace_row_actions(ss_box, |ab| {
-        ab.append(&super::mass_match_dialog::match_id_link(
+        ab.append(&super::mass_match_dialog::match_id_button(
             super::mass_match_dialog::MatchSource::ScreenScraper,
             id,
             name,

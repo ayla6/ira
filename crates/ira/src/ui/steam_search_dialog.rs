@@ -4,7 +4,6 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use super::add_game::prompt_for_steam_id;
 use super::css::*;
 use super::helpers::{
     clamped, clamped_boxed_list, clear_children, esc, poll_channel, replace_row_actions,
@@ -142,10 +141,10 @@ pub(super) fn handle_steam_search_result(
         let label = status_label(&matched_text(&sid, &matched_name), CSS_SUCCESS_LABEL);
         action_box.append(&label);
     } else {
-        // No label — the buttons already say "not found": the row stays
-        // quiet and the affordances stay obvious. The line's source label
-        // names Steam, so the buttons stay short; SGDB has its own line
-        // with its own search button.
+        // No label — the button already says "not found": the row stays
+        // quiet and the affordance stays obvious. The line's source label
+        // names Steam, so the button stays short. Numeric ids search
+        // directly — the store answers an app id query with its game.
 
         let ab = action_box.clone();
         let on_match: MatchCallback = Rc::new(move |sid, name| {
@@ -156,24 +155,6 @@ pub(super) fn handle_steam_search_result(
             };
             replace_row_actions(&ab, |ab| ab.append(&status_label(&text, CSS_SUCCESS_LABEL)));
         });
-
-        let id_btn = gtk4::Button::with_label(&crate::tr!("Enter ID"));
-        let sc = state.clone();
-        let name = game_name.to_string();
-        let cb = on_match.clone();
-        let did = db_id;
-        id_btn.connect_clicked(move |_| {
-            let sc2 = sc.clone();
-            let name2 = name.clone();
-            let cb2 = cb.clone();
-            let body = crate::tr!("Enter the Steam app ID for \u{201C}{}\u{201D}:")
-                .replacen("{}", &name, 1);
-            prompt_for_steam_id(&sc, &crate::tr!("Match to Steam"), &body, move |app_id| {
-                match_game_to_steam(&sc2, did, app_id.to_string(), name2.clone());
-                cb2(app_id, "");
-            });
-        });
-        action_box.append(&id_btn);
 
         let steam_btn = gtk4::Button::with_label(&crate::tr!("Search"));
         let sc2 = state.clone();

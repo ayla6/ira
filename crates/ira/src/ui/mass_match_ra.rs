@@ -86,7 +86,7 @@ fn show_unmatched(
 
 fn paint_ra_link(ra_box: &gtk4::Box, id: &str, title: &str) {
     replace_row_actions(ra_box, |ab| {
-        ab.append(&super::mass_match_dialog::match_id_link(
+        ab.append(&super::mass_match_dialog::match_id_button(
             super::mass_match_dialog::MatchSource::Ra,
             id,
             title,

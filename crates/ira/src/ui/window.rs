@@ -305,9 +305,9 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     connect_search_signals(state, &window, &search_entry);
 }
 
-/// Flat popover menu row: left-aligned label on a 36px-tall flat button with
-/// the standard popover-menu-row styling. Popping down and handling stay
-/// with `on_click`.
+/// Flat popover menu row: left-aligned label on a natural-height flat
+/// button with the standard popover-menu-row styling. Popping down and
+/// handling stay with `on_click`.
 fn popover_menu_row(label: &str, on_click: impl Fn() + 'static) -> gtk4::Button {
     let btn = gtk4::Button::new();
     let text = gtk4::Label::new(Some(label));
@@ -315,7 +315,6 @@ fn popover_menu_row(label: &str, on_click: impl Fn() + 'static) -> gtk4::Button 
     btn.set_child(Some(&text));
     btn.add_css_class(CSS_FLAT);
     btn.set_halign(gtk4::Align::Fill);
-    btn.set_size_request(-1, 36);
     btn.add_css_class(CSS_POPOVER_MENU_ROW);
     btn.connect_clicked(move |_| on_click());
     btn
@@ -323,12 +322,7 @@ fn popover_menu_row(label: &str, on_click: impl Fn() + 'static) -> gtk4::Button 
 
 fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     let popover = gtk4::Popover::new();
-    popover.set_size_request(300, -1);
     let popover_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-    popover_box.set_margin_start(12);
-    popover_box.set_margin_end(12);
-    popover_box.set_margin_top(8);
-    popover_box.set_margin_bottom(8);
 
     let popup_settings_btn = {
         let popover_clone = popover.clone();
@@ -345,16 +339,20 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     popover_box.append(&popup_settings_btn);
 
     let match_btn = {
+        let popover_clone = popover.clone();
         let state_clone = state.clone();
         popover_menu_row(&crate::tr!("Match unmatched games"), move || {
+            popover_clone.popdown();
             show_mass_match_dialog(&state_clone)
         })
     };
     popover_box.append(&match_btn);
 
     let history_btn = {
+        let popover_clone = popover.clone();
         let state_clone = state.clone();
         popover_menu_row(&crate::tr!("Play history"), move || {
+            popover_clone.popdown();
             super::play_history::show_daily_history_dialog(&state_clone)
         })
     };
@@ -380,7 +378,6 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
 
     let hidden_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
     hidden_row.set_hexpand(true);
-    hidden_row.set_size_request(-1, 36);
     hidden_row.add_css_class(CSS_POPOVER_MENU_ROW);
     let hidden_label = gtk4::Label::new(Some(&crate::tr!("Show hidden games")));
     hidden_label.set_xalign(0.0);

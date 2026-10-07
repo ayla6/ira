@@ -179,12 +179,10 @@ pub(super) fn attach_ss_actions(
     game: &Game,
     dialog: &gtk4::Widget,
     missed: bool,
-    vis: &super::mass_match_dialog::RowVis,
 ) {
     let console = ira_models::scraper_console_id(game.kind, &game.platform_id);
     if missed {
         // Already tombstoned by an earlier pass: terminal from the start.
-        vis.mark_attempted(game.db_id);
         show_unmatched(
             ss_box,
             state,
@@ -236,7 +234,7 @@ pub(super) fn start_ss_batch_matching(
                 continue;
             }
             show_unmatched(&ss_box, state, g.db_id, &g.name, &g.platform_id, dialog);
-            vis.pass_done(i);
+            vis.source_done(i, super::mass_match_dialog::MatchSource::ScreenScraper);
         }
         return;
     }
@@ -255,7 +253,7 @@ pub(super) fn start_ss_batch_matching(
             show_background_match(&ss_box, state, g.db_id, &g.name, &g.platform_id, dialog);
             // The background job owns the answer from here: the row is
             // done as far as this dialog is concerned.
-            vis.pass_done(i);
+            vis.source_done(i, super::mass_match_dialog::MatchSource::ScreenScraper);
         }
         return;
     }
@@ -411,7 +409,7 @@ pub(super) fn start_ss_batch_matching(
                     show_unmatched(
                         &ss_box, &state, item.db_id, &item.name, &platform_id, &dialog,
                     );
-                    vis.pass_done(item.row_idx);
+                    vis.source_done(item.row_idx, super::mass_match_dialog::MatchSource::ScreenScraper);
                 }
                 eprintln!("ScreenScraper batch: quota exhausted, standing down for today");
             }
@@ -1381,10 +1379,10 @@ fn apply_hit(
             // empty id back over the fresh one.
             super::edit_game_scraper::refresh_scraper_section(state, hit.db_id);
             if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {
-                show_matched(&ss_box);
+                show_matched(&ss_box, &game.ss_id, &game.name);
                 append_ss_veto(state, &ss_box, hit.db_id, &platform_id, &hit.name, dialog);
             }
-            vis.pass_done(hit.row_idx);
+            vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::ScreenScraper);
         }
         Some(SsOutcome::Miss) => {
             if let Err(e) = ira_db::tombstone_match_miss(&state.borrow().db, hit.db_id, ira_db::miss_source::SS) {
@@ -1395,7 +1393,7 @@ fn apply_hit(
                     show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
                 });
             }
-            vis.pass_done(hit.row_idx);
+            vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::ScreenScraper);
         }
         Some(SsOutcome::Failed(e)) => {
             eprintln!(
@@ -1407,7 +1405,7 @@ fn apply_hit(
                     show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
                 });
             }
-            vis.pass_done(hit.row_idx);
+            vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::ScreenScraper);
         }
         None => {}
     }

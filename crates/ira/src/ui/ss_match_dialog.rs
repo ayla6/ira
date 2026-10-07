@@ -425,7 +425,7 @@ fn unmatched_actions(
     if !label.is_empty() {
         ab.append(&status_label(label, CSS_DIM_LABEL));
     }
-    let btn = gtk4::Button::with_label(&crate::tr!("Search SS"));
+    let btn = gtk4::Button::with_label(&crate::tr!("Search"));
     btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     let gn = game_name.to_string();
@@ -434,6 +434,7 @@ fn unmatched_actions(
     let inner = ab.clone();
     btn.connect_clicked(move |_| {
         let inner = inner.clone();
+        let sc2 = sc.clone();
         show_ss_search_dialog(
             &sc,
             db_id,
@@ -441,15 +442,30 @@ fn unmatched_actions(
             &pid,
             &dlg,
             SsMatchSink::Persist,
-            Some(Rc::new(move || show_matched(&inner))),
+            // A manual pick shows the same id link as an automatic one —
+            // without a veto, since the user just chose it.
+            Some(Rc::new(move || {
+                let matched = ira_db::find_by_db_id(&sc2.borrow().db, db_id)
+                    .ok()
+                    .flatten()
+                    .map(|entry| (entry.screenscraper_id, entry.title))
+                    .unwrap_or_default();
+                if !matched.0.is_empty() {
+                    show_matched(&inner, &matched.0, &matched.1);
+                }
+            })),
         );
     });
     ab.append(&btn);
 }
 
-pub(super) fn show_matched(ss_box: &gtk4::Box) {
+pub(super) fn show_matched(ss_box: &gtk4::Box, id: &str, name: &str) {
     replace_row_actions(ss_box, |ab| {
-        ab.append(&status_label(&crate::tr!("Matched"), CSS_SUCCESS_LABEL));
+        ab.append(&super::mass_match_dialog::match_id_link(
+            super::mass_match_dialog::MatchSource::ScreenScraper,
+            id,
+            name,
+        ));
     });
 }
 

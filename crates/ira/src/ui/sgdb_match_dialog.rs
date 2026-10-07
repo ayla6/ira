@@ -12,18 +12,11 @@ use super::image_manager::build_image_manager_content_with_drafts;
 use super::matching::{fetch_and_report_sgdb_assets, persist_sgdb_match, SgdAssetsRequest};
 use super::state::SharedState;
 use super::steam_search_dialog::{
-    build_search_dialog, match_result_row, status_label, MatchCallback, SearchDialogWidgets,
+    build_search_dialog, match_result_row, MatchCallback, SearchDialogWidgets,
 };
 
-/// Text for the manual "Search SGDB…" success label: shows the matched SGDB
-/// title, not the local game's name.
-fn matched_sgdb_text(matched_name: &str) -> String {
-    crate::tr!("Matched to SGDB: {}").replacen("{}", matched_name, 1)
-}
-
-/// A "Search SGDB" button that reopens the SGDB search for this game and,
-/// once a new match is accepted, repaints the action box with the green
-/// "Matched to SGDB" label.
+/// A "Search" button that reopens the SGDB search for this game and,
+/// once a new match is accepted, repaints the action box with its id link.
 fn manual_sgdb_search_button(
     state: &SharedState,
     action_box: &gtk4::Box,
@@ -35,14 +28,17 @@ fn manual_sgdb_search_button(
     let action_box = action_box.clone();
     let parent_dialog = parent_dialog.clone();
     let game_name = game_name.to_string();
-    let btn = gtk4::Button::with_label(&crate::tr!("Search SGDB"));
+    let btn = gtk4::Button::with_label(&crate::tr!("Search"));
     btn.connect_clicked(move |_| {
         let cb: MatchCallback = Rc::new({
             let action_box = action_box.clone();
-            move |_sgdb_id, matched_name| {
-                let text = matched_sgdb_text(matched_name);
+            move |sgdb_id, matched_name| {
                 replace_row_actions(&action_box, |ab| {
-                    ab.append(&status_label(&text, CSS_SUCCESS_LABEL));
+                    ab.append(&super::mass_match_dialog::match_id_link(
+                        super::mass_match_dialog::MatchSource::Sgdb,
+                        sgdb_id,
+                        matched_name,
+                    ));
                 });
             }
         });
@@ -77,6 +73,11 @@ pub(super) fn handle_unified_sgdb_result(
         {
             g.sgdb_id = sgdb_id.clone();
         }
+        action_box.append(&super::mass_match_dialog::match_id_link(
+            super::mass_match_dialog::MatchSource::Sgdb,
+            &sgdb_id,
+            &matched_name,
+        ));
         let (steam_dl, sender, save_dir, cfg_dl, db_dl, game_for_dir) = {
             let s = state.borrow();
             (
@@ -103,10 +104,8 @@ pub(super) fn handle_unified_sgdb_result(
             });
         });
 
-        let text = crate::tr!("SGDB: {}").replacen("{}", &matched_name, 1);
-        action_box.append(&status_label(&text, CSS_SUCCESS_LABEL));
-
-        let undo_btn = gtk4::Button::with_label(&crate::tr!("Undo SGDB"));
+        let undo_btn = gtk4::Button::with_label(&crate::tr!("Unmatch"));
+        undo_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
         let sc = state.clone();
         let action_box_c = action_box.clone();
         let parent_c = parent_dialog.clone();
@@ -191,10 +190,8 @@ pub(super) fn handle_unified_sgdb_result(
 }
 
 /// Whether the box already carries a painted result: any button (the
-/// fail states and the SGDB undo pair are buttons) or any success label
-/// (a Steam match is label-only). The Steam and SGDB batch passes share
-/// this box, and the later arriving source must not wipe the earlier
-/// one's word.
+/// fail states and the SGDB match pair are buttons) or any success label.
+/// Guards against a late or duplicate hit repainting a decided line.
 fn row_shows_result(action_box: &gtk4::Box) -> bool {
     let mut child = action_box.first_child();
     while let Some(widget) = child {
@@ -354,12 +351,3 @@ fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
     });
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_matched_sgdb_text_shows_matched_name() {
-        assert_eq!(matched_sgdb_text("Portal 2"), "Matched to SGDB: Portal 2");
-    }
-}

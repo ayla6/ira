@@ -12,6 +12,7 @@ use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchItem, RowActions, BATCH_FINISHED};
 use super::mass_match_ra::{attach_ra_actions, ra_pass_available, start_ra_batch_matching};
 use super::mass_match_ss::{attach_ss_actions, start_ss_batch_matching};
+use super::matching::match_game_to_steam;
 use super::sgdb_match_dialog::handle_unified_sgdb_result;
 use super::state::SharedState;
 use super::steam_search_dialog::{handle_steam_search_result, matched_text, status_label};
@@ -121,8 +122,8 @@ fn needs_steam_title_match(g: &Game) -> bool {
 /// One matchable source with its own line on a mass-match row. Lines
 /// render in this order; every line carries its source name once, so the
 /// statuses themselves stay short ("Matched", "Searching…").
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum MatchSource {
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub(super) enum MatchSource {
     Steam,
     Sgdb,
     Ra,
@@ -163,52 +164,76 @@ fn source_label(source: MatchSource) -> String {
     }
 }
 
-/// Per-dialog visibility for the match list: rows whose game has
-/// gotten a final word from every pass that applies to it (matched, or
-/// a negative result this session) are hidden while the toggle is on,
-/// so the list only shows games still in play.
+/// The match's page on its own site, for the id link on matched lines.
+/// Shapes are pinned by unit tests below — not guessed per call site.
+pub(super) fn match_site_uri(source: MatchSource, id: &str) -> String {
+    match source {
+        MatchSource::Steam | MatchSource::SteamLink => {
+            format!("https://store.steampowered.com/app/{id}")
+        }
+        MatchSource::Sgdb => format!("https://www.steamgriddb.com/game/{id}"),
+        MatchSource::Ra => format!("https://retroachievements.org/game/{id}"),
+        MatchSource::ScreenScraper => ira_api::screenscraper::game_page_url(id),
+    }
+}
+
+/// The matched line's identity: the match id linking to its site page,
+/// the matched name riding the tooltip. Replaces the old bare "Matched"
+/// label — the Unmatch button beside it already says what happened.
+pub(super) fn match_id_link(source: MatchSource, id: &str, name: &str) -> gtk4::LinkButton {
+    let link = gtk4::LinkButton::with_label(&match_site_uri(source, id), id);
+    link.set_valign(gtk4::Align::Center);
+    if !name.is_empty() {
+        link.set_tooltip_text(Some(name));
+    }
+    link
+}
+
+/// Per-dialog visibility for the match list: every row tracks the sources
+/// still running for it, and rows with nothing pending hide while the
+/// toggle is on — so the list only shows games still in play. Explicit
+/// per-row state, never inferred from game snapshots: a match already
+/// rewrote the game by the time its line repaints, so re-asking "does
+/// this game still need anything" can no longer answer.
 #[derive(Clone)]
 pub(super) struct RowVis {
     rows: RefCell<Vec<gtk4::ListBoxRow>>,
-    games: Vec<Game>,
+    pending: RefCell<Vec<HashSet<MatchSource>>>,
     show_finished: Rc<Cell<bool>>,
-    attempted: Rc<RefCell<HashSet<i64>>>,
     scrolled: glib::WeakRef<gtk4::ScrolledWindow>,
 }
 
 impl RowVis {
     pub(super) fn new(
-        games: Vec<Game>,
         show_finished: Rc<Cell<bool>>,
         scrolled: &gtk4::ScrolledWindow,
     ) -> Self {
         Self {
             rows: RefCell::new(Vec::new()),
-            games,
+            pending: RefCell::new(Vec::new()),
             show_finished,
-            attempted: Rc::new(RefCell::new(HashSet::new())),
             scrolled: Downgrade::downgrade(scrolled),
         }
     }
 
-    /// One widget per game, in order; set right after the rows exist.
-    pub(super) fn set_rows(&self, rows: Vec<gtk4::ListBoxRow>) {
+    /// One widget plus its running sources per game, in order; set right
+    /// after the rows exist.
+    pub(super) fn set_rows(
+        &self,
+        rows: Vec<gtk4::ListBoxRow>,
+        pending: Vec<HashSet<MatchSource>>,
+    ) {
         *self.rows.borrow_mut() = rows;
+        *self.pending.borrow_mut() = pending;
     }
 
-    /// A pass reached a terminal result for this row — count it and
-    /// hide the row when nothing applicable is left open.
-    pub fn pass_done(&self, row_idx: usize) {
-        if let Some(g) = self.games.get(row_idx) {
-            self.attempted.borrow_mut().insert(g.db_id);
+    /// One source reached a terminal result for this row — count it and
+    /// hide the row when nothing is left running.
+    pub fn source_done(&self, row_idx: usize, source: MatchSource) {
+        if let Some(running) = self.pending.borrow_mut().get_mut(row_idx) {
+            running.remove(&source);
         }
         self.refresh(row_idx);
-    }
-
-    /// A pass will never run for this row (its box attached already
-    /// concluded) — that counts as its final word too.
-    pub fn mark_attempted(&self, db_id: i64) {
-        self.attempted.borrow_mut().insert(db_id);
     }
 
     fn refresh(&self, row_idx: usize) {
@@ -216,10 +241,11 @@ impl RowVis {
             return;
         }
         let rows = self.rows.borrow();
-        let (Some(row), Some(game)) = (rows.get(row_idx), self.games.get(row_idx)) else {
+        let pending = self.pending.borrow();
+        let (Some(row), Some(running)) = (rows.get(row_idx), pending.get(row_idx)) else {
             return;
         };
-        if game_concluded(game, &self.attempted.borrow()) {
+        if running.is_empty() {
             hide_row_stable(&self.scrolled, std::slice::from_ref(&row));
         }
     }
@@ -231,14 +257,14 @@ impl RowVis {
             return;
         }
         let rows = self.rows.borrow();
-        let attempted = self.attempted.borrow();
+        let pending = self.pending.borrow();
         let hiding: Vec<&gtk4::ListBoxRow> = rows
             .iter()
             .enumerate()
             .filter(|(idx, _)| {
-                self.games
+                pending
                     .get(*idx)
-                    .is_some_and(|game| game_concluded(game, &attempted))
+                    .is_some_and(|running| running.is_empty())
             })
             .map(|(_, row)| row)
             .collect();
@@ -284,25 +310,27 @@ fn hide_row_stable(
     }
 }
 
-/// Whether the game has nothing left to try automatically: every pass
-/// that applies either matched, or gave its negative word this session.
-fn game_concluded(g: &Game, attempted: &HashSet<i64>) -> bool {
-    if needs_steam_match(g) && !attempted.contains(&g.db_id) {
-        return false;
-    }
-    if needs_ra_match(g) && !attempted.contains(&g.db_id) {
-        return false;
-    }
-    if needs_sgdb_match(g) && !attempted.contains(&g.db_id) {
-        return false;
-    }
-    if needs_ss_match(g) && !attempted.contains(&g.db_id) {
-        return false;
-    }
-    if needs_steam_title_match(g) && !attempted.contains(&g.db_id) {
-        return false;
-    }
-    true
+/// The sources whose passes will actually run for this game: the hide
+/// toggle retires the row once all of these conclude. Sources with only
+/// a terminal line (or none) are excluded — nothing will ever finish
+/// them, so waiting on them would pin the row forever.
+fn running_sources(
+    game: &Game,
+    ra_available: bool,
+    ss_missed: bool,
+    steam_missed: bool,
+) -> HashSet<MatchSource> {
+    match_sources_for(game)
+        .into_iter()
+        .filter(|source| match source {
+            // Lines without a running pass show a terminal state from the
+            // start (or no line at all): nothing will ever conclude them.
+            MatchSource::Ra => ra_available,
+            MatchSource::ScreenScraper => !ss_missed,
+            MatchSource::SteamLink => !steam_missed,
+            MatchSource::Steam | MatchSource::Sgdb => true,
+        })
+        .collect()
 }
 
 /// The games the console→Steam pass already failed: terminal, never
@@ -367,65 +395,62 @@ fn populate_match_list(
 ) -> Vec<RowActions> {
     let ra_available = ra_pass_available(state);
     let steam_missed = steam_missed_ids(state);
-    needs_matching
-        .iter()
-        .map(|game| {
-            let (sources, mut actions) = create_match_row(list, game);
-            for source in match_sources_for(game) {
-                match source {
-                    MatchSource::Steam | MatchSource::Sgdb => {
-                        let actions_box = source_sub_row(&sources, source);
-                        actions_box.append(&status_label(
-                            &crate::tr!("Searching…"),
-                            CSS_DIM_LABEL,
-                        ));
-                        if source == MatchSource::Steam {
-                            actions.steam = Some(actions_box);
-                        } else {
-                            actions.sgdb = Some(actions_box);
-                        }
+    let mut rows = Vec::new();
+    let mut pendings = Vec::new();
+    for game in needs_matching {
+        let (sources, mut actions) = create_match_row(list, game);
+        for source in match_sources_for(game) {
+            match source {
+                MatchSource::Steam | MatchSource::Sgdb => {
+                    let actions_box = source_sub_row(&sources, source);
+                    actions_box.append(&status_label(
+                        &crate::tr!("Searching…"),
+                        CSS_DIM_LABEL,
+                    ));
+                    if source == MatchSource::Steam {
+                        actions.steam = Some(actions_box);
+                    } else {
+                        actions.sgdb = Some(actions_box);
                     }
-                    MatchSource::Ra => {
+                }
+                MatchSource::Ra => {
+                    let actions_box = source_sub_row(&sources, source);
+                    attach_ra_actions(&actions_box, state, game, dialog, ra_available);
+                    actions.ra = Some(actions_box);
+                }
+                MatchSource::ScreenScraper => {
+                    let actions_box = source_sub_row(&sources, source);
+                    attach_ss_actions(
+                        &actions_box,
+                        state,
+                        game,
+                        dialog,
+                        ss_missed.contains(&game.db_id),
+                    );
+                    actions.ss = Some(actions_box);
+                }
+                MatchSource::SteamLink => {
+                    if !steam_missed.contains(&game.db_id) {
                         let actions_box = source_sub_row(&sources, source);
-                        attach_ra_actions(
-                            &actions_box,
-                            state,
-                            game,
-                            dialog,
-                            ra_available,
-                            vis,
-                        );
-                        actions.ra = Some(actions_box);
-                    }
-                    MatchSource::ScreenScraper => {
-                        let actions_box = source_sub_row(&sources, source);
-                        attach_ss_actions(
-                            &actions_box,
-                            state,
-                            game,
-                            dialog,
-                            ss_missed.contains(&game.db_id),
-                            vis,
-                        );
-                        actions.ss = Some(actions_box);
-                    }
-                    MatchSource::SteamLink => {
-                        if steam_missed.contains(&game.db_id) {
-                            // Steam already failed this one and no line
-                            // runs for it: terminal from the start, like
-                            // the SS misses.
-                            vis.mark_attempted(game.db_id);
-                        } else {
-                            let actions_box = source_sub_row(&sources, source);
-                            attach_steam_link_actions(&actions_box);
-                            actions.steam_link = Some(actions_box);
-                        }
+                        attach_steam_link_actions(&actions_box);
+                        actions.steam_link = Some(actions_box);
                     }
                 }
             }
-            actions
-        })
-        .collect()
+        }
+        pendings.push(running_sources(
+            game,
+            ra_available,
+            ss_missed.contains(&game.db_id),
+            steam_missed.contains(&game.db_id),
+        ));
+        rows.push(actions);
+    }
+    vis.set_rows(
+        rows.iter().map(|r| r.row.clone()).collect(),
+        pendings,
+    );
+    rows
 }
 
 /// The exact normalized-title hit in a Steam store answer, if any —
@@ -497,54 +522,50 @@ fn start_steam_batch_matching(
                 else {
                     return;
                 };
-                let auto_matched = hit.matched.is_some();
-                handle_steam_search_result(
-                    &state,
-                    &steam_box,
-                    &steam,
-                    &hit.name,
-                    hit.db_id,
-                    hit.matched,
-                    &parent_dialog,
-                );
-                if auto_matched {
-                    append_steam_veto(
-                        &state,
-                        steam.clone(),
+                if let Some((sid, match_name)) = hit.matched {
+                    match_game_to_steam(&state, hit.db_id, sid.clone(), hit.name.clone());
+                    paint_steam_matched(
                         &steam_box,
-                        &hit.name,
-                        hit.db_id,
-                        &parent_dialog,
+                        &sid,
+                        &match_name,
+                        SteamLineVeto {
+                            state: state.clone(),
+                            steam: steam.clone(),
+                            game_name: hit.name.clone(),
+                            db_id: hit.db_id,
+                            parent_dialog: parent_dialog.clone(),
+                        },
                     );
                 }
                 // The pass spoke its final word for this row —
                 // without this the hide toggle can never retire it.
-                vis.pass_done(hit.row_idx);
+                vis.source_done(hit.row_idx, MatchSource::Steam);
             }
         },
     );
 }
 
-/// Unmatch for an automatically applied Steam match: clear the link and
-/// block every automatic pass like any other veto, then offer the manual
-/// search buttons again. Manual picks repaint label-only on purpose — the
-/// user just chose them, so there is nothing to veto.
-fn append_steam_veto(
-    state: &SharedState,
-    steam: Arc<ira_api::SteamDataClient>,
+/// Repaint a worker-matched Steam line as its id link plus veto.
+/// Manual picks repaint label-only through the search handler — the user
+/// just chose them, so there is nothing to veto.
+fn paint_steam_matched(
     steam_box: &gtk4::Box,
-    game_name: &str,
-    db_id: i64,
-    parent_dialog: &gtk4::Widget,
+    sid: &str,
+    match_name: &str,
+    veto: SteamLineVeto,
 ) {
     let unmatch = gtk4::Button::with_label(&crate::tr!("Unmatch"));
     unmatch.add_css_class(CSS_DESTRUCTIVE_ACTION);
     unmatch.set_valign(gtk4::Align::Center);
     {
-        let state = state.clone();
+        let SteamLineVeto {
+            state,
+            steam,
+            game_name,
+            db_id,
+            parent_dialog,
+        } = veto;
         let steam_box = steam_box.clone();
-        let game_name = game_name.to_string();
-        let parent_dialog = parent_dialog.clone();
         unmatch.connect_clicked(move |_| {
             let db = state.borrow().db.clone();
             if let Err(e) = ira_db::set_steam_id(&db, db_id, "") {
@@ -573,7 +594,19 @@ fn append_steam_veto(
             );
         });
     }
-    steam_box.append(&unmatch);
+    replace_row_actions(steam_box, |ab| {
+        ab.append(&match_id_link(MatchSource::Steam, sid, match_name));
+        ab.append(&unmatch);
+    });
+}
+
+/// Everything a Steam line's veto needs beyond the line itself.
+struct SteamLineVeto {
+    state: SharedState,
+    steam: Arc<ira_api::SteamDataClient>,
+    game_name: String,
+    db_id: i64,
+    parent_dialog: gtk4::Widget,
 }
 
 /// Unmatch for a confirmed Steam link: unlink and tombstone the source —
@@ -607,7 +640,7 @@ fn append_steam_link_veto(
                     CSS_DIM_LABEL,
                 ));
             });
-            vis.pass_done(row_idx);
+            vis.source_done(row_idx, MatchSource::SteamLink);
         });
     }
     steam_box.append(&unmatch);
@@ -662,7 +695,7 @@ fn start_sgdb_batch_matching(
                         hit.matched,
                         &parent_dialog,
                     );
-                    vis.pass_done(hit.row_idx);
+                    vis.source_done(hit.row_idx, MatchSource::Sgdb);
                 }
             }
         },
@@ -809,7 +842,7 @@ fn start_steam_title_matching(
             let db_id = hit.db_id;
             let name = hit.name.clone();
             let done_tick = |vis: &RowVis| {
-                vis.pass_done(row_idx);
+                vis.source_done(row_idx, MatchSource::SteamLink);
                 let finished = done.get() + 1;
                 done.set(finished);
                 if let Some(job) = &job {
@@ -842,13 +875,10 @@ fn start_steam_title_matching(
                     link_btn.connect_clicked(move |_| {
                         if super::fetch_metadata::store_steam_link(&state, db_id, &id) {
                             replace_row_actions(&steam_box, |ab| {
-                                ab.append(&status_label(
-                                    &crate::tr!("Matched"),
-                                    CSS_SUCCESS_LABEL,
-                                ));
+                                ab.append(&match_id_link(MatchSource::SteamLink, &id, &candidate));
                                 append_steam_link_veto(&state, &steam_box, db_id, row_idx, &vis);
                             });
-                            vis.pass_done(row_idx);
+                            vis.source_done(row_idx, MatchSource::SteamLink);
                         } else {
                             eprintln!("Steam title pass: link for '{candidate}' failed");
                         }
@@ -872,7 +902,7 @@ fn start_steam_title_matching(
                                 CSS_DIM_LABEL,
                             ));
                         });
-                        vis.pass_done(row_idx);
+                        vis.source_done(row_idx, MatchSource::SteamLink);
                     });
                 }
             });
@@ -950,10 +980,9 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     // show_finished mirrors the switch below, inverted: with the switch
     // off, nothing hides and every row plays its pass out in the open.
     let show_finished = Rc::new(Cell::new(true));
-    let vis = RowVis::new(needs_matching.to_vec(), show_finished.clone(), &scrolled);
+    let vis = RowVis::new(show_finished.clone(), &scrolled);
     let vis_toggle = vis.clone();
     let rows = populate_match_list(&list, &needs_matching, state, dialog.upcast_ref(), &ss_missed, &vis);
-    vis.set_rows(rows.iter().map(|r| r.row.clone()).collect());
     vis.apply_all();
     let show_finished_c = show_finished.clone();
     let hide_switch = gtk4::Switch::new();
@@ -1011,15 +1040,23 @@ fn create_match_row(
     outer.set_margin_top(6);
     outer.set_margin_bottom(6);
 
-    let header = adw::ActionRow::new();
+    // Plain labels, not an ActionRow: the title gets heading size and the
+    // platform full body size instead of the row's fixed small subtitle.
     // Game titles are shown as typed — "Fear & Hunger" is not markup.
-    header.set_use_markup(false);
-    header.set_title(&game.name);
-    header.set_subtitle(&ira_models::platform_display_name(&game.platform_id));
-    // Long names ellipsize like every list row; the full name rides the
-    // tooltip.
-    header.set_tooltip_text(Some(&game.name));
-    header.set_activatable(false);
+    let header = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+    header.set_margin_start(12);
+    let title = gtk4::Label::new(Some(&game.name));
+    title.set_halign(gtk4::Align::Start);
+    title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    title.set_single_line_mode(true);
+    title.add_css_class(CSS_HEADING);
+    title.set_tooltip_text(Some(&game.name));
+    header.append(&title);
+    let platform =
+        gtk4::Label::new(Some(&ira_models::platform_display_name(&game.platform_id)));
+    platform.set_halign(gtk4::Align::Start);
+    platform.add_css_class(CSS_DIM_LABEL);
+    header.append(&platform);
     outer.append(&header);
 
     let sources = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
@@ -1040,7 +1077,7 @@ fn create_match_row(
 /// action box, right-aligned so every line scans the same way.
 fn source_sub_row(sources: &gtk4::Box, source: MatchSource) -> gtk4::Box {
     let line = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
-    line.set_margin_start(16);
+    line.set_margin_start(12);
     line.set_margin_end(12);
     let label = gtk4::Label::new(Some(&source_label(source)));
     label.add_css_class(CSS_DIM_LABEL);
@@ -1123,14 +1160,21 @@ mod tests {
     }
 
     #[test]
-    fn test_game_concluded_needs_every_attempt() {
-        // A row with an open pass stays; attempted passes retire it.
+    fn test_running_sources_cover_every_applicable_pass() {
+        // A row retires exactly when its running sources all conclude:
+        // terminal lines (tombstoned, unavailable) never pin it.
         let mut g = game(ira_models::GameKind::Wine);
         g.name = "Hollow Knight".to_string();
-        let empty: HashSet<i64> = HashSet::new();
-        assert!(!game_concluded(&g, &empty));
-        let attempted: HashSet<i64> = HashSet::from([g.db_id]);
-        assert!(game_concluded(&g, &attempted));
+        let all = running_sources(&g, true, false, false);
+        assert_eq!(all.len(), 3);
+        // A tombstoned SS line and an unavailable RA line are not waited
+        // on — but here neither applies, so all three run.
+        assert!(all.contains(&MatchSource::Steam));
+        assert!(all.contains(&MatchSource::Sgdb));
+        assert!(all.contains(&MatchSource::ScreenScraper));
+        let without_ss = running_sources(&g, true, true, false);
+        assert!(!without_ss.contains(&MatchSource::ScreenScraper));
+        assert_eq!(without_ss.len(), 2);
     }
 
     #[test]
@@ -1322,5 +1366,31 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), labels.len());
+    }
+
+    /// The id-link targets: pinned shapes, so a site redesign that moves
+    /// pages fails loudly here instead of shipping dead links.
+    #[test]
+    fn test_match_site_uri_points_at_each_match_page() {
+        assert_eq!(
+            match_site_uri(MatchSource::Steam, "367520"),
+            "https://store.steampowered.com/app/367520"
+        );
+        assert_eq!(
+            match_site_uri(MatchSource::SteamLink, "367520"),
+            "https://store.steampowered.com/app/367520"
+        );
+        assert_eq!(
+            match_site_uri(MatchSource::Sgdb, "12345"),
+            "https://www.steamgriddb.com/game/12345"
+        );
+        assert_eq!(
+            match_site_uri(MatchSource::Ra, "6789"),
+            "https://retroachievements.org/game/6789"
+        );
+        assert_eq!(
+            match_site_uri(MatchSource::ScreenScraper, "2341"),
+            ira_api::screenscraper::game_page_url("2341")
+        );
     }
 }

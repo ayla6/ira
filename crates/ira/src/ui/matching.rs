@@ -110,66 +110,6 @@ pub fn match_game_to_steam(
     });
 }
 
-pub fn match_game_to_sgdb(state: &SharedState, db_id: i64, sgdb_id: String) {
-    let (steam, sender, db, save_dir, cfg) = {
-        let s = state.borrow();
-        (
-            s.steam.clone(),
-            s.sender.clone(),
-            s.db.clone(),
-            s.save_dir.clone(),
-            s.cfg.clone(),
-        )
-    };
-    std::thread::spawn(move || {
-        if let Err(e) = ira_db::set_sgdb_id(&db, db_id, &sgdb_id) {
-            eprintln!("match_game_to_sgdb: set_sgdb_id failed: {}", e);
-            return;
-        }
-        if let Err(e) = ira_db::set_manual_unmatch(&db, db_id, false) {
-            eprintln!("match_game_to_sgdb: set_manual_unmatch failed: {}", e);
-        }
-        let entry = ira_db::find_by_db_id(&db, db_id).ok().flatten();
-        let (dir, game) = match &entry {
-            Some(e) => (
-                ira_parser::entry_data_dir(&save_dir, e),
-                Some(sgdb_game_from_entry(e, &sgdb_id)),
-            ),
-            None => (ira_parser::local_data_dir(&save_dir, db_id), None),
-        };
-        let switch_exe = cfg.console("switch").executable.clone();
-        let (icon, hero, grid, logo, header, square) = match &game {
-            Some(g) => super::fetch_images::ensure_game_assets(
-                &steam, &dir, &save_dir, &db, &cfg, g, &switch_exe,
-            ),
-            None => steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), &[]),
-        };
-        let Some(mut game) = game else {
-            return;
-        };
-        game.icon_path = icon;
-        game.hero_image_path = hero;
-        game.grid_path = grid;
-        game.logo_path = logo;
-        game.header_path = header;
-        game.square_path = square;
-        // A fresh SGDB match can also unlock the disc art.
-        super::disc_art::ensure_game_discs(&steam, &db, &cfg, &save_dir, &game);
-        let _ = sender.send(AppMessage::NewGame(game));
-    });
-}
-
-/// The display `Game` for a freshly matched SGDB entry, before any asset
-/// paths are filled in. `game_path` carries the ROM path so the native
-/// icon import can find console ROMs.
-fn sgdb_game_from_entry(entry: &ira_models::GameEntry, sgdb_id: &str) -> Game {
-    let mut game = entry.to_game();
-    game.playtime = 0.0;
-    game.game_path = entry.rom_path.clone();
-    game.sgdb_id = sgdb_id.to_string();
-    game
-}
-
 /// Persist accepting an SGDB match on the DB side: store the SGDB id and,
 /// when `clear_manual_unmatch` is set, drop any prior manual-unmatch flag.
 /// Failures are logged, never propagated — callers keep going either way.

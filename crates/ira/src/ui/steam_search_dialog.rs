@@ -10,7 +10,7 @@ use super::helpers::{
     clamped, clamped_boxed_list, clear_children, esc, poll_channel, replace_row_actions,
     status_row,
 };
-use super::matching::{match_game_to_sgdb, match_game_to_steam};
+use super::matching::match_game_to_steam;
 use super::state::SharedState;
 
 /// Success callback for an accepted match: `(store_id, matched_name)`.
@@ -111,19 +111,12 @@ pub(crate) fn build_search_dialog(
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum SearchSource {
-    Steam,
-    Sgdb,
-}
-
 pub(super) struct SearchResultsDialogParams<'a, P: IsA<gtk4::Widget>> {
     pub(super) state: &'a SharedState,
     pub(super) steam: Arc<SteamDataClient>,
     pub(super) source_name: &'a str,
     pub(super) game_name: &'a str,
     pub(super) db_id: i64,
-    pub(super) source: SearchSource,
     pub(super) on_match: MatchCallback,
     /// Widget the dialog is presented over (main window or another dialog).
     pub(super) parent: &'a P,
@@ -149,8 +142,10 @@ pub(super) fn handle_steam_search_result(
         let label = status_label(&matched_text(&sid, &matched_name), CSS_SUCCESS_LABEL);
         action_box.append(&label);
     } else {
-        // No label — the three buttons already say "not found": the row
-        // stays quiet and the affordances stay obvious.
+        // No label — the buttons already say "not found": the row stays
+        // quiet and the affordances stay obvious. The line's source label
+        // names Steam, so the buttons stay short; SGDB has its own line
+        // with its own search button.
 
         let ab = action_box.clone();
         let on_match: MatchCallback = Rc::new(move |sid, name| {
@@ -180,7 +175,7 @@ pub(super) fn handle_steam_search_result(
         });
         action_box.append(&id_btn);
 
-        let steam_btn = gtk4::Button::with_label(&crate::tr!("Search Steam"));
+        let steam_btn = gtk4::Button::with_label(&crate::tr!("Search"));
         let sc2 = state.clone();
         let name2 = game_name.to_string();
         let steam2 = steam.clone();
@@ -193,34 +188,12 @@ pub(super) fn handle_steam_search_result(
                 source_name: &crate::tr!("Steam"),
                 game_name: &name2,
                 db_id,
-                source: SearchSource::Steam,
                 on_match: cb2.clone(),
                 parent: &pd,
                 match_in_db: true,
             });
         });
         action_box.append(&steam_btn);
-
-        let sgdb_btn = gtk4::Button::with_label(&crate::tr!("Search SGDB"));
-        let sc3 = state.clone();
-        let name3 = game_name.to_string();
-        let steam3 = steam.clone();
-        let cb3 = on_match.clone();
-        let pd = parent_dialog.clone();
-        sgdb_btn.connect_clicked(move |_| {
-            show_search_results_dialog(SearchResultsDialogParams {
-                state: &sc3,
-                steam: steam3.clone(),
-                source_name: &crate::tr!("SteamGridDB"),
-                game_name: &name3,
-                db_id,
-                source: SearchSource::Sgdb,
-                on_match: cb3.clone(),
-                parent: &pd,
-                match_in_db: true,
-            });
-        });
-        action_box.append(&sgdb_btn);
     }
 }
 
@@ -231,7 +204,6 @@ pub fn show_search_results_dialog<P: IsA<gtk4::Widget>>(params: SearchResultsDia
         source_name,
         game_name,
         db_id,
-        source,
         on_match,
         parent,
         match_in_db,
@@ -254,7 +226,6 @@ pub fn show_search_results_dialog<P: IsA<gtk4::Widget>>(params: SearchResultsDia
     let ctx = MatchContext {
         state: state.clone(),
         db_id,
-        source,
         match_in_db,
         on_match,
         dialog: dialog.clone(),
@@ -276,10 +247,7 @@ pub fn show_search_results_dialog<P: IsA<gtk4::Widget>>(params: SearchResultsDia
             let (tx, rx) = mpsc::channel::<Vec<(String, String)>>();
             let steam = steam.clone();
             std::thread::spawn(move || {
-                let results = match source {
-                    SearchSource::Steam => steam.search_steam_store(&term),
-                    SearchSource::Sgdb => steam.search_sgdb(&term),
-                };
+                let results = steam.search_steam_store(&term);
                 let _ = tx.send(results);
             });
 
@@ -312,7 +280,6 @@ pub fn show_search_results_dialog<P: IsA<gtk4::Widget>>(params: SearchResultsDia
 struct MatchContext {
     state: SharedState,
     db_id: i64,
-    source: SearchSource,
     match_in_db: bool,
     on_match: MatchCallback,
     dialog: adw::Dialog,
@@ -348,12 +315,7 @@ fn search_result_row(ctx: &MatchContext, app_id: &str, result_name: &str) -> adw
         &crate::tr!("App ID: {}").replacen("{}", app_id, 1),
         move || {
             if ctx.match_in_db {
-                match ctx.source {
-                    SearchSource::Steam => {
-                        match_game_to_steam(&ctx.state, ctx.db_id, sid.clone(), name.clone())
-                    }
-                    SearchSource::Sgdb => match_game_to_sgdb(&ctx.state, ctx.db_id, sid.clone()),
-                }
+                match_game_to_steam(&ctx.state, ctx.db_id, sid.clone(), name.clone())
             }
             (ctx.on_match)(&sid, &name);
             ctx.dialog.close();

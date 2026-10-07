@@ -25,13 +25,11 @@ pub(super) fn attach_ra_actions(
     game: &Game,
     dialog: &gtk4::Widget,
     will_search: bool,
-    vis: &super::mass_match_dialog::RowVis,
 ) {
     if will_search {
         ra_box.append(&status_label(&crate::tr!("Searching…"), CSS_DIM_LABEL));
     } else {
         // Nothing will run for this row: terminal from the start.
-        vis.mark_attempted(game.db_id);
         show_unmatched(ra_box, state, game.db_id, &game.name, &game.platform_id, dialog);
     }
 }
@@ -53,7 +51,7 @@ fn show_unmatched(
     platform_id: &str,
     dialog: &gtk4::Widget,
 ) {
-    let btn = gtk4::Button::with_label(&crate::tr!("Search RA"));
+    let btn = gtk4::Button::with_label(&crate::tr!("Search"));
     btn.set_valign(gtk4::Align::Center);
     let sc = state.clone();
     let gn = game_name.to_string();
@@ -62,23 +60,36 @@ fn show_unmatched(
     let inner = ra_box.clone();
     btn.connect_clicked(move |_| {
         let inner = inner.clone();
+        let sc2 = sc.clone();
         show_ra_search_dialog(
             &sc,
             db_id,
             &gn,
             &pid,
             &dlg,
-            Some(Rc::new(move || paint_matched(&inner))),
+            // A manual pick shows the same id link as an automatic one —
+            // without a veto, since the user just chose it.
+            Some(Rc::new(move || {
+                let matched = ira_db::find_by_db_id(&sc2.borrow().db, db_id)
+                    .ok()
+                    .flatten()
+                    .map(|entry| (entry.trophy_id, entry.title))
+                    .unwrap_or_default();
+                if !matched.0.is_empty() {
+                    paint_ra_link(&inner, &matched.0, &matched.1);
+                }
+            })),
         );
     });
     ra_box.append(&btn);
 }
 
-fn paint_matched(ra_box: &gtk4::Box) {
+fn paint_ra_link(ra_box: &gtk4::Box, id: &str, title: &str) {
     replace_row_actions(ra_box, |ab| {
-        ab.append(&status_label(
-            &crate::tr!("Matched"),
-            CSS_SUCCESS_LABEL,
+        ab.append(&super::mass_match_dialog::match_id_link(
+            super::mass_match_dialog::MatchSource::Ra,
+            id,
+            title,
         ));
     });
 }
@@ -236,12 +247,12 @@ fn apply_hit(
                 Ok(trophy_id) => persist_ra_match(state, hit.db_id, &platform_id, trophy_id, &title),
                 Err(e) => eprintln!("RA batch: bad game id {id:?}: {e}"),
             }
-            paint_matched(&ra_box);
+            paint_ra_link(&ra_box, &id, &title);
             append_ra_veto(state, &ra_box, hit.db_id, &platform_id, &hit.name, dialog);
         }
         None => replace_row_actions(&ra_box, |ab| {
             show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
         }),
     }
-    vis.pass_done(hit.row_idx);
+    vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::Ra);
 }

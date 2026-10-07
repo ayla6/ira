@@ -15,7 +15,7 @@ use super::helpers::clear_children;
 use super::ss_match_dialog::persist_ss_match;
 use super::state::SharedState;
 use super::steam_search_dialog::{
-    show_search_results_dialog, SearchResultsDialogParams, SearchSource,
+    show_search_results_dialog, SearchResultsDialogParams,
 };
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
 use super::wizard_window::WizardWindow;
@@ -713,10 +713,9 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf, name: S
             state: &state_c,
             steam: steam_c.clone(),
             source_name: &crate::tr!("Steam"),
-            game_name: &name_c,
-            db_id: 0,
-            source: SearchSource::Steam,
-            on_match: {
+                game_name: &name_c,
+                db_id: 0,
+                on_match: {
                 let wizard_c = wizard_c.clone();
                 let folder_c = folder_c.clone();
                 Rc::new(move |app_id: &str, _matched_name: &str| {

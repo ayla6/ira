@@ -16,8 +16,8 @@ use super::css::*;
 use super::helpers::replace_row_actions;
 use super::mass_match_batch::{run_batch, BatchHit, BatchItem, RowActions, BATCH_FINISHED};
 use super::rom_name::{
-    alt_search_term, clean_rom_name, looks_like_title_id, pick_search_name, region_hints,
-    search_term,
+    alt_search_term, clean_rom_name, digit_tail_alt, looks_like_title_id, pick_search_name,
+    region_hints, search_term, DigitTail,
 };
 use unicode_normalization::UnicodeNormalization;
 use super::ss_match_dialog::{
@@ -681,6 +681,13 @@ fn title_search(
         eprintln!("SS batch: [{platform_id}] no usable search term");
         return SsOutcome::Failed("no usable search term".to_string());
     }
+    let term = match digit_tail_alt(&full, &term) {
+        DigitTail::Ask(ask) => ask,
+        DigitTail::GiveUp => {
+            eprintln!("SS batch: '{full}' [{platform_id}] digits-only tail, conceding the miss");
+            return SsOutcome::Miss;
+        }
+    };
     match steam.screenscraper_search(creds, &term, platform_id, rom_region_for(abs)) {
         Err(e) => {
             eprintln!("SS batch: '{term}' [{platform_id}] search failed: {e}");

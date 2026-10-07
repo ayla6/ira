@@ -212,6 +212,30 @@ pub(crate) fn search_term(name: &str) -> String {
     head.join(" ")
 }
 
+/// What to ask when the distinctive tail is digits alone.
+pub(crate) enum DigitTail {
+    /// Search this term instead (the head side, or the tail itself).
+    Ask(String),
+    /// Nothing askable exists: concede without spending the request.
+    GiveUp,
+}
+
+/// A digits-only tail ("Custom Tracks Grand Prix - 7" searching as
+/// "7", or a game bluntly named "7") is unaskable: ScreenScraper errors
+/// instead of answering. Ask the head side when it carries letters;
+/// concede the miss otherwise, so the pass tombstones instead of
+/// error-spamming every opening. Empty terms never reach here — their
+/// retry path stays untouched.
+pub(crate) fn digit_tail_alt(full: &str, term: &str) -> DigitTail {
+    if !term.chars().all(|c| c.is_ascii_digit()) {
+        return DigitTail::Ask(term.to_string());
+    }
+    match alt_search_term(full).filter(|alt| alt.chars().any(|c| !c.is_ascii_digit())) {
+        Some(alt) => DigitTail::Ask(alt),
+        None => DigitTail::GiveUp,
+    }
+}
+
 /// Dump-tag words mapped to ScreenScraper's region codes. Matching never
 /// requires them — plenty of dumps, especially on older platforms, carry
 /// no region at all — they only break ties: between equally-shaped
@@ -278,8 +302,8 @@ fn bracket_groups(name: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        alt_search_term, clean_rom_name, looks_like_title_id, pick_search_name,
-        raw_separator_richness, region_hints, search_term,
+        alt_search_term, clean_rom_name, digit_tail_alt, looks_like_title_id, pick_search_name,
+        raw_separator_richness, region_hints, search_term, DigitTail,
     };
 
     #[test]
@@ -497,6 +521,25 @@ mod tests {
         assert_eq!(search_term("Fear & Hunger"), "Fear Hunger");
         assert_eq!(search_term("Katamari Damacy"), "Katamari Damacy");
         assert_eq!(search_term("Okami"), "Okami");
+    }
+
+    #[test]
+    fn test_digit_tail_alt_reroutes_unaskable_tails() {
+        // A digits-only tail errors server-side instead of answering, so
+        // the head side goes out when it carries letters...
+        match digit_tail_alt("Custom Tracks Grand Prix - 7", "7") {
+            DigitTail::Ask(ask) => assert_eq!(ask, "Custom Tracks Grand Prix"),
+            DigitTail::GiveUp => panic!("the head side is askable"),
+        }
+        // ...a bluntly numeric name concedes without spending the request,
+        // as does a head side of pure digits...
+        assert!(matches!(digit_tail_alt("7", "7"), DigitTail::GiveUp));
+        assert!(matches!(digit_tail_alt("50 - 7", "7"), DigitTail::GiveUp));
+        // ...while anything with letters passes through untouched.
+        match digit_tail_alt("Hollow Knight", "Hollow Knight") {
+            DigitTail::Ask(ask) => assert_eq!(ask, "Hollow Knight"),
+            DigitTail::GiveUp => panic!("letters are askable"),
+        }
     }
 
     #[test]

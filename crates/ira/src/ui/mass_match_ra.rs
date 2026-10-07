@@ -231,6 +231,8 @@ fn apply_hit(
     hit: BatchHit<(String, String)>,
     vis: &super::mass_match_dialog::RowVis,
 ) {
+    // Record first: a missing box must not leave the row pending forever.
+    vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::Ra);
     let Some(ra_box) = rows.get(hit.row_idx).and_then(|r| r.ra.clone()) else {
         return;
     };
@@ -254,5 +256,4 @@ fn apply_hit(
             show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
         }),
     }
-    vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::Ra);
 }

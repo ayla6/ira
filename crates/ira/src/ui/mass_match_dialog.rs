@@ -524,6 +524,8 @@ fn start_steam_batch_matching(
             let parent_dialog = dialog.clone();
             let vis = vis;
             move |hit| {
+                // Record first: a missing box must not leave the row pending forever.
+                vis.source_done(hit.row_idx, MatchSource::Steam);
                 let Some(steam_box) = rows.get(hit.row_idx).and_then(|r| r.steam.clone())
                 else {
                     return;
@@ -556,9 +558,6 @@ fn start_steam_batch_matching(
                         &parent_dialog,
                     );
                 }
-                // The pass spoke its final word for this row —
-                // without this the hide toggle can never retire it.
-                vis.source_done(hit.row_idx, MatchSource::Steam);
             }
         },
     );
@@ -705,6 +704,7 @@ fn start_sgdb_batch_matching(
             let parent_dialog = dialog.clone();
             let vis = vis;
             move |hit| {
+                vis.source_done(hit.row_idx, MatchSource::Sgdb);
                 if let Some(sgdb_box) = rows.get(hit.row_idx).and_then(|r| r.sgdb.clone()) {
                     handle_unified_sgdb_result(
                         &state,
@@ -714,7 +714,6 @@ fn start_sgdb_batch_matching(
                         hit.matched,
                         &parent_dialog,
                     );
-                    vis.source_done(hit.row_idx, MatchSource::Sgdb);
                 }
             }
         },
@@ -854,6 +853,9 @@ fn start_steam_title_matching(
                 return;
             }
             let Some(steam_box) = rows.get(hit.row_idx).and_then(|r| r.steam_link.clone()) else {
+                // Record first, like every other pass: a missing box must
+                // not leave the row pending forever.
+                vis.source_done(hit.row_idx, MatchSource::SteamLink);
                 return;
             };
             let vis = vis.clone();
@@ -1387,6 +1389,38 @@ mod tests {
         sorted.sort();
         sorted.dedup();
         assert_eq!(sorted.len(), labels.len());
+    }
+
+    /// The hide mechanism, exercised with real widgets: a concluded row
+    /// hides when the toggle is on, a running row stays, and flipping
+    /// back shows everything. Skipped where no display is reachable.
+    #[test]
+    fn test_rowvis_hides_only_concluded_rows() {
+        if gtk4::init().is_err() {
+            return;
+        }
+        let show_finished = Rc::new(Cell::new(true));
+        let scrolled = gtk4::ScrolledWindow::new();
+        let vis = RowVis::new(show_finished.clone(), &scrolled);
+        let rows: Vec<gtk4::ListBoxRow> =
+            (0..3).map(|_| gtk4::ListBoxRow::new()).collect();
+        vis.set_rows(
+            rows.clone(),
+            vec![
+                HashSet::from([MatchSource::Ra]),
+                HashSet::new(),
+                HashSet::from([MatchSource::Steam]),
+            ],
+        );
+        vis.source_done(0, MatchSource::Ra);
+        show_finished.set(false);
+        vis.apply_all();
+        assert!(!rows[0].is_visible());
+        assert!(!rows[1].is_visible());
+        assert!(rows[2].is_visible());
+        show_finished.set(true);
+        vis.apply_all();
+        assert!(rows.iter().all(|row| row.is_visible()));
     }
 
     /// The id-link targets: pinned shapes, so a site redesign that moves

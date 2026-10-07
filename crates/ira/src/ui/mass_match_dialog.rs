@@ -177,6 +177,17 @@ pub(super) fn match_site_uri(source: MatchSource, id: &str) -> String {
     }
 }
 
+/// The manual-search affordance on every mass-match line: a magnifier
+/// icon button instead of a repeated "Search" word — the line label
+/// already names the source, and the tooltip carries the full text.
+pub(super) fn search_icon_button(source: MatchSource) -> gtk4::Button {
+    let button = gtk4::Button::from_icon_name("edit-find-symbolic");
+    button.set_valign(gtk4::Align::Center);
+    button.set_tooltip_text(Some(
+        &crate::tr!("Search {}").replacen("{}", &source_label(source), 1),
+    ));
+    button
+}
 /// The matched line's identity: the match id as a flat accent-colored
 /// button opening its site page — visibly clickable with no underline
 /// for any theme to render badly — the matched name riding the tooltip.
@@ -201,10 +212,15 @@ pub(super) fn match_id_button(source: MatchSource, id: &str, name: &str) -> gtk4
 /// per-row state, never inferred from game snapshots: a match already
 /// rewrote the game by the time its line repaints, so re-asking "does
 /// this game still need anything" can no longer answer.
+///
+/// The row state lives behind `Rc`: the dialog hands a clone to every
+/// pass and the toggle, and a plain `RefCell` clone would fork the state
+/// instead of sharing it — every clone watching its own empty copy.
+/// That fork is why the toggle historically never hid anything.
 #[derive(Clone)]
 pub(super) struct RowVis {
-    rows: RefCell<Vec<gtk4::ListBoxRow>>,
-    pending: RefCell<Vec<HashSet<MatchSource>>>,
+    rows: Rc<RefCell<Vec<gtk4::ListBoxRow>>>,
+    pending: Rc<RefCell<Vec<HashSet<MatchSource>>>>,
     show_finished: Rc<Cell<bool>>,
     scrolled: glib::WeakRef<gtk4::ScrolledWindow>,
 }
@@ -215,8 +231,8 @@ impl RowVis {
         scrolled: &gtk4::ScrolledWindow,
     ) -> Self {
         Self {
-            rows: RefCell::new(Vec::new()),
-            pending: RefCell::new(Vec::new()),
+            rows: Rc::new(RefCell::new(Vec::new())),
+            pending: Rc::new(RefCell::new(Vec::new())),
             show_finished,
             scrolled: Downgrade::downgrade(scrolled),
         }
@@ -1393,7 +1409,10 @@ mod tests {
 
     /// The hide mechanism, exercised with real widgets: a concluded row
     /// hides when the toggle is on, a running row stays, and flipping
-    /// back shows everything. Skipped where no display is reachable.
+    /// back shows everything. The toggle drives through a clone settled
+    /// before the rows existed — like the dialog — so a state fork fails
+    /// loud here instead of shipping a dead toggle. Skipped where no
+    /// display is reachable.
     #[test]
     fn test_rowvis_hides_only_concluded_rows() {
         if gtk4::init().is_err() {
@@ -1402,6 +1421,7 @@ mod tests {
         let show_finished = Rc::new(Cell::new(true));
         let scrolled = gtk4::ScrolledWindow::new();
         let vis = RowVis::new(show_finished.clone(), &scrolled);
+        let vis_toggle = vis.clone();
         let rows: Vec<gtk4::ListBoxRow> =
             (0..3).map(|_| gtk4::ListBoxRow::new()).collect();
         vis.set_rows(
@@ -1414,12 +1434,12 @@ mod tests {
         );
         vis.source_done(0, MatchSource::Ra);
         show_finished.set(false);
-        vis.apply_all();
+        vis_toggle.apply_all();
         assert!(!rows[0].is_visible());
         assert!(!rows[1].is_visible());
         assert!(rows[2].is_visible());
         show_finished.set(true);
-        vis.apply_all();
+        vis_toggle.apply_all();
         assert!(rows.iter().all(|row| row.is_visible()));
     }
 

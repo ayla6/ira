@@ -51,8 +51,9 @@ fn show_unmatched(
     platform_id: &str,
     dialog: &gtk4::Widget,
 ) {
-    let btn = gtk4::Button::with_label(&crate::tr!("Search"));
-    btn.set_valign(gtk4::Align::Center);
+    let btn = super::mass_match_dialog::search_icon_button(
+        super::mass_match_dialog::MatchSource::Ra,
+    );
     let sc = state.clone();
     let gn = game_name.to_string();
     let pid = platform_id.to_string();

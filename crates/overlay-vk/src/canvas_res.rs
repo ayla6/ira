@@ -297,10 +297,13 @@ unsafe fn find_memory_type(
 ) -> Option<u32> {
     let mut props = vk::PhysicalDeviceMemoryProperties::default();
     (fns.get_mem_props)(physical_device, &mut props);
-    for i in 0..props.memory_type_count as usize {
-        if (type_filter & (1 << i)) != 0
-            && props.memory_types[i].property_flags.contains(properties)
-        {
+    for (i, mem_type) in props
+        .memory_types
+        .iter()
+        .take(props.memory_type_count as usize)
+        .enumerate()
+    {
+        if (type_filter & (1 << i)) != 0 && mem_type.property_flags.contains(properties) {
             return Some(i as u32);
         }
     }

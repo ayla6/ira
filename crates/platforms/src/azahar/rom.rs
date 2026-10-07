@@ -149,8 +149,10 @@ fn smdh_short_title(smdh: &[u8; SMDH_LEN]) -> Option<String> {
     for region in [1usize, 0, 2, 3, 4, 5] {
         let start = 8 + region * 0x200;
         let units: Vec<u16> = smdh[start..start + 0x80]
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
             .collect();
         let title = String::from_utf16_lossy(&units);
         let title = title.split('\0').next().unwrap_or("").trim();

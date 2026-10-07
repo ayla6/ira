@@ -79,8 +79,10 @@ fn banner_addr(lead: &[u8]) -> Option<u64> {
 /// UTF-16 banner title, NUL-trimmed.
 fn title_from_bytes(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
         .collect();
     String::from_utf16_lossy(&units)
         .split('\0')

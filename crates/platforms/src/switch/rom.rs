@@ -237,8 +237,10 @@ fn read_at(file: &mut std::fs::File, offset: u64, size: u64) -> Option<Vec<u8>> 
 /// holds the name as a NUL-terminated UTF-16LE string.
 fn nacp_title(nacp: Vec<u8>) -> Option<String> {
     let units: Vec<u16> = nacp[..nacp.len().min(0x200)]
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     let len = units.iter().position(|u| *u == 0).unwrap_or(units.len());
     let title: String = String::from_utf16_lossy(&units[..len]).trim().into();

@@ -291,7 +291,9 @@ fn data_payload(counter: u32, sample: &MotionSample, pad: &PadState) -> [u8; 8 *
 
     payload[48..56].copy_from_slice(&sample.timestamp_us.to_le_bytes());
     for (offset, value) in payload[56..80]
-        .chunks_exact_mut(4)
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
         .zip(sample.accel_ms2.iter().chain(sample.gyro_dps.iter()))
     {
         offset.copy_from_slice(&value.to_le_bytes());

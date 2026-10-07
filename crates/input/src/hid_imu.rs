@@ -84,7 +84,7 @@ pub fn imu_report(accel_g: [f32; 3], gyro_dps: [f32; 3]) -> [u8; IMU_REPORT_LEN]
         .map(|g| g * ACCEL_LSB_PER_G)
         .chain(gyro_dps.into_iter().map(|dps| dps * GYRO_LSB_PER_DPS));
     let mut report = [0u8; IMU_REPORT_LEN];
-    for (slot, value) in report.chunks_exact_mut(2).zip(values) {
+    for (slot, value) in report.as_chunks_mut::<2>().0.iter_mut().zip(values) {
         slot.copy_from_slice(&(value.round().clamp(-32768.0, 32767.0) as i16).to_le_bytes());
     }
     report

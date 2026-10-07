@@ -142,7 +142,7 @@ impl RaClient {
         // matching can resolve exact game IDs locally.
         let url = reqwest::Url::parse_with_params(
             RA_WEB_GAME_LIST,
-            &[("i", &console), ("y", &self.api_key), ("h", &with_hashes)],
+            [("i", &console), ("y", &self.api_key), ("h", &with_hashes)],
         )
         .map_err(|e| format!("game list url: {}", e))?;
         let text = self.get_web(url)?;
@@ -248,7 +248,7 @@ impl RaClient {
 
         let url = reqwest::Url::parse_with_params(
             RA_WEB_GAME_PROGRESS,
-            &[("g", game_id), ("u", &self.username), ("y", &self.api_key)],
+            [("g", game_id), ("u", &self.username), ("y", &self.api_key)],
         )
         .map_err(|e| format!("web api url: {}", e))?;
         let text = self.get_web(url)?;

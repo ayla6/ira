@@ -49,9 +49,14 @@ unsafe fn create_one_staging_buffer(
 
     let find_mem =
         |require: vk::MemoryPropertyFlags, avoid: vk::MemoryPropertyFlags| -> Option<u32> {
-            for i in 0..mem_props.memory_type_count as usize {
+            for (i, mem_type) in mem_props
+                .memory_types
+                .iter()
+                .take(mem_props.memory_type_count as usize)
+                .enumerate()
+            {
                 if (reqs.memory_type_bits & (1 << i)) != 0 {
-                    let flags = mem_props.memory_types[i].property_flags;
+                    let flags = mem_type.property_flags;
                     if flags.contains(require) && !flags.intersects(avoid) {
                         return Some(i as u32);
                     }

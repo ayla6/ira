@@ -565,7 +565,10 @@ fn add_console_page_overrides(
     result
         .source_gamescope_states
         .push((console_id.to_string(), gamescope_state));
-    add_console_profile_group(page, win, cfg, &cfg.save_dir, console_id, label, registry)
+    // Lazy pages read fresh on open: layouts created while the dialog
+    // sits open show up, and the read stays off the dialog-open path.
+    let profiles = super::input_profile_settings::read_profiles(&cfg.save_dir);
+    add_console_profile_group(page, win, cfg, console_id, label, registry, &profiles)
 }
 
 pub(super) fn discovery_settings_changed(before: &Config, after: &Config) -> bool {

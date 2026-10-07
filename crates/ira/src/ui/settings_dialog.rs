@@ -5,7 +5,10 @@ use super::settings_dialog_console::{
     apply_console_settings, apply_emulator_settings, apply_override_states,
     discovery_settings_changed, register_console_pages, SharedConsoleSettingsWidgets,
 };
-use super::settings_dialog_pages::{build_settings_pages, register_settings_pages};
+use super::settings_dialog_pages::{
+    assemble_pages, build_general_section, build_remaining_pages, fill_page, fill_scrolled_page,
+    register_settings_rows, GeneralSection,
+};
 use super::settings_pages::{AutoReloadWidgets, OverlayPageWidgets, SystemDefaultsWidgets};
 use super::state::SharedState;
 use super::system_settings::{build_override_switch_row, OverrideState};
@@ -62,17 +65,46 @@ struct SavedSettingsWidgets {
     emu_version_model: gtk4::StringList,
 }
 
-struct SettingsDialogParams {
+/// Everything the deferred bulk build needs. The dialog opens with the
+/// shell, the sidebar rows and the landing page only; the bulk build fills
+/// the remaining pages just after paint (or synchronously when a row or
+/// Save beats the idle callback to it).
+struct BulkCtx {
     win: adw::Window,
-    sidebar: gtk4::ListBox,
     stack: gtk4::Stack,
-    content_area: gtk4::Box,
     cfg: Config,
     steam: Arc<SteamDataClient>,
     state: SharedState,
-    rom_platforms_with_games: HashSet<String>,
-    /// Sidebar page to land on (the row's widget name, e.g. "3ds").
-    open_page: Option<String>,
+    general: RefCell<Option<GeneralSection>>,
+    console_pages: SharedConsoleSettingsWidgets,
+    /// Non-console pages still showing placeholders. Landing on one (or
+    /// Save) runs the bulk build first; console ids never appear here —
+    /// the console lazy handler owns those rows independently.
+    pending: RefCell<HashSet<&'static str>>,
+    saved: RefCell<Option<SavedSettingsWidgets>>,
+    done: std::cell::Cell<bool>,
+}
+
+fn bulk_pages_pending() -> HashSet<&'static str> {
+    [
+        "overlay",
+        "input",
+        "system",
+        "sgdb",
+        "screenscraper",
+        "computer_games",
+        "steam",
+        "api_emulators",
+        "migration",
+        "profiles",
+        "performance",
+        "graphics",
+        "advanced",
+        "ra",
+        "roms",
+    ]
+    .into_iter()
+    .collect()
 }
 
 pub fn show_settings_dialog(
@@ -106,19 +138,11 @@ fn open_settings_dialog(
     let layout = settings_window_layout(parent);
     layout.sidebar_area.set_size_request(180, -1);
 
-    let loading = adw::StatusPage::new();
-    loading.set_title(&crate::tr!("Loading Settings"));
-    loading.set_description(Some(&crate::tr!(
-        "Checking installed emulators and controller profiles"
-    )));
-    let spinner = gtk4::Spinner::new();
-    spinner.start();
-    loading.set_child(Some(&spinner));
-    layout.stack.add_named(&loading, Some("loading"));
-    layout.stack.set_visible_child_name("loading");
-    layout.window.present();
-
-    let rom_platforms_with_games = {
+    // Phase A: shell, sidebar rows with placeholders, and the landing
+    // page — real content on first paint, no loading state. The bulk
+    // build fills the rest just after (or synchronously when a row or
+    // Save gets there first).
+    let rom_platforms_with_games: HashSet<String> = {
         let state = state.borrow();
         state
             .games
@@ -126,20 +150,75 @@ fn open_settings_dialog(
             .map(|game| game.platform_id.id().to_string())
             .collect()
     };
-    let params = SettingsDialogParams {
-        win: layout.window,
-        sidebar: layout.sidebar,
-        stack: layout.stack,
-        content_area: layout.content_area,
+    let general = build_general_section(&cfg, state);
+    register_settings_rows(&layout.sidebar, &layout.stack);
+    fill_page(
+        &layout.stack,
+        "general",
+        &super::helpers::scrolled_page(&general.general_page),
+    );
+    let console_pages = register_console_pages(
+        &cfg,
+        &layout.window,
+        state,
+        &layout.sidebar,
+        &layout.stack,
+        rom_platforms_with_games,
+    );
+    let ctx = Rc::new(BulkCtx {
+        win: layout.window.clone(),
+        stack: layout.stack.clone(),
         cfg,
         steam,
         state: state.clone(),
-        rom_platforms_with_games,
-        open_page,
-    };
-    glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
-        finish_settings_dialog(params)
+        general: RefCell::new(Some(general)),
+        console_pages,
+        pending: RefCell::new(bulk_pages_pending()),
+        saved: RefCell::new(None),
+        done: std::cell::Cell::new(false),
     });
+    {
+        let ctx = ctx.clone();
+        let stack = layout.stack.clone();
+        layout.sidebar.connect_row_selected(move |_, row| {
+            if let Some(row) = row {
+                let page_id = row.widget_name().to_string();
+                if ctx.pending.borrow().contains(page_id.as_str()) {
+                    run_bulk_build(&ctx);
+                }
+                stack.set_visible_child_name(&page_id);
+            }
+        });
+    }
+    wire_save_button(&ctx, &layout.content_area);
+
+    let target_row = open_page
+        .as_deref()
+        .and_then(|page_id| sidebar_row_with_name(&layout.sidebar, page_id))
+        .or_else(|| layout.sidebar.row_at_index(0));
+    layout.window.present();
+    if let Some(row) = target_row {
+        // Selecting a not-yet-built row runs the bulk build through the
+        // handler above; landing on General or a console page skips it.
+        layout.sidebar.select_row(Some(&row));
+    }
+    if let Some(row) = layout
+        .sidebar
+        .selected_row()
+        .filter(|row| row.parent().is_some())
+    {
+        row.grab_focus();
+    }
+    {
+        let ctx = ctx.clone();
+        let win = layout.window.clone();
+        glib::idle_add_local_once(move || {
+            // Closed without touching anything: nothing needs building.
+            if win.is_visible() {
+                run_bulk_build(&ctx);
+            }
+        });
+    }
 }
 
 /// The sidebar row whose widget name is `page_id` (see
@@ -155,20 +234,38 @@ fn sidebar_row_with_name(sidebar: &gtk4::ListBox, page_id: &str) -> Option<gtk4:
     None
 }
 
-fn finish_settings_dialog(params: SettingsDialogParams) {
-    let SettingsDialogParams {
-        win,
-        sidebar,
-        stack,
-        content_area,
-        cfg,
-        steam,
-        state,
-        rom_platforms_with_games,
-        open_page,
-    } = params;
-    let pages = build_settings_pages(&cfg, &win, &state);
-    register_settings_pages(&pages, &sidebar, &stack);
+/// Build every page but the landing one, swap them into the placeholders,
+/// and assemble the save widgets. Runs once: the idle callback after
+/// paint, or synchronously when a row or Save gets there first.
+fn run_bulk_build(ctx: &Rc<BulkCtx>) {
+    if ctx.done.get() {
+        return;
+    }
+    ctx.done.set(true);
+    ctx.pending.borrow_mut().clear();
+
+    let rest = build_remaining_pages(&ctx.cfg, &ctx.win, &ctx.state);
+    let general = ctx
+        .general
+        .borrow_mut()
+        .take()
+        .expect("bulk build runs once");
+    let pages = assemble_pages(general, rest);
+    fill_page(&ctx.stack, "overlay", &pages.overlay_page);
+    fill_page(&ctx.stack, "input", &pages.input_page);
+    fill_page(&ctx.stack, "system", &pages.system_page);
+    fill_page(&ctx.stack, "sgdb", &pages.sgdb_page);
+    fill_page(&ctx.stack, "screenscraper", &pages.screenscraper_page);
+    fill_page(&ctx.stack, "computer_games", &pages.computer_games_page);
+    fill_page(&ctx.stack, "steam", &pages.steam_page);
+    fill_page(&ctx.stack, "api_emulators", &pages.emu_page);
+    fill_page(&ctx.stack, "migration", &pages.lutris_page);
+    fill_scrolled_page(&ctx.stack, "profiles", &pages.profiles_page);
+    for wine in &pages.wine_pages {
+        fill_scrolled_page(&ctx.stack, wine.page_id, &wine.page);
+    }
+    fill_page(&ctx.stack, "ra", &pages.ra_page);
+    fill_page(&ctx.stack, "roms", &pages.rom_page);
     let steam_page = pages.steam_page.clone();
     let ra_page = pages.ra_page.clone();
 
@@ -179,14 +276,14 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         let (overlay_row, state) = build_override_switch_row(
             &crate::tr!("In-game overlay"),
             &crate::tr!("Achievements, screenshots, and recording"),
-            cfg.overlay.enabled,
-            cfg.overlay.source_overrides.get("steam").copied(),
+            ctx.cfg.overlay.enabled,
+            ctx.cfg.overlay.source_overrides.get("steam").copied(),
         );
         let (gs_row, gs_state) = build_override_switch_row(
             &crate::tr!("Gamescope"),
             &crate::tr!("Valve Gamescope compositor"),
-            cfg.default_system.gamescope,
-            cfg.overlay.source_gamescope.get("steam").copied(),
+            ctx.cfg.default_system.gamescope,
+            ctx.cfg.overlay.source_gamescope.get("steam").copied(),
         );
         let g = adw::PreferencesGroup::new();
         g.add(&overlay_row);
@@ -200,14 +297,14 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         let (overlay_row, state) = build_override_switch_row(
             &crate::tr!("In-game overlay"),
             &crate::tr!("Achievements, screenshots, and recording"),
-            cfg.overlay.enabled,
-            cfg.overlay.source_overrides.get("ra").copied(),
+            ctx.cfg.overlay.enabled,
+            ctx.cfg.overlay.source_overrides.get("ra").copied(),
         );
         let (gs_row, gs_state) = build_override_switch_row(
             &crate::tr!("Gamescope"),
             &crate::tr!("Valve Gamescope compositor"),
-            cfg.default_system.gamescope,
-            cfg.overlay.source_gamescope.get("ra").copied(),
+            ctx.cfg.default_system.gamescope,
+            ctx.cfg.overlay.source_gamescope.get("ra").copied(),
         );
         let g = adw::PreferencesGroup::new();
         g.add(&overlay_row);
@@ -217,16 +314,10 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         source_gamescope_states.push(("ra".to_string(), gs_state));
     }
 
-    let console_pages = register_console_pages(
-        &cfg,
-        &win,
-        &state,
-        &sidebar,
-        &stack,
-        rom_platforms_with_games,
-    );
+    // The console rows were registered at open; merge the steam/ra
+    // override states into their shared widgets now.
     {
-        let mut console_pages = console_pages.borrow_mut();
+        let mut console_pages = ctx.console_pages.borrow_mut();
         console_pages
             .source_overlay_states
             .append(&mut source_overlay_states);
@@ -258,7 +349,7 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         controller_default_widgets: pages.controller_default_widgets,
         overlay_widgets: pages.overlay_widgets,
         system_defaults_widgets: pages.system_defaults_widgets,
-        console_pages,
+        console_pages: ctx.console_pages.clone(),
         wine_widgets: pages.wine_widgets,
         linux_controller_profile: pages.linux_controller_profile,
         wine_controller_profile: pages.wine_controller_profile,
@@ -268,51 +359,44 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         emu_version_row: pages.emu_version_row,
         emu_version_model: pages.emu_version_model,
     };
+    ctx.saved.borrow_mut().replace(saved_widgets);
+}
 
-    let stack_clone = stack;
-    sidebar.connect_row_selected(move |_, row| {
-        if let Some(row) = row {
-            let page_id = row.widget_name().to_string();
-            stack_clone.set_visible_child_name(&page_id);
-        }
-    });
-
-    let target_row = open_page
-        .as_deref()
-        .and_then(|page_id| sidebar_row_with_name(&sidebar, page_id))
-        .or_else(|| sidebar.row_at_index(0));
-    if let Some(row) = target_row {
-        sidebar.select_row(Some(&row));
-    }
-
-    let btn_row = super::helpers::dialog_button_row_with_escape(&win);
+/// The Save row, wired at open: the handler runs the bulk build when Save
+/// beats the idle callback to it, then saves exactly like before.
+fn wire_save_button(ctx: &Rc<BulkCtx>, content_area: &gtk4::Box) {
+    let btn_row = super::helpers::dialog_button_row_with_escape(&ctx.win);
 
     let save_btn = gtk4::Button::with_label(&crate::tr!("Save"));
     save_btn.add_css_class(CSS_SUGGESTED_ACTION);
 
-    let state_clone = state;
-    let win_clone = win;
-    let steam_clone = steam;
+    let ctx = ctx.clone();
     save_btn.connect_clicked(move |_| {
-        let mut s = state_clone.borrow_mut();
+        run_bulk_build(&ctx);
+        let saved = ctx.saved.borrow();
+        let Some(ref saved_widgets) = *saved else {
+            return;
+        };
+        let mut s = ctx.state.borrow_mut();
         let old_cfg = s.cfg.clone();
-        apply_saved_settings(&mut s.cfg, &saved_widgets);
+        apply_saved_settings(&mut s.cfg, saved_widgets);
 
-        steam_clone.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
-        steam_clone.set_sgdb_disabled_assets(&s.cfg.sgdb_disabled_assets);
-        steam_clone.set_sgdb_filtered_users(
+        ctx.steam.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
+        ctx.steam.set_sgdb_disabled_assets(&s.cfg.sgdb_disabled_assets);
+        ctx.steam.set_sgdb_filtered_users(
             &s.cfg
                 .sgdb_filtered_users
                 .iter()
                 .map(|u| (u.name.clone(), u.steam64.clone()))
                 .collect::<Vec<_>>(),
         );
-        steam_clone.set_sgdb_filtered_styles(&s.cfg.sgdb_filtered_styles);
-        steam_clone.set_sgdb_show_filtered(s.cfg.sgdb_show_filtered);
+        ctx.steam.set_sgdb_filtered_styles(&s.cfg.sgdb_filtered_styles);
+        ctx.steam.set_sgdb_show_filtered(s.cfg.sgdb_show_filtered);
 
         let reload_games = discovery_settings_changed(&old_cfg, &s.cfg);
         let cfg = s.cfg.clone();
         let sender = s.sender.clone();
+        let state = ctx.state.clone();
         drop(s);
 
         if let Err(e) = cfg.ensure_rom_folders() {
@@ -325,19 +409,16 @@ fn finish_settings_dialog(params: SettingsDialogParams) {
         if old_cfg.shadps4_executable != cfg.shadps4_executable
             || old_cfg.rpcs3_executable != cfg.rpcs3_executable
         {
-            crate::activate::refresh_playtime_watchers(&state_clone);
+            crate::activate::refresh_playtime_watchers(&state);
         }
         if reload_games {
             let _ = sender.send(crate::AppMessage::ReloadGames);
         }
-        win_clone.close();
+        ctx.win.close();
     });
 
     btn_row.append(&save_btn);
     content_area.append(&btn_row);
-    if let Some(row) = sidebar.selected_row().filter(|row| row.parent().is_some()) {
-        row.grab_focus();
-    }
 }
 
 fn apply_saved_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {

@@ -46,6 +46,7 @@ pub(super) fn add_pc_profile_group(
     label: &str,
     parent: &impl IsA<gtk4::Widget>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
+    profiles: &[StoredProfile],
 ) -> ConsoleProfileWidgets {
     let parent = parent.clone().upcast();
     let group = adw::PreferencesGroup::new();
@@ -61,6 +62,7 @@ pub(super) fn add_pc_profile_group(
         &parent,
         &cfg.save_dir,
         registry,
+        profiles,
     );
     page.append(&group);
     widget
@@ -97,6 +99,7 @@ pub(super) fn build_input_settings_page(
     cfg: &Config,
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
+    profiles: &[StoredProfile],
 ) -> (gtk4::Box, InputPageWidgets) {
     let parent = parent.clone().upcast();
     let page = settings_page_container();
@@ -110,6 +113,7 @@ pub(super) fn build_input_settings_page(
         steam.clone(),
         registry.clone(),
         &profile_rows,
+        profiles,
     );
 
     let controller_group = adw::PreferencesGroup::new();
@@ -130,7 +134,7 @@ pub(super) fn build_input_settings_page(
         no_controllers_row: no_controllers_row.clone(),
         registry: registry.clone(),
     };
-    rebuild_controller_rows(&controller_rows_params, &registry.snapshot());
+    rebuild_controller_rows(&controller_rows_params, &registry.snapshot(), profiles);
     start_controller_registry_refresh(
         &parent,
         &controller_group,
@@ -155,10 +159,10 @@ pub(super) fn add_console_profile_group(
     page: &gtk4::Box,
     parent: &impl IsA<gtk4::Widget>,
     cfg: &Config,
-    save_dir: &str,
     console_id: &str,
     label: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
+    profiles: &[StoredProfile],
 ) -> ConsoleProfileWidgets {
     let parent = parent.clone().upcast();
     let group = adw::PreferencesGroup::new();
@@ -172,8 +176,9 @@ pub(super) fn add_console_profile_group(
             show_pause_unfocused: true,
         },
         &parent,
-        save_dir,
+        &cfg.save_dir,
         registry,
+        profiles,
     );
     page.append(&group);
     widget
@@ -186,6 +191,7 @@ fn add_console_remapping_rows(
     parent: &gtk4::Widget,
     save_dir: &str,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
+    profiles: &[StoredProfile],
 ) -> ConsoleProfileWidgets {
     let ConsoleRowsParams {
         console_id,
@@ -240,7 +246,7 @@ fn add_console_remapping_rows(
     profile_row.set_title(&crate::tr!("Layout"));
     let current_path = (!cfg.console(&console_id).controller_profile.is_empty())
         .then(|| std::path::PathBuf::from(&cfg.console(&console_id).controller_profile));
-    let (labels, profile_paths, selected) = console_profile_choices(save_dir, current_path);
+    let (labels, profile_paths, selected) = console_profile_choices(profiles, current_path);
     profile_row.set_model(Some(&gtk4::StringList::new(
         &labels.iter().map(String::as_str).collect::<Vec<_>>(),
     )));
@@ -362,23 +368,23 @@ fn add_console_remapping_rows(
 /// controller-default pickers: the none-style choice first, then every
 /// layout not scoped to a specific game, then the create-new sentinel.
 /// The selected layout owns the virtual backend; these rows never pick it.
+///
+/// Takes the dialog's single profile read — listing means re-reading,
+/// re-parsing and re-validating every stored layout, so callers share one
+/// vec and only user actions (create/import/delete/refresh) read fresh.
 fn layout_choices(
-    save_dir: &str,
+    profiles: &[StoredProfile],
     current_path: Option<std::path::PathBuf>,
     none_label: &str,
 ) -> (Vec<String>, Vec<Option<std::path::PathBuf>>, u32) {
-    let profiles = list_profiles(save_dir).unwrap_or_else(|error| {
-        eprintln!("Failed to list controller profiles: {error}");
-        Vec::new()
-    });
     let mut labels = vec![none_label.to_string()];
     let mut paths = vec![None];
     for profile in profiles
-        .into_iter()
+        .iter()
         .filter(|profile| profile.profile.compatible_game_ids.is_empty())
     {
-        labels.push(profile_label(&profile));
-        paths.push(Some(profile.path));
+        labels.push(profile_label(profile));
+        paths.push(Some(profile.path.clone()));
     }
     let selected = current_path
         .as_ref()
@@ -394,10 +400,10 @@ fn layout_choices(
 }
 
 fn console_profile_choices(
-    save_dir: &str,
+    profiles: &[StoredProfile],
     current_path: Option<std::path::PathBuf>,
 ) -> (Vec<String>, Vec<Option<std::path::PathBuf>>, u32) {
-    layout_choices(save_dir, current_path, &crate::tr!("Inherit"))
+    layout_choices(profiles, current_path, &crate::tr!("Inherit"))
 }
 
 fn selected_console_path(
@@ -417,8 +423,10 @@ fn refresh_console_profile_choices(
     selected_path: Option<&std::path::Path>,
     last_real: &Rc<RefCell<u32>>,
 ) {
-    let (labels, updated_paths, selected) =
-        console_profile_choices(save_dir, selected_path.map(std::path::Path::to_path_buf));
+    let (labels, updated_paths, selected) = console_profile_choices(
+        &read_profiles(save_dir),
+        selected_path.map(std::path::Path::to_path_buf),
+    );
     *paths.borrow_mut() = updated_paths;
     row.set_model(Some(&gtk4::StringList::new(
         &labels.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -443,7 +451,11 @@ fn input_mode_from_index(index: u32) -> Option<ControllerInputMode> {
     }
 }
 
-fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::DeviceInfo]) {
+fn rebuild_controller_rows(
+    params: &ControllerRowsParams,
+    devices: &[ira_input::DeviceInfo],
+    profiles: &[StoredProfile],
+) {
     let previous = params
         .widgets
         .borrow()
@@ -516,6 +528,7 @@ fn rebuild_controller_rows(params: &ControllerRowsParams, devices: &[ira_input::
             device.clone(),
             state,
             params.registry.clone(),
+            profiles,
         ));
     }
     if rebuilt.is_empty() {
@@ -547,6 +560,7 @@ fn add_controller_row(
     device: ira_input::DeviceInfo,
     state: ControllerDefaultState,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
+    profiles: &[StoredProfile],
 ) -> ControllerDefaultWidgets {
     let key = ira_config::Config::controller_key(device.vendor, device.product);
     let device_name = device.name.clone();
@@ -560,6 +574,7 @@ fn add_controller_row(
         &device,
         &state,
         registry.clone(),
+        profiles,
     );
     let enabled = state.config.mode != ControllerInputMode::Disabled;
     expander.set_expanded(enabled);
@@ -627,11 +642,12 @@ impl ControllerDefaultLayout {
         device: &ira_input::DeviceInfo,
         state: &ControllerDefaultState,
         registry: std::sync::Arc<ira_input::ControllerRegistry>,
+        profiles: &[StoredProfile],
     ) -> Self {
         let enabled = state.config.mode != ControllerInputMode::Disabled;
         let current = enabled.then(|| state.profile_path.clone()).flatten();
         let (labels, paths, selected) =
-            layout_choices(save_dir, current, &crate::tr!("Disabled"));
+            layout_choices(profiles, current, &crate::tr!("Disabled"));
         let row = adw::ComboRow::new();
         row.set_title(&crate::tr!("Default layout"));
         row.set_model(Some(&gtk4::StringList::new(
@@ -739,7 +755,7 @@ impl ControllerDefaultLayout {
     /// saved file selected and the subtitle in step with its backend.
     fn refresh(&self, selected_path: Option<&std::path::Path>) {
         let (labels, paths, selected) = layout_choices(
-            &self.save_dir,
+            &read_profiles(&self.save_dir),
             selected_path.map(std::path::Path::to_path_buf),
             &crate::tr!("Disabled"),
         );
@@ -816,10 +832,25 @@ fn start_controller_registry_refresh(
                 no_controllers_row: no_controllers_row.clone(),
                 registry: registry.clone(),
             };
-            rebuild_controller_rows(&params, &registry.snapshot());
+            rebuild_controller_rows(
+                &params,
+                &registry.snapshot(),
+                &read_profiles(&save_dir_for_refresh),
+            );
         }
         glib::ControlFlow::Continue
     });
+}
+
+/// One profile read, shared by a dialog build: listing means re-reading,
+/// re-parsing and re-validating every stored layout, so the build reads
+/// once and threads the vec through. User actions read fresh through this
+/// same helper so create/import/delete show up immediately.
+pub(super) fn read_profiles(save_dir: &str) -> Vec<StoredProfile> {
+    list_profiles(save_dir).unwrap_or_else(|error| {
+        eprintln!("Failed to list controller profiles: {error}");
+        Vec::new()
+    })
 }
 
 fn rebuild_profile_rows(
@@ -829,14 +860,12 @@ fn rebuild_profile_rows(
     steam: std::sync::Arc<ira_api::SteamDataClient>,
     registry: std::sync::Arc<ira_input::ControllerRegistry>,
     rows: &Rc<RefCell<Vec<gtk4::Widget>>>,
+    profiles: &[StoredProfile],
 ) {
     for row in rows.borrow_mut().drain(..) {
         group.remove(&row);
     }
-    for stored in list_profiles(save_dir).unwrap_or_else(|error| {
-        eprintln!("Failed to list controller profiles: {error}");
-        Vec::new()
-    }) {
+    for stored in profiles.iter().cloned() {
         rows.borrow_mut().push(
             add_profile_row(
                 group,
@@ -881,6 +910,7 @@ fn rebuild_profile_rows(
                     steam_for_saved.clone(),
                     registry_for_saved.clone(),
                     &rows,
+                    &read_profiles(&save_dir),
                 )
             }),
         );
@@ -921,6 +951,7 @@ fn rebuild_profile_rows(
                     steam_for_saved.clone(),
                     registry_for_saved.clone(),
                     &rows,
+                    &read_profiles(&save_dir),
                 )
             },
         );
@@ -979,6 +1010,7 @@ fn add_profile_row(
                         steam.clone(),
                         registry.clone(),
                         &rows_for_saved,
+                        &read_profiles(&save_dir),
                     )
                 }
             },
@@ -1016,6 +1048,7 @@ fn add_profile_row(
                         steam.clone(),
                         registry.clone(),
                         &rows,
+                        &read_profiles(&save_dir),
                     );
                 }
             },
@@ -1040,7 +1073,7 @@ fn profile_label(stored: &StoredProfile) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{input_mode_from_index, input_mode_index, layout_choices};
+    use super::{input_mode_from_index, input_mode_index, layout_choices, read_profiles};
     use crate::ui::input_profile_store::{managed_profile_path, write_profile};
     use ira_input::InputProfile;
     use ira_models::ControllerInputMode;
@@ -1077,9 +1110,7 @@ mod tests {
 
     #[test]
     fn test_layout_choices_empty_store_has_none_and_sentinel_only() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (labels, paths, selected) =
-            layout_choices(tmp.path().to_str().unwrap(), None, "Disabled");
+        let (labels, paths, selected) = layout_choices(&[], None, "Disabled");
         assert_eq!(labels, vec!["Disabled", "Create new profile..."]);
         assert_eq!(paths, vec![None, None]);
         assert_eq!(selected, 0);
@@ -1106,7 +1137,8 @@ mod tests {
             },
         )
         .unwrap();
-        let (labels, paths, selected) = layout_choices(save_dir, None, "Disabled");
+        let profiles = read_profiles(save_dir);
+        let (labels, paths, selected) = layout_choices(&profiles, None, "Disabled");
         assert_eq!(labels, vec!["Disabled", "Global", "Create new profile..."]);
         assert!(paths[1].is_some());
         assert_eq!(selected, 0);
@@ -1125,8 +1157,8 @@ mod tests {
             },
         )
         .unwrap();
-        let (labels, _, selected) =
-            layout_choices(save_dir, Some(path), "Disabled");
+        let profiles = read_profiles(save_dir);
+        let (labels, _, selected) = layout_choices(&profiles, Some(path), "Disabled");
         assert_eq!(labels[selected as usize], "Global");
     }
 
@@ -1143,7 +1175,8 @@ mod tests {
         )
         .unwrap();
         let missing = tmp.path().join("elsewhere.json");
-        let (_, _, selected) = layout_choices(save_dir, Some(missing), "Disabled");
+        let profiles = read_profiles(save_dir);
+        let (_, _, selected) = layout_choices(&profiles, Some(missing), "Disabled");
         assert_eq!(selected, 0);
     }
 }

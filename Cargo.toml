@@ -23,3 +23,11 @@ resolver = "2"
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
+
+# Dev builds recompile one giant crate on every touch (~30s) with full
+# debuginfo, most of it link time. Line tables keep RUST_BACKTRACE useful
+# while dropping the type/variable info that slows codegen and linking.
+# No `cargo add` equivalent exists for profiles; this touches neither
+# dependencies nor the lockfile.
+[profile.dev]
+debug = 1

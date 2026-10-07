@@ -206,6 +206,7 @@ pub fn settings_window_layout_sized(
         stack,
     } = dialog_widgets();
     header.set_title_widget(Some(&gtk4::Label::new(Some(title))));
+    let sidebar_search = add_sidebar_search(&sidebar_area, &sidebar);
     // The root overlay hosts toasts for every settings page (and for
     // the job refusals the fetch buttons report).
     let toast_overlay = adw::ToastOverlay::new();
@@ -213,13 +214,26 @@ pub fn settings_window_layout_sized(
     // AdwWindow only accepts set_content; gtk_window_set_child aborts.
     win.set_content(Some(&toast_overlay));
 
-    SettingsWindowLayout {
-        window: win,
+    let layout = SettingsWindowLayout {
+        window: win.clone(),
         sidebar,
         stack,
         content_area,
         sidebar_area,
-    }
+    };
+    // Ctrl+F jumps to the sidebar filter, mirroring the library search.
+    let search_focus = sidebar_search;
+    let find_shortcut = gtk4::EventControllerKey::new();
+    find_shortcut.connect_key_pressed(move |_, key, _, modifiers| {
+        if key == gdk4::Key::f && modifiers.contains(gdk4::ModifierType::CONTROL_MASK) {
+            search_focus.grab_focus();
+            gtk4::glib::Propagation::Stop
+        } else {
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    win.add_controller(find_shortcut);
+    layout
 }
 
 /// Show a short notice on a settings window: the window's root is a
@@ -328,6 +342,109 @@ fn dialog_widgets() -> DialogWidgets {
         header,
         stack,
     }
+}
+
+/// Search entry filtering a settings sidebar, prepended above it: live
+/// page-row matching, Enter jumping to the first match. Wired by the
+/// settings window layout, so app settings and per-game settings share
+/// it; wizard sheets (`dialog_layout`) stay unfiltered.
+fn add_sidebar_search(
+    sidebar_area: &gtk4::Box,
+    sidebar: &gtk4::ListBox,
+) -> gtk4::SearchEntry {
+    let search = gtk4::SearchEntry::new();
+    search.set_placeholder_text(Some(&crate::tr!("Search pages…")));
+    search.set_margin_start(8);
+    search.set_margin_end(8);
+    search.set_margin_top(8);
+    let no_match = gtk4::Label::new(Some(&crate::tr!("No matching pages")));
+    no_match.add_css_class(CSS_DIM_LABEL);
+    sidebar.set_placeholder(Some(&no_match));
+    {
+        let sidebar = sidebar.clone();
+        search.connect_search_changed(move |entry| {
+            filter_settings_sidebar(&sidebar, &entry.text().trim().to_lowercase());
+        });
+    }
+    {
+        let sidebar = sidebar.clone();
+        search.connect_activate(move |_| {
+            // Enter jumps to the first match.
+            let mut index = 0;
+            while let Some(row) = sidebar.row_at_index(index) {
+                if !row.widget_name().is_empty() && row.is_visible() {
+                    sidebar.select_row(Some(&row));
+                    break;
+                }
+                index += 1;
+            }
+        });
+    }
+    sidebar_area.prepend(&search);
+    search
+}
+
+/// Live-filter a settings sidebar by row label. Page rows match
+/// case-insensitively; section titles survive only while one of their
+/// pages matches; separators hide while filtering. Rows without a
+/// readable label stay visible — the filter never hides what it
+/// cannot read.
+fn filter_settings_sidebar(sidebar: &gtk4::ListBox, query: &str) {
+    let mut index = 0;
+    while let Some(row) = sidebar.row_at_index(index) {
+        if !row.widget_name().is_empty() {
+            let visible = query.is_empty()
+                || sidebar_row_label(&row)
+                    .map(|label| label.to_lowercase().contains(query))
+                    .unwrap_or(true);
+            row.set_visible(visible);
+        } else if is_separator_row(&row) {
+            row.set_visible(query.is_empty());
+        }
+        index += 1;
+    }
+    let mut index = 0;
+    while let Some(row) = sidebar.row_at_index(index) {
+        if row.widget_name().is_empty() && !is_separator_row(&row) {
+            let mut visible = query.is_empty();
+            if !visible {
+                let mut next_index = index + 1;
+                while let Some(next) = sidebar.row_at_index(next_index) {
+                    if !next.widget_name().is_empty() {
+                        if next.is_visible() {
+                            visible = true;
+                            break;
+                        }
+                    } else if !is_separator_row(&next) {
+                        break;
+                    }
+                    next_index += 1;
+                }
+            }
+            row.set_visible(visible);
+        }
+        index += 1;
+    }
+}
+
+/// The row's visible label: page rows hold [icon, label], section titles
+/// [label, separator].
+fn sidebar_row_label(row: &gtk4::ListBoxRow) -> Option<String> {
+    let hbox = row.child()?.downcast::<gtk4::Box>().ok()?;
+    let mut child = hbox.first_child();
+    while let Some(current) = child {
+        if let Ok(label) = current.clone().downcast::<gtk4::Label>() {
+            return Some(label.text().to_string());
+        }
+        child = current.next_sibling();
+    }
+    None
+}
+
+fn is_separator_row(row: &gtk4::ListBoxRow) -> bool {
+    row.child()
+        .and_then(|child| child.downcast::<gtk4::Separator>().ok())
+        .is_some()
 }
 
 /// Wrap a page's content in the standard per-page `ScrolledWindow`.

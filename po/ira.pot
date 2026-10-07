@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-07 17:46-0300\n"
+"POT-Creation-Date: 2026-10-07 18:37-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -176,7 +176,7 @@ msgstr ""
 #: crates/ira/src/ui/add_game_dialog.rs:65
 #: crates/ira/src/ui/input_profile_editor.rs:317
 #: crates/ira/src/ui/input_profile_stick_settings.rs:62
-#: crates/ira/src/ui/settings_dialog_pages.rs:385
+#: crates/ira/src/ui/settings_dialog_pages.rs:384
 msgid "General"
 msgstr ""
 
@@ -202,8 +202,8 @@ msgstr ""
 #: crates/ira/src/ui/group_dialog.rs:20
 #: crates/ira/src/ui/group_dialog.rs:70
 #: crates/ira/src/ui/helpers.rs:107
-#: crates/ira/src/ui/helpers.rs:593
-#: crates/ira/src/ui/helpers.rs:984
+#: crates/ira/src/ui/helpers.rs:710
+#: crates/ira/src/ui/helpers.rs:1101
 #: crates/ira/src/ui/input_profile_editor.rs:443
 #: crates/ira/src/ui/input_profile_editor_save.rs:129
 #: crates/ira/src/ui/input_profile_output_capture.rs:55
@@ -222,7 +222,7 @@ msgid "Value"
 msgstr ""
 
 #: crates/ira/src/ui/add_game_env.rs:10
-#: crates/ira/src/ui/settings_dialog_pages.rs:427
+#: crates/ira/src/ui/settings_dialog_pages.rs:426
 #: crates/ira/src/ui/wine_config_widget.rs:486
 msgid "Advanced"
 msgstr ""
@@ -475,7 +475,7 @@ msgstr ""
 #: crates/ira/src/ui/image_manager.rs:259
 #: crates/ira/src/ui/image_manager.rs:329
 #: crates/ira/src/ui/mass_match_dialog.rs:159
-#: crates/ira/src/ui/settings_dialog_pages.rs:402
+#: crates/ira/src/ui/settings_dialog_pages.rs:401
 #: crates/ira/src/ui/settings_pages.rs:158
 #: crates/ira/src/ui/steam_search_dialog.rs:169
 msgid "Steam"
@@ -1457,7 +1457,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_overlay.rs:44
 #: crates/ira/src/ui/edit_game_overlay.rs:87
-#: crates/ira/src/ui/settings_dialog_pages.rs:386
+#: crates/ira/src/ui/settings_dialog_pages.rs:385
 msgid "Overlay"
 msgstr ""
 
@@ -1734,7 +1734,7 @@ msgstr ""
 
 #: crates/ira/src/ui/edit_game_scraper.rs:958
 #: crates/ira/src/ui/mass_match_dialog.rs:162
-#: crates/ira/src/ui/settings_dialog_pages.rs:397
+#: crates/ira/src/ui/settings_dialog_pages.rs:396
 msgid "ScreenScraper"
 msgstr ""
 
@@ -1798,7 +1798,7 @@ msgid "Another metadata job is running"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:51
-#: crates/ira/src/ui/settings_dialog_pages.rs:417
+#: crates/ira/src/ui/settings_dialog_pages.rs:416
 #: crates/ira/src/ui/settings_pages.rs:304
 #: crates/ira/src/ui/wine_config_widget.rs:96
 #: crates/ira/src/ui/wine_config_widget.rs:170
@@ -1842,7 +1842,7 @@ msgid "Valve Gamescope compositor"
 msgstr ""
 
 #: crates/ira/src/ui/edit_game_system.rs:170
-#: crates/ira/src/ui/settings_dialog_pages.rs:422
+#: crates/ira/src/ui/settings_dialog_pages.rs:421
 #: crates/ira/src/ui/settings_pages.rs:424
 #: crates/ira/src/ui/wine_config_widget.rs:193
 #: crates/ira/src/ui/wine_config_widget.rs:310
@@ -2178,7 +2178,7 @@ msgstr ""
 
 #: crates/ira/src/ui/game_settings.rs:48
 #: crates/ira/src/ui/mass_match_dialog.rs:161
-#: crates/ira/src/ui/settings_dialog_pages.rs:433
+#: crates/ira/src/ui/settings_dialog_pages.rs:432
 msgid "RetroAchievements"
 msgstr ""
 
@@ -2358,7 +2358,15 @@ msgstr ""
 msgid "Delete “{}”? Games in this group will not be removed."
 msgstr ""
 
-#: crates/ira/src/ui/helpers.rs:985
+#: crates/ira/src/ui/helpers.rs:356
+msgid "Search pages…"
+msgstr ""
+
+#: crates/ira/src/ui/helpers.rs:360
+msgid "No matching pages"
+msgstr ""
+
+#: crates/ira/src/ui/helpers.rs:1102
 msgid "Confirm"
 msgstr ""
 
@@ -4180,7 +4188,7 @@ msgstr ""
 #: crates/ira/src/ui/input_profile_preview.rs:209
 #: crates/ira/src/ui/input_profile_search_filters.rs:111
 #: crates/ira/src/ui/input_profile_settings.rs:169
-#: crates/ira/src/ui/settings_dialog_pages.rs:387
+#: crates/ira/src/ui/settings_dialog_pages.rs:386
 msgid "Controller"
 msgstr ""
 
@@ -4421,7 +4429,7 @@ msgid "over {parent}"
 msgstr ""
 
 #: crates/ira/src/ui/input_profile_settings.rs:107
-#: crates/ira/src/ui/settings_dialog_pages.rs:414
+#: crates/ira/src/ui/settings_dialog_pages.rs:413
 msgid "Profiles"
 msgstr ""
 
@@ -4797,7 +4805,7 @@ msgid "Select installer files"
 msgstr ""
 
 #: crates/ira/src/ui/installer_add_dialog.rs:160
-#: crates/ira/src/ui/settings_dialog_pages.rs:413
+#: crates/ira/src/ui/settings_dialog_pages.rs:412
 msgid "Wine"
 msgstr ""
 
@@ -4932,7 +4940,7 @@ msgid "No log output yet. The log will populate when the game is launched."
 msgstr ""
 
 #: crates/ira/src/ui/mass_match_dialog.rs:160
-#: crates/ira/src/ui/settings_dialog_pages.rs:394
+#: crates/ira/src/ui/settings_dialog_pages.rs:393
 msgid "SteamGridDB"
 msgstr ""
 
@@ -5519,42 +5527,42 @@ msgstr ""
 msgid "Refetches matched games' entries by id and fills any gaps"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:390
+#: crates/ira/src/ui/settings_dialog_pages.rs:389
 msgid "Game system"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:393
+#: crates/ira/src/ui/settings_dialog_pages.rs:392
 msgid "Metadata"
 msgstr ""
 
+#: crates/ira/src/ui/settings_dialog_pages.rs:399
 #: crates/ira/src/ui/settings_dialog_pages.rs:400
-#: crates/ira/src/ui/settings_dialog_pages.rs:401
 msgid "PC games"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:405
+#: crates/ira/src/ui/settings_dialog_pages.rs:404
 msgid "API emulators"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:410
+#: crates/ira/src/ui/settings_dialog_pages.rs:409
 msgid "Lutris migration"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:430
+#: crates/ira/src/ui/settings_dialog_pages.rs:429
 msgid "Emulation"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:436
+#: crates/ira/src/ui/settings_dialog_pages.rs:435
 #: crates/ira/src/ui/settings_pages.rs:163
 #: crates/ira/src/ui/settings_pages.rs:668
 msgid "ROM library"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:508
+#: crates/ira/src/ui/settings_dialog_pages.rs:507
 msgid "Linux controller"
 msgstr ""
 
-#: crates/ira/src/ui/settings_dialog_pages.rs:517
+#: crates/ira/src/ui/settings_dialog_pages.rs:516
 msgid "Wine controller"
 msgstr ""
 

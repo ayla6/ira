@@ -572,10 +572,26 @@ enum PendingSource<'scope> {
 /// the ROM scan can reattach the same content when the file comes back —
 /// even renamed or from another folder.
 fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
-    let entries = match db::load_all_games(db) {
+    let entries = match db::load_games_by_kinds(db, &[GameKind::Retro, GameKind::Switch]) {
         Ok(entries) => entries,
         Err(error) => {
             eprintln!("Failed to load games for ROM cleanup: {error}");
+            return;
+        }
+    };
+
+    // Disc paths for rows without a primary ROM path, in one query instead
+    // of one per row. A failure aborts the pass: like the per-row lookup
+    // before it, an unreadable discs table must keep games, never clear.
+    let empty_ids: Vec<i64> = entries
+        .iter()
+        .filter(|entry| entry.rom_path.is_empty())
+        .map(|entry| entry.id)
+        .collect();
+    let discs_by_game = match db::get_discs_for_games(db, &empty_ids) {
+        Ok(map) => map,
+        Err(error) => {
+            eprintln!("Failed to load discs for ROM cleanup: {error}");
             return;
         }
     };
@@ -584,6 +600,7 @@ fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
         .iter()
         // Switch ROM entries share the ROM library's lifecycle; the two
         // kinds are exactly what the ROM scan manages.
+        // (Already kind-filtered above; the match stays as documentation.)
         .filter(|entry| matches!(entry.kind, GameKind::Retro | GameKind::Switch))
         // Switch titles of an emulator's own library have no ROM file by
         // design — their identity is the emulator's title id — so the
@@ -593,7 +610,10 @@ fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
                 && entry.rom_path.is_empty()
                 && ira_platforms::switch::is_title_id(&entry.native_id))
         })
-        .filter(|entry| !rom_entry_has_file(db, cfg, entry))
+        .filter(|entry| {
+            let discs = discs_by_game.get(&entry.id);
+            !rom_entry_has_file(cfg, entry, discs.map(Vec::as_slice).unwrap_or(&[]))
+        })
     {
         if !entry.rom_path.is_empty() {
             if let Err(error) = db::set_rom_path(db, entry.id, "") {
@@ -606,17 +626,11 @@ fn cleanup_stale_rom_entries(db: &db::DbConn, cfg: &Config) {
     }
 }
 
-fn rom_entry_has_file(db: &db::DbConn, cfg: &Config, entry: &GameEntry) -> bool {
-    let paths = if entry.rom_path.is_empty() {
-        match db::get_discs(db, entry.id) {
-            Ok(discs) => discs.into_iter().map(|disc| disc.rom_path).collect(),
-            Err(error) => {
-                eprintln!("Failed to load discs for ROM entry {}: {error}", entry.id);
-                return true;
-            }
-        }
+fn rom_entry_has_file(cfg: &Config, entry: &GameEntry, discs: &[ira_models::GameDisc]) -> bool {
+    let paths: Vec<&str> = if entry.rom_path.is_empty() {
+        discs.iter().map(|disc| disc.rom_path.as_str()).collect()
     } else {
-        vec![entry.rom_path.clone()]
+        vec![entry.rom_path.as_str()]
     };
 
     if paths.is_empty() {
@@ -625,7 +639,7 @@ fn rom_entry_has_file(db: &db::DbConn, cfg: &Config, entry: &GameEntry) -> bool 
 
     let mut checked_path = false;
     for path in paths {
-        let Some(path) = cfg.resolve_rom_path(&entry.platform_id, &path) else {
+        let Some(path) = cfg.resolve_rom_path(&entry.platform_id, path) else {
             continue;
         };
         checked_path = true;
@@ -811,19 +825,36 @@ fn scan_console_games<D>(
     executable: &str,
 ) -> Vec<Game> {
     let discovered = discover(executable);
+    // One lookup for the kind's rows instead of one per discovered game.
+    // The map is the scan's working copy: hits answer from it, misses
+    // insert and join it, so later duplicates of the same install hit.
+    // A failed preload leaves no map and each game takes the single-lookup
+    // path, so a DB hiccup costs speed, never games.
+    let mut known_entries = load_console_entry_map(db, kind);
     let mut seen: Vec<(String, String)> = Vec::with_capacity(discovered.len());
     let games = discovered
         .iter()
         .filter_map(|item| {
             let (trophy_id, native_id, title, game_path) = identity(item);
-            let meta = find_or_create_console_entry(
-                db,
-                kind,
-                trophy_id,
-                native_id,
-                title,
-                include_version,
-            )?;
+            let meta = match known_entries.as_mut() {
+                Some(map) => find_or_create_console_entry_cached(
+                    db,
+                    kind,
+                    trophy_id,
+                    native_id,
+                    title,
+                    include_version,
+                    map,
+                ),
+                None => find_or_create_console_entry(
+                    db,
+                    kind,
+                    trophy_id,
+                    native_id,
+                    title,
+                    include_version,
+                ),
+            }?;
             remember_console_location(db, kind, &meta, game_path);
             seen.push((native_id.to_string(), kind.as_str().to_string()));
             Some(into_game(item, meta))
@@ -831,6 +862,96 @@ fn scan_console_games<D>(
         .collect();
     reconcile_console_presence(db, kind, &seen);
     games
+}
+
+/// Every row of one console kind keyed by its native identity, or `None`
+/// when the preload query itself failed (callers then use the single-lookup
+/// path per game).
+fn load_console_entry_map(
+    db: &db::DbConn,
+    kind: GameKind,
+) -> Option<std::collections::HashMap<(String, String), GameEntry>> {
+    match db::load_games_by_kind(db, kind) {
+        Ok(entries) => Some(
+            entries
+                .into_iter()
+                .map(|entry| ((entry.native_id.clone(), entry.platform_id.clone()), entry))
+                .collect(),
+        ),
+        Err(error) => {
+            eprintln!("DB error preloading {kind} games: {error}");
+            None
+        }
+    }
+}
+
+/// `find_or_create_console_entry` against a preloaded map: hits never touch
+/// the DB, misses insert and join the map. On an insert conflict (a row that
+/// appeared after the preload) the single lookup runs as fallback.
+fn find_or_create_console_entry_cached(
+    db: &db::DbConn,
+    kind: GameKind,
+    trophy_id: &str,
+    native_id: &str,
+    title: &str,
+    include_version: bool,
+    known_entries: &mut std::collections::HashMap<(String, String), GameEntry>,
+) -> Option<ConsoleDbMeta> {
+    let platform_id = kind.as_str();
+    let key = (native_id.to_string(), platform_id.to_string());
+    if let Some(entry) = known_entries.get(&key) {
+        return Some(ConsoleDbMeta::from_entry(entry, include_version));
+    }
+    match db::add_game(
+        db,
+        db::NewGame {
+            kind,
+            trophy_source: ira_models::TrophySource::Empty,
+            steam_id: "",
+            trophy_id,
+            native_id,
+            platform_id,
+            title,
+        },
+    ) {
+        Ok(id) => {
+            let meta = ConsoleDbMeta::new_db_entry(id, title.to_string());
+            // Keep the map total for duplicate installs of one scan: the
+            // synthetic row mirrors a freshly inserted DB row exactly
+            // (logo_size 50 is the schema default; GameEntry::default
+            // carries 0), so a later duplicate reads what a re-SELECT
+            // would have returned.
+            known_entries.entry(key).or_insert_with(|| GameEntry {
+                id,
+                kind,
+                trophy_source: ira_models::TrophySource::Empty,
+                trophy_id: trophy_id.to_string(),
+                native_id: native_id.to_string(),
+                platform_id: platform_id.to_string(),
+                title: title.to_string(),
+                logo_position: ira_models::LogoPosition::BottomLeft.to_string(),
+                logo_size: 50,
+                ..Default::default()
+            });
+            Some(meta)
+        }
+        Err(error) => {
+            eprintln!("{kind}: failed to add {native_id} to DB: {error}");
+            // Conflict or race: the row may exist after all.
+            match db::find_by_native_id(db, native_id, platform_id) {
+                Ok(Some(entry)) => {
+                    let meta = ConsoleDbMeta::from_entry(&entry, include_version);
+                    known_entries.insert(key, entry);
+                    Some(meta)
+                }
+                Ok(None) => None,
+                Err(error) => {
+                    eprintln!("DB error looking up {kind} game {native_id}: {error}");
+                    None
+                }
+            }
+        }
+    }
 }
 
 /// Record where a scanned game lives. The DB-only startup load uses the
@@ -860,7 +981,7 @@ fn reconcile_console_presence(db: &db::DbConn, kind: GameKind, seen: &[(String, 
         // emulator, no config): nothing here proves any game vanished.
         return;
     }
-    let entries = match db::load_all_games(db) {
+    let entries = match db::load_games_by_kind(db, kind) {
         Ok(entries) => entries,
         Err(error) => {
             eprintln!("Failed to load games for {kind} presence reconcile: {error}");
@@ -871,7 +992,7 @@ fn reconcile_console_presence(db: &db::DbConn, kind: GameKind, seen: &[(String, 
         .iter()
         .map(|(native_id, platform_id)| (native_id.as_str(), platform_id.as_str()))
         .collect();
-    for entry in entries.iter().filter(|entry| entry.kind == kind) {
+    for entry in &entries {
         let present = seen.contains(&(entry.native_id.as_str(), entry.platform_id.as_str()));
         if present == entry.vanished {
             if let Err(error) = db::set_game_vanished(db, entry.id, !present) {
@@ -1203,7 +1324,7 @@ fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
     let discovered_ids: std::collections::HashSet<String> =
         discovered.iter().map(|g| g.app_id.clone()).collect();
 
-    let all_entries = match db::load_all_games(db) {
+    let all_entries = match db::load_games_by_kind(db, GameKind::Steam) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("DB error loading all games for Steam cleanup: {e}");
@@ -1211,7 +1332,7 @@ fn cleanup_steam_entries(db: &db::DbConn, discovered: &[steam::SteamGame]) {
         }
     };
     for entry in &all_entries {
-        if entry.kind == GameKind::Steam && !discovered_ids.contains(&entry.steam_id) {
+        if !discovered_ids.contains(&entry.steam_id) {
             if let Err(e) = db::remove_game(db, entry.id) {
                 eprintln!(
                     "DB error removing stale Steam entry {}: {e}",
@@ -1268,6 +1389,20 @@ fn build_steam_games(
     steam_games: &[steam::SteamGame],
     playtimes: &std::collections::HashMap<String, (f64, i64)>,
 ) -> Vec<Game> {
+    // One lookup for the Steam rows instead of one per discovered game.
+    // Hits answer from the map; misses run the single-lookup path and join
+    // it, so duplicate manifests of one app id hit.
+    let mut known_steam_games: std::collections::HashMap<String, GameEntry> =
+        match db::load_games_by_kind(db, GameKind::Steam) {
+            Ok(entries) => entries
+                .into_iter()
+                .map(|entry| (entry.steam_id.clone(), entry))
+                .collect(),
+            Err(e) => {
+                eprintln!("DB error preloading Steam games: {e}");
+                std::collections::HashMap::new()
+            }
+        };
     let mut games = Vec::new();
 
     for sg in steam_games {
@@ -1275,8 +1410,15 @@ fn build_steam_games(
             continue;
         }
 
-        let Some(entry) = find_or_create_steam_entry(db, &sg.app_id, &sg.name) else {
-            continue;
+        let entry = match known_steam_games.get(&sg.app_id) {
+            Some(entry) => entry.clone(),
+            None => {
+                let Some(entry) = find_or_create_steam_entry(db, &sg.app_id, &sg.name) else {
+                    continue;
+                };
+                known_steam_games.insert(sg.app_id.clone(), entry.clone());
+                entry
+            }
         };
 
         match game_loader::load_game_fast(&entry, save_dir) {

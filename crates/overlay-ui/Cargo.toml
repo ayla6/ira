@@ -13,7 +13,6 @@ glib = "0.22"
 graphene-rs = "0.22"
 gsk4 = "0.11"
 gtk4 = { version = "0.11", features = ["v4_14"] }
-ira-images = { version = "0.1.0", path = "../images" }
 ira-input = { version = "0.1.0", path = "../input" }
 ira-overlay-ipc = { version = "0.1.0", path = "../overlay-ipc" }
 ira-parser = { version = "0.1.0", path = "../parser" }

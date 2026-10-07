@@ -2029,7 +2029,6 @@ dependencies = [
  "graphene-rs",
  "gsk4",
  "gtk4",
- "ira-images",
  "ira-input",
  "ira-overlay-ipc",
  "ira-parser",
@@ -2055,7 +2054,6 @@ dependencies = [
 name = "ira-parser"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "image",
  "ira-models",
  "serde",
@@ -2078,7 +2076,6 @@ dependencies = [
  "ira-parser",
  "md-5",
  "notify",
- "opticaldiscs",
  "rayon",
  "reqwest 0.12.28",
  "roxmltree",
@@ -2105,7 +2102,6 @@ version = "0.1.0"
 dependencies = [
  "ira-config",
  "ira-models",
- "ira-parser",
  "notify",
 ]
 

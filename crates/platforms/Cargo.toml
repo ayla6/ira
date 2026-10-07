@@ -16,7 +16,6 @@ serde_yaml = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 xdg = "3.0.0"
 which = "7.0"
-opticaldiscs = "0.10"
 notify = "9.0.0-rc.4"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 tracing = "0.1"

@@ -111,7 +111,10 @@ const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS games (
                 release_dates TEXT NOT NULL DEFAULT ''
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_steam_id_platform ON games(steam_id, platform_id) WHERE steam_id != '';
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_games_trophy_id_platform ON games(trophy_id, platform_id) WHERE trophy_id != '';
+            -- Plain lookup index, not unique: regional dupes and revisions
+            -- of one game share its trophy id, and uniqueness turned every
+            -- repeat claim into a failed update that left rows unmatched.
+            CREATE INDEX IF NOT EXISTS idx_games_trophy_id_platform ON games(trophy_id, platform_id) WHERE trophy_id != '';
             CREATE UNIQUE INDEX IF NOT EXISTS idx_games_native_id_platform ON games(native_id, platform_id) WHERE native_id != '';
             CREATE TABLE IF NOT EXISTS game_configs (
                 game_id INTEGER NOT NULL UNIQUE,

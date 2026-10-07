@@ -449,6 +449,51 @@ mod tests {
     }
 
     #[test]
+    fn test_update_game_ids_allows_shared_trophy_claims() {
+        // Regional ROM dupes and revisions legitimately claim one trophy
+        // id: the old unique index turned the second claim into a failed
+        // update instead of a duplicate the merge tooling reconciles.
+        let (conn, _tmp) = setup_db();
+        let first = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "r1",
+                platform_id: "snes",
+                title: "Game (USA)",
+            },
+        )
+        .unwrap();
+        let second = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "r2",
+                platform_id: "snes",
+                title: "Game (Europe)",
+            },
+        )
+        .unwrap();
+        for id in [first, second] {
+            update_game_ids(&conn, id, "", "42", TrophySource::Ra, "snes").unwrap();
+        }
+        assert_eq!(
+            find_by_db_id(&conn, first).unwrap().unwrap().trophy_id,
+            "42"
+        );
+        assert_eq!(
+            find_by_db_id(&conn, second).unwrap().unwrap().trophy_id,
+            "42"
+        );
+    }
+
+    #[test]
     fn test_set_and_get_saves_centralized() {
         let (conn, _tmp) = setup_db();
         let id = add_game(

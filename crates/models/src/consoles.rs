@@ -1,5 +1,6 @@
 use crate::kind::GameKind;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConsoleDef {
     pub id: &'static str,
     pub display_name: &'static str,
@@ -377,22 +378,81 @@ pub fn find_console(id: &str) -> Option<&'static ConsoleDef> {
     all_consoles().find(|c| c.id == id)
 }
 
-/// The display name for a game's platform: the console's full name
-/// where the platform is a known console, a friendly name for the PC
-/// platforms (`wine` shows as Windows), else the raw platform id — the
-/// same fallback the sidebar grouping and the autogroup Platform
-/// matcher use.
+/// A platform id resolved once into a typed value, at the moment it is
+/// read: every branch below answers from the value afterwards, so display
+/// names never re-scan tables or re-match strings at each call site.
+///
+/// The fixed variants are load-bearing, not legacy, and must never gain
+/// console-table entries: PC platform ids (`wine`, `linux`, `steam`,
+/// `gog`) are kinds, not consoles — a table entry would enable
+/// ROM-folder scanning for them — and `3ds` is emulator-integrated
+/// outside the table by design (dedicated config fields,
+/// emulator-library discovery, no RA). `Unknown` keeps forward
+/// compatibility with ids no known source issued (title ids stored as
+/// the platform on legacy rows): they render raw, exactly as before.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Platform {
+    /// A console-table entry (ROM-library and emulator-library consoles).
+    Console(&'static ConsoleDef),
+    Wine,
+    Linux,
+    Steam,
+    Gog,
+    ThreeDS,
+    Unknown(String),
+}
+
+impl Platform {
+    /// Resolve a stored platform id. The five fixed ids answer from a
+    /// match — faster than the table scan they can never hit — and only
+    /// genuine console ids reach `find_console`.
+    pub fn parse(platform_id: &str) -> Self {
+        match platform_id {
+            "wine" => Self::Wine,
+            "linux" => Self::Linux,
+            "steam" => Self::Steam,
+            "gog" => Self::Gog,
+            "3ds" => Self::ThreeDS,
+            _ => match find_console(platform_id) {
+                Some(def) => Self::Console(def),
+                None => Self::Unknown(platform_id.to_string()),
+            },
+        }
+    }
+
+    /// The stored id back: what the database, the queries and the data
+    /// directories key on.
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Console(def) => def.id,
+            Self::Wine => "wine",
+            Self::Linux => "linux",
+            Self::Steam => "steam",
+            Self::Gog => "gog",
+            Self::ThreeDS => "3ds",
+            Self::Unknown(raw) => raw,
+        }
+    }
+
+    /// The name shown anywhere a platform renders: the console's full
+    /// name, the fixed friendly name, or the raw id. No lookup involved.
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Console(def) => def.display_name,
+            Self::Wine => "Windows",
+            Self::Linux => "Linux",
+            Self::Steam => "Steam",
+            Self::Gog => "GOG",
+            Self::ThreeDS => "Nintendo 3DS",
+            Self::Unknown(raw) => raw,
+        }
+    }
+}
+
+/// The display name for a game's platform — the same fallback the
+/// sidebar grouping and the autogroup Platform matcher use.
 pub fn platform_display_name(platform_id: &str) -> String {
-    if let Some(console) = find_console(platform_id) {
-        return console.display_name.to_string();
-    }
-    match platform_id {
-        "wine" => "Windows".to_string(),
-        "linux" => "Linux".to_string(),
-        "steam" => "Steam".to_string(),
-        "gog" => "GOG".to_string(),
-        _ => platform_id.to_string(),
-    }
+    Platform::parse(platform_id).display_name().to_string()
 }
 
 /// The compressed Switch containers, gated behind the
@@ -440,10 +500,38 @@ mod tests {
             ("linux", "Linux"),
             ("steam", "Steam"),
             ("gog", "GOG"),
+            ("3ds", "Nintendo 3DS"),
         ] {
             assert_eq!(platform_display_name(id), shown);
         }
         assert_eq!(platform_display_name("unknown-thing"), "unknown-thing");
+    }
+
+    #[test]
+    fn test_platform_parse_round_trips_every_shape() {
+        // Fixed ids parse without touching the table; consoles resolve to
+        // their def; anything else rides through untouched.
+        assert_eq!(Platform::parse("wine"), Platform::Wine);
+        assert_eq!(Platform::parse("3ds"), Platform::ThreeDS);
+        assert_eq!(
+            Platform::parse("psx"),
+            Platform::Console(find_console("psx").unwrap())
+        );
+        assert_eq!(
+            Platform::parse("0004000000038800"),
+            Platform::Unknown("0004000000038800".to_string())
+        );
+        for id in ["wine", "psx", "3ds", "0004000000038800", ""] {
+            assert_eq!(Platform::parse(id).id(), id);
+        }
+    }
+
+    #[test]
+    fn test_platform_display_name_never_scans() {
+        // The type carries the answer: display needs no lookup.
+        assert_eq!(Platform::parse("snes").display_name(), "Super Nintendo Entertainment System");
+        assert_eq!(Platform::parse("3ds").display_name(), "Nintendo 3DS");
+        assert_eq!(Platform::parse("whatever").display_name(), "whatever");
     }
 
     #[test]

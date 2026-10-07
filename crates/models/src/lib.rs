@@ -34,7 +34,7 @@ pub use auto_group::{AutoCriterion, AutoDimension, AutoGroup, AutoGroupContext, 
 pub use consoles::{
     all_consoles, console_has_ra, find_console, is_compressed_switch_extension,
     platform_display_name,
-    ConsoleDef, COMPRESSED_SWITCH_EXTENSIONS, CONSOLES,
+    ConsoleDef, Platform, COMPRESSED_SWITCH_EXTENSIONS, CONSOLES,
 };
 pub use disc::GameDisc;
 pub use fullscreen::fullscreen_args;

@@ -1,5 +1,5 @@
 use ira_db::DbConn;
-use ira_models::{AchievementStatus, AppDetails, AssetType, Game, GameEntry, MergedAchievement};
+use ira_models::{AchievementStatus, AppDetails, Game, GameEntry, MergedAchievement};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -87,34 +87,113 @@ fn load_selected_games(
     conn: &DbConn,
     save_dir: &str,
     db_error_context: &str,
-    skip: impl Fn(&GameEntry) -> bool,
-    describe: impl Fn(&GameEntry) -> String,
+    skip: impl Fn(&GameEntry) -> bool + Sync,
+    describe: impl Fn(&GameEntry) -> String + Sync,
 ) -> Vec<Game> {
-    let entries = match ira_db::load_all_games(conn) {
+    let entries = match ira_db::load_all_games_unordered(conn) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("{}: {}", db_error_context, e);
             return Vec::new();
         }
     };
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    // One round-trip for every game's variants instead of one per game.
+    let variant_map = load_variant_map(conn, &entries);
+    let mut games = load_entries_parallel(&entries, save_dir, &variant_map, &skip, &describe);
+    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+    games
+}
 
-    let mut games: Vec<Game> = entries
-        .iter()
-        .filter(|entry| !skip(entry))
-        .flat_map(|entry| match load_game_fast(entry, save_dir) {
+/// Batch-load variants for every entry at once. A per-game failure used to
+/// mean that game's variants silently vanished; a batch failure means the
+/// same (empty map), so the output matches without a log line.
+fn load_variant_map(
+    conn: &DbConn,
+    entries: &[GameEntry],
+) -> HashMap<i64, Vec<ira_models::GameVariant>> {
+    let ids: Vec<i64> = entries.iter().map(|entry| entry.id).collect();
+    ira_db::get_variants_for_games(conn, &ids).unwrap_or_default()
+}
+
+/// Load and expand every entry. Filesystem work (directory listings,
+/// thumbnail checks) dominates, so entries split across worker threads;
+/// the final sort makes thread completion order irrelevant.
+fn load_entries_parallel(
+    entries: &[GameEntry],
+    save_dir: &str,
+    variant_map: &HashMap<i64, Vec<ira_models::GameVariant>>,
+    skip: &(impl Fn(&GameEntry) -> bool + Sync),
+    describe: &(impl Fn(&GameEntry) -> String + Sync),
+) -> Vec<Game> {
+    let threads = worker_thread_count(entries.len());
+    if threads <= 1 {
+        return load_chunk(entries, save_dir, variant_map, skip, describe);
+    }
+    let chunk_size = entries.len().div_ceil(threads);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = entries
+            .chunks(chunk_size)
+            .map(|chunk| s.spawn(move || load_chunk(chunk, save_dir, variant_map, skip, describe)))
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| match handle.join() {
+                Ok(games) => games,
+                Err(_) => {
+                    eprintln!("Game load worker panicked; skipping its chunk");
+                    Vec::new()
+                }
+            })
+            .collect()
+    })
+}
+
+/// Worker count for the load: sequential below 32 entries, otherwise one
+/// worker per core capped at 8 so the outer source-scan threads keep room.
+fn worker_thread_count(entry_count: usize) -> usize {
+    if entry_count < 32 {
+        return 1;
+    }
+    std::thread::available_parallelism()
+        .map(|n| n.get().min(8))
+        .unwrap_or(4)
+        .min(entry_count)
+}
+
+/// Load one slice of entries: filter, build the base game, expand variants.
+fn load_chunk(
+    chunk: &[GameEntry],
+    save_dir: &str,
+    variant_map: &HashMap<i64, Vec<ira_models::GameVariant>>,
+    skip: &(impl Fn(&GameEntry) -> bool + Sync),
+    describe: &(impl Fn(&GameEntry) -> String + Sync),
+) -> Vec<Game> {
+    let mut games = Vec::new();
+    for entry in chunk {
+        if skip(entry) {
+            continue;
+        }
+        match load_game_fast(entry, save_dir) {
             Ok(game) => {
-                let variant_entries = build_variant_entries(conn, save_dir, &game);
-                std::iter::once(game)
-                    .chain(variant_entries)
-                    .collect::<Vec<_>>()
+                let variants = build_variant_entries_from_slice(
+                    variant_map
+                        .get(&game.db_id)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                    save_dir,
+                    &game,
+                );
+                games.push(game);
+                games.extend(variants);
             }
             Err(e) => {
                 eprintln!("{}: {}", describe(entry), e);
-                Vec::new()
             }
-        })
-        .collect();
-    games.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+        }
+    }
     games
 }
 
@@ -154,11 +233,8 @@ fn build_game_base(entry: &GameEntry, save_dir: &str) -> Game {
     game.name_lower = game.name.to_lowercase();
 
     let image_dir = ira_parser::entry_data_dir(save_dir, entry);
-
-    if let Some(icon_path) = ira_parser::find_image_file(&image_dir, AssetType::Icon.file_base()) {
-        game.icon_path = icon_path.to_string_lossy().into_owned();
-    }
-
+    // populate_image_paths sets every asset path including the icon (small
+    // variant preferred), so no separate icon lookup is needed.
     ira_parser::populate_image_paths(&image_dir, &mut game);
 
     game
@@ -494,6 +570,16 @@ pub fn build_variant_entries(db: &DbConn, save_dir: &str, game: &Game) -> Vec<Ga
     let Ok(variants) = ira_db::get_variants(db, game.db_id) else {
         return Vec::new();
     };
+    build_variant_entries_from_slice(&variants, save_dir, game)
+}
+
+/// Pure expansion shared by the single-game reload and the bulk loader: the
+/// same rows in the same order produce the same pseudo-games.
+fn build_variant_entries_from_slice(
+    variants: &[ira_models::GameVariant],
+    save_dir: &str,
+    game: &Game,
+) -> Vec<Game> {
     let image_dir = ira_parser::game_data_dir(save_dir, game);
 
     variants
@@ -640,5 +726,103 @@ mod tests {
             &"{} – App-ID".replacen("{}", "7", 1),
             "{} – App-ID"
         ));
+    }
+
+    fn saved_game_fixture(db: &ira_db::DbConn, native_id: &str, title: &str) -> GameEntry {
+        let id = ira_db::add_game(
+            db,
+            ira_db::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: native_id,
+                trophy_id: "",
+                native_id,
+                platform_id: GameKind::Steam.as_str(),
+                title,
+            },
+        )
+        .unwrap();
+        ira_db::find_by_db_id(db, id).unwrap().unwrap()
+    }
+
+    fn add_show_as_entry_variant(db: &ira_db::DbConn, game_id: i64, name: &str) {
+        let variant = ira_models::GameVariant {
+            game_id,
+            name: name.to_string(),
+            show_as_entry: true,
+            ..Default::default()
+        };
+        ira_db::add_variant(db, &variant).unwrap();
+    }
+
+    /// The batched variant expansion must match the single-game query path
+    /// exactly: same count, same names, same variant ids in the same order.
+    #[test]
+    fn test_variant_slice_matches_db_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = ira_db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let save_dir = tmp.path().join("save").to_string_lossy().into_owned();
+        let entry = saved_game_fixture(&db, "100", "Base Game");
+        add_show_as_entry_variant(&db, entry.id, "Beta");
+        let hidden = ira_models::GameVariant {
+            game_id: entry.id,
+            name: "Hidden".to_string(),
+            ..Default::default()
+        };
+        ira_db::add_variant(&db, &hidden).unwrap();
+
+        let game = load_game_fast(&entry, &save_dir).unwrap();
+        let from_db = build_variant_entries(&db, &save_dir, &game);
+        let all = ira_db::get_variants(&db, entry.id).unwrap();
+        let from_slice = build_variant_entries_from_slice(&all, &save_dir, &game);
+
+        assert_eq!(from_db.len(), 1);
+        assert_eq!(from_slice.len(), from_db.len());
+        assert_eq!(from_slice[0].variant_id, from_db[0].variant_id);
+        assert_eq!(from_slice[0].name, from_db[0].name);
+        assert_eq!(from_slice[0].db_id, from_db[0].db_id);
+    }
+
+    /// The parallel bulk load must equal a sequential per-game load: same
+    /// games in the same sorted order, variants expanded identically.
+    #[test]
+    fn test_load_saved_games_matches_sequential_load() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = ira_db::init_db(&tmp.path().join("ira.db").to_string_lossy());
+        let save_dir = tmp.path().join("save").to_string_lossy().into_owned();
+        let mut ids = Vec::new();
+        for i in 0..40 {
+            let entry = saved_game_fixture(&db, &format!("app{i}"), &format!("Game {i:03}"));
+            ids.push(entry.id);
+        }
+        add_show_as_entry_variant(&db, ids[0], "Extra");
+
+        let parallel = load_saved_games(&db, &save_dir);
+        let entries = ira_db::load_all_games_unordered(&db).unwrap();
+        let mut sequential = Vec::new();
+        for entry in &entries {
+            let game = load_game_fast(entry, &save_dir).unwrap();
+            let variants = build_variant_entries(&db, &save_dir, &game);
+            sequential.push(game);
+            sequential.extend(variants);
+        }
+        sequential.sort_by(|a: &Game, b: &Game| a.sort_key().cmp(b.sort_key()));
+
+        let key = |g: &Game| (g.db_id, g.variant_id, g.name.clone());
+        let mut parallel_keys: Vec<_> = parallel.iter().map(key).collect();
+        let mut sequential_keys: Vec<_> = sequential.iter().map(key).collect();
+        parallel_keys.sort();
+        sequential_keys.sort();
+        assert_eq!(parallel_keys, sequential_keys);
+        // 40 bases plus the one show-as-entry variant.
+        assert_eq!(parallel.len(), 41);
+    }
+
+    #[test]
+    fn test_worker_thread_count_stays_sequential_when_small() {
+        assert_eq!(worker_thread_count(0), 1);
+        assert_eq!(worker_thread_count(31), 1);
+        let many = worker_thread_count(10_000);
+        assert!((1..=8).contains(&many));
     }
 }

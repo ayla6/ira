@@ -37,7 +37,10 @@ pub use metadata_lookup::*;
 pub use metadata_marks::*;
 pub use profiles::*;
 pub use rom_serials::*;
-pub(crate) use query::{execute, query_all, query_optional, query_optional_scalar, query_scalar_all};
+pub(crate) use query::{
+    execute, positional_placeholders, query_all, query_optional, query_optional_scalar,
+    query_scalar_all, IN_QUERY_CHUNK_SIZE,
+};
 pub(crate) use row_mapping::{err, game_entry_from_row, lock_db, GAME_COLUMNS};
 pub use sessions::*;
 pub use settings::*;

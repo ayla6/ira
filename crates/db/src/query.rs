@@ -70,6 +70,18 @@ pub(crate) fn execute(conn: &DbConn, sql: &str, params: impl rusqlite::Params) -
     c.execute(sql, params).map_err(err)
 }
 
+/// Chunk size for batched `IN (...)` lookups: well under the SQLite variable
+/// limit, large enough that a thousand-game library needs two round-trips.
+pub(crate) const IN_QUERY_CHUNK_SIZE: usize = 500;
+
+/// Sequential `?N` placeholders separated by ", ".
+pub(crate) fn positional_placeholders(count: usize) -> String {
+    (1..=count)
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

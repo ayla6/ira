@@ -121,6 +121,53 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     )
 }
 
+/// Same rows as `load_all_games` without the title sort. List builds sort by
+/// `sort_key` in Rust anyway, and maintenance passes filter in Rust, so the
+/// SQLite sort is pure overhead on those paths.
+pub fn load_all_games_unordered(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
+    crate::query_all(
+        conn,
+        &format!("SELECT {} FROM games", crate::GAME_COLUMNS),
+        [],
+        crate::game_entry_from_row,
+    )
+}
+
+/// Every game of one kind, unsorted. Presence reconciles and Steam cleanup
+/// only inspect their own kind; loading the whole library to filter in Rust
+/// parses every row's JSON for nothing.
+pub fn load_games_by_kind(conn: &DbConn, kind: GameKind) -> Result<Vec<GameEntry>, String> {
+    load_games_by_kinds(conn, &[kind])
+}
+
+/// Every game of any listed kind, unsorted. Chunked so long kind lists never
+/// approach the SQLite variable limit.
+pub fn load_games_by_kinds(
+    conn: &DbConn,
+    kinds: &[GameKind],
+) -> Result<Vec<GameEntry>, String> {
+    if kinds.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut games = Vec::new();
+    for chunk in kinds.chunks(crate::IN_QUERY_CHUNK_SIZE) {
+        let placeholders = crate::positional_placeholders(chunk.len());
+        let sql = format!(
+            "SELECT {} FROM games WHERE kind IN ({placeholders})",
+            crate::GAME_COLUMNS
+        );
+        let kind_strs: Vec<&str> = chunk.iter().map(|kind| kind.as_str()).collect();
+        let mut rows: Vec<GameEntry> = crate::query_all(
+            conn,
+            &sql,
+            rusqlite::params_from_iter(kind_strs.iter()),
+            crate::game_entry_from_row,
+        )?;
+        games.append(&mut rows);
+    }
+    Ok(games)
+}
+
 pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     let tx = c.unchecked_transaction().map_err(err)?;
@@ -422,5 +469,49 @@ mod tests {
         assert!(super::super::get_saves_centralized(&conn, id).unwrap());
         set_saves_centralized(&conn, id, false).unwrap();
         assert!(!super::super::get_saves_centralized(&conn, id).unwrap());
+    }
+
+    #[test]
+    fn test_kind_filtered_loads_match_full_scan() {
+        let (conn, _tmp) = setup_db();
+        let steam_id = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "1",
+                trophy_id: "",
+                native_id: "1",
+                platform_id: "steam",
+                title: "Steam Game",
+            },
+        )
+        .unwrap();
+        let retro_id = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Retro,
+                trophy_source: TrophySource::Ra,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "r1",
+                platform_id: "snes",
+                title: "Retro Game",
+            },
+        )
+        .unwrap();
+        let unordered = load_all_games_unordered(&conn).unwrap();
+        assert_eq!(unordered.len(), 2);
+        let steam = load_games_by_kind(&conn, GameKind::Steam).unwrap();
+        assert_eq!(steam.len(), 1);
+        assert_eq!(steam[0].id, steam_id);
+        let both = load_games_by_kinds(&conn, &[GameKind::Steam, GameKind::Retro]).unwrap();
+        assert_eq!(both.len(), 2);
+        let mut ids: Vec<i64> = both.iter().map(|entry| entry.id).collect();
+        ids.sort_unstable();
+        let mut expected = vec![retro_id, steam_id];
+        expected.sort_unstable();
+        assert_eq!(ids, expected);
+        assert!(load_games_by_kinds(&conn, &[]).unwrap().is_empty());
     }
 }

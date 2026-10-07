@@ -44,14 +44,6 @@ fn variant_insert_columns() -> String {
     )
 }
 
-/// Sequential `?N` placeholders separated by ", ".
-fn positional_placeholders(count: usize) -> String {
-    (1..=count)
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 fn variant_from_row(row: &rusqlite::Row, game_id: i64) -> rusqlite::Result<GameVariant> {
     let env_str: String = row.get(6)?;
     let variant_id: i64 = row.get(0)?;
@@ -91,6 +83,41 @@ pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, Str
     )
 }
 
+/// Every variant of every listed game in one query, grouped by game id.
+///
+/// The loader built one `get_variants` query per game (N round-trips for N
+/// games); this is the same rows in the same per-game order for a single
+/// round-trip per 500-id chunk. Missing ids simply have no entry.
+pub fn get_variants_for_games(
+    conn: &DbConn,
+    game_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, Vec<GameVariant>>, String> {
+    let mut grouped: std::collections::HashMap<i64, Vec<GameVariant>> =
+        std::collections::HashMap::new();
+    if game_ids.is_empty() {
+        return Ok(grouped);
+    }
+    for chunk in game_ids.chunks(crate::IN_QUERY_CHUNK_SIZE) {
+        let placeholders = crate::positional_placeholders(chunk.len());
+        let sql = format!(
+            "SELECT {VARIANT_SELECT_COLUMNS} FROM game_variants WHERE game_id IN ({placeholders}) ORDER BY game_id, sort_order, id"
+        );
+        let rows: Vec<GameVariant> = crate::query_all(
+            conn,
+            &sql,
+            rusqlite::params_from_iter(chunk.iter()),
+            |row| {
+                let gid: i64 = row.get(1)?;
+                variant_from_row(row, gid)
+            },
+        )?;
+        for variant in rows {
+            grouped.entry(variant.game_id).or_default().push(variant);
+        }
+    }
+    Ok(grouped)
+}
+
 pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> {
     let env_str = serde_json::to_string(&variant.env_vars).map_err(err)?;
     let c = crate::lock_db(conn)?;
@@ -113,7 +140,7 @@ pub fn add_variant(conn: &DbConn, variant: &GameVariant) -> Result<i64, String> 
     let sql = format!(
         "INSERT INTO game_variants ({}) VALUES ({})",
         variant_insert_columns(),
-        positional_placeholders(VARIANT_WRITE_COLUMNS.len() + 2),
+        crate::positional_placeholders(VARIANT_WRITE_COLUMNS.len() + 2),
     );
     tx.execute(
         &sql,
@@ -246,5 +273,53 @@ mod tests {
         for col in VARIANT_WRITE_COLUMNS {
             assert!(VARIANT_SELECT_COLUMNS.contains(col));
         }
+    }
+
+    #[test]
+    fn test_get_variants_for_games_matches_single_queries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let conn = crate::init_db(&tmp.path().join("test.db").to_string_lossy());
+        let game_a = crate::add_game(
+            &conn,
+            crate::NewGame {
+                kind: ira_models::GameKind::Other,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "a",
+                platform_id: "p",
+                title: "A",
+            },
+        )
+        .unwrap();
+        let game_b = crate::add_game(
+            &conn,
+            crate::NewGame {
+                kind: ira_models::GameKind::Other,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "b",
+                platform_id: "p",
+                title: "B",
+            },
+        )
+        .unwrap();
+        for (game_id, name) in [(game_a, "V1"), (game_a, "V2"), (game_b, "W1")] {
+            let variant = ira_models::GameVariant {
+                game_id,
+                name: name.to_string(),
+                ..Default::default()
+            };
+            add_variant(&conn, &variant).unwrap();
+        }
+
+        let grouped = get_variants_for_games(&conn, &[game_a, game_b, 99999]).unwrap();
+        assert_eq!(grouped[&game_a].len(), 2);
+        assert_eq!(grouped[&game_b].len(), 1);
+        assert!(!grouped.contains_key(&99999));
+        assert_eq!(grouped[&game_a][0].name, "V1");
+        assert_eq!(grouped[&game_a][1].name, "V2");
+        assert!(get_variants_for_games(&conn, &[]).unwrap().is_empty());
     }
 }

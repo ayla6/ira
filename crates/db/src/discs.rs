@@ -50,6 +50,44 @@ pub fn get_discs(conn: &DbConn, game_id: i64) -> Result<Vec<GameDisc>, String> {
     )
 }
 
+/// Disc rows for every listed game in one query per 500-id chunk, grouped by
+/// game id. The stale-ROM cleanup asked per game; this is the same rows for
+/// one round-trip.
+pub fn get_discs_for_games(
+    conn: &DbConn,
+    game_ids: &[i64],
+) -> Result<std::collections::HashMap<i64, Vec<GameDisc>>, String> {
+    let mut grouped: std::collections::HashMap<i64, Vec<GameDisc>> =
+        std::collections::HashMap::new();
+    if game_ids.is_empty() {
+        return Ok(grouped);
+    }
+    for chunk in game_ids.chunks(crate::IN_QUERY_CHUNK_SIZE) {
+        let placeholders = crate::positional_placeholders(chunk.len());
+        let sql = format!(
+            "SELECT id, game_id, disc_number, rom_path, label FROM game_discs WHERE game_id IN ({placeholders}) ORDER BY game_id, disc_number"
+        );
+        let rows: Vec<GameDisc> = crate::query_all(
+            conn,
+            &sql,
+            rusqlite::params_from_iter(chunk.iter()),
+            |row| {
+                Ok(GameDisc {
+                    id: row.get(0)?,
+                    game_id: row.get(1)?,
+                    disc_number: row.get(2)?,
+                    rom_path: row.get(3)?,
+                    label: row.get(4)?,
+                })
+            },
+        )?;
+        for disc in rows {
+            grouped.entry(disc.game_id).or_default().push(disc);
+        }
+    }
+    Ok(grouped)
+}
+
 pub fn add_disc(conn: &DbConn, disc: &GameDisc) -> Result<i64, String> {
     let c = crate::lock_db(conn)?;
     c.execute(
@@ -85,4 +123,61 @@ pub fn set_default_disc(conn: &DbConn, game_id: i64, disc_id: Option<i64>) -> Re
         crate::execute(conn, "DELETE FROM game_default_disc WHERE game_id = ?1", params![game_id])?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_discs_for_games_matches_single_queries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let conn = crate::init_db(&tmp.path().join("test.db").to_string_lossy());
+        let game_a = crate::add_game(
+            &conn,
+            crate::NewGame {
+                kind: ira_models::GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "a",
+                platform_id: "psx",
+                title: "A",
+            },
+        )
+        .unwrap();
+        let game_b = crate::add_game(
+            &conn,
+            crate::NewGame {
+                kind: ira_models::GameKind::Retro,
+                trophy_source: ira_models::TrophySource::Empty,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "b",
+                platform_id: "psx",
+                title: "B",
+            },
+        )
+        .unwrap();
+        for (game_id, path) in [(game_a, "a1.bin"), (game_a, "a2.bin"), (game_b, "b1.bin")] {
+            add_disc(
+                &conn,
+                &ira_models::GameDisc {
+                    id: 0,
+                    game_id,
+                    disc_number: 1,
+                    rom_path: path.to_string(),
+                    label: "Disc 1".to_string(),
+                },
+            )
+            .unwrap();
+        }
+
+        let grouped = get_discs_for_games(&conn, &[game_a, game_b, 99999]).unwrap();
+        assert_eq!(grouped[&game_a].len(), 2);
+        assert_eq!(grouped[&game_b].len(), 1);
+        assert!(!grouped.contains_key(&99999));
+        assert_eq!(get_discs(&conn, game_a).unwrap().len(), 2);
+        assert!(get_discs_for_games(&conn, &[]).unwrap().is_empty());
+    }
 }

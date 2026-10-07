@@ -623,7 +623,7 @@ fn show_organize_picker(
     content.set_margin_start(12);
     content.set_margin_end(12);
     let entry = gtk4::SearchEntry::new();
-    entry.set_placeholder_text(Some(&crate::tr!("Search…")));
+    entry.set_placeholder_text(Some(&crate::tr!("Search")));
     content.append(&entry);
     let (scrolled, results) = super::helpers::clamped_boxed_list(460);
     scrolled.set_vexpand(true);

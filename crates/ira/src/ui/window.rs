@@ -215,7 +215,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     }
 
     let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some(&crate::tr!("Search games…")));
+    search_entry.set_placeholder_text(Some(&crate::tr!("Search games")));
     search_entry.set_hexpand(true);
     let title_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
     title_box.set_hexpand(true);

@@ -175,7 +175,7 @@ fn build_search_ui(context: &Option<SteamLayoutSearchContext>) -> SearchWidgets 
         .map(|context| context.game_name.as_str())
         .unwrap_or_default();
     let (search_row, entry, search_btn) =
-        build_search_row(entry_text, Some(&crate::tr!("Search community layouts…")));
+        build_search_row(entry_text, Some(&crate::tr!("Search community layouts")));
     query_column.append(&search_row);
 
     // A known Steam app id scopes the query to that game's pool; everything

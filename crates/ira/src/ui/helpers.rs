@@ -353,7 +353,7 @@ fn add_sidebar_search(
     sidebar: &gtk4::ListBox,
 ) -> gtk4::SearchEntry {
     let search = gtk4::SearchEntry::new();
-    search.set_placeholder_text(Some(&crate::tr!("Search pages…")));
+    search.set_placeholder_text(Some(&crate::tr!("Search pages")));
     search.set_margin_start(8);
     search.set_margin_end(8);
     search.set_margin_top(8);

@@ -190,7 +190,7 @@ pub(super) fn build_entity_editor(
     merge_box.set_margin_start(12);
     merge_box.set_margin_end(12);
     let merge_search = gtk4::SearchEntry::new();
-    merge_search.set_placeholder_text(Some(&crate::tr!("Search…")));
+    merge_search.set_placeholder_text(Some(&crate::tr!("Search")));
     merge_box.append(&merge_search);
     let (merge_scrolled, merge_list) = super::helpers::clamped_boxed_list(520);
     merge_scrolled.set_vexpand(true);
@@ -626,7 +626,7 @@ pub(super) fn show_entity_dialog(
     search_box.set_margin_start(12);
     search_box.set_margin_end(12);
     let search_entry = gtk4::SearchEntry::new();
-    search_entry.set_placeholder_text(Some(&crate::tr!("Search…")));
+    search_entry.set_placeholder_text(Some(&crate::tr!("Search")));
     search_box.append(&search_entry);
     let (search_scrolled, search_list) = super::helpers::clamped_boxed_list(520);
     search_scrolled.set_vexpand(true);
@@ -649,7 +649,7 @@ pub(super) fn show_entity_dialog(
     manage_box.set_margin_start(12);
     manage_box.set_margin_end(12);
     let manage_search = gtk4::SearchEntry::new();
-    manage_search.set_placeholder_text(Some(&crate::tr!("Search…")));
+    manage_search.set_placeholder_text(Some(&crate::tr!("Search")));
     manage_box.append(&manage_search);
     let (manage_scrolled, manage_list) = super::helpers::clamped_boxed_list(520);
     manage_scrolled.set_vexpand(true);

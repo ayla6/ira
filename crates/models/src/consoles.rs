@@ -203,7 +203,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     },
     ConsoleDef {
         id: "gc",
-        display_name: "GameCube",
+        display_name: "Nintendo GameCube",
         search_aliases: &[],
         ra_console_id: 16,
         extensions: &["iso", "gcm", "rvz", "gcz"],
@@ -214,7 +214,7 @@ pub const CONSOLES: &[ConsoleDef] = &[
     },
     ConsoleDef {
         id: "wii",
-        display_name: "Wii",
+        display_name: "Nintendo Wii",
         search_aliases: &[],
         ra_console_id: 19,
         extensions: &["iso", "wbfs", "gcm", "rvz", "gcz"],

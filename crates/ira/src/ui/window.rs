@@ -110,6 +110,7 @@ pub fn build_ui(
         auto_groups,
         search_entry: gtk4::SearchEntry::new(),
         sort_label: gtk4::Label::new(Some(SortMode::Alphabetical.display_label())),
+        menu_btn: gtk4::MenuButton::new(),
         collapsed_collections: HashSet::new(),
         multi_selected_ids: HashSet::new(),
         playtime_links: HashMap::new(),
@@ -280,6 +281,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         s.grid_header = grid_header.clone();
         s.search_entry = search_entry.clone();
         s.sort_label = sort_label;
+        s.menu_btn = menu_btn.clone();
     }
 
     rebuild_sidebar(state);
@@ -288,6 +290,10 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         let s = state.borrow();
         (s.games.is_empty(), s.content_unloaded)
     };
+    // The menu's dialogs all read the loaded library; keep it shut until
+    // the load lands. Rescans re-disable through show_loading_view and
+    // re-enable through show_grid_view.
+    menu_btn.set_sensitive(content_unloaded || !initial_loading);
     if !content_unloaded && initial_loading {
         show_loading_view(state, &crate::tr!("Preparing game library…"), 0, 1);
     } else if !content_unloaded {
@@ -697,6 +703,11 @@ fn connect_window_signals(
     let preferences_shortcut = gtk4::EventControllerKey::new();
     preferences_shortcut.connect_key_pressed(move |_, key, _, modifiers| {
         if key == gdk4::Key::comma && modifiers.contains(gdk4::ModifierType::CONTROL_MASK) {
+            // Same gate as the menu button: settings reads the loaded
+            // library, and there is no button to grey out for a shortcut.
+            if state_clone.borrow().loading.is_some() {
+                return glib::Propagation::Stop;
+            }
             let (window, cfg, steam) = {
                 let state = state_clone.borrow();
                 (state.window.clone(), state.cfg.clone(), state.steam.clone())

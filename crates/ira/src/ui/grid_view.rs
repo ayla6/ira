@@ -607,6 +607,9 @@ pub fn show_grid_view(state: &SharedState) {
         s.view_generation += 1;
         s.displayed_content_dirty = true;
         s.loading = None;
+        // A visible grid means a loaded library: reopen the menu gate
+        // rescans close through show_loading_view.
+        s.menu_btn.set_sensitive(true);
     }
 
     let (content_scroll, grid_header, square, stored_h, sort_mode, search_empty) = {
@@ -710,6 +713,9 @@ pub fn show_loading_view(state: &SharedState, status: &str, completed: usize, to
         progress,
         counter,
     });
+    // Every menu dialog reads the loaded library: shut the gate until the
+    // load lands and show_grid_view reopens it.
+    s.menu_btn.set_sensitive(false);
 }
 
 /// Progress bar with a dim "N of M sources" caption below it, sized to a

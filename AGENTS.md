@@ -24,6 +24,15 @@ distrobox enter rust-dev -- cargo clippy --all-targets -- -D warnings   # Zero c
 
 **Always run `cargo build` and `cargo test` before committing.** Zero warnings is the baseline.
 
+## Working with the user
+
+- **Never police the user's builds.** When they report a bug, assume the
+  binary is current and the bug is real — do not ask them to verify
+  commits, check timestamps, rebuild, restart processes, or otherwise prove
+  the report before investigating. If build identity genuinely matters,
+  establish it yourself (distinguishing UI markers in their screenshots,
+  headless reproduction under `xvfb-run`) and keep working.
+
 ### Running the app
 
 Always run the app from inside the distrobox. The host has no GTK/libadwaita

@@ -349,6 +349,18 @@ struct SgdbPickerCtx<'a> {
     save_dir: &'a str,
 }
 
+/// Geometry sync for picker opens: keeps the in-memory config current so
+/// a later settings save can't clobber what the picker's close persists.
+fn picker_geometry_sync(state: &SharedState, asset: &str) -> Rc<dyn Fn(i32, i32, i32)> {
+    let state = state.clone();
+    let asset = asset.to_string();
+    Rc::new(move |zoom, w, h| {
+        let mut s = state.borrow_mut();
+        s.cfg.sgdb_picker_zoom.insert(asset.clone(), zoom);
+        s.cfg.sgdb_picker_size.insert(asset.clone(), (w, h));
+    })
+}
+
 fn build_sgdb_picker_button(
     game: &Game,
     is_steam: bool,
@@ -400,15 +412,7 @@ fn build_sgdb_picker_button(
                 super::image_manager_helpers::remove_sgdb_filtered_user(&state, &author)
             })
         };
-        let on_geometry = {
-            let state = filter_state.clone();
-            let asset = asset_c.clone();
-            Rc::new(move |zoom, w, h| {
-                let mut s = state.borrow_mut();
-                s.cfg.sgdb_picker_zoom.insert(asset.clone(), zoom);
-                s.cfg.sgdb_picker_size.insert(asset.clone(), (w, h));
-            })
-        };
+        let on_geometry = picker_geometry_sync(&filter_state, &asset_c);
         show_sgdb_picker(ShowSgdbPickerParams {
             steam: &steam,
             id: &sgdb_id_c,
@@ -1307,15 +1311,7 @@ fn build_dir_buttons(
                     super::image_manager_helpers::remove_sgdb_filtered_user(&state, &author)
                 })
             };
-            let on_geometry = {
-                let state = filter_state.clone();
-                let asset = asset_c.clone();
-                Rc::new(move |zoom, w, h| {
-                    let mut s = state.borrow_mut();
-                    s.cfg.sgdb_picker_zoom.insert(asset.clone(), zoom);
-                    s.cfg.sgdb_picker_size.insert(asset.clone(), (w, h));
-                })
-            };
+            let on_geometry = picker_geometry_sync(&filter_state, &asset_c);
             show_sgdb_picker(ShowSgdbPickerParams {
                 steam: &steam,
                 id: &sgdb_id_c,

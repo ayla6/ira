@@ -376,8 +376,8 @@ struct SgdbPickerCtx {
     asset: String,
     is_steam_id: bool,
     // Weak: ctx clones are owned by closures attached to the picker's own
-    // widgets, and the settings-screen cache owns the dialog strongly, so a
-    // strong ref here would make dialog -> closure -> dialog a cycle.
+    // widgets, and the settings-screen cache owns the window strongly, so a
+    // strong ref here would make window -> closure -> window a cycle.
     picker: glib::WeakRef<adw::Window>,
     on_done: Rc<dyn Fn()>,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
@@ -387,6 +387,12 @@ struct SgdbPickerCtx {
     store: Rc<RefCell<Vec<SgdbAsset>>>,
     rendered: Rc<Cell<usize>>,
     zoom_level: Rc<Cell<i32>>,
+    /// Pagination state: next page to fetch, exhaustion, one flight at a
+    /// time, and whether the first page has landed yet.
+    has_more: Rc<Cell<bool>>,
+    current_page: Rc<Cell<u32>>,
+    loading_more: Rc<Cell<bool>>,
+    is_initial_load: Rc<Cell<bool>>,
     /// Uniform tile aspect for this picker's asset type (width over
     /// height): every card takes the type's shape like game-grid tiles,
     /// instead of everything squeezing into squares.
@@ -769,7 +775,7 @@ fn append_assets(
     ctx: &SgdbPickerCtx,
 ) {
     // No column clamp: the box wraps by width like the game grid, so the
-    // column count follows the dialog size and the zoom level.
+    // column count follows the window size and the zoom level.
     // Dimmed cards always trail: partition the batch and park the
     // previously-settled dimmed tails behind it, so new sections never
     // stripe visible/dimmed/visible.
@@ -842,6 +848,10 @@ fn full_rebuild(
 /// Geometry sync callback (zoom, width, height).
 type GeometrySync = Rc<dyn Fn(i32, i32, i32)>;
 
+/// Settings-screen picker cache: one live window per SGDB query, kept
+/// alive only while the settings screen is open.
+pub(crate) type SgdbPickerCache = Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>;
+
 pub(crate) struct ShowSgdbPickerParams<'a> {
     pub steam: &'a Arc<SteamDataClient>,
     pub id: &'a str,
@@ -851,7 +861,7 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     pub parent: &'a adw::Window,
     pub on_done: Rc<dyn Fn()>,
     pub pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
-    pub sgdb_cache: Option<Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>>>,
+    pub sgdb_cache: Option<SgdbPickerCache>,
     pub save_dir: &'a str,
     pub dest_dir: Option<&'a str>,
     /// Persists an author (name, steam64) to the filtered-users config;
@@ -866,43 +876,39 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     pub on_geometry: Option<GeometrySync>,
 }
 
-pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
-    let ShowSgdbPickerParams {
-        steam,
-        id,
-        asset,
-        is_steam_id,
-        dimensions,
-        parent,
-        on_done,
-        pending_copies,
-        sgdb_cache,
-        save_dir,
-        dest_dir,
-        filter_user,
-        unfilter_user,
-        on_geometry,
-    } = params;
-    // Key the settings-screen cache by the full SGDB query, not just the
-    // asset type: a Steam game's picker runs against its Steam id until it's
-    // matched to an SGDB id, and reusing one entry across both would serve
-    // stale results (and resume pagination from the wrong stream).
-    let cache_key = format!("{}|{}|{}|{}", id, is_steam_id, asset, dimensions.join(","));
+/// Widgets of a fresh picker window, built once by [`build_picker_views`].
+struct PickerViews {
+    scrolled: gtk4::ScrolledWindow,
+    flow: gtk4::FlowBox,
+    list_view: gtk4::ListBox,
+    stack: gtk4::Stack,
+    toggle_btn: gtk4::ToggleButton,
+    zoom_scale: gtk4::Scale,
+    loading_grid: gtk4::Label,
+    loading_list: gtk4::Label,
+}
 
-    // If a picker dialog for this exact query is already registered (open,
-    // or closed but still cache-owned), re-present it with its loaded
-    // thumbnails and scroll intact instead of rebuilding everything and
-    // refetching the list.
-    let cached_picker = sgdb_cache
+/// Re-present the cached picker for this exact query (open, or closed
+/// but still cache-owned), with its loaded thumbnails and scroll intact
+/// instead of rebuilding everything and refetching the list.
+/// True when there was anything to re-present.
+fn reopen_cached_picker(sgdb_cache: &Option<SgdbPickerCache>, cache_key: &str) -> bool {
+    let cached = sgdb_cache
         .as_ref()
-        .and_then(|c| c.borrow().get(&cache_key).map(|entry| entry.picker.clone()));
-    if let Some(picker) = cached_picker {
+        .and_then(|c| c.borrow().get(cache_key).map(|entry| entry.picker.clone()));
+    if let Some(picker) = cached {
         // No refit: the live window keeps whatever size it has, which is
         // the whole point of persisting it.
         picker.present();
-        return;
+        true
+    } else {
+        false
     }
+}
 
+/// Fresh picker window with the persisted zoom and size restored.
+/// Returns the window and the zoom it opened at.
+fn build_picker_window(asset: &str, parent: &adw::Window) -> (adw::Window, i32) {
     // A real window, not a sheet: sheets cannot be resized by the user,
     // and this grid is meant to grow with its viewport like the game
     // grid does. Modal over its parent like the settings windows, so
@@ -935,7 +941,12 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     // machine, so clamping it to the parent (like dialog fits do)
     // would shrink every reopen back to the settings size.
     picker.set_default_size(size_w, size_h);
+    (picker, zoom_initial)
+}
 
+/// Fresh picker shell: header with view toggle and zoom, grid/list stack
+/// in a scrolled window. Returns the root widget and the live views.
+fn build_picker_views(asset: &str, zoom_initial: i32) -> (gtk4::Box, PickerViews) {
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header_bar = adw::HeaderBar::new();
     let title = crate::tr!("Pick {}").replacen("{}", asset, 1);
@@ -972,7 +983,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let flow = gtk4::FlowBox::new();
     flow.set_selection_mode(gtk4::SelectionMode::None);
     // Children size themselves to their tiles; the box wraps by width so
-    // columns follow the dialog and zoom like the game grid does.
+    // columns follow the window and zoom like the game grid does.
     flow.set_homogeneous(false);
     flow.set_min_children_per_line(1);
     flow.set_row_spacing(12);
@@ -1001,30 +1012,42 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     stack.add_named(&list_view, Some("list"));
     stack.set_visible_child_name("grid");
 
-    let loading_label = gtk4::Label::new(Some(&crate::tr!("Loading\u{2026}")));
-    loading_label.add_css_class(CSS_DIM_LABEL);
-    flow.append(&loading_label);
-    let loading_label2 = gtk4::Label::new(Some(&crate::tr!("Loading\u{2026}")));
-    loading_label2.add_css_class(CSS_DIM_LABEL);
-    list_view.append(&loading_label2);
+    let loading_grid = gtk4::Label::new(Some(&crate::tr!("Loading\u{2026}")));
+    loading_grid.add_css_class(CSS_DIM_LABEL);
+    flow.append(&loading_grid);
+    let loading_list = gtk4::Label::new(Some(&crate::tr!("Loading\u{2026}")));
+    loading_list.add_css_class(CSS_DIM_LABEL);
+    list_view.append(&loading_list);
 
     scrolled.set_child(Some(&stack));
     outer.append(&scrolled);
 
-    picker.set_content(Some(&outer));
-    picker.present();
+    (
+        outer,
+        PickerViews {
+            scrolled,
+            flow,
+            list_view,
+            stack,
+            toggle_btn,
+            zoom_scale,
+            loading_grid,
+            loading_list,
+        },
+    )
+}
 
-    // Closing an AdwDialog only unmaps it; the cache entry registered below
-    // is what owns the dialog from here on. Without that strong ref the
-    // dialog would be finalized on close, because every handler holds it
-    // weakly and this function's own ref dies with the call frame.
-
-    // Register the live dialog in the settings-screen cache immediately so a
-    // reopen (even before the first fetch lands) can re-present it instead of
-    // building a fresh one. The fetch handler updates this entry in place.
-    if let Some(ref cache) = sgdb_cache {
+/// Cache the live window immediately so a reopen (even before the first
+/// fetch lands) re-presents it instead of building a fresh one. The fetch
+/// handler updates this entry in place.
+fn register_picker_window(
+    sgdb_cache: &Option<SgdbPickerCache>,
+    cache_key: String,
+    picker: &adw::Window,
+) {
+    if let Some(cache) = sgdb_cache {
         cache.borrow_mut().insert(
-            cache_key.clone(),
+            cache_key,
             SgdbAssetsCacheEntry {
                 assets: Vec::new(),
                 has_more: true,
@@ -1033,75 +1056,52 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
             },
         );
     }
+}
 
-    let assets_store: Rc<RefCell<Vec<SgdbAsset>>> = Rc::new(RefCell::new(Vec::new()));
-    let zoom_level = Rc::new(Cell::new(zoom_initial));
-    // Closing — header X, Alt+F4, or the download path closing the
-    // window — persists zoom and size for the next fresh open. Reopens
-    // from the cache keep the live window trivially.
-    {
-        let geo_asset = asset.to_string();
-        let geo_zoom = zoom_level.clone();
-        let geo_sync = on_geometry.clone();
-        picker.connect_close_request(move |win| {
-            // Record geometry only from a mapped window: teardown and the
-            // download path also close already-hidden pickers, whose size
-            // reads are meaningless and would overwrite real values.
-            if win.is_visible() {
-                let zoom = geo_zoom.get();
-                let (w, h) = (win.width(), win.height());
-                if let Some(ref sync) = geo_sync {
-                    sync(zoom, w, h);
-                }
-                let mut cfg = ira_config::load_config();
-                cfg.sgdb_picker_zoom.insert(geo_asset.clone(), zoom);
-                cfg.sgdb_picker_size.insert(geo_asset.clone(), (w, h));
-                if let Err(e) = cfg.save() {
-                    eprintln!("Failed to save picker geometry: {e}");
-                }
+/// Persist zoom and size on every close — header X, Alt+F4, or the
+/// download path closing the window — for the next fresh open. Reopens
+/// from the cache keep the live window trivially.
+fn wire_close_persist(
+    picker: &adw::Window,
+    asset: &str,
+    zoom_level: &Rc<Cell<i32>>,
+    on_geometry: &Option<GeometrySync>,
+) {
+    let geo_asset = asset.to_string();
+    let geo_zoom = zoom_level.clone();
+    let geo_sync = on_geometry.clone();
+    picker.connect_close_request(move |win| {
+        // Record geometry only from a mapped window: teardown and the
+        // download path also close already-hidden pickers, whose size
+        // reads are meaningless and would overwrite real values.
+        if win.is_visible() {
+            let zoom = geo_zoom.get();
+            let (w, h) = (win.width(), win.height());
+            if let Some(ref sync) = geo_sync {
+                sync(zoom, w, h);
             }
-            // Stop: the default handler DESTROYS the window, which strands
-            // the cache holding a destroyed widget that re-presents as an
-            // unresponsive zombie and never closes again. Hiding keeps the
-            // live window for the next open; the cache drop destroys it.
-            win.set_visible(false);
-            glib::Propagation::Stop
-        });
-    }
-    let current_page: Rc<Cell<u32>> = Rc::new(Cell::new(0));
-    let has_more: Rc<Cell<bool>> = Rc::new(Cell::new(true));
-    let loading_more: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-    let rendered_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
-    let all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>> =
-        Rc::new(RefCell::new(Vec::new()));
-    let is_initial_load: Rc<Cell<bool>> = Rc::new(Cell::new(true));
+            let mut cfg = ira_config::load_config();
+            cfg.sgdb_picker_zoom.insert(geo_asset.clone(), zoom);
+            cfg.sgdb_picker_size.insert(geo_asset.clone(), (w, h));
+            if let Err(e) = cfg.save() {
+                eprintln!("Failed to save picker geometry: {e}");
+            }
+        }
+        // Stop: the default handler DESTROYS the window, which strands
+        // the cache holding a destroyed widget that re-presents as an
+        // unresponsive zombie and never closes again. Hiding keeps the
+        // live window for the next open; the cache drop destroys it.
+        win.set_visible(false);
+        glib::Propagation::Stop
+    });
+}
 
-    let picker_ctx = SgdbPickerCtx {
-        id: id.to_string(),
-        save_dir: save_dir.to_string(),
-        steam: steam.clone(),
-        asset: asset.to_string(),
-        is_steam_id,
-        picker: picker.downgrade(),
-        on_done: on_done.clone(),
-        pending_copies: pending_copies.clone(),
-        dest_dir: dest_dir.map(|s| s.to_string()),
-        store: assets_store.clone(),
-        rendered: rendered_count.clone(),
-        zoom_level: zoom_level.clone(),
-        tile_aspect: AssetType::from_string(asset)
-            .map(|at| at.tile_aspect())
-            .unwrap_or(1.0),
-        pics: Rc::new(RefCell::new(Vec::new())),
-        all_buttons: all_buttons.clone(),
-        flow: flow.downgrade(),
-        list_view: list_view.downgrade(),
-        filter_user,
-        unfilter_user,
-    };
-
-    // Re-showing a hidden picker resets any buttons left disabled by a
-    // previous download so the same window is ready to pick again.
+/// Re-showing a hidden picker resets any buttons left disabled by a
+/// previous download so the same window is ready to pick again.
+fn wire_reopen_reset(
+    picker: &adw::Window,
+    all_buttons: &Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
+) {
     let reset_buttons = all_buttons.clone();
     picker.connect_map(move |_| {
         for b in reset_buttons.borrow().iter() {
@@ -1111,17 +1111,10 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
             }
         }
     });
+}
 
-    let do_full_rebuild = {
-        let ctx = picker_ctx.clone();
-        Rc::new(move || ctx.rebuild_all()) as Rc<dyn Fn()>
-    };
-
-    let do_append = {
-        let ctx = picker_ctx.clone();
-        Rc::new(move || ctx.append_new()) as Rc<dyn Fn()>
-    };
-
+/// Grid/list toggle button swaps the visible stack child.
+fn wire_view_toggle(toggle_btn: &gtk4::ToggleButton, stack: &gtk4::Stack) {
     let stack_toggle = stack.clone();
     toggle_btn.connect_toggled(move |btn| {
         if btn.is_active() {
@@ -1134,99 +1127,15 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
             btn.set_tooltip_text(Some(&crate::tr!("Switch to list view")));
         }
     });
+}
 
-    if let Some(entry) = sgdb_cache
-        .as_ref()
-        .and_then(|c| c.borrow().get(&cache_key).cloned())
-        .filter(|e| !e.assets.is_empty())
-    {
-        // Cache hit: render straight from the settings-screen cache instead of
-        // re-issuing the network request. Pagination continues from the
-        // page where the previous session left off.
-        *assets_store.borrow_mut() = entry.assets;
-        has_more.set(entry.has_more);
-        current_page.set(entry.next_page);
-        is_initial_load.set(false);
-        loading_label.set_text("");
-        loading_label.set_visible(false);
-        loading_label2.set_text("");
-        loading_label2.set_visible(false);
-        do_full_rebuild();
-    } else {
-        let (tx, rx) = std::sync::mpsc::channel::<(Vec<SgdbAsset>, bool)>();
-        let rx = std::cell::RefCell::new(rx);
-        let steam_c = steam.clone();
-        let id_c = id.to_string();
-        let asset_at = AssetType::from_string(asset).unwrap_or(AssetType::Icon);
-        let dims: Vec<String> = dimensions.iter().map(|s| s.to_string()).collect();
-        std::thread::spawn(move || {
-            let dims_refs: Vec<&str> = dims.iter().map(|s| s.as_str()).collect();
-            let results = steam_c.list_sgdb_assets(&id_c, asset_at, is_steam_id, &dims_refs, 0);
-            let _ = tx.send(results);
-        });
-
-        let assets_store_t = assets_store.clone();
-        let do_append_t = do_append.clone();
-        let do_full_rebuild_t = do_full_rebuild.clone();
-        let has_more_t = has_more.clone();
-        let current_page_t = current_page.clone();
-        let loading_more_t = loading_more.clone();
-        let is_initial_load_t = is_initial_load.clone();
-        let loading_label = loading_label.clone();
-        let loading_label2 = loading_label2.clone();
-        let picker_weak = picker.downgrade();
-        let sgdb_cache_t = sgdb_cache.as_ref().map(Rc::downgrade);
-        let cache_key_t = cache_key.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            if picker_weak.upgrade().is_none() {
-                return glib::ControlFlow::Break;
-            }
-            if let Ok((new_assets, more)) = rx.borrow_mut().try_recv() {
-                if is_initial_load_t.get() {
-                    *assets_store_t.borrow_mut() = new_assets.clone();
-                    is_initial_load_t.set(false);
-                    loading_label.set_text("");
-                    loading_label.set_visible(false);
-                    loading_label2.set_text("");
-                    loading_label2.set_visible(false);
-                    do_full_rebuild_t();
-                    if let Some(ref cache) = sgdb_cache_t.as_ref().and_then(Weak::upgrade) {
-                        if let Some(entry) = cache.borrow_mut().get_mut(&cache_key_t) {
-                            entry.assets = new_assets;
-                            entry.has_more = more;
-                            entry.next_page = 1;
-                        } else if let Some(picker) = picker_weak.upgrade() {
-                            cache.borrow_mut().insert(
-                                cache_key_t.clone(),
-                                SgdbAssetsCacheEntry {
-                                    assets: new_assets,
-                                    has_more: more,
-                                    next_page: 1,
-                                    picker,
-                                },
-                            );
-                        }
-                    }
-                } else {
-                    assets_store_t.borrow_mut().extend(new_assets);
-                    do_append_t();
-                }
-                has_more_t.set(more);
-                current_page_t.set(current_page_t.get() + 1);
-                loading_more_t.set(false);
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
-            }
-        });
-    }
-
-    let zoom_level_z = zoom_level.clone();
-    let zoom_pics = picker_ctx.pics.clone();
-    let zoom_aspect = picker_ctx.tile_aspect;
+/// Zoom slider resizes cards in place: rebuilding would respawn every
+/// thumbnail download on each slider tick.
+fn wire_zoom(zoom_scale: &gtk4::Scale, ctx: &SgdbPickerCtx) {
+    let zoom_level_z = ctx.zoom_level.clone();
+    let zoom_pics = ctx.pics.clone();
+    let zoom_aspect = ctx.tile_aspect;
     zoom_scale.connect_value_changed(move |s| {
-        // Resize in place: rebuilding would respawn every thumbnail
-        // download on each slider tick.
         let w = (s.value() as i32).clamp(100, 500);
         zoom_level_z.set(w);
         let h = (w as f64 / zoom_aspect).round().max(1.0) as i32;
@@ -1247,76 +1156,305 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
             }
         }
     });
-
-    // One ticker polls every card's thumbnail receiver. A timeout per
-    // card saturated the main loop past a few hundred cards — starving
-    // input and window close — while one callback sipping try_recv is
-    // nothing. It lives as long as the window; hidden cached windows
-    // just idle through it.
-    {
-        let tick_ctx = picker_ctx.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-            let Some(_) = tick_ctx.picker.upgrade() else {
-                return glib::ControlFlow::Break;
-            };
-            let w = tick_ctx.zoom_level.get().clamp(100, 500);
-            let aspect = tick_ctx.tile_aspect;
-            for entry in tick_ctx.pics.borrow_mut().iter_mut() {
-                let rx = entry.rx.borrow_mut().take();
-                let Some(rx) = rx else { continue };
-                match rx.try_recv() {
-                    Ok(Some(bytes)) => {
-                        if let Ok(texture) =
-                            gdk4::Texture::from_bytes(&glib::Bytes::from_owned(bytes))
-                        {
-                            paint_card(entry, &texture, w, aspect);
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        entry.rx.borrow_mut().replace(rx);
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
-                }
-            }
-            glib::ControlFlow::Continue
-        });
-    }
-
-/// Bottom edge of the lowest visible flow card, in flow coordinates.
-/// Dimmed cards don't count: prefetching off them forces scrolling
-/// through the whole hidden tail first.
-fn last_visible_bottom(flow: &gtk4::FlowBox, steam: &SteamDataClient) -> Option<f64> {
-    let mut bottom: Option<f64> = None;
-    let mut child = flow.first_child();
-    while let Some(w) = child {
-        child = w.next_sibling();
-        let name = w.widget_name();
-        if steam.asset_filtered(tag_author(&name), tag_style(&name)) {
-            continue;
-        }
-        if let Some(rect) = w.compute_bounds(flow) {
-            bottom = Some(bottom.unwrap_or(0.0).max((rect.y() + rect.height()) as f64));
-        }
-    }
-    bottom
 }
 
+/// One ticker polls every card's thumbnail receiver. A timeout per card
+/// saturated the main loop past a few hundred cards — starving input and
+/// window close — while one callback sipping try_recv is nothing. It
+/// lives as long as the window; hidden cached windows just idle
+/// through it.
+fn start_thumbnail_ticker(ctx: &SgdbPickerCtx) {
+    let tick_ctx = ctx.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        let Some(_) = tick_ctx.picker.upgrade() else {
+            return glib::ControlFlow::Break;
+        };
+        let w = tick_ctx.zoom_level.get().clamp(100, 500);
+        let aspect = tick_ctx.tile_aspect;
+        for entry in tick_ctx.pics.borrow_mut().iter_mut() {
+            let rx = entry.rx.borrow_mut().take();
+            let Some(rx) = rx else { continue };
+            match rx.try_recv() {
+                Ok(Some(bytes)) => {
+                    if let Ok(texture) =
+                        gdk4::Texture::from_bytes(&glib::Bytes::from_owned(bytes))
+                    {
+                        paint_card(entry, &texture, w, aspect);
+                    }
+                }
+                Ok(None) => {}
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    entry.rx.borrow_mut().replace(rx);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
+/// Render straight from the settings-screen cache instead of re-issuing
+/// the network request. Pagination continues where the previous session
+/// left off.
+fn render_cached_entry(
+    ctx: &SgdbPickerCtx,
+    assets_store: &Rc<RefCell<Vec<SgdbAsset>>>,
+    entry: SgdbAssetsCacheEntry,
+    do_full_rebuild: &Rc<dyn Fn()>,
+    loading_grid: &gtk4::Label,
+    loading_list: &gtk4::Label,
+) {
+    *assets_store.borrow_mut() = entry.assets;
+    ctx.has_more.set(entry.has_more);
+    ctx.current_page.set(entry.next_page);
+    ctx.is_initial_load.set(false);
+    loading_grid.set_text("");
+    loading_grid.set_visible(false);
+    loading_list.set_text("");
+    loading_list.set_visible(false);
+    do_full_rebuild();
+}
+
+/// First SGDB page load: fetch on a worker thread, then a short-interval
+/// poller receives the list once and renders it. The poller dies with
+/// the window.
+fn fetch_first_page(
+    ctx: &SgdbPickerCtx,
+    dimensions: &[&str],
+    loading_grid: &gtk4::Label,
+    loading_list: &gtk4::Label,
+    sgdb_cache: &Option<SgdbPickerCache>,
+    cache_key: &str,
+) {
+    let (tx, rx) = std::sync::mpsc::channel::<(Vec<SgdbAsset>, bool)>();
+    let rx = std::cell::RefCell::new(rx);
+    let steam_c = ctx.steam.clone();
+    let id_c = ctx.id.clone();
+    let asset_at = AssetType::from_string(&ctx.asset).unwrap_or(AssetType::Icon);
+    let is_steam_id = ctx.is_steam_id;
+    let dims: Vec<String> = dimensions.iter().map(|s| s.to_string()).collect();
+    std::thread::spawn(move || {
+        let dims_refs: Vec<&str> = dims.iter().map(|s| s.as_str()).collect();
+        let results = steam_c.list_sgdb_assets(&id_c, asset_at, is_steam_id, &dims_refs, 0);
+        let _ = tx.send(results);
+    });
+
+    let assets_store_t = ctx.store.clone();
+    let do_append_t = {
+        let ctx = ctx.clone();
+        Rc::new(move || ctx.append_new()) as Rc<dyn Fn()>
+    };
+    let do_full_rebuild_t = {
+        let ctx = ctx.clone();
+        Rc::new(move || ctx.rebuild_all()) as Rc<dyn Fn()>
+    };
+    let has_more_t = ctx.has_more.clone();
+    let current_page_t = ctx.current_page.clone();
+    let loading_more_t = ctx.loading_more.clone();
+    let is_initial_load_t = ctx.is_initial_load.clone();
+    let loading_grid = loading_grid.clone();
+    let loading_list = loading_list.clone();
+    let picker_weak = ctx.picker.clone();
+    let sgdb_cache_t = sgdb_cache.as_ref().map(Rc::downgrade);
+    let cache_key_t = cache_key.to_string();
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        if picker_weak.upgrade().is_none() {
+            return glib::ControlFlow::Break;
+        }
+        if let Ok((new_assets, more)) = rx.borrow_mut().try_recv() {
+            if is_initial_load_t.get() {
+                *assets_store_t.borrow_mut() = new_assets.clone();
+                is_initial_load_t.set(false);
+                loading_grid.set_text("");
+                loading_grid.set_visible(false);
+                loading_list.set_text("");
+                loading_list.set_visible(false);
+                do_full_rebuild_t();
+                if let Some(ref cache) = sgdb_cache_t.as_ref().and_then(Weak::upgrade) {
+                    if let Some(entry) = cache.borrow_mut().get_mut(&cache_key_t) {
+                        entry.assets = new_assets;
+                        entry.has_more = more;
+                        entry.next_page = 1;
+                    } else if let Some(picker) = picker_weak.upgrade() {
+                        cache.borrow_mut().insert(
+                            cache_key_t.clone(),
+                            SgdbAssetsCacheEntry {
+                                assets: new_assets,
+                                has_more: more,
+                                next_page: 1,
+                                picker,
+                            },
+                        );
+                    }
+                }
+            } else {
+                assets_store_t.borrow_mut().extend(new_assets);
+                do_append_t();
+            }
+            has_more_t.set(more);
+            current_page_t.set(current_page_t.get() + 1);
+            loading_more_t.set(false);
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+}
+
+pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
+    let ShowSgdbPickerParams {
+        steam,
+        id,
+        asset,
+        is_steam_id,
+        dimensions,
+        parent,
+        on_done,
+        pending_copies,
+        sgdb_cache,
+        save_dir,
+        dest_dir,
+        filter_user,
+        unfilter_user,
+        on_geometry,
+    } = params;
+    // Key the settings-screen cache by the full SGDB query, not just the
+    // asset type: a Steam game's picker runs against its Steam id until it's
+    // matched to an SGDB id, and reusing one entry across both would serve
+    // stale results (and resume pagination from the wrong stream).
+    let cache_key = format!("{}|{}|{}|{}", id, is_steam_id, asset, dimensions.join(","));
+
+    if reopen_cached_picker(&sgdb_cache, &cache_key) {
+        return;
+    }
+
+    let (picker, zoom_initial) = build_picker_window(asset, parent);
+
+    let (outer, views) = build_picker_views(asset, zoom_initial);
+
+    picker.set_content(Some(&outer));
+    picker.present();
+
+    register_picker_window(&sgdb_cache, cache_key.clone(), &picker);
+
+    let assets_store: Rc<RefCell<Vec<SgdbAsset>>> = Rc::new(RefCell::new(Vec::new()));
+    let zoom_level = Rc::new(Cell::new(zoom_initial));
+    wire_close_persist(&picker, asset, &zoom_level, &on_geometry);
+    let rendered_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+    let all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>> =
+        Rc::new(RefCell::new(Vec::new()));
+
+    let picker_ctx = SgdbPickerCtx {
+        id: id.to_string(),
+        save_dir: save_dir.to_string(),
+        steam: steam.clone(),
+        asset: asset.to_string(),
+        is_steam_id,
+        picker: picker.downgrade(),
+        on_done: on_done.clone(),
+        pending_copies: pending_copies.clone(),
+        dest_dir: dest_dir.map(|s| s.to_string()),
+        store: assets_store.clone(),
+        rendered: rendered_count.clone(),
+        zoom_level: zoom_level.clone(),
+        has_more: Rc::new(Cell::new(true)),
+        current_page: Rc::new(Cell::new(0)),
+        loading_more: Rc::new(Cell::new(false)),
+        is_initial_load: Rc::new(Cell::new(true)),
+        tile_aspect: AssetType::from_string(asset)
+            .map(|at| at.tile_aspect())
+            .unwrap_or(1.0),
+        pics: Rc::new(RefCell::new(Vec::new())),
+        all_buttons: all_buttons.clone(),
+        flow: views.flow.downgrade(),
+        list_view: views.list_view.downgrade(),
+        filter_user,
+        unfilter_user,
+    };
+
+    wire_reopen_reset(&picker, &all_buttons);
+
+    let do_full_rebuild = {
+        let ctx = picker_ctx.clone();
+        Rc::new(move || ctx.rebuild_all()) as Rc<dyn Fn()>
+    };
+
+    let do_append = {
+        let ctx = picker_ctx.clone();
+        Rc::new(move || ctx.append_new()) as Rc<dyn Fn()>
+    };
+
+    wire_view_toggle(&views.toggle_btn, &views.stack);
+
+    if let Some(entry) = sgdb_cache
+        .as_ref()
+        .and_then(|c| c.borrow().get(&cache_key).cloned())
+        .filter(|e| !e.assets.is_empty())
+    {
+        // Cache hit: render straight from the settings-screen cache instead of
+        // re-issuing the network request. Pagination continues from the
+        // page where the previous session left off.
+        render_cached_entry(
+            &picker_ctx,
+            &assets_store,
+            entry,
+            &do_full_rebuild,
+            &views.loading_grid,
+            &views.loading_list,
+        );
+    } else {
+        fetch_first_page(
+            &picker_ctx,
+            dimensions,
+            &views.loading_grid,
+            &views.loading_list,
+            &sgdb_cache,
+            &cache_key,
+        );
+    }
+
+    wire_zoom(&views.zoom_scale, &picker_ctx);
+    start_thumbnail_ticker(&picker_ctx);
+    start_infinite_scroll(
+        &picker_ctx,
+        &views.scrolled,
+        dimensions,
+        &do_append,
+        &sgdb_cache,
+        &cache_key,
+        &views.toggle_btn,
+    );
+}
+
+/// Infinite scroll: near the bottom, fetch the next SGDB page in the
+/// background and append it. The guards (initial load, exhaustion, one
+/// flight at a time, live visible window) keep it from stampeding, and
+/// pagination resumes in the settings-screen cache.
+fn start_infinite_scroll(
+    ctx: &SgdbPickerCtx,
+    scrolled: &gtk4::ScrolledWindow,
+    dimensions: &[&str],
+    do_append: &Rc<dyn Fn()>,
+    sgdb_cache: &Option<SgdbPickerCache>,
+    cache_key: &str,
+    toggle_btn: &gtk4::ToggleButton,
+) {
     let vadj = scrolled.vadjustment();
-    let steam_scroll = steam.clone();
-    let id_scroll = id.to_string();
-    let asset_scroll = asset.to_string();
+    let steam_scroll = ctx.steam.clone();
+    let id_scroll = ctx.id.clone();
+    let asset_scroll = ctx.asset.clone();
+    let is_steam_id = ctx.is_steam_id;
     let dims_scroll: Vec<String> = dimensions.iter().map(|s| s.to_string()).collect();
-    let assets_store_scroll = assets_store.clone();
+    let assets_store_scroll = ctx.store.clone();
     let do_append_scroll = do_append.clone();
-    let has_more_scroll = has_more.clone();
-    let loading_more_scroll = loading_more.clone();
-    let current_page_scroll = current_page.clone();
-    let picker_scroll = picker.downgrade();
+    let has_more_scroll = ctx.has_more.clone();
+    let loading_more_scroll = ctx.loading_more.clone();
+    let current_page_scroll = ctx.current_page.clone();
+    let picker_scroll = ctx.picker.clone();
     let sgdb_cache_scroll = sgdb_cache.as_ref().map(Rc::downgrade);
-    let cache_key_scroll = cache_key.clone();
-    let is_initial_load_scroll = is_initial_load.clone();
-    let flow_scroll = flow.downgrade();
+    let cache_key_scroll = cache_key.to_string();
+    let is_initial_load_scroll = ctx.is_initial_load.clone();
+    let flow_scroll = ctx.flow.clone();
     let view_toggle = toggle_btn.clone();
 
     vadj.connect_value_changed(move |adj| {
@@ -1405,6 +1543,25 @@ fn last_visible_bottom(flow: &gtk4::FlowBox, steam: &SteamDataClient) -> Option<
     });
 }
 
+/// Bottom edge of the lowest visible flow card, in flow coordinates.
+/// Dimmed cards don't count: prefetching off them forces scrolling
+/// through the whole hidden tail first.
+fn last_visible_bottom(flow: &gtk4::FlowBox, steam: &SteamDataClient) -> Option<f64> {
+    let mut bottom: Option<f64> = None;
+    let mut child = flow.first_child();
+    while let Some(w) = child {
+        child = w.next_sibling();
+        let name = w.widget_name();
+        if steam.asset_filtered(tag_author(&name), tag_style(&name)) {
+            continue;
+        }
+        if let Some(rect) = w.compute_bounds(flow) {
+            bottom = Some(bottom.unwrap_or(0.0).max((rect.y() + rect.height()) as f64));
+        }
+    }
+    bottom
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1464,6 +1621,10 @@ mod tests {
             dest_dir: None,
             store: Rc::new(RefCell::new(Vec::new())),
             rendered: Rc::new(Cell::new(0)),
+            has_more: Rc::new(Cell::new(true)),
+            current_page: Rc::new(Cell::new(0)),
+            loading_more: Rc::new(Cell::new(false)),
+            is_initial_load: Rc::new(Cell::new(true)),
             zoom_level: Rc::new(Cell::new(300)),
             tile_aspect: 2.0 / 3.0,
             pics: Rc::new(RefCell::new(Vec::new())),
@@ -1634,6 +1795,10 @@ mod tests {
             dest_dir: None,
             store: Rc::new(RefCell::new(Vec::new())),
             rendered: Rc::new(Cell::new(0)),
+            has_more: Rc::new(Cell::new(true)),
+            current_page: Rc::new(Cell::new(0)),
+            loading_more: Rc::new(Cell::new(false)),
+            is_initial_load: Rc::new(Cell::new(true)),
             zoom_level: Rc::new(Cell::new(300)),
             tile_aspect: 2.0 / 3.0,
             pics: Rc::new(RefCell::new(Vec::new())),

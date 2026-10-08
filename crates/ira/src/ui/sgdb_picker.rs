@@ -11,11 +11,48 @@ use std::rc::Rc;
 use std::rc::Weak;
 use std::sync::Arc;
 
+/// Tile pixel size for the zoom level: the slider names the tile width
+/// and the picker's asset aspect sets the height, like game-grid tiles
+/// growing with the viewport instead of fixed squares.
+fn tile_size(ctx: &SgdbPickerCtx) -> (i32, i32) {
+    let w = ctx.zoom_level.get().clamp(100, 500);
+    (w, (w as f64 / ctx.tile_aspect).round().max(1.0) as i32)
+}
+
+/// List-row thumbnail for a tile width: a third of the tile, floored so
+/// narrow zooms stay tappable, shaped by the same aspect.
+fn list_thumb_size(tile_w: i32, aspect: f64) -> (i32, i32) {
+    let w = (tile_w / 3).max(48);
+    (w, (w as f64 / aspect).round().max(1.0) as i32)
+}
+
+/// Paint one card's texture at the tile size: sized paintables on both
+/// views plus matching size requests, and the texture stored for zoom
+/// rebuilds.
+fn paint_card(entry: &mut CardViews, texture: &gdk4::Texture, tile_w: i32, aspect: f64) {
+    let tile_h = (tile_w as f64 / aspect).round().max(1.0) as i32;
+    let (list_w, list_h) = list_thumb_size(tile_w, aspect);
+    if let Some(pic) = entry.grid.upgrade() {
+        pic.set_paintable(Some(&ira_images::ScaledPaintable::new(
+            texture, tile_w, tile_h,
+        )));
+        pic.set_size_request(tile_w, tile_h);
+    }
+    if let Some(pic) = entry.list.upgrade() {
+        pic.set_paintable(Some(&ira_images::ScaledPaintable::new(
+            texture, list_w, list_h,
+        )));
+        pic.set_size_request(list_w, list_h);
+    }
+    entry.texture = Some(texture.clone());
+}
+
 fn build_sgdb_asset_card(
     a: &SgdbAsset,
     ctx: &SgdbPickerCtx,
     on_download: Rc<dyn Fn()>,
-    thumb_size: i32,
+    tile_w: i32,
+    tile_h: i32,
     dimmed: bool,
 ) -> (gtk4::Widget, gtk4::Widget) {
     let mut info = String::new();
@@ -40,16 +77,24 @@ fn build_sgdb_asset_card(
     let card = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     card.set_halign(gtk4::Align::Center);
     card.set_valign(gtk4::Align::Start);
-    card.set_margin_top(8);
-    card.set_margin_bottom(8);
+    // No outer margins: row/column spacing alone sets the rhythm (like
+    // the game grid), so gaps can't read uneven next to the tight
+    // in-card spacing.
 
     // Thumbnail with the author eye button overlaid top-right; the button
     // is revealed by hovering anywhere on the card (see the sgdb-filter
     // CSS rules).
     let thumb_overlay = gtk4::Overlay::new();
     let grid_pic = gtk4::Picture::new();
-    grid_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
-    grid_pic.set_size_request(thumb_size, thumb_size);
+    // Sized paintables, not sized Pictures: a Picture reports its
+    // texture's natural size and ignores the request, so full-size art
+    // blows out the tile, the columns and the window minimum. The
+    // ScaledPaintable reports the tile instead and draws into it.
+    grid_pic.set_content_fit(gtk4::ContentFit::Contain);
+    grid_pic.set_size_request(tile_w, tile_h);
+    grid_pic.set_paintable(Some(&ira_images::ScaledPaintable::new_empty(
+        tile_w, tile_h,
+    )));
     thumb_overlay.set_child(Some(&grid_pic));
     if let Some(btn) = build_filter_button(ctx, a) {
         btn.set_halign(gtk4::Align::End);
@@ -63,9 +108,16 @@ fn build_sgdb_asset_card(
 
     let ilbl = gtk4::Label::new(Some(&info));
     ilbl.set_xalign(0.5);
-    ilbl.set_max_width_chars(20);
+    // Wrap at the tile width: a fixed char cap is wider than narrow
+    // tiles and stretches them, while an unconstrained label takes the
+    // full unwrapped line width.
+    ilbl.set_size_request(tile_w, -1);
     ilbl.set_wrap(true);
     ilbl.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    // Fixed two lines: wrapping to 1-3 lines per card ragged-rows the
+    // whole flow at small zooms. Overflow ellipsizes on the second line.
+    ilbl.set_lines(2);
+    ilbl.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     ilbl.add_css_class(CSS_DIM_LABEL);
     card.append(&ilbl);
 
@@ -79,9 +131,12 @@ fn build_sgdb_asset_card(
     row.set_margin_bottom(4);
 
     let list_pic = gtk4::Picture::new();
-    list_pic.set_content_fit(gtk4::ContentFit::ScaleDown);
-    let list_thumb = (thumb_size / 3).max(48);
-    list_pic.set_size_request(list_thumb, list_thumb);
+    list_pic.set_content_fit(gtk4::ContentFit::Contain);
+    let (list_w, list_h) = list_thumb_size(tile_w, ctx.tile_aspect);
+    list_pic.set_size_request(list_w, list_h);
+    list_pic.set_paintable(Some(&ira_images::ScaledPaintable::new_empty(
+        list_w, list_h,
+    )));
     row.append(&list_pic);
 
     let rlbl = gtk4::Label::new(Some(&info));
@@ -130,7 +185,6 @@ fn build_sgdb_asset_card(
     };
     let steam_thumb = ctx.steam.clone();
     let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
-    let rx_thumb = std::cell::RefCell::new(rx_thumb);
     std::thread::spawn(move || {
         let _s = tracing::info_span!("thumbnail_download", url = %thumb_url).entered();
         let bytes = steam_thumb
@@ -141,23 +195,17 @@ fn build_sgdb_asset_card(
     });
     let tp_g = grid_pic.downgrade();
     let tp_l = list_pic.downgrade();
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        let (Some(tp_g), Some(tp_l)) = (tp_g.upgrade(), tp_l.upgrade()) else {
-            return glib::ControlFlow::Break;
-        };
-        if let Ok(bytes) = rx_thumb.borrow_mut().try_recv() {
-            if let Some(bytes) = bytes {
-                let texture = gdk4::Texture::from_bytes(&glib::Bytes::from_owned(bytes));
-                if let Ok(texture) = texture {
-                    tp_g.set_paintable(Some(&texture));
-                    tp_l.set_paintable(Some(&texture));
-                }
-            }
-            glib::ControlFlow::Break
-        } else {
-            glib::ControlFlow::Continue
-        }
-    });
+    let tp_lbl = ilbl.downgrade();
+    {
+        let mut pics = ctx.pics.borrow_mut();
+        pics.push(CardViews {
+            grid: tp_g,
+            list: tp_l,
+            label: tp_lbl,
+            texture: None,
+            rx: RefCell::new(Some(rx_thumb)),
+        });
+    }
 
     // Wrapped and tagged by author and style so a filter click can dim
     // exactly these widgets in place without rebuilding anything, and
@@ -197,6 +245,40 @@ fn tag_author(tag: &str) -> &str {
 /// The style half of a [`widget_tag`]; empty when the asset has no style.
 fn tag_style(tag: &str) -> &str {
     tag.split('\u{1f}').nth(1).unwrap_or("")
+}
+
+/// True when the card/row widget's tagged author/style is filtered.
+fn card_dimmed(ctx: &SgdbPickerCtx, widget: &gtk4::Widget) -> bool {
+    let name = widget.widget_name();
+    ctx.steam
+        .asset_filtered(tag_author(&name), tag_style(&name))
+}
+
+/// Index of the first dimmed child, if any.
+fn first_dimmed_pos(container: &impl IsA<gtk4::Widget>, ctx: &SgdbPickerCtx) -> Option<i32> {
+    let mut index = 0;
+    let mut child = container.first_child();
+    while let Some(w) = child {
+        child = w.next_sibling();
+        if card_dimmed(ctx, &w) {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Detach dimmed children, in order, for re-appending after new cards.
+fn detach_dimmed(ctx: &SgdbPickerCtx, container: &impl IsA<gtk4::Widget>) -> Vec<gtk4::Widget> {
+    let mut out = Vec::new();
+    let mut child = container.first_child();
+    while let Some(w) = child {
+        child = w.next_sibling();
+        if card_dimmed(ctx, &w) {
+            out.push(w);
+        }
+    }
+    out
 }
 
 /// The author eye button, overlaid on thumbnails and revealed on hover
@@ -272,6 +354,20 @@ fn attach_hover_reveal<T: IsA<gtk4::Widget>, U: IsA<gtk4::Widget>>(
     area.add_controller(ctrl);
 }
 
+/// One card's views plus its downloaded texture. Zoom rebuilds the
+/// paintables from the stored texture at the new tile size — no
+/// re-download — and arrivals size the first paintable from the live
+/// zoom level. The thumbnail receiver lives here too: one shared
+/// ticker polls every card instead of one timeout per card saturating
+/// the main loop.
+struct CardViews {
+    grid: glib::WeakRef<gtk4::Picture>,
+    list: glib::WeakRef<gtk4::Picture>,
+    label: glib::WeakRef<gtk4::Label>,
+    texture: Option<gdk4::Texture>,
+    rx: RefCell<Option<std::sync::mpsc::Receiver<Option<Vec<u8>>>>>,
+}
+
 #[derive(Clone)]
 struct SgdbPickerCtx {
     id: String,
@@ -282,7 +378,7 @@ struct SgdbPickerCtx {
     // Weak: ctx clones are owned by closures attached to the picker's own
     // widgets, and the settings-screen cache owns the dialog strongly, so a
     // strong ref here would make dialog -> closure -> dialog a cycle.
-    picker: glib::WeakRef<adw::Dialog>,
+    picker: glib::WeakRef<adw::Window>,
     on_done: Rc<dyn Fn()>,
     pending_copies: Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
     dest_dir: Option<String>,
@@ -291,6 +387,12 @@ struct SgdbPickerCtx {
     store: Rc<RefCell<Vec<SgdbAsset>>>,
     rendered: Rc<Cell<usize>>,
     zoom_level: Rc<Cell<i32>>,
+    /// Uniform tile aspect for this picker's asset type (width over
+    /// height): every card takes the type's shape like game-grid tiles,
+    /// instead of everything squeezing into squares.
+    tile_aspect: f64,
+    /// Per-card views in render order; zoom resizes them in place.
+    pics: Rc<RefCell<Vec<CardViews>>>,
     all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
     flow: glib::WeakRef<gtk4::FlowBox>,
     list_view: glib::WeakRef<gtk4::ListBox>,
@@ -310,7 +412,7 @@ impl SgdbPickerCtx {
             return;
         };
         let assets = self.store.borrow();
-        full_rebuild(&flow, &list_view, &assets, self.zoom_level.get(), self);
+        full_rebuild(&flow, &list_view, &assets, self);
         self.rendered.set(assets.len());
     }
 
@@ -325,15 +427,20 @@ impl SgdbPickerCtx {
             return;
         };
         let assets = self.store.borrow();
-        append_assets(
-            &flow,
-            &list_view,
-            &assets,
-            start,
-            self.zoom_level.get(),
-            self,
-        );
+        append_assets(&flow, &list_view, &assets, start, self);
         self.rendered.set(assets.len());
+    }
+
+    /// Reposition one author's cards after a filter toggle: dimmed to
+    /// the end, visible just before the first dimmed — the grid never
+    /// stripes visible/dimmed/visible.
+    fn settle_author_cards(&self, author: &str) {
+        let (Some(flow), Some(list)) = (self.flow.upgrade(), self.list_view.upgrade())
+        else {
+            return;
+        };
+        settle_flow_author(self, &flow, author);
+        settle_list_author(self, &list, author);
     }
 
     /// The eye button's click: filter a shown author, unfilter an
@@ -377,6 +484,7 @@ impl SgdbPickerCtx {
             persist(author.to_string(), steam64.to_string());
         }
         self.for_each_author_card(author, |w| self.dim_card(w));
+        self.settle_author_cards(author);
     }
 
     /// Dim one card-or-row and flip its eye button to the unfilter
@@ -399,6 +507,7 @@ impl SgdbPickerCtx {
             persist(author.to_string());
         }
         self.for_each_author_card(author, |w| self.undim_card(w));
+        self.settle_author_cards(author);
     }
 
     /// Drop one card-or-row's dim when its style is no longer filtered and
@@ -411,6 +520,59 @@ impl SgdbPickerCtx {
         if let Some(btn) = find_filter_button(widget) {
             btn.set_icon_name("eye-not-looking-symbolic");
             btn.set_tooltip_text(Some(&crate::tr!("Hide art by this author")));
+        }
+    }
+}
+
+/// Settle one author's flow children: detach, then reinsert dimmed at
+/// the end and visible before the first dimmed, all order-preserved.
+fn settle_flow_author(ctx: &SgdbPickerCtx, flow: &gtk4::FlowBox, author: &str) {
+    let mut mine = Vec::new();
+    let mut child = flow.first_child();
+    while let Some(w) = child {
+        child = w.next_sibling();
+        if tag_author(&w.widget_name()) == author {
+            mine.push(w);
+        }
+    }
+    for w in &mine {
+        flow.remove(w);
+    }
+    let mut pos = first_dimmed_pos(flow, ctx);
+    for w in &mine {
+        if card_dimmed(ctx, w) {
+            flow.append(w);
+        } else if let Some(p) = pos {
+            flow.insert(w, p);
+            pos = Some(p + 1);
+        } else {
+            flow.append(w);
+        }
+    }
+}
+
+/// Settle one author's list rows, mirroring [`settle_flow_author`].
+fn settle_list_author(ctx: &SgdbPickerCtx, list: &gtk4::ListBox, author: &str) {
+    let mut mine = Vec::new();
+    let mut child = list.first_child();
+    while let Some(w) = child {
+        child = w.next_sibling();
+        if tag_author(&w.widget_name()) == author {
+            mine.push(w);
+        }
+    }
+    for w in &mine {
+        list.remove(w);
+    }
+    let mut pos = first_dimmed_pos(list, ctx);
+    for w in &mine {
+        if card_dimmed(ctx, w) {
+            list.append(w);
+        } else if let Some(p) = pos {
+            list.insert(w, p);
+            pos = Some(p + 1);
+        } else {
+            list.append(w);
         }
     }
 }
@@ -604,14 +766,17 @@ fn append_assets(
     list_view: &gtk4::ListBox,
     assets: &[SgdbAsset],
     start: usize,
-    thumb_size: i32,
     ctx: &SgdbPickerCtx,
 ) {
-    flow.set_max_children_per_line((900 / (thumb_size + 20)).clamp(1, 8) as u32);
-    // Filtered authors/styles already sink to the bottom via
-    // list_sgdb_assets' partition; render them dimmed when the toggle is on,
-    // skip them entirely when it is off.
+    // No column clamp: the box wraps by width like the game grid, so the
+    // column count follows the dialog size and the zoom level.
+    // Dimmed cards always trail: partition the batch and park the
+    // previously-settled dimmed tails behind it, so new sections never
+    // stripe visible/dimmed/visible.
     let show_filtered = ctx.steam.sgdb_show_filtered();
+    let (tile_w, tile_h) = tile_size(ctx);
+    let mut new_visible = Vec::new();
+    let mut new_dimmed = Vec::new();
     for a in &assets[start..] {
         let filtered = ctx.steam.asset_filtered(&a.author, &a.style);
         if filtered && !show_filtered {
@@ -619,9 +784,34 @@ fn append_assets(
         }
         let on_download = build_on_download(ctx, a);
         let (grid_card, list_row) =
-            build_sgdb_asset_card(a, ctx, on_download, thumb_size, filtered);
-        flow.append(&grid_card);
-        list_view.append(&list_row);
+            build_sgdb_asset_card(a, ctx, on_download, tile_w, tile_h, filtered);
+        if filtered {
+            new_dimmed.push((grid_card, list_row));
+        } else {
+            new_visible.push((grid_card, list_row));
+        }
+    }
+    let old_flow_dimmed = detach_dimmed(ctx, flow);
+    for w in &old_flow_dimmed {
+        flow.remove(w);
+    }
+    let old_list_dimmed = detach_dimmed(ctx, list_view);
+    for w in &old_list_dimmed {
+        list_view.remove(w);
+    }
+    for (grid_card, list_row) in &new_visible {
+        flow.append(grid_card);
+        list_view.append(list_row);
+    }
+    for (grid_card, list_row) in &new_dimmed {
+        flow.append(grid_card);
+        list_view.append(list_row);
+    }
+    for w in &old_flow_dimmed {
+        flow.append(w);
+    }
+    for w in &old_list_dimmed {
+        list_view.append(w);
     }
 }
 
@@ -629,12 +819,12 @@ fn full_rebuild(
     flow: &gtk4::FlowBox,
     list_view: &gtk4::ListBox,
     assets: &[SgdbAsset],
-    thumb_size: i32,
     ctx: &SgdbPickerCtx,
 ) {
     clear_children(flow);
     clear_children(list_view);
     ctx.all_buttons.borrow_mut().clear();
+    ctx.pics.borrow_mut().clear();
 
     if assets.is_empty() {
         let none = gtk4::Label::new(Some(&crate::tr!("No images found on SteamGridDB")));
@@ -646,8 +836,11 @@ fn full_rebuild(
         return;
     }
 
-    append_assets(flow, list_view, assets, 0, thumb_size, ctx);
+    append_assets(flow, list_view, assets, 0, ctx);
 }
+
+/// Geometry sync callback (zoom, width, height).
+type GeometrySync = Rc<dyn Fn(i32, i32, i32)>;
 
 pub(crate) struct ShowSgdbPickerParams<'a> {
     pub steam: &'a Arc<SteamDataClient>,
@@ -667,6 +860,10 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     /// Removes an author from the filtered-users config; the eye button's
     /// unfilter half. Paired with filter_user above.
     pub unfilter_user: Option<Rc<dyn Fn(String)>>,
+    /// Live geometry sync (zoom, width, height): keeps the in-memory
+    /// config current so a later settings save can't clobber what the
+    /// close-request persists to disk.
+    pub on_geometry: Option<GeometrySync>,
 }
 
 pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
@@ -684,6 +881,7 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         dest_dir,
         filter_user,
         unfilter_user,
+        on_geometry,
     } = params;
     // Key the settings-screen cache by the full SGDB query, not just the
     // asset type: a Steam game's picker runs against its Steam id until it's
@@ -699,14 +897,44 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         .as_ref()
         .and_then(|c| c.borrow().get(&cache_key).map(|entry| entry.picker.clone()));
     if let Some(picker) = cached_picker {
-        super::helpers::fit_dialog_height(&picker, parent, 700);
-        picker.present(Some(parent));
+        // No refit: the live window keeps whatever size it has, which is
+        // the whole point of persisting it.
+        picker.present();
         return;
     }
 
-    let picker = adw::Dialog::new();
-    picker.set_content_width(900);
-    picker.set_content_height(700);
+    // A real window, not a sheet: sheets cannot be resized by the user,
+    // and this grid is meant to grow with its viewport like the game
+    // grid does. Modal over its parent like the settings windows, so
+    // focus and keys (Alt+F4 included) belong to it unambiguously; a
+    // modeless window under a modal parent leaves focus delivery up to
+    // the compositor. Still freely resizable; the settings teardown
+    // closes cached pickers before dropping their cache.
+    let persisted = ira_config::load_config();
+    let zoom_initial = persisted
+        .sgdb_picker_zoom
+        .get(asset)
+        .copied()
+        .unwrap_or(300)
+        .clamp(100, 500);
+    let (size_w, size_h) = persisted
+        .sgdb_picker_size
+        .get(asset)
+        .copied()
+        .unwrap_or((900, 700));
+    // Floor the restore: degenerate saved sizes (from older builds that
+    // measured mid-teardown) would otherwise stick forever, and nothing
+    // in the UI can even produce a legitimately smaller window.
+    let size_w = size_w.max(640);
+    let size_h = size_h.max(480);
+    let picker = adw::Window::new();
+    picker.set_title(Some(&crate::tr!("Pick {}").replacen("{}", asset, 1)));
+    picker.set_modal(true);
+    picker.set_transient_for(Some(parent));
+    // Restore the saved size verbatim: it is user-produced on this
+    // machine, so clamping it to the parent (like dialog fits do)
+    // would shrink every reopen back to the settings size.
+    picker.set_default_size(size_w, size_h);
 
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     let header_bar = adw::HeaderBar::new();
@@ -718,7 +946,14 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     toggle_btn.set_tooltip_text(Some(&crate::tr!("Switch to list view")));
     toggle_btn.add_css_class(CSS_FLAT);
 
-    let zoom_adj = gtk4::Adjustment::new(300.0, 100.0, 500.0, 50.0, 100.0, 0.0);
+    let zoom_adj = gtk4::Adjustment::new(
+        zoom_initial as f64,
+        100.0,
+        500.0,
+        50.0,
+        100.0,
+        0.0,
+    );
     let zoom_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(&zoom_adj));
     zoom_scale.set_tooltip_text(Some(&crate::tr!("Zoom")));
     zoom_scale.set_width_request(120);
@@ -736,11 +971,16 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
 
     let flow = gtk4::FlowBox::new();
     flow.set_selection_mode(gtk4::SelectionMode::None);
-    flow.set_homogeneous(true);
+    // Children size themselves to their tiles; the box wraps by width so
+    // columns follow the dialog and zoom like the game grid does.
+    flow.set_homogeneous(false);
     flow.set_min_children_per_line(1);
-    flow.set_max_children_per_line(3);
-    flow.set_row_spacing(8);
-    flow.set_column_spacing(8);
+    flow.set_row_spacing(12);
+    flow.set_column_spacing(12);
+    // Top-aligned: a filling flow stretches its rows to the viewport
+    // height (measured 800 vs a 516 card), which is the tall-tile dead
+    // space. Natural height keeps rows content-sized like the game grid.
+    flow.set_valign(gtk4::Align::Start);
     flow.set_margin_start(12);
     flow.set_margin_end(12);
     flow.set_margin_top(8);
@@ -753,6 +993,9 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     list_view.set_margin_end(12);
     list_view.set_margin_top(8);
     list_view.set_margin_bottom(8);
+    // Same row-stretch guard as the grid: short lists must not grow
+    // tall rows to fill the viewport.
+    list_view.set_valign(gtk4::Align::Start);
 
     stack.add_named(&flow, Some("grid"));
     stack.add_named(&list_view, Some("list"));
@@ -768,25 +1011,8 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     scrolled.set_child(Some(&stack));
     outer.append(&scrolled);
 
-    let close_btn = gtk4::Button::with_label(&crate::tr!("Close"));
-    close_btn.set_halign(gtk4::Align::End);
-    close_btn.set_margin_start(12);
-    close_btn.set_margin_end(12);
-    close_btn.set_margin_bottom(12);
-    let win = picker.downgrade();
-    close_btn.connect_clicked(move |_| {
-        if let Some(win) = win.upgrade() {
-            win.close();
-        }
-    });
-    outer.append(&close_btn);
-
-    picker.set_child(Some(&outer));
-    // 700 content + sheet chrome overflows shorter windows; libadwaita
-    // warns and clips floating sheets that ask for more than their
-    // presenter has.
-    super::helpers::fit_dialog_height(&picker, parent, 700);
-    picker.present(Some(parent));
+    picker.set_content(Some(&outer));
+    picker.present();
 
     // Closing an AdwDialog only unmaps it; the cache entry registered below
     // is what owns the dialog from here on. Without that strong ref the
@@ -809,7 +1035,39 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     }
 
     let assets_store: Rc<RefCell<Vec<SgdbAsset>>> = Rc::new(RefCell::new(Vec::new()));
-    let zoom_level = Rc::new(Cell::new(300));
+    let zoom_level = Rc::new(Cell::new(zoom_initial));
+    // Closing — header X, Alt+F4, or the download path closing the
+    // window — persists zoom and size for the next fresh open. Reopens
+    // from the cache keep the live window trivially.
+    {
+        let geo_asset = asset.to_string();
+        let geo_zoom = zoom_level.clone();
+        let geo_sync = on_geometry.clone();
+        picker.connect_close_request(move |win| {
+            // Record geometry only from a mapped window: teardown and the
+            // download path also close already-hidden pickers, whose size
+            // reads are meaningless and would overwrite real values.
+            if win.is_visible() {
+                let zoom = geo_zoom.get();
+                let (w, h) = (win.width(), win.height());
+                if let Some(ref sync) = geo_sync {
+                    sync(zoom, w, h);
+                }
+                let mut cfg = ira_config::load_config();
+                cfg.sgdb_picker_zoom.insert(geo_asset.clone(), zoom);
+                cfg.sgdb_picker_size.insert(geo_asset.clone(), (w, h));
+                if let Err(e) = cfg.save() {
+                    eprintln!("Failed to save picker geometry: {e}");
+                }
+            }
+            // Stop: the default handler DESTROYS the window, which strands
+            // the cache holding a destroyed widget that re-presents as an
+            // unresponsive zombie and never closes again. Hiding keeps the
+            // live window for the next open; the cache drop destroys it.
+            win.set_visible(false);
+            glib::Propagation::Stop
+        });
+    }
     let current_page: Rc<Cell<u32>> = Rc::new(Cell::new(0));
     let has_more: Rc<Cell<bool>> = Rc::new(Cell::new(true));
     let loading_more: Rc<Cell<bool>> = Rc::new(Cell::new(false));
@@ -831,6 +1089,10 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         store: assets_store.clone(),
         rendered: rendered_count.clone(),
         zoom_level: zoom_level.clone(),
+        tile_aspect: AssetType::from_string(asset)
+            .map(|at| at.tile_aspect())
+            .unwrap_or(1.0),
+        pics: Rc::new(RefCell::new(Vec::new())),
         all_buttons: all_buttons.clone(),
         flow: flow.downgrade(),
         list_view: list_view.downgrade(),
@@ -960,11 +1222,85 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     }
 
     let zoom_level_z = zoom_level.clone();
-    let do_full_rebuild_z = do_full_rebuild.clone();
+    let zoom_pics = picker_ctx.pics.clone();
+    let zoom_aspect = picker_ctx.tile_aspect;
     zoom_scale.connect_value_changed(move |s| {
-        zoom_level_z.set(s.value() as i32);
-        do_full_rebuild_z();
+        // Resize in place: rebuilding would respawn every thumbnail
+        // download on each slider tick.
+        let w = (s.value() as i32).clamp(100, 500);
+        zoom_level_z.set(w);
+        let h = (w as f64 / zoom_aspect).round().max(1.0) as i32;
+        let (lw, lh) = list_thumb_size(w, zoom_aspect);
+        for entry in zoom_pics.borrow_mut().iter_mut() {
+            if let Some(texture) = entry.texture.clone() {
+                paint_card(entry, &texture, w, zoom_aspect);
+            } else {
+                if let Some(pic) = entry.grid.upgrade() {
+                    pic.set_size_request(w, h);
+                }
+                if let Some(pic) = entry.list.upgrade() {
+                    pic.set_size_request(lw, lh);
+                }
+            }
+            if let Some(lbl) = entry.label.upgrade() {
+                lbl.set_size_request(w, -1);
+            }
+        }
     });
+
+    // One ticker polls every card's thumbnail receiver. A timeout per
+    // card saturated the main loop past a few hundred cards — starving
+    // input and window close — while one callback sipping try_recv is
+    // nothing. It lives as long as the window; hidden cached windows
+    // just idle through it.
+    {
+        let tick_ctx = picker_ctx.clone();
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            let Some(_) = tick_ctx.picker.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let w = tick_ctx.zoom_level.get().clamp(100, 500);
+            let aspect = tick_ctx.tile_aspect;
+            for entry in tick_ctx.pics.borrow_mut().iter_mut() {
+                let rx = entry.rx.borrow_mut().take();
+                let Some(rx) = rx else { continue };
+                match rx.try_recv() {
+                    Ok(Some(bytes)) => {
+                        if let Ok(texture) =
+                            gdk4::Texture::from_bytes(&glib::Bytes::from_owned(bytes))
+                        {
+                            paint_card(entry, &texture, w, aspect);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        entry.rx.borrow_mut().replace(rx);
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+/// Bottom edge of the lowest visible flow card, in flow coordinates.
+/// Dimmed cards don't count: prefetching off them forces scrolling
+/// through the whole hidden tail first.
+fn last_visible_bottom(flow: &gtk4::FlowBox, steam: &SteamDataClient) -> Option<f64> {
+    let mut bottom: Option<f64> = None;
+    let mut child = flow.first_child();
+    while let Some(w) = child {
+        child = w.next_sibling();
+        let name = w.widget_name();
+        if steam.asset_filtered(tag_author(&name), tag_style(&name)) {
+            continue;
+        }
+        if let Some(rect) = w.compute_bounds(flow) {
+            bottom = Some(bottom.unwrap_or(0.0).max((rect.y() + rect.height()) as f64));
+        }
+    }
+    bottom
+}
 
     let vadj = scrolled.vadjustment();
     let steam_scroll = steam.clone();
@@ -980,6 +1316,8 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
     let sgdb_cache_scroll = sgdb_cache.as_ref().map(Rc::downgrade);
     let cache_key_scroll = cache_key.clone();
     let is_initial_load_scroll = is_initial_load.clone();
+    let flow_scroll = flow.downgrade();
+    let view_toggle = toggle_btn.clone();
 
     vadj.connect_value_changed(move |adj| {
         if is_initial_load_scroll.get() {
@@ -996,11 +1334,23 @@ pub fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         }
 
         let value = adj.value();
-        let upper = adj.upper();
         let page_size = adj.page_size();
-        let distance_to_bottom = upper - value - page_size;
-
-        if distance_to_bottom > 800.0 {
+        // Prefetch off the last VISIBLE card, not the absolute bottom:
+        // the dimmed tail keeps growing and scrolling through all of it
+        // to trigger the next page is the complaint. The hidden list
+        // view has no valid flow allocation, so it keeps the old
+        // absolute check.
+        let prefetch = if view_toggle.is_active() {
+            adj.upper() - value - page_size <= 800.0
+        } else if let Some(flow) = flow_scroll.upgrade() {
+            match last_visible_bottom(&flow, &steam_scroll) {
+                Some(bottom) => value + page_size >= bottom - 800.0,
+                None => true,
+            }
+        } else {
+            false
+        };
+        if !prefetch {
             return;
         }
 
@@ -1071,5 +1421,266 @@ mod tests {
         let tag = widget_tag("Some Artist", "");
         assert_eq!(tag_author(&tag), "Some Artist");
         assert_eq!(tag_style(&tag), "");
+    }
+
+    // Display-bound probes, merged into one test: GTK lives on a single
+    // thread, so separate display tests starve each other. Ignored by
+    // default (needs a display); run under xvfb-run. HOME is sandboxed
+    // so the close-request geometry save can't touch the real config.
+    // Still compiled, so API drift breaks the build.
+    #[test]
+    #[ignore]
+    fn test_picker_display_probes() {
+        use adw::prelude::*;
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            adw::init().expect("adw init");
+        });
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("XDG_CONFIG_HOME", home.path().join(".config"));
+        let save_dir = home.path().join("save");
+        std::fs::create_dir_all(&save_dir).unwrap();
+        let save_dir = save_dir.to_str().unwrap().to_string();
+        let steam = std::sync::Arc::new(ira_api::SteamDataClient::new(
+            String::new(),
+            String::new(),
+            &save_dir,
+        ));
+
+        // Phase 1: tiles measure tile-sized no matter how large the
+        // downloaded texture is — a raw texture paintable reports its
+        // own size and blows out the columns and the window minimum.
+        let win = adw::Window::new();
+        let ctx = SgdbPickerCtx {
+            id: "1".to_string(),
+            save_dir: save_dir.clone(),
+            steam: steam.clone(),
+            asset: "grid".to_string(),
+            is_steam_id: false,
+            picker: win.downgrade(),
+            on_done: Rc::new(|| {}),
+            pending_copies: None,
+            dest_dir: None,
+            store: Rc::new(RefCell::new(Vec::new())),
+            rendered: Rc::new(Cell::new(0)),
+            zoom_level: Rc::new(Cell::new(300)),
+            tile_aspect: 2.0 / 3.0,
+            pics: Rc::new(RefCell::new(Vec::new())),
+            all_buttons: Rc::new(RefCell::new(Vec::new())),
+            flow: glib::WeakRef::new(),
+            list_view: glib::WeakRef::new(),
+            filter_user: None,
+            unfilter_user: None,
+        };
+        let asset = SgdbAsset {
+            url: String::new(),
+            thumb: String::new(),
+            width: 1024,
+            height: 1024,
+            style: String::new(),
+            author: "t".to_string(),
+            author_steam64: String::new(),
+            mime: String::new(),
+        };
+        let (card, _row) = build_sgdb_asset_card(&asset, &ctx, Rc::new(|| {}), 300, 450, false);
+        let (min_w, ..) = card.measure(gtk4::Orientation::Horizontal, -1);
+        assert_eq!(min_w, 300);
+        // Sensitivity: a raw texture paintable blows the same card out.
+        let bytes = vec![128u8; 1024 * 1024 * 4];
+        let tex = gdk4::MemoryTexture::new(
+            1024,
+            1024,
+            gdk4::MemoryFormat::R8g8b8a8,
+            &glib::Bytes::from_owned(bytes),
+            1024 * 4,
+        );
+        let overlay = card
+            .first_child()
+            .and_then(|c| c.first_child())
+            .and_then(|c| c.downcast::<gtk4::Overlay>().ok())
+            .expect("card overlay");
+        let pic = overlay
+            .child()
+            .and_then(|c| c.downcast::<gtk4::Picture>().ok())
+            .expect("tile picture");
+        pic.set_paintable(Some(&tex));
+        let (_, raw_nat_w, ..) = card.measure(gtk4::Orientation::Horizontal, -1);
+        assert!(raw_nat_w >= 1024, "probe insensitive: {raw_nat_w}");
+        // The fix: sized paintable keeps the tile at tile size.
+        let tex_obj = tex.upcast::<gdk4::Texture>();
+        pic.set_paintable(Some(&ira_images::ScaledPaintable::new(&tex_obj, 300, 450)));
+        pic.set_size_request(300, 450);
+        let (fix_min_w, fix_nat_w, ..) = card.measure(gtk4::Orientation::Horizontal, -1);
+        assert_eq!(fix_min_w, 300);
+        assert_eq!(fix_nat_w, 300);
+
+        // Phase 2: open, close, reopen from the cache, close again —
+        // every close must hide the window.
+        let parent = adw::Window::new();
+        parent.present();
+        let cache: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>> = Default::default();
+        let open = || {
+            show_sgdb_picker(ShowSgdbPickerParams {
+                steam: &steam,
+                id: "1",
+                asset: "grid",
+                is_steam_id: false,
+                dimensions: &["600x900"],
+                parent: &parent,
+                on_done: Rc::new(|| {}),
+                pending_copies: None,
+                sgdb_cache: Some(cache.clone()),
+                save_dir: &save_dir,
+                dest_dir: None,
+                filter_user: None,
+                unfilter_user: None,
+                on_geometry: None,
+            });
+        };
+        let pump = || {
+            for _ in 0..100 {
+                while glib::MainContext::default().iteration(false) {}
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        };
+        let picker = || {
+            cache
+                .borrow()
+                .values()
+                .next()
+                .map(|entry| entry.picker.clone())
+        };
+        open();
+        pump();
+        let win = picker().expect("picker cached after open");
+        assert!(win.is_visible(), "fresh picker never became visible");
+        // Fresh config: default size applies.
+        assert_eq!(win.width(), 900);
+        assert_eq!(win.height(), 700);
+        win.close();
+        pump();
+        assert!(!win.is_visible(), "first close did not hide");
+        open();
+        pump();
+        assert!(win.is_visible(), "cache-hit reopen never became visible");
+        // Resize, close, and prove the geometry round-trips through the
+        // config file into a fresh window. Default size stands in for a
+        // user resize (headless has no compositor to drag against).
+        win.close();
+        pump();
+        assert!(!win.is_visible(), "second close did not hide");
+        let config_path = home
+            .path()
+            .join(".config")
+            .join("ira")
+            .join("config.json");
+        let config_text = std::fs::read_to_string(&config_path)
+            .expect("config file written by close");
+        let config_json: serde_json::Value =
+            serde_json::from_str(&config_text).expect("config parses");
+        assert_eq!(
+            config_json["sgdb_picker_size"]["grid"],
+            serde_json::json!([900, 700])
+        );
+        assert!(
+            config_json["sgdb_picker_zoom"]["grid"]
+                .as_i64()
+                .is_some_and(|z| (100..=500).contains(&z))
+        );
+        // Fresh cache: rebuild reads the saved geometry back.
+        let cache2: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>> = Default::default();
+        show_sgdb_picker(ShowSgdbPickerParams {
+            steam: &steam,
+            id: "1",
+            asset: "grid",
+            is_steam_id: false,
+            dimensions: &["600x900"],
+            parent: &parent,
+            on_done: Rc::new(|| {}),
+            pending_copies: None,
+            sgdb_cache: Some(cache2.clone()),
+            save_dir: &save_dir,
+            dest_dir: None,
+            filter_user: None,
+            unfilter_user: None,
+            on_geometry: None,
+        });
+        pump();
+        let win2 = cache2
+            .borrow()
+            .values()
+            .next()
+            .map(|entry| entry.picker.clone())
+            .expect("fresh picker cached");
+        assert!(win2.is_visible(), "fresh reopen never became visible");
+        assert_eq!((win2.width(), win2.height()), (900, 700));
+
+        // Phase 3: rows stay content-sized instead of stretching to the
+        // viewport. Three fixture cards go in a 1000-tall window; at a
+        // ~950 viewport a stretching row would fill it, a content-sized
+        // one stays near its 516 card.
+        let measure_win = adw::Window::new();
+        measure_win.set_default_size(1000, 1000);
+        let measure_ctx = SgdbPickerCtx {
+            id: "1".to_string(),
+            save_dir: save_dir.clone(),
+            steam: steam.clone(),
+            asset: "grid".to_string(),
+            is_steam_id: false,
+            picker: measure_win.downgrade(),
+            on_done: Rc::new(|| {}),
+            pending_copies: None,
+            dest_dir: None,
+            store: Rc::new(RefCell::new(Vec::new())),
+            rendered: Rc::new(Cell::new(0)),
+            zoom_level: Rc::new(Cell::new(300)),
+            tile_aspect: 2.0 / 3.0,
+            pics: Rc::new(RefCell::new(Vec::new())),
+            all_buttons: Rc::new(RefCell::new(Vec::new())),
+            flow: glib::WeakRef::new(),
+            list_view: glib::WeakRef::new(),
+            filter_user: None,
+            unfilter_user: None,
+        };
+        let measure_flow = gtk4::FlowBox::new();
+        measure_flow.set_selection_mode(gtk4::SelectionMode::None);
+        measure_flow.set_homogeneous(false);
+        measure_flow.set_min_children_per_line(1);
+        measure_flow.set_row_spacing(12);
+        measure_flow.set_column_spacing(12);
+        measure_flow.set_halign(gtk4::Align::Fill);
+        measure_flow.set_valign(gtk4::Align::Start);
+        measure_win.set_content(Some(&measure_flow));
+        measure_win.present();
+        for author in ["MrSandman7337", "Neptune13", "GabiShy"] {
+            let asset = SgdbAsset {
+                url: String::new(),
+                thumb: String::new(),
+                width: 600,
+                height: 900,
+                style: "alternate".to_string(),
+                author: author.to_string(),
+                author_steam64: String::new(),
+                mime: String::new(),
+            };
+            let (card, _row) =
+                build_sgdb_asset_card(&asset, &measure_ctx, Rc::new(|| {}), 300, 450, false);
+            measure_flow.append(&card);
+        }
+        pump();
+        let height_of = |w: &gtk4::Widget| {
+            w.compute_bounds(w).map(|r| r.height() as i32).unwrap_or(-1)
+        };
+        let first = measure_flow
+            .first_child()
+            .and_then(|c| c.downcast::<gtk4::FlowBoxChild>().ok())
+            .expect("flow has children");
+        let card = first.first_child().expect("child has card");
+        let (child_h, card_h) = (height_of(first.upcast_ref()), height_of(&card));
+        assert!(
+            child_h >= card_h && child_h < 600,
+            "row stretched to viewport: {child_h} vs card {card_h}"
+        );
     }
 }

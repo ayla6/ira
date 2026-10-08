@@ -644,7 +644,12 @@ fn on_installer_complete(
     cancel_btn.add_css_class(CSS_FLAT);
     {
         let wizard_c = wizard.clone();
-        cancel_btn.connect_clicked(move |_| wizard_c.borrow().win.close());
+        // Cloned out first: closing reenters handlers that borrow the
+        // wizard, and a held borrow aborts from the signal.
+        cancel_btn.connect_clicked(move |_| {
+            let win = wizard_c.borrow().win.clone();
+            win.close();
+        });
     }
     btn_row.append(&cancel_btn);
 

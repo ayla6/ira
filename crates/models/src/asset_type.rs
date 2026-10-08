@@ -64,6 +64,21 @@ impl AssetType {
         }
     }
 
+    /// Tile width-over-height for picker grids: capsules stand 2:3,
+    /// squares and icons are 1:1, heroes take Steam's wide banner ratio,
+    /// headers Steam's capsule ratio, logos a generic 3:2. Uniform per
+    /// type like the game grid — per-asset dims would ragged-row the
+    /// flow, and queries are dim-filtered to one shape anyway.
+    pub fn tile_aspect(self) -> f64 {
+        match self {
+            AssetType::Icon | AssetType::Square => 1.0,
+            AssetType::Hero => 1920.0 / 620.0,
+            AssetType::Grid => 2.0 / 3.0,
+            AssetType::Header => 460.0 / 215.0,
+            AssetType::Logo => 3.0 / 2.0,
+        }
+    }
+
     pub fn from_string(s: &str) -> Option<Self> {
         match s {
             "icon" => Some(AssetType::Icon),
@@ -250,6 +265,17 @@ mod tests {
         assert_eq!(AssetType::Header.thumb_dims(), (460, 215));
         assert_eq!(AssetType::Logo.thumb_dims(), (620, 620));
         assert_eq!(AssetType::Square.thumb_dims(), (384, 384));
+    }
+
+    #[test]
+    fn test_asset_type_tile_aspect() {
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert!(close(AssetType::Icon.tile_aspect(), 1.0));
+        assert!(close(AssetType::Square.tile_aspect(), 1.0));
+        assert!(close(AssetType::Grid.tile_aspect(), 2.0 / 3.0));
+        assert!(close(AssetType::Hero.tile_aspect(), 1920.0 / 620.0));
+        assert!(close(AssetType::Header.tile_aspect(), 460.0 / 215.0));
+        assert!(close(AssetType::Logo.tile_aspect(), 3.0 / 2.0));
     }
 
     #[test]

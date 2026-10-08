@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Ira\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-07 18:46-0300\n"
+"POT-Creation-Date: 2026-10-07 20:07-0300\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -830,7 +830,6 @@ msgid "Delete"
 msgstr ""
 
 #: crates/ira/src/ui/big_picture/keyboard.rs:355
-#: crates/ira/src/ui/sgdb_picker.rs:771
 #: crates/overlay-ui/src/ui.rs:319
 msgid "Close"
 msgstr ""
@@ -2127,7 +2126,7 @@ msgstr ""
 
 #: crates/ira/src/ui/game_header.rs:338
 #: crates/ira/src/ui/helpers.rs:177
-#: crates/ira/src/ui/window.rs:336
+#: crates/ira/src/ui/window.rs:330
 msgid "Settings"
 msgstr ""
 
@@ -2402,8 +2401,8 @@ msgstr ""
 #: crates/ira/src/ui/image_manager.rs:579
 #: crates/ira/src/ui/image_manager.rs:647
 #: crates/ira/src/ui/image_manager.rs:725
-#: crates/ira/src/ui/sgdb_picker.rs:110
-#: crates/ira/src/ui/sgdb_picker.rs:120
+#: crates/ira/src/ui/sgdb_picker.rs:161
+#: crates/ira/src/ui/sgdb_picker.rs:171
 msgid "Downloading…"
 msgstr ""
 
@@ -4989,7 +4988,7 @@ msgstr ""
 
 #: crates/ira/src/ui/mass_match_dialog.rs:1013
 #: crates/ira/src/ui/mass_match_dialog.rs:1027
-#: crates/ira/src/ui/window.rs:349
+#: crates/ira/src/ui/window.rs:344
 msgid "Match unmatched games"
 msgstr ""
 
@@ -5594,7 +5593,7 @@ msgid ""
 msgstr ""
 
 #: crates/ira/src/ui/settings_pages.rs:131
-#: crates/ira/src/ui/window.rs:385
+#: crates/ira/src/ui/window.rs:382
 msgid "Show hidden games"
 msgstr ""
 
@@ -6130,47 +6129,48 @@ msgstr ""
 msgid "SGDB ID: {}"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:72
-#: crates/ira/src/ui/sgdb_picker.rs:97
-#: crates/ira/src/ui/sgdb_picker.rs:848
+#: crates/ira/src/ui/sgdb_picker.rs:120
+#: crates/ira/src/ui/sgdb_picker.rs:148
+#: crates/ira/src/ui/sgdb_picker.rs:1062
 msgid "Download"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:211
-#: crates/ira/src/ui/sgdb_picker.rs:388
+#: crates/ira/src/ui/sgdb_picker.rs:287
+#: crates/ira/src/ui/sgdb_picker.rs:489
 msgid "Show art by this author"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:215
-#: crates/ira/src/ui/sgdb_picker.rs:413
+#: crates/ira/src/ui/sgdb_picker.rs:291
+#: crates/ira/src/ui/sgdb_picker.rs:515
 msgid "Hide art by this author"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:640
-#: crates/ira/src/ui/sgdb_picker.rs:644
+#: crates/ira/src/ui/sgdb_picker.rs:823
+#: crates/ira/src/ui/sgdb_picker.rs:827
 msgid "No images found on SteamGridDB"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:713
+#: crates/ira/src/ui/sgdb_picker.rs:907
+#: crates/ira/src/ui/sgdb_picker.rs:914
 #, rust-format
 msgid "Pick {}"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:718
-#: crates/ira/src/ui/sgdb_picker.rs:872
+#: crates/ira/src/ui/sgdb_picker.rs:919
+#: crates/ira/src/ui/sgdb_picker.rs:1086
 msgid "Switch to list view"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:723
+#: crates/ira/src/ui/sgdb_picker.rs:931
 msgid "Zoom"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:761
-#: crates/ira/src/ui/sgdb_picker.rs:764
+#: crates/ira/src/ui/sgdb_picker.rs:970
+#: crates/ira/src/ui/sgdb_picker.rs:973
 msgid "Loading…"
 msgstr ""
 
-#: crates/ira/src/ui/sgdb_picker.rs:868
+#: crates/ira/src/ui/sgdb_picker.rs:1082
 msgid "Switch to grid view"
 msgstr ""
 
@@ -6318,15 +6318,15 @@ msgstr ""
 msgid "Square capsules"
 msgstr ""
 
-#: crates/ira/src/ui/window.rs:357
+#: crates/ira/src/ui/window.rs:354
 msgid "Play history"
 msgstr ""
 
-#: crates/ira/src/ui/window.rs:366
+#: crates/ira/src/ui/window.rs:364
 msgid "Rescan game library"
 msgstr ""
 
-#: crates/ira/src/ui/window.rs:488
+#: crates/ira/src/ui/window.rs:485
 msgid "Group by"
 msgstr ""
 

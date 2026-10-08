@@ -198,6 +198,12 @@ pub struct Config {
     /// Controller defaults keyed by USB vendor/product, e.g. `2dc8:6012`.
     #[serde(default)]
     pub controller_defaults: HashMap<String, ControllerInputConfig>,
+    /// SGDB picker tile width per asset type: reopening keeps the zoom.
+    #[serde(default)]
+    pub sgdb_picker_zoom: HashMap<String, i32>,
+    /// SGDB picker window size per asset type (width, height).
+    #[serde(default)]
+    pub sgdb_picker_size: HashMap<String, (i32, i32)>,
 }
 
 impl Default for Config {
@@ -282,6 +288,8 @@ impl Default for Config {
             consoles,
             overlay: OverlaySettings::default(),
             controller_defaults: HashMap::new(),
+            sgdb_picker_zoom: HashMap::new(),
+            sgdb_picker_size: HashMap::new(),
         }
     }
 }

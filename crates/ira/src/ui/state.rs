@@ -22,19 +22,19 @@ pub enum PendingImage {
 
 /// Fetched SGDB asset list for one asset type, kept alive only while the
 /// per-game settings screen is open so reopening the picker is instant. The
-/// entry owns the picker dialog: closing an AdwDialog only unmaps it, and
-/// this strong ref is what keeps the dialog — with its loaded thumbnails and
-/// scroll — alive for the next open, since everything else holds it weakly.
+/// entry owns the picker window: closing it only unmaps it, and this strong
+/// ref is what keeps the window — with its loaded thumbnails and scroll —
+/// alive for the next open, since everything else holds it weakly.
 /// The cache lives in SettingsData, so closing the settings window (which
-/// drops the cache) is the single teardown path that releases the dialog.
-/// Nothing reachable from the dialog may own the cache strongly, or the two
+/// drops the cache) is the single teardown path that releases the window.
+/// Nothing reachable from the window may own the cache strongly, or the two
 /// would form a reference cycle — handlers capture it via `Rc::downgrade`.
 #[derive(Clone)]
 pub struct SgdbAssetsCacheEntry {
     pub assets: Vec<SgdbAsset>,
     pub has_more: bool,
     pub next_page: u32,
-    pub picker: adw::Dialog,
+    pub picker: adw::Window,
 }
 
 #[derive(Clone)]

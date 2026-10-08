@@ -650,6 +650,26 @@ fn build_dialog_contents(
     let state_close_w = Rc::downgrade(&state);
     win.connect_close_request(move |_| {
         if let Some(state) = state_close_w.upgrade() {
+            // Close cached picker windows first: modeless pickers survive
+            // on their own, so they must persist geometry and hide before
+            // the cache below releases them mid-use. Collect under a short
+            // borrow: closing reenters picker handlers that borrow_mut the
+            // same state, and a held borrow aborts the app from the signal.
+            let pickers: Vec<adw::Window> = state
+                .borrow()
+                .settings_data
+                .as_ref()
+                .map(|sd| {
+                    sd.sgdb_cache
+                        .borrow()
+                        .values()
+                        .map(|entry| entry.picker.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            for picker in &pickers {
+                picker.close();
+            }
             // Defer dropping the bookkeeping refs: SettingsData owns the
             // window itself, and finalizing it (with its whole page tree)
             // inside the close-request emission trips GTK's post-emission

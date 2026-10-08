@@ -400,6 +400,15 @@ fn build_sgdb_picker_button(
                 super::image_manager_helpers::remove_sgdb_filtered_user(&state, &author)
             })
         };
+        let on_geometry = {
+            let state = filter_state.clone();
+            let asset = asset_c.clone();
+            Rc::new(move |zoom, w, h| {
+                let mut s = state.borrow_mut();
+                s.cfg.sgdb_picker_zoom.insert(asset.clone(), zoom);
+                s.cfg.sgdb_picker_size.insert(asset.clone(), (w, h));
+            })
+        };
         show_sgdb_picker(ShowSgdbPickerParams {
             steam: &steam,
             id: &sgdb_id_c,
@@ -414,6 +423,7 @@ fn build_sgdb_picker_button(
             dest_dir: Some(&dest_dir),
             filter_user: Some(filter_user),
             unfilter_user: Some(unfilter_user),
+            on_geometry: Some(on_geometry),
         });
     });
     Some(btn)
@@ -1297,6 +1307,15 @@ fn build_dir_buttons(
                     super::image_manager_helpers::remove_sgdb_filtered_user(&state, &author)
                 })
             };
+            let on_geometry = {
+                let state = filter_state.clone();
+                let asset = asset_c.clone();
+                Rc::new(move |zoom, w, h| {
+                    let mut s = state.borrow_mut();
+                    s.cfg.sgdb_picker_zoom.insert(asset.clone(), zoom);
+                    s.cfg.sgdb_picker_size.insert(asset.clone(), (w, h));
+                })
+            };
             show_sgdb_picker(ShowSgdbPickerParams {
                 steam: &steam,
                 id: &sgdb_id_c,
@@ -1311,6 +1330,7 @@ fn build_dir_buttons(
                 dest_dir: Some(&target_dir_c),
                 filter_user: Some(filter_user),
                 unfilter_user: Some(unfilter_user),
+                on_geometry: Some(on_geometry),
             });
         });
         btns.append(&btn);

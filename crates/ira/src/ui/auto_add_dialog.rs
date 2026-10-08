@@ -945,8 +945,10 @@ pub(super) fn start_add(
     // No window for the download: the wizard goes away here and the game
     // simply appears in the sidebar, the strip carrying the progress.
     // Decision prompts (emulator install, redists) still come back over
-    // the main window.
-    wizard.borrow().win.close();
+    // the main window. Cloned out first: closing reenters handlers that
+    // borrow the wizard, and a held borrow aborts from the signal.
+    let win = wizard.borrow().win.clone();
+    win.close();
 
     // Skipped too when a matching job owns the quota gate — one search
     // is not worth colliding with a batch pass.

@@ -180,16 +180,8 @@ pub(super) fn build_sgdb_asset_card(
     } else {
         a.thumb.clone()
     };
-    let steam_thumb = ctx.steam.clone();
     let (tx_thumb, rx_thumb) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
-    std::thread::spawn(move || {
-        let _s = tracing::info_span!("thumbnail_download", url = %thumb_url).entered();
-        let bytes = steam_thumb
-            .download_bytes(&thumb_url)
-            .ok()
-            .filter(|b| !b.is_empty());
-        let _ = tx_thumb.send(bytes);
-    });
+    ctx.pool.submit(thumb_url, tx_thumb);
     let tp_g = grid_pic.downgrade();
     let tp_l = list_pic.downgrade();
     let tp_lbl = ilbl.downgrade();

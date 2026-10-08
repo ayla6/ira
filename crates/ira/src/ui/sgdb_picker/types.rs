@@ -52,6 +52,9 @@ pub(super) struct SgdbPickerCtx {
     /// Per-card views in render order; zoom resizes them in place.
     pub(super) pics: Rc<RefCell<Vec<CardViews>>>,
     pub(super) all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
+    /// Bounded thumbnail workers, shared by every card this picker
+    /// renders: six threads drain one queue instead of a thread per card.
+    pub(super) pool: ThumbPool,
     pub(super) flow: glib::WeakRef<gtk4::FlowBox>,
     pub(super) list_view: glib::WeakRef<gtk4::ListBox>,
     // Persists an author (name, steam64) to the config's filtered-users
@@ -64,6 +67,50 @@ pub(super) struct SgdbPickerCtx {
 
 /// Geometry sync callback (zoom, width, height).
 pub(super) type GeometrySync = Rc<dyn Fn(i32, i32, i32)>;
+
+/// How browsers fetch a grid of images: around six parallel
+/// per-origin requests, first-rendered first. A thread per card
+/// stampedes past that on long grids — hundreds of threads over a
+/// scrolling session — so one small pool drains a FIFO queue in render
+/// order instead. The visible top cards render first, so they still win
+/// without any priority machinery. Workers exit when the last pool
+/// clone drops.
+const THUMB_POOL_SIZE: usize = 6;
+
+type ThumbJob = (String, std::sync::mpsc::Sender<Option<Vec<u8>>>);
+
+#[derive(Clone)]
+pub(super) struct ThumbPool {
+    tx: std::sync::mpsc::Sender<ThumbJob>,
+}
+
+impl ThumbPool {
+    pub(super) fn new(steam: &Arc<SteamDataClient>) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel::<ThumbJob>();
+        let rx = Arc::new(std::sync::Mutex::new(rx));
+        for _ in 0..THUMB_POOL_SIZE {
+            let rx = rx.clone();
+            let steam = steam.clone();
+            std::thread::spawn(move || {
+                while let Ok((url, reply)) =
+                    rx.lock().unwrap_or_else(|e| e.into_inner()).recv()
+                {
+                    let _s = tracing::info_span!("thumbnail_download", url = %url).entered();
+                    let bytes = steam
+                        .download_bytes(&url)
+                        .ok()
+                        .filter(|b| !b.is_empty());
+                    let _ = reply.send(bytes);
+                }
+            });
+        }
+        Self { tx }
+    }
+
+    pub(super) fn submit(&self, url: String, reply: std::sync::mpsc::Sender<Option<Vec<u8>>>) {
+        let _ = self.tx.send((url, reply));
+    }
+}
 
 /// Settings-screen picker cache: one live window per SGDB query, kept
 /// alive only while the settings screen is open.
@@ -91,4 +138,35 @@ pub(crate) struct ShowSgdbPickerParams<'a> {
     /// config current so a later settings save can't clobber what the
     /// close-request persists to disk.
     pub on_geometry: Option<GeometrySync>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thumb_pool_serves_queued_jobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let steam = Arc::new(SteamDataClient::new(
+            String::new(),
+            String::new(),
+            dir.path().to_str().unwrap(),
+        ));
+        let pool = ThumbPool::new(&steam);
+        // Empty urls fail fast: ten queued jobs must all still get a
+        // reply, proving the queue drains instead of deadlocking.
+        let rxs: Vec<_> = (0..10)
+            .map(|_| {
+                let (tx, rx) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
+                pool.submit(String::new(), tx);
+                rx
+            })
+            .collect();
+        for rx in rxs {
+            let reply = rx
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("pooled download replies");
+            assert_eq!(reply, None);
+        }
+    }
 }

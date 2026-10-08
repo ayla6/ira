@@ -3,7 +3,7 @@ use super::fetch::{
     fetch_first_page, render_cached_entry, start_infinite_scroll, start_thumbnail_ticker,
 };
 use super::geometry::{build_picker_window, register_picker_window, wire_close_persist};
-use super::types::{SgdbPickerCache, SgdbPickerCtx, ShowSgdbPickerParams};
+use super::types::{SgdbPickerCache, SgdbPickerCtx, ShowSgdbPickerParams, ThumbPool};
 use super::views::build_picker_views;
 use adw::prelude::*;
 use ira_api::types::SgdbAsset;
@@ -153,6 +153,7 @@ pub(crate) fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         tile_aspect: AssetType::from_string(asset)
             .map(|at| at.tile_aspect())
             .unwrap_or(1.0),
+        pool: ThumbPool::new(steam),
         pics: Rc::new(RefCell::new(Vec::new())),
         all_buttons: all_buttons.clone(),
         flow: views.flow.downgrade(),
@@ -270,6 +271,7 @@ mod tests {
             loading_more: Rc::new(Cell::new(false)),
             is_initial_load: Rc::new(Cell::new(true)),
             tile_aspect: 2.0 / 3.0,
+            pool: ThumbPool::new(&steam),
             pics: Rc::new(RefCell::new(Vec::new())),
             all_buttons: Rc::new(RefCell::new(Vec::new())),
             flow: glib::WeakRef::new(),
@@ -444,6 +446,7 @@ mod tests {
             loading_more: Rc::new(Cell::new(false)),
             is_initial_load: Rc::new(Cell::new(true)),
             tile_aspect: 2.0 / 3.0,
+            pool: ThumbPool::new(&steam),
             pics: Rc::new(RefCell::new(Vec::new())),
             all_buttons: Rc::new(RefCell::new(Vec::new())),
             flow: glib::WeakRef::new(),

@@ -190,8 +190,6 @@ impl MotionServer {
             .retain(|(_, seen)| seen.elapsed() < CLIENT_TIMEOUT);
     }
 
-    /// Broadcast the latest sample — motion plus the controller shadow
-    /// state — to every subscribed client.
     pub fn send_sample(&mut self, sample: &MotionSample, pad: &PadState) {
         if self.clients.is_empty() {
             return;

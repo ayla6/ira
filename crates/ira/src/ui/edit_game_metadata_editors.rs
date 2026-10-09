@@ -259,8 +259,7 @@ pub(super) fn show_synopsis_edit_dialog(
     content.set_margin_bottom(12);
     content.set_margin_start(12);
     content.set_margin_end(12);
-    // The framed, scrolling text view fills the dialog — a real editor
-    // surface instead of a text field stranded in empty space.
+    // The framed, scrolling text view fills the dialog.
     let scrolled = gtk4::ScrolledWindow::new();
     scrolled.set_vexpand(true);
     let view = gtk4::TextView::new();

@@ -105,12 +105,9 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
         let adj = scrolled.hadjustment();
         let track = move |_: &gtk4::Adjustment| {
             if let Some(big) = scroll_state.borrow().big_picture.clone() {
-                // Rebuild the carousel when the viewport (and with it the
-                // capsule size) changes; a no-op while it stays put.
-                // Deferred to an idle: this signal fires mid-allocation, and
-                // refresh reloads the stylesheet — re-styling widgets while
-                // the layout pass is still walking them measures and
-                // allocates them against mixed old/new styles.
+                // Rebuild when the capsule size changes; a no-op while it stays put.
+                // Deferred to an idle: this fires mid-allocation, and refresh
+                // would re-style widgets the layout pass is still walking.
                 let desired = ((big.home.page.width() as f64 / 6.0).round() as i32).max(160);
                 if desired != big.home.capsule.get() {
                     big.home.capsule.set(desired);
@@ -251,9 +248,7 @@ pub(super) fn refresh(state: &SharedState) {
         return;
     }
 
-    // The capsule follows the viewport (one sixth of its width); 320 is
-    // the reference until the window reports a size. The row's cover
-    // height is kept in step so covers stay square.
+    // The row's cover height is kept in step so covers stay square.
     let square_mode = state.borrow().cfg.big_picture_square_capsules;
     let viewport = state.borrow().window.width();
     let capsule = if viewport >= 960 {
@@ -602,7 +597,6 @@ pub(super) fn selection_is_tile(big: &Rc<BigPictureUi>) -> bool {
     )
 }
 
-/// Selection visuals, floating title, and scroll.
 /// The gamepad or keyboard moved the selection: restyle it and bring it
 /// to the viewport center.
 fn apply_selection(big: &Rc<BigPictureUi>) {

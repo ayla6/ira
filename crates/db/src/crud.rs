@@ -2,9 +2,7 @@ use crate::{err, DbConn};
 use ira_models::{GameEntry, GameKind, TrophySource};
 use rusqlite::params;
 
-/// One row insert: match ids (`steam_id`, `trophy_id`), the
-/// platform-native product id, and the system scope. Bundled so the
-/// parameter list stays readable as id columns come and go.
+/// Bundled so the parameter list stays readable as id columns come and go.
 pub struct NewGame<'a> {
     pub kind: GameKind,
     pub trophy_source: TrophySource,
@@ -121,9 +119,8 @@ pub fn load_all_games(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     )
 }
 
-/// Same rows as `load_all_games` without the title sort. List builds sort by
-/// `sort_key` in Rust anyway, and maintenance passes filter in Rust, so the
-/// SQLite sort is pure overhead on those paths.
+/// Same rows as `load_all_games` without the title sort: callers sort by
+/// `sort_key` in Rust, so the SQLite sort is pure overhead.
 pub fn load_all_games_unordered(conn: &DbConn) -> Result<Vec<GameEntry>, String> {
     crate::query_all(
         conn,
@@ -133,15 +130,13 @@ pub fn load_all_games_unordered(conn: &DbConn) -> Result<Vec<GameEntry>, String>
     )
 }
 
-/// Every game of one kind, unsorted. Presence reconciles and Steam cleanup
-/// only inspect their own kind; loading the whole library to filter in Rust
-/// parses every row's JSON for nothing.
+/// Every game of one kind, unsorted: loading the whole library to filter
+/// in Rust parses every row's JSON for nothing.
 pub fn load_games_by_kind(conn: &DbConn, kind: GameKind) -> Result<Vec<GameEntry>, String> {
     load_games_by_kinds(conn, &[kind])
 }
 
-/// Every game of any listed kind, unsorted. Chunked so long kind lists never
-/// approach the SQLite variable limit.
+/// Chunked so long kind lists never approach the SQLite variable limit.
 pub fn load_games_by_kinds(
     conn: &DbConn,
     kinds: &[GameKind],
@@ -195,7 +190,6 @@ pub fn set_api_dll_folder(conn: &DbConn, id: i64, folder: &str) -> Result<(), St
     Ok(())
 }
 
-/// Cache of whether the game's UFS saves have been centralized.
 pub fn set_saves_centralized(conn: &DbConn, id: i64, centralized: bool) -> Result<(), String> {
     crate::execute(conn, "UPDATE games SET saves_centralized = ?1 WHERE id = ?2", params![centralized as i64, id])?;
     Ok(())
@@ -450,9 +444,7 @@ mod tests {
 
     #[test]
     fn test_update_game_ids_allows_shared_trophy_claims() {
-        // Regional ROM dupes and revisions legitimately claim one trophy
-        // id: the old unique index turned the second claim into a failed
-        // update instead of a duplicate the merge tooling reconciles.
+        // Regional ROM dupes and revisions legitimately claim one trophy id.
         let (conn, _tmp) = setup_db();
         let first = add_game(
             &conn,

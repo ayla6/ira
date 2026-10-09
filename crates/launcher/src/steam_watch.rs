@@ -26,20 +26,16 @@ use crate::wrapper::{
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// A game whose processes have all been gone this long has ended its session.
 const EXIT_GRACE: Duration = Duration::from_secs(2);
-/// When the spawned launcher process is gone and no game process ever
-/// appeared, nothing will: stop tracking so the game does not stay marked
-/// as running after a failed launch.
+/// When the launcher exited and no game process ever appeared, stop tracking
+/// so the game never stays marked running after a failed launch.
 const START_TIMEOUT: Duration = Duration::from_secs(60);
-/// After `stop_game` asked Steam to stop a running game, the session ends
-/// when its processes are actually gone — but a game that ignores
-/// steam://stop cannot hold the session open forever.
+/// After stop_game asks Steam to stop the game, the session ends when its
+/// processes are gone — a game ignoring steam://stop cannot hold it forever.
 const STOP_EXIT_CAP: Duration = Duration::from_secs(60);
 
 /// Session state for one tracked Steam launch. The game counts as running
-/// from the first poll on which any matching process exists — including
-/// processes that were already running before the launch, because Steam
-/// answers a launch request for a running game by focusing it, and that
-/// focus is the session the user asked for.
+/// from the first matching poll, including already-running processes (Steam
+/// answers by focusing: that focus is the session).
 struct SteamLaunchSession {
     seen: bool,
     empty_since: Option<Instant>,
@@ -115,9 +111,8 @@ pub fn monitor_steam_launch(child: Option<Child>, app_id: String, mut ctx: Monit
         loop {
             let stopped = !ctx.running_games.lock().unwrap().contains_key(&game_id);
             if stopped && !session.seen {
-                // stop_game removed us before the game ever ran: it asked
-                // Steam to stop the app, so report the session over instead
-                // of waiting for processes that may never have started.
+                // stop_game removed us before the game ran; report over instead of
+                // waiting for processes that may never start.
                 break;
             }
             let launcher_exited = child
@@ -163,10 +158,8 @@ pub fn monitor_steam_launch(child: Option<Child>, app_id: String, mut ctx: Monit
     });
 }
 
-/// A placeholder pid (0) marks the session as running until the first game
-/// process shows up; store its pid so stop diagnostics see something real.
-/// Never replacing a real pid keeps the entry stable across the game's own
-/// process churn (launchers, restarts, Proton stubs).
+/// Placeholder pid (0) marks running until the first game process shows; store
+/// it, then never replace (stable across launcher/Proton process churn).
 fn adopt_game_pid(ctx: &MonitorContext, processes: &HashSet<ProcessIdentity>) {
     let Some(pid) = processes.iter().map(|identity| identity.pid).min() else {
         return;

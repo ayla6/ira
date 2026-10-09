@@ -9,8 +9,6 @@ fn copy_guarded_update_sql(table: &str) -> String {
     )
 }
 
-/// Reassigns one owned-child table from a duplicate game to the canonical
-/// game (copy-guarded) and then deletes any leftovers from the duplicate.
 fn reassign_child_rows(
     tx: &rusqlite::Transaction<'_>,
     table: &str,
@@ -30,9 +28,6 @@ fn reassign_child_rows(
     Ok(())
 }
 
-/// Fold one duplicate row into the canonical game: scalar fields merge,
-/// group/variant/session/disc rows reassign, owned-child tables move
-/// copy-guarded, then the duplicate row goes away.
 fn merge_one_duplicate(
     tx: &rusqlite::Transaction<'_>,
     canonical_id: i64,
@@ -81,7 +76,6 @@ fn merge_one_duplicate(
     Ok(())
 }
 
-/// Merge duplicate game rows into `canonical_id` while keeping their related data.
 pub fn merge_duplicate_games(
     conn: &DbConn,
     canonical_id: i64,

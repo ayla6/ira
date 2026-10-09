@@ -162,8 +162,8 @@ impl TrophySource {
     }
 
     /// True when this source's id is a real Steam app id the Steam CDN
-    /// fetch buttons can use. Nge carries a GOG product id — not a Steam
-    /// id — and other sources hold RA, title or serial ids.
+    /// fetch buttons can use. Nge carries a GOG product id; other sources
+    /// hold RA, title or serial ids.
     pub fn has_steam_app_id(self) -> bool {
         matches!(self, TrophySource::Gse | TrophySource::SteamNative)
     }

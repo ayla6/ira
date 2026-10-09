@@ -143,8 +143,7 @@ pub(super) fn show_input_profile_editor(
     save.set_sensitive(false);
     apply.set_sensitive(false);
 
-    // The header names the layout being edited and follows renames, instead
-    // of sitting empty above every page.
+    // The header names the layout being edited and follows renames.
     let title = gtk4::Label::new(Some(profile_name.borrow().as_str()));
     title.add_css_class(CSS_TITLE_1);
     layout.header.set_title_widget(Some(&title));
@@ -320,8 +319,7 @@ fn build_pages(
     general_box.append(&super::input_profile_general_page::build_general_page(
         ctx, name,
     ));
-    // The Controller page was one lonely haptics group; it lives on General
-    // now instead of its own near-empty page.
+    // A single haptics group doesn't merit its own page; it lives on General.
     super::input_profile_controller_page::add_controller_groups(
         &general_box,
         &ctx.profile,

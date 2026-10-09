@@ -1066,7 +1066,6 @@ pub(super) fn launch_emulator_no_game(
     )
 }
 
-/// The console-wide controller override saved for `console_id`.
 fn console_controller_input(
     cfg: &Config,
     console_id: &str,

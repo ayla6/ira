@@ -2,7 +2,6 @@
 //! Leaf module: everything environment-related funnels through here so the
 //! set-or-replace pattern is written once.
 
-/// Sets `key` to `value`, replacing any previous entry.
 pub(crate) fn env_set(env: &mut Vec<(String, String)>, key: &str, value: &str) {
     env.retain(|(k, _)| k != key);
     env.push((key.to_string(), value.to_string()));

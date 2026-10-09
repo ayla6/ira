@@ -19,7 +19,6 @@ where
     }
 }
 
-/// [`query_optional`] for single-column rows.
 pub(crate) fn query_optional_scalar<T, P>(
     conn: &DbConn,
     sql: &str,
@@ -32,9 +31,6 @@ where
     query_optional(conn, sql, params, |row| row.get(0))
 }
 
-/// Runs a query returning any number of rows, mapping each through `map.
-/// Consolidates the lock/prepare/collect pattern previously repeated in
-/// every list getter.
 pub(crate) fn query_all<T, P>(
     conn: &DbConn,
     sql: &str,
@@ -50,7 +46,6 @@ where
     rows.collect::<Result<Vec<_>, _>>().map_err(err)
 }
 
-/// [`query_all`] for single-column rows.
 pub(crate) fn query_scalar_all<T, P>(
     conn: &DbConn,
     sql: &str,
@@ -63,8 +58,6 @@ where
     query_all(conn, sql, params, |row| row.get(0))
 }
 
-/// Runs a single INSERT/UPDATE/DELETE statement, consolidating the
-/// lock/execute pattern previously repeated in every small setter.
 pub(crate) fn execute(conn: &DbConn, sql: &str, params: impl rusqlite::Params) -> Result<usize, String> {
     let c = lock_db(conn)?;
     c.execute(sql, params).map_err(err)
@@ -74,7 +67,6 @@ pub(crate) fn execute(conn: &DbConn, sql: &str, params: impl rusqlite::Params) -
 /// limit, large enough that a thousand-game library needs two round-trips.
 pub(crate) const IN_QUERY_CHUNK_SIZE: usize = 500;
 
-/// Sequential `?N` placeholders separated by ", ".
 pub(crate) fn positional_placeholders(count: usize) -> String {
     (1..=count)
         .map(|i| format!("?{i}"))

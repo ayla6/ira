@@ -7,10 +7,8 @@ use super::AzaharGame;
 #[cfg(test)]
 pub(super) mod fixtures;
 
-/// Logical bytes read from the start of a ROM before parsing headers; large
-/// enough to cover cartridge partition 0, its ExeFS and SMDH. Z3DS frames
-/// are at least 256 KiB (larger for CIA-derived content), so the first
-/// frame suffices.
+/// Lead bytes read before parsing; covers partition 0, ExeFS and SMDH (Z3DS
+/// frames are ≥256 KiB, so the first frame suffices).
 const ROM_PREFIX_LEN: usize = 64 * 1024;
 
 fn read_at(file: &mut std::fs::File, offset: u64, buf: &mut [u8]) -> Option<()> {

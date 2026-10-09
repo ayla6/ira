@@ -74,13 +74,8 @@ pub(super) fn build_sgdb_asset_card(
     let card = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     card.set_halign(gtk4::Align::Center);
     card.set_valign(gtk4::Align::Start);
-    // No outer margins: row/column spacing alone sets the rhythm (like
-    // the game grid), so gaps can't read uneven next to the tight
-    // in-card spacing.
+    // No outer margins: row/column spacing alone sets the rhythm.
 
-    // Thumbnail with the author eye button overlaid top-right; the button
-    // is revealed by hovering anywhere on the card (see the sgdb-filter
-    // CSS rules).
     let thumb_overlay = gtk4::Overlay::new();
     let grid_pic = gtk4::Picture::new();
     // Sized paintables, not sized Pictures: a Picture reports its
@@ -199,7 +194,7 @@ pub(super) fn build_sgdb_asset_card(
     // Wrapped and tagged by author and style so a filter click can dim
     // exactly these widgets in place without rebuilding anything, and
     // an unfilter click can re-evaluate each card (art that is still
-    // style-filtered stays dim). Split with tag_author/tag_style.
+    // style-filtered stays dim).
     let flow_child = gtk4::FlowBoxChild::new();
     flow_child.set_widget_name(&widget_tag(&a.author, &a.style));
     flow_child.set_child(Some(&card));
@@ -225,8 +220,7 @@ fn widget_tag(author: &str, style: &str) -> String {
     format!("{author}\u{1f}{style}")
 }
 
-/// The author half of a [`widget_tag`]; the pluck match, kept exact like
-/// the previous bare-name comparison.
+/// The author half of a [`widget_tag`].
 pub(super) fn tag_author(tag: &str) -> &str {
     tag.split('\u{1f}').next().unwrap_or(tag)
 }

@@ -83,15 +83,10 @@ fn enforce_cursor_fn() -> Option<EnforceCursorFn> {
     resolve(&ENFORCE_CURSOR, c"ira_overlay_enforce_cursor")
 }
 
-/// Returns true if the overlay is visible (synced from the shim).
-/// Returns false if the shim is not loaded.
 pub fn is_visible() -> bool {
     visible_fn().is_some_and(|f| unsafe { f() != 0 })
 }
 
-/// Sets the overlay visibility. Called by the Wayland input handler
-/// when Shift+Tab is pressed, or by any other input path that needs
-/// to toggle the overlay.
 pub fn set_visible(v: bool) {
     if let Some(f) = set_visible_fn() {
         unsafe { f(if v { 1 } else { 0 }) };
@@ -127,14 +122,12 @@ pub fn has_sdl_hooks() -> bool {
     has_sdl_fn().is_some_and(|f| unsafe { f() != 0 })
 }
 
-/// Increments the present counter in the shim. Called on every queue_present.
 pub fn increment_present_count() {
     if let Some(f) = increment_present_fn() {
         unsafe { f() };
     }
 }
 
-/// Resets the present counter to zero. Called when a new swapchain is created.
 pub fn reset_present_count() {
     if let Some(f) = reset_present_fn() {
         unsafe { f() };

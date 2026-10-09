@@ -1,8 +1,6 @@
 //! Pre-launch scripts: run synchronously via `sh -c` in the game's working
 //! directory. Aborts the launch on non-zero exit (unless fire-and-forget).
 
-/// Run a pre-launch command synchronously via `sh -c`.
-/// Uses the game's working directory. Aborts launch on non-zero exit.
 pub(crate) fn run_pre_launch(
     cmd: &str,
     cwd: Option<&str>,

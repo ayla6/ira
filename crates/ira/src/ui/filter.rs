@@ -82,7 +82,7 @@ pub(crate) fn game_compare(
 }
 
 /// The filter+sort core shared by the desktop sidebar and big-picture,
-/// so the two modes can't drift apart again: hidden handling, search,
+/// so the two modes can't drift apart: hidden handling, search,
 /// group membership, and the stable sort (equal keys tiebreak on the
 /// insertion id).
 pub fn filter_and_sort(games: &[Game], f: &GameFilter) -> Vec<Game> {

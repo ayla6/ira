@@ -1,16 +1,11 @@
-//! Content hashing for ROM files.
-
 use std::io::Read;
 use std::path::Path;
 
 use md5::{Digest, Md5};
 
-/// Streams a file through MD5 and returns the lowercase hex digest. This is
-/// the ROM's content identity: it lets a scan recognize a game whose file
-/// reappears under a different name or path. On consoles whose
-/// RetroAchievements digest covers only part of the data (NDS computes its
-/// own in [`crate::nds`]) this is not the RA hash, and RA lookups with it
-/// simply miss into the title-based fallback.
+/// Streams a file through MD5 (lowercase hex): the ROM's content identity
+/// across renames. Not the RA hash where digests cover partial data (NDS);
+/// RA lookups with it fall back to titles.
 pub fn file_md5(path: &Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
@@ -47,10 +42,8 @@ pub fn content_md5_and_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<
     Some((format!("{:x}", hasher.finalize()), bytes))
 }
 
-/// [`file_md5`] of the ROM *inside* a `.zip`/`.7z`/`.zst` container, or of
-/// the file itself for anything else. A digest of the container bytes is
-/// useless for RetroAchievements — no game ever lists it — so archives are
-/// hashed through their single decompressed entry, selected by `pick`.
+/// MD5 of the ROM inside a container (or the file itself): a container-bytes
+/// digest matches nothing on RA, so archives hash through one entry.
 pub fn content_md5(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<String> {
     crate::archives::with_entry_reader(path, pick, |reader| reader_md5(reader))
 }

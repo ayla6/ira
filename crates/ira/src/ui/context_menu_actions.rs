@@ -270,7 +270,6 @@ pub(super) fn setup_open_gog_status_action(
 }
 
 
-/// Which metadata list a mass entity add targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum MassEntityList {
     Family,

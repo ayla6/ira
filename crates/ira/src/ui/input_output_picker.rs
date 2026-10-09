@@ -1,6 +1,6 @@
 //! Steam-style command picker: one modal window, pill tab bar (Gamepad /
-//! Mouse / Keyboard / Numpad / Action Sets), large tappable tiles. Replaces
-//! the flat output dropdowns and mirrors Steam Input's output selector.
+//! Mouse / Keyboard / Numpad / Action Sets) and large tappable tiles,
+//! mirroring Steam Input's output selector.
 
 use super::css::{CSS_COMMAND_TILE, CSS_COMMAND_TILE_ACTIVE};
 use super::input_output_keys::{build_keyboard_page, build_numpad_page};

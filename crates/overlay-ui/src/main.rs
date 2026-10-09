@@ -329,7 +329,6 @@ mod tests {
 
     #[test]
     fn test_screen_size_from_env_accepts_positive_only() {
-        // Arrange
         let _gw = EnvGuard::set("IRA_OVERLAY_SCREEN_W", "1920");
         let _gh = EnvGuard::set("IRA_OVERLAY_SCREEN_H", "1080");
         // Act + Assert

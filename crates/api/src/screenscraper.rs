@@ -44,7 +44,6 @@ pub struct ScrapedGame {
     pub classifications: Vec<ira_models::ScraperClassification>,
     /// Every synopsis as `(language, text)` pairs, entities cleaned.
     pub synopses: Vec<(String, String)>,
-    /// Screenshot media URL.
     pub screenshot: Option<String>,
     /// Region-picked 2D box URL — the PS1 square's source.
     pub box2d: Option<String>,
@@ -311,7 +310,6 @@ fn pick<'a>(preference: &[&str], items: &'a [(String, String)]) -> Option<&'a st
     items.iter().map(|(_, text)| text.as_str()).find(|t| !t.is_empty())
 }
 
-// ——— XML model ———
 // The API answers in XML whose shape ES-DE documents by example:
 // Data > ssuser + jeux > jeu* with attributed children. Parsed with
 // quick-xml's serde support; missing nodes deserialize to None.
@@ -822,7 +820,6 @@ fn disc_media_urls(medias: &[SsMedia], regions: &[&str], strict: bool) -> Vec<(i
     out
 }
 
-// ——— genre table ———
 // `genresListe.php` answers `<genre><id>..</id><nom_en>..</nom_en>..` rows
 // covering every genre the service knows, so one cached request serves
 // every picker forever.

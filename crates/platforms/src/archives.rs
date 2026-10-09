@@ -1,8 +1,5 @@
-//! Streaming access to ROMs inside compressed containers: `.zip`, `.7z`
-//! archives and single-file `.zst` streams. Callers get one sequential
-//! pass over the decompressed entry — enough to hash and capture header
-//! ranges without unpacking anything to disk.
-
+//! Streaming ROM access inside `.zip`/`.7z`/`.zst` without unpacking to disk:
+//! one sequential pass over the entry for hashing and header capture.
 use std::io::Read;
 use std::path::Path;
 
@@ -20,10 +17,8 @@ fn ext_of(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
-/// The inner ROM's byte count without reading its data: a plain file's
-/// length from metadata, an archive entry's declared size. The digest
-/// search pairs md5 with this count, and recomputing a digest just to
-/// learn a size re-read whole archives on every batch run.
+/// The inner ROM's byte count without reading data (plain length or archive
+/// entry size); the digest search needs it without re-reading archives.
 pub fn entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
     match ext_of(path).as_str() {
         "zip" => zip_entry_size(path, pick),
@@ -41,9 +36,8 @@ fn zip_entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
     archive.by_index(index).ok().map(|entry| entry.size())
 }
 
-/// The single entry index matching `pick`, or `None` when zero or several
-/// entries match. Opening the archive twice (scan, then read) keeps the
-/// borrow checker happy: `ZipArchive::by_index` borrows the archive.
+/// The single entry index matching `pick` (None when zero or several match);
+/// opened twice because `by_index` borrows the archive.
 fn zip_matching_index(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<usize> {
     let file = std::fs::File::open(path).ok()?;
     let mut archive = zip::ZipArchive::new(file).ok()?;
@@ -85,10 +79,8 @@ fn sevenz_entry_size(path: &Path, pick: &dyn Fn(&str) -> bool) -> Option<u64> {
     }
 }
 
-/// Runs `f` with a reader over the selected entry of `path`, or over the
-/// file itself when it is not an archive. For `.zst` the whole file is the
-/// entry, so `pick` is not consulted. Returns whatever `f` returns, or
-/// None when the container cannot be opened or holds no matching entry.
+/// Runs `f` over `path`'s selected entry (or the file itself); for `.zst` the
+/// whole file is the entry. None when unopenable or nothing matches.
 pub fn with_entry_reader<T, F>(path: &Path, pick: &dyn Fn(&str) -> bool, mut f: F) -> Option<T>
 where
     F: FnMut(&mut dyn Read) -> Option<T>,
@@ -147,10 +139,8 @@ where
     result
 }
 
-/// Captures selected byte ranges from one sequential pass over a stream,
-/// alongside a CRC32 of everything that passed through. Ranges may be
-/// registered as the stream advances (e.g. after a header was decoded);
-/// data before a range starts is ignored.
+/// Captures selected byte ranges from one sequential pass; ranges may be
+/// registered as the stream advances, data before a range starts is ignored.
 pub struct RangeCapture {
     ranges: Vec<(u64, usize)>,
     buffers: Vec<Vec<u8>>,
@@ -173,9 +163,8 @@ impl RangeCapture {
         &self.buffers[index]
     }
 
-    /// Bytes actually captured so far for range `index`. The buffer is
-    /// preallocated to its full length, so progress must be read from here,
-    /// never from `captured(..).len()`.
+    /// Bytes captured so far for range `index`; read progress here, never from
+    /// `captured(..).len()` (the buffer is preallocated to full length).
     pub fn filled(&self, index: usize) -> usize {
         let Some((start, len)) = self.ranges.get(index) else {
             return 0;

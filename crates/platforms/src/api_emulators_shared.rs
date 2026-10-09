@@ -120,8 +120,6 @@ pub(crate) fn detect_folder_bitness(
     names_64: &[&str],
     names_32: &[&str],
 ) -> Option<bool> {
-    // Single directory read: the old code scanned the directory twice
-    // (once for 64-bit names, once for 32-bit names).
     let files = dir_file_names_lower(dir)?;
     if names_64.iter().any(|n| files.contains(&n.to_lowercase())) {
         return Some(true);
@@ -184,8 +182,7 @@ pub(crate) fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Opt
 }
 
 /// Case-insensitive check whether `dir` directly contains any of `dll_names`.
-/// Both sides are lowercased: the old inline version only lowercased the
-/// directory entry, so mixed-case lists like `Galaxy.dll` never matched.
+/// Both sides are lowercased, so mixed-case lists like `Galaxy.dll` match.
 fn dir_has_any_dll(dir: &Path, dll_names: &[&str]) -> bool {
     let lower: Vec<String> = dll_names.iter().map(|n| n.to_lowercase()).collect();
     std::fs::read_dir(dir)
@@ -740,7 +737,7 @@ mod tests {
     #[test]
     fn test_find_api_emu_dll_folder_matches_mixed_case_list() {
         // NGE lists carry `Galaxy.dll` casing; a lowercase file on disk
-        // must still match (the old code lowercased only one side).
+        // must still match.
         let tmp = tempfile::tempdir().unwrap();
         let exe = tmp.path().join("game.exe");
         std::fs::write(&exe, b"x").unwrap();

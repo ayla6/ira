@@ -76,13 +76,11 @@ pub(super) type DeleteSessionFn = Rc<dyn Fn(i64, bool)>;
 /// Returns (interval_seconds, nice_max_seconds). Prefers smallest interval that fits.
 fn axis_config(max_v: f64) -> (f64, f64) {
     const MAX_LINES: usize = 6;
-    // 30m interval only when max ≤ 1h
     if max_v <= 3600.0 {
         let interval = 1800.0;
         let nice = ((max_v / interval).ceil() * interval).max(interval);
         return (interval, nice);
     }
-    // Try 1h, then 2h
     for &interval in &[3600.0, 7200.0] {
         let nice = ((max_v / interval).ceil() * interval).max(interval);
         let num_lines = (nice / interval) as usize + 1;
@@ -215,7 +213,6 @@ fn build_chart_area(
     gtk4::Button,
     gtk4::Button,
 ) {
-    // Chart area: BarChart + day labels + nav (nav centered relative to chart only)
     let chart_area = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     chart_area.set_hexpand(true);
     chart_area.set_vexpand(true);
@@ -258,7 +255,6 @@ fn build_chart_area(
 }
 
 fn build_chart_sidebar() -> (gtk4::Box, gtk4::ListBox) {
-    // Sidebar — fills to bottom of window
     let sidebar_box = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar_box.set_width_request(SIDEBAR_W);
     sidebar_box.set_valign(gtk4::Align::Fill);

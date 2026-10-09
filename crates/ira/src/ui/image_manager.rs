@@ -1219,8 +1219,8 @@ fn build_dir_buttons(
             let refresh = Rc::clone(ctx.refresh_preview);
             move |path| {
                 ira_parser::remove_image_variants(&target_dir, &file_base);
-                // Decode in memory and persist WebP only: a raw copy of an
-                // .ico pick used to strand files that never converted.
+                // Decode in memory and persist WebP only: raw .ico copies
+                // strand unconverted files.
                 let dest_webp = target_dir.join(format!("{file_base}.webp"));
                 if let Ok(bytes) = std::fs::read(path) {
                     if ira_parser::is_decodable_image(&bytes) {

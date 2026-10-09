@@ -164,12 +164,11 @@ mod tests {
 
     #[test]
     fn test_console_config_fullscreen_json_stays_backward_compatible() {
-        // Configs written before fullscreen became inheritable carry an
-        // explicit bool; it must load as a console-level override.
+        // An explicit bool loads as a console-level override.
         let console: ConsoleConfig =
             serde_json::from_str(r#"{"executable":"","ra_core":"","fullscreen":true}"#).unwrap();
         assert_eq!(console.fullscreen, Some(true));
-        // New configs omit the key entirely, meaning inherit.
+        // Omitting the key means inherit.
         let console: ConsoleConfig =
             serde_json::from_str(r#"{"executable":"","ra_core":""}"#).unwrap();
         assert_eq!(console.fullscreen, None);

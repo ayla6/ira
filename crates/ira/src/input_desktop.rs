@@ -17,13 +17,13 @@ use ira_models::ControllerInputMode;
 
 /// How often the wish is re-evaluated (config file, hotplug).
 const TICK: Duration = Duration::from_secs(2);
-/// How often the daemon's event stream is drained. Game output lines are
-/// broadcast to every client, so a slow reader could back up the daemon's
-/// broadcast and stall its loop; drain far more often than that.
+/// How often the daemon's event stream is drained (far more often than the
+/// re-evaluation above): game output is broadcast to every client, so a
+/// slow reader stalls the daemon's loop.
 const DRAIN: Duration = Duration::from_millis(250);
 
-/// Starts the background thread; failures are logged, never fatal — the
-/// desktop behaviour is a default, not a requirement.
+/// Failures are logged, never fatal — desktop behaviour is a default,
+/// not a requirement.
 pub fn start(save_dir: String) {
     let result = std::thread::Builder::new()
         .name("ira-input-desktop".to_string())
@@ -58,9 +58,8 @@ fn run(save_dir: String) {
         }
         if std::time::Instant::now() >= next_tick {
             next_tick = std::time::Instant::now() + TICK;
-            // A broken config file falls back to defaults inside
-            // load_config, which would disable the desktop behaviour; that
-            // is the honest reading of an unreadable configuration.
+            // A broken config falls back to defaults inside load_config,
+            // which disables the desktop behaviour.
             let desired = desired_for(&load_config(), &save_dir);
             if sent.as_ref() != Some(&desired) {
                 let delivered = client

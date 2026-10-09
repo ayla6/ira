@@ -3,7 +3,6 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use ira_parser::GALAXY_ID;
 
-/// Check if a GOG game folder contains Galaxy.dll or Galaxy64.dll (case-insensitive).
 pub fn is_gog_game(folder: &str) -> bool {
     find_galaxy_dll(folder).is_some()
 }
@@ -43,9 +42,7 @@ fn find_galaxy_dll(folder: &str) -> Option<PathBuf> {
     None
 }
 
-/// Parse one goggame-*.info file's product id and display name.
-/// Accepts both string and numeric ids, and both `rootGameId`/`gameId`
-/// and `name`/`title` keys.
+/// Accepts string or numeric ids, `rootGameId`/`gameId` and `name`/`title` keys.
 fn parse_gog_info_json(data: &str) -> Option<(String, String)> {
     let json = serde_json::from_str::<serde_json::Value>(data).ok()?;
     let product_id = json
@@ -67,7 +64,6 @@ fn parse_gog_info_json(data: &str) -> Option<(String, String)> {
     Some((product_id, name))
 }
 
-/// Walk up from `start` looking for a directory containing goggame-*.info files.
 /// Returns (info_dir, product_id, name).
 pub fn find_gog_info(start: &str) -> Option<(PathBuf, String, String)> {
     let mut current = Path::new(start).to_path_buf();
@@ -181,8 +177,7 @@ fn write_new_emu_config(settings_dir: &Path, product_id: &str) -> Result<(), Str
     )
 }
 
-/// Generate NemirtingasGalaxyEmu.json in the game's ngalaxye_settings folder.
-/// Uses XXH3 checksum of the Galaxy DLL to determine old vs new config format.
+/// Uses the Galaxy DLL's XXH3 checksum to pick old vs new config format.
 pub fn generate_galaxy_emu_config(galaxy_dll_folder: &str, product_id: &str) -> Result<(), String> {
     let settings_dir = Path::new(galaxy_dll_folder).join("ngalaxye_settings");
     std::fs::create_dir_all(&settings_dir)

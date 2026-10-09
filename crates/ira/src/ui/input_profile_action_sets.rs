@@ -260,7 +260,7 @@ fn show_add_set_dialog(
             ctx.active_target.set(EditingTarget::Set(last));
             // Order matters: the rename target must follow the new set
             // before the entry text changes, or the changed handler renames
-            // whatever set was selected before (the old "Set 2" bug).
+            // whatever set was selected before.
             rename_target.set(last);
             if rename.text() != name {
                 rename.set_text(&name);

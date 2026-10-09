@@ -1,8 +1,6 @@
-//! Canvas panel geometry — pure functions, no SHM dependency.
-//!
-//! Split out of `canvas.rs` (which owns the SHM mapping): geometry is
-//! testable without mappings and has different callers (host sizes its
-//! window, layer positions its quad).
+//! Canvas panel geometry — pure functions, no SHM dependency: testable
+//! without mappings, with different callers than `canvas.rs` (host sizes
+//! its window, layer positions its quad).
 
 use super::canvas::{CANVAS_MAX_H, CANVAS_MAX_W};
 use crate::config::OverlayPosition;

@@ -44,9 +44,8 @@ impl DaemonClient {
         })
     }
 
-    /// Connects to the daemon, starting one first when the socket is dead.
-    /// `binary` is the ira-input executable; the daemon is spawned detached
-    /// (its own session) so it can outlive short-lived callers.
+    /// Connects to the daemon, starting one first when the socket is dead. The daemon
+    /// is spawned detached so it can outlive short-lived callers.
     pub fn ensure_connected(binary: &str) -> Result<Self, String> {
         let path = socket_path();
         if let Ok(client) = Self::connect(&path) {
@@ -63,9 +62,8 @@ impl DaemonClient {
         Err("ira-input daemon did not accept connections in time".to_string())
     }
 
-    /// Connects (spawning the daemon when needed) and verifies it speaks
-    /// this build's protocol version. `Err` means "use whatever local
-    /// fallback the caller has".
+    /// Connects and verifies the protocol version. `Err` means "use whatever
+    /// local fallback the caller has".
     pub fn connect_daemon(binary: &str) -> Result<Self, String> {
         let mut client = Self::ensure_connected(binary)?;
         let status = client.status()?;
@@ -119,11 +117,9 @@ impl DaemonClient {
         }
     }
 
-    /// Discards the daemon's broadcasts on a cloned descriptor for the rest
-    /// of this client's life. A client that holds its connection open but
-    /// never reads (a launch holding the desktop behaviour off while the
-    /// game runs) would otherwise let the socket buffer fill and stall the
-    /// daemon's writes to every client.
+    /// Discards the daemon's broadcasts on a cloned descriptor for this client's life:
+    /// an unread-but-connected client would otherwise fill the socket buffer and stall
+    /// the daemon's writes to every client.
     pub fn drain_in_background(&self) {
         let Ok(stream) = self.stream.try_clone() else {
             return;
@@ -156,7 +152,6 @@ impl DaemonClient {
         }
     }
 
-    /// Hands a game to the daemon and waits it out in one call.
     pub fn launch_and_wait(
         &mut self,
         request: LaunchRequest,
@@ -166,9 +161,8 @@ impl DaemonClient {
         self.wait_session(on_event)
     }
 
-    /// Pumps events until the session ends; returns the game's exit code.
-    /// An unexpected connection loss surfaces as `Err` — the game may still
-    /// be running, so callers must not treat it as a clean end.
+    /// Pumps events until the session ends; returns the game's exit code. A lost
+    /// connection surfaces as `Err` with the game possibly still running.
     pub fn wait_session(&mut self, mut on_event: impl FnMut(Event)) -> Result<i32, String> {
         loop {
             match self.read()? {
@@ -187,11 +181,8 @@ impl DaemonClient {
         }
     }
 
-    /// Waits up to `timeout` for the next event, draining it to `on_event`
-    /// and returning whether one arrived. `Ok(None)` on timeout means the
-    /// connection is idle and healthy — a long-lived client uses this to
-    /// keep the daemon's event stream flowing while doing periodic work.
-    /// A connection error surfaces as `Err` for the caller to reconnect.
+    /// Waits up to `timeout` for the next event. `Ok(None)` on timeout means idle
+    /// and healthy; `Err` means reconnect.
     pub fn wait_event_timeout(
         &mut self,
         timeout: Duration,
@@ -256,9 +247,8 @@ fn spawn_daemon(binary: &str) -> Result<(), String> {
     }
     let mut command = Command::new(binary);
     command.arg("--daemon").stdin(std::process::Stdio::null());
-    // Detach into its own session: the daemon must survive the terminal's
-    // Ctrl-C and the launcher's process group, and retire on its own idle
-    // timer instead.
+    // Detach into its own session: the daemon must survive the terminal's Ctrl-C
+    // and the launcher's process group, retiring on its own idle timer instead.
     unsafe {
         command.pre_exec(|| {
             libc::setsid();

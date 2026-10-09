@@ -10,9 +10,8 @@ use gdk_pixbuf::Pixbuf;
 use gio::MemoryInputStream;
 use glib::Bytes;
 
-/// The mark for a stored board+value pair, rendered to fit `size`
-/// pixels. `None` for pairs without a bundled mark, or when no SVG
-/// loader is installed for gdk-pixbuf.
+/// `None` for pairs without a bundled mark, or when no SVG loader is
+/// installed for gdk-pixbuf.
 pub fn rating_texture(kind: &str, value: &str, size: i32) -> Option<Texture> {
     if size <= 0 {
         return None;
@@ -31,7 +30,6 @@ pub fn rating_texture(kind: &str, value: &str, size: i32) -> Option<Texture> {
     }
 }
 
-/// The bundled SVG for an asset slug, if there is one.
 fn svg_bytes(slug: &str) -> Option<&'static [u8]> {
     match slug {
         "acb-g" => Some(include_bytes!("../assets/ratings/acb-g.svg") as &[u8]),

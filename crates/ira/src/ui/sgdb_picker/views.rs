@@ -51,8 +51,6 @@ pub(super) fn build_picker_views(asset: &str, zoom_initial: i32) -> (gtk4::Box, 
 
     let flow = gtk4::FlowBox::new();
     flow.set_selection_mode(gtk4::SelectionMode::None);
-    // Children size themselves to their tiles; the box wraps by width so
-    // columns follow the window and zoom like the game grid does.
     flow.set_homogeneous(false);
     flow.set_min_children_per_line(1);
     flow.set_row_spacing(12);

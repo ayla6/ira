@@ -305,7 +305,8 @@ pub fn show_profile_dialog(
         }
     }
 
-    // Auto-update prefix from name when not manually edited
+    // The prefix auto-updates from the name until the user edits it
+    // directly; the flag below tracks that.
     let prefix_entry_for_name = prefix_entry.clone();
     let prefix_me_for_name = prefix_manually_edited.clone();
     let prefix_programmatic_for_name = prefix_programmatic.clone();
@@ -325,7 +326,6 @@ pub fn show_profile_dialog(
         prefix_programmatic_for_name.set(false);
     });
 
-    // Mark as manually edited when the user types in the prefix field
     let prefix_me_for_edit = prefix_manually_edited.clone();
     let prefix_programmatic_for_edit = prefix_programmatic.clone();
     prefix_entry.connect_changed(move |_| {
@@ -351,7 +351,6 @@ pub fn show_profile_dialog(
     );
     prefix_entry.add_suffix(&prefix_browse);
 
-    // Reset button — regenerate prefix from name, clear manual flag
     let prefix_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     prefix_reset.add_css_class(CSS_FLAT);
     prefix_reset.set_valign(gtk4::Align::Center);
@@ -404,7 +403,7 @@ pub fn show_profile_dialog(
     ));
     umu_row.set_active(existing.as_ref().is_none_or(|p| p.umu_enabled));
 
-    // Auto-enable and disable UMU toggle based on wine version selection
+    // Proton versions force UMU on and lock the toggle.
     let umu_row_for_version = umu_row.clone();
     let version_row_for_cb = version_row.clone();
     let versions_for_cb = versions.clone();
@@ -419,7 +418,6 @@ pub fn show_profile_dialog(
             }
         });
 
-    // Set initial state based on selected version
     {
         let idx = version_row.selected() as usize;
         if let Some((_, ver)) = versions.get(idx) {

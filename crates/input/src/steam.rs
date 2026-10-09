@@ -124,8 +124,7 @@ fn parse_process_start_time(stat: &str) -> Option<u64> {
 }
 
 fn environment_has_steam_app(environment: &[u8], app_id: &str) -> bool {
-    // Compared without allocating: this runs per process per poll, and the
-    // previous `format!("{key}=")` built three strings per environ entry.
+    // Compared without allocating: this runs per process per poll.
     let app_id = app_id.as_bytes();
     environment.split(|byte| *byte == 0).any(|variable| {
         ["SteamAppId", "SteamGameId", "STEAM_COMPAT_APP_ID"]

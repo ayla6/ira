@@ -19,12 +19,10 @@ pub const SHM_VERSION: u32 = 3;
 pub const MAX_ACHIEVEMENTS: usize = 1024;
 pub const MAX_NOTIFICATIONS: usize = 16;
 
-/// Total size of the shared memory region.
 pub const SHM_SIZE: usize = std::mem::size_of::<ShmHeader>()
     + MAX_ACHIEVEMENTS * std::mem::size_of::<AchievementEntry>()
     + MAX_NOTIFICATIONS * std::mem::size_of::<NotificationEntry>();
 
-/// Fixed-size header at the start of the shared memory region.
 #[repr(C)]
 pub struct ShmHeader {
     pub magic: u32,
@@ -122,7 +120,6 @@ impl Default for ShmHeader {
     }
 }
 
-/// One achievement entry in the shared memory array.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct AchievementEntry {
@@ -139,7 +136,6 @@ pub struct AchievementEntry {
     pub _pad: [u8; 5],
 }
 
-/// Ring-buffer entry for achievement unlock / progress notifications.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct NotificationEntry {
@@ -161,7 +157,6 @@ pub enum NotificationType {
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct InputEventRaw {
-    /// One of `EVT_*` below.
     pub event_type: u32,
     pub x: i32,
     pub y: i32,
@@ -183,7 +178,6 @@ pub const EVT_SCREENSHOT: u32 = 5;
 pub const EVT_TOGGLE_RECORD: u32 = 6;
 pub const EVT_SCROLL: u32 = 7;
 
-/// Offsets into the shared memory region for each section.
 pub const fn header_offset() -> usize {
     0
 }
@@ -209,7 +203,6 @@ pub const OVERLAY_VISIBLE_OFFSET: usize = std::mem::offset_of!(ShmHeader, overla
 pub const DAEMON_TOGGLE_ENV: &str = "IRA_OVERLAY_DAEMON_TOGGLE";
 
 impl ShmHeader {
-    /// Cross-process toggle debounce window in milliseconds.
     pub(crate) const TOGGLE_DEBOUNCE_MS: u32 = 300;
 
     /// Wall-clock milliseconds since the UNIX epoch, truncated to u32.
@@ -243,8 +236,8 @@ impl ShmHeader {
         self.overlay_visible
             .compare_exchange(current, new_value, Ordering::SeqCst, Ordering::SeqCst)
             .ok()?;
-        // Stamp only after a successful flip — matches historical behavior:
-        // a lost race must not refresh the debounce window.
+        // Stamp only after a successful flip: a lost race must not refresh
+        // the debounce window.
         self.last_toggle_ms.store(now, Ordering::SeqCst);
         Some(new_visible)
     }
@@ -261,8 +254,6 @@ mod tests {
 
     #[test]
     fn test_shm_size_is_reasonable() {
-        // Compile-time assertions are in the const block above.
-        // This test verifies the size at link time as well.
         let size = SHM_SIZE;
         assert!(size > 1024 && size < 2 * 1024 * 1024);
     }

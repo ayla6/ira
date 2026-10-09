@@ -144,7 +144,6 @@ mod tests {
         let mut pixels = vec![0u8; 2 * 2 * 2];
         pixels[0..2].copy_from_slice(&0x0400u16.to_le_bytes());
         pixels[2..4].copy_from_slice(&0x7800u16.to_le_bytes());
-        // Act
         save_rgb565_png(&path, 2, 2, &pixels).unwrap();
         // Assert: green uses the full 6-bit range, red the 5-bit range.
         let img = image::open(&path).unwrap().to_rgb8();

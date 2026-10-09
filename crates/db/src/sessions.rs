@@ -209,7 +209,6 @@ mod tests {
         super::super::set_last_played(&conn, game, 2000).unwrap();
         let old = record_session(&conn, game, None, 1000, 1100).unwrap();
         let new = record_session(&conn, game, None, 2000, 2100).unwrap();
-        // Act: delete the newest session, then recompute.
         delete_session(&conn, new).unwrap();
         let latest = recompute_last_played(&conn, game, None).unwrap();
         // Assert: falls back to the remaining session's start.
@@ -226,7 +225,6 @@ mod tests {
         let game = super::super::add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "1", trophy_id: "", native_id: "", platform_id: "", title: "G" }).unwrap();
         super::super::set_last_played(&conn, game, 1000).unwrap();
         let id = record_session(&conn, game, None, 1000, 1100).unwrap();
-        // Act: delete the only session, then recompute.
         delete_session(&conn, id).unwrap();
         let latest = recompute_last_played(&conn, game, None).unwrap();
         // Assert: no sessions left clears the timestamp.
@@ -252,7 +250,6 @@ mod tests {
         super::super::set_variant_last_played(&conn, vid, 2000).unwrap();
         record_session(&conn, game, Some(vid), 1000, 1100).unwrap();
         let new = record_session(&conn, game, Some(vid), 2000, 2100).unwrap();
-        // Act: delete the newest variant session, then recompute that scope.
         delete_session(&conn, new).unwrap();
         let latest = recompute_last_played(&conn, game, Some(vid)).unwrap();
         // Assert: variant falls back; the base game row is untouched.

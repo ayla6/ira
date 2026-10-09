@@ -45,7 +45,6 @@ pub(crate) fn data_dir_for(executable: &str) -> PathBuf {
 
 use crate::qt_ini::QtIni;
 
-/// Game locations and virtual storage roots configured in Azahar.
 pub struct AzaharPaths {
     /// (directory, deep scan) pairs from the game list; deep scan searches
     /// subdirectories.

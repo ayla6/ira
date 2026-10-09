@@ -1,15 +1,13 @@
 use std::path::{Path, PathBuf};
 
-/// Set up centralized save path for GBE by symlinking its save directories
-/// inside the Wine prefix. Called at launch time when `trophy_source == Gse`.
+/// Called at launch time when `trophy_source == Gse`.
 ///
 /// GBE saves to `%APPDATA%\GSE Saves\` (legacy name: `Goldberg SteamEmu Saves`).
 /// We replace those directories with symlinks to `<save_dir>/emulator_saves/gbe/`
 /// so saves persist across prefix resets.
 ///
-/// The previous approach passed `GseSavePath` as an env var to redirect GBE's
-/// save root. That broke Denuvo/reflex hypervisor games (P5T, P5R): with the
-/// env var set, GBE ignores its existing settings folder under the default save
+/// Redirecting GBE's save root with the `GseSavePath` env var breaks
+/// Denuvo/reflex hypervisor games (P5T, P5R): with the env var set, GBE
 /// root, and the game refuses to start. Symlinks keep GBE on its default path,
 /// so the game can't tell saves were redirected.
 pub fn setup_gbe_saves(wine_prefix: &str, save_dir: &str) {
@@ -24,7 +22,6 @@ pub fn setup_gbe_saves(wine_prefix: &str, save_dir: &str) {
         create_roaming_symlink(&user_dir, &centralized, "Goldberg SteamEmu Saves");
     }
 }
-/// Set up centralized save path for NGE by creating symlinks in the Wine prefix.
 /// Called at launch time when `trophy_source == Nge` and Wine is enabled.
 ///
 /// NGE saves to `%APPDATA%\NemirtingasGalaxyEmu\`. We replace that directory
@@ -43,7 +40,6 @@ pub fn setup_nge_saves(wine_prefix: &str, save_dir: &str) {
     }
 }
 
-/// Create a symlink `<user_dir>/AppData/Roaming/<name>` → `centralized`.
 fn create_roaming_symlink(user_dir: &Path, centralized: &Path, name: &str) {
     let roaming = user_dir.join("AppData").join("Roaming");
     if let Err(e) = std::fs::create_dir_all(&roaming) {
@@ -66,7 +62,6 @@ fn create_save_symlink(base: &Path, name: &str, centralized: &Path) {
         if meta.file_type().is_symlink() {
             return;
         }
-        // Real directory — migrate contents safely before replacing
         eprintln!(
             "Migrating {} saves from {} to centralized path",
             name,
@@ -103,9 +98,6 @@ fn native_saves_base() -> PathBuf {
         })
 }
 
-/// Set up centralized save path for GBE for a native Linux game by symlinking
-/// GBE's native save directories (`$XDG_DATA_HOME/GSE Saves` and legacy
-/// `Goldberg SteamEmu Saves`) to `<save_dir>/emulator_saves/gbe/`.
 pub fn setup_gbe_saves_native(save_dir: &str) {
     let centralized = Path::new(save_dir).join("emulator_saves").join("gbe");
     if let Err(e) = std::fs::create_dir_all(&centralized) {

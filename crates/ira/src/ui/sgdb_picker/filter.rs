@@ -5,7 +5,6 @@ use super::types::SgdbPickerCtx;
 use adw::prelude::*;
 
 impl SgdbPickerCtx {
-    /// Re-render every asset currently in the store.
     pub(super) fn rebuild_all(&self) {
         let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
         else {
@@ -16,7 +15,6 @@ impl SgdbPickerCtx {
         self.rendered.set(assets.len());
     }
 
-    /// Render assets fetched since the last render (infinite scroll).
     pub(super) fn append_new(&self) {
         let start = self.rendered.get();
         if start >= self.store.borrow().len() {
@@ -73,12 +71,10 @@ impl SgdbPickerCtx {
         }
     }
 
-    /// Dim one author's art in place: persist the choice, then dim
-    /// exactly that author's cards and rows where they stand and flip
-    /// their eye buttons to the unfilter state — no rebuild, no reorder,
-    /// so loaded thumbnails and the scroll position stay untouched and
-    /// the art stays visible, just transparent. The store keeps its
-    /// order; later pages render dimmed through the normal path.
+    /// Dim one author's art in place: persist the choice, dim exactly
+    /// that author's cards and rows where they stand, and flip their eye
+    /// buttons to the unfilter state. The art stays visible, just
+    /// transparent, and the store keeps its order for later pages.
     fn filter_author(&self, author: &str, steam64: &str) {
         if let Some(persist) = &self.filter_user {
             persist(author.to_string(), steam64.to_string());
@@ -97,11 +93,9 @@ impl SgdbPickerCtx {
         }
     }
 
-    /// Show one author's art again: persist the removal, then undim exactly
-    /// that author's cards and rows in place and flip their eye buttons
-    /// back to the hide state — no rebuild, so loaded thumbnails and the
-    /// scroll position stay untouched. Cards whose style is still filtered
-    /// keep their dim (re-checked per card via its tag).
+    /// Show one author's art again: persist the removal, undim exactly
+    /// that author's cards and rows, and flip their eye buttons back.
+    /// Cards whose style is still filtered keep their dim.
     fn unfilter_author(&self, author: &str) {
         if let Some(persist) = &self.unfilter_user {
             persist(author.to_string());
@@ -177,14 +171,12 @@ fn settle_list_author(ctx: &SgdbPickerCtx, list: &gtk4::ListBox, author: &str) {
     }
 }
 
-/// True when the card/row widget's tagged author/style is filtered.
 fn card_dimmed(ctx: &SgdbPickerCtx, widget: &gtk4::Widget) -> bool {
     let name = widget.widget_name();
     ctx.steam
         .asset_filtered(tag_author(&name), tag_style(&name))
 }
 
-/// Index of the first dimmed child, if any.
 fn first_dimmed_pos(container: &impl IsA<gtk4::Widget>, ctx: &SgdbPickerCtx) -> Option<i32> {
     let mut index = 0;
     let mut child = container.first_child();
@@ -198,7 +190,6 @@ fn first_dimmed_pos(container: &impl IsA<gtk4::Widget>, ctx: &SgdbPickerCtx) -> 
     None
 }
 
-/// Detach dimmed children, in order, for re-appending after new cards.
 pub(super) fn detach_dimmed(
     ctx: &SgdbPickerCtx,
     container: &impl IsA<gtk4::Widget>,

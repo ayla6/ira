@@ -20,7 +20,6 @@ pub(super) fn parse_display_number(display: &str) -> Option<(u32, usize)> {
     parts.next().is_none().then_some((num, screen))
 }
 
-/// One length-prefixed field of an Xauthority record.
 fn take_field(data: &[u8], off: usize) -> Option<(Vec<u8>, usize)> {
     let len = u16::from_be_bytes(data.get(off..off.checked_add(2)?)?.try_into().ok()?) as usize;
     let end = off.checked_add(2)?.checked_add(len)?;

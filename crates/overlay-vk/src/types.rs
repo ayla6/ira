@@ -96,8 +96,6 @@ pub static DEVICES: Mutex<Option<HashMap<usize, DeviceData>>> = Mutex::new(None)
 pub static SWAPCHAINS: Mutex<Option<HashMap<u64, SwapchainData>>> = Mutex::new(None);
 
 /// One-shot env check for layer diagnostics (`IRA_OVERLAY_DEBUG=1`).
-/// Single source of truth: canvas, wayland, and shim_bridge shared
-/// copy-pasted versions of this.
 pub(crate) fn debug_log() -> bool {
     static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *DEBUG.get_or_init(|| std::env::var_os("IRA_OVERLAY_DEBUG").is_some())

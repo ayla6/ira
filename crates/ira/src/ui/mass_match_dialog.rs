@@ -214,7 +214,6 @@ pub(super) fn match_id_button(source: MatchSource, id: &str, name: &str) -> gtk4
 /// The row state lives behind `Rc`: the dialog hands a clone to every
 /// pass and the toggle, and a plain `RefCell` clone would fork the state
 /// instead of sharing it — every clone watching its own empty copy.
-/// That fork is why the toggle historically never hid anything.
 #[derive(Clone)]
 pub(super) struct RowVis {
     rows: Rc<RefCell<Vec<gtk4::ListBoxRow>>>,

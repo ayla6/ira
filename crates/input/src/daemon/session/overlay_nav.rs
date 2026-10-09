@@ -25,7 +25,7 @@ const PRESSED_ABOVE: f32 = 0.5;
 const STICK_PRESS: f32 = 0.6;
 const STICK_RELEASE: f32 = 0.4;
 
-/// What one navigation press does. Pure mapping, tested below.
+/// What one navigation press does. Tested below.
 fn command_for_source(source: InputSource) -> Option<CanvasCommand> {
     let nav = |kind| Some(CanvasCommand::nav(kind));
     match source {
@@ -52,9 +52,8 @@ fn command_for_source(source: InputSource) -> Option<CanvasCommand> {
     }
 }
 
-/// Left-stick halves with press/release hysteresis: a deflection past
-/// `STICK_PRESS` latches until it falls back below `STICK_RELEASE`, so
-/// hovering at the edge cannot machine-gun the menu. Pure for testability.
+/// Left-stick halves with press/release hysteresis, so hovering at the edge
+/// cannot machine-gun the menu.
 fn stick_halves(
     axis: GamepadAxis,
     value: f32,
@@ -111,7 +110,6 @@ fn repeats(source: InputSource) -> bool {
 }
 
 /// Directions held past the initial delay re-fire at the repeat rate.
-/// Pure for testability.
 fn repeat_due(
     held: &HashMap<InputSource, Instant>,
     last_repeat: Instant,
@@ -129,9 +127,7 @@ fn repeat_due(
 }
 
 impl OverlayNav {
-    /// Arms from the session env: same launcher marker, and the host's
-    /// canvas for command pushes (the game SHM only supplies the db_id
-    /// for the canvas path). Silent `None` until the host created its
+    /// Arms from the session env. Silent `None` until the host created its
     /// canvas (callers retry lazily).
     pub(crate) fn arm(env: Option<&[(String, String)]>) -> Option<Self> {
         let shm_name = super::daemon_toggle_shm_name(env)?;
@@ -144,9 +140,8 @@ impl OverlayNav {
         })
     }
 
-    /// Translates one pad event while the overlay is visible. Press edges
-    /// act; releases just clear the edge latch. The session drops
-    /// everything afterwards regardless — the game never sees it.
+    /// Translates one pad event while the overlay is visible; the session drops
+    /// everything afterwards regardless, so the game never sees it.
     pub(crate) fn feed(&mut self, event: &InputEvent) {
         match event.source {
             InputSource::Button(button) => {
@@ -181,8 +176,7 @@ impl OverlayNav {
         }
     }
 
-    /// Re-fires held directions past the repeat delay. Called every pass
-    /// while visible; the session drops pad input regardless.
+    /// Re-fires held directions past the repeat delay. Called every pass while visible.
     pub(crate) fn poll_repeat(&mut self) {
         self.poll_repeat_at(Instant::now());
     }

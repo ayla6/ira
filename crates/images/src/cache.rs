@@ -12,10 +12,8 @@ pub(crate) type PendingPixbufMap = HashMap<String, Vec<PendingPixbufCallback>>;
 
 pub(crate) const DECODE_POOL_SIZE: usize = 4;
 
-/// The header/editor logos draw through a pixbuf (cairo), so the decoded logo
-/// is also reachable as a pixbuf. Both the texture and the pixbuf wrap the
-/// same decoded byte buffer, so the pixbuf cache adds no pixel data of its own
-/// — it only keeps the wrapper reachable so logos stay warm and instant.
+/// Wrappers share the decoded byte buffer with the texture cache, so this
+/// cache adds no pixel data — it only keeps logos warm and instant.
 pub(crate) const PIXBUF_CACHE_MAX_BYTES: usize = 128 * 1024 * 1024;
 
 /// Textures at or below this size are treated as icons (sidebar rows,
@@ -24,11 +22,8 @@ pub(crate) const ICON_MAX_DIM: u32 = 128;
 /// The icon cache is bounded by bytes only — a sidebar's worth of tiny icons
 /// (≤64KB each) stays warm under the cap without an entry count to thrash on.
 pub(crate) const ICON_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
-/// Textures above this many pixels are "game page" images (heroes) — the real
-/// memory hogs. The entry cap is generous enough that browsing through game
-/// pages keeps the last ~dozen heroes warm (mmap returns evicted buffers to
-/// the OS, so the byte cap is the real memory guard); the cap only prevents
-/// pathological growth from a huge hero-dense library.
+/// Textures above this many pixels are the real memory hogs: the entry cap
+/// keeps the last ~dozen heroes warm while the byte cap stays the real guard.
 pub(crate) const HERO_MIN_PIXELS: u64 = 1_000_000;
 pub(crate) const HERO_CACHE_MAX_ENTRIES: usize = 16;
 pub(crate) const HERO_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -65,10 +60,8 @@ pub(crate) struct TextureCache {
 }
 
 impl TextureCache {
-    /// `max_entries` is `None` for byte-cap-only tiers (icons, general
-    /// textures): those never evict by count, so scrolling a long grid or
-    /// sidebar doesn't thrash. `Some(n)` is only used for the hero tier,
-    /// where even a few full-screen textures would blow the memory budget.
+    /// `None` = byte-cap-only (icons, general); `Some(n)` only for the hero
+    /// tier, where a few full-screen textures would blow the memory budget.
     pub(crate) fn new(max_entries: Option<usize>, max_bytes: usize) -> Self {
         Self {
             map: HashMap::new(),
@@ -184,11 +177,8 @@ impl TextureCache {
     }
 }
 
-/// Byte-capped cache for the pixbuf wrappers (header/editor logos). No entry
-/// cap: a library's logos must all stay warm so switching games is instant.
-/// Wrappers share the decoded byte buffer with the texture cache.
-/// Eviction is LRU, mirroring [`TextureCache`], so a burst of fresh logos
-/// never evicts the currently visible one.
+/// Byte-capped cache for the pixbuf wrappers (header/editor logos): no entry
+/// cap so a library's logos stay warm, sharing the texture byte buffer.
 pub(crate) struct PixbufCache {
     map: HashMap<String, gtk4::gdk_pixbuf::Pixbuf>,
     order: HashMap<String, u64>,
@@ -269,8 +259,6 @@ impl PixbufCache {
     }
 }
 
-/// Route a texture into the tier that fits its size: icons (≤128px), heroes
-/// (game-page sized, entry-capped) and everything else (byte-capped only).
 pub(crate) fn insert_texture(path: &str, texture: Texture) {
     let w = texture.width();
     let h = texture.height();
@@ -286,8 +274,7 @@ pub(crate) fn insert_texture(path: &str, texture: Texture) {
     }
 }
 
-/// Drop a path from every texture tier. Single place that knows the tier
-/// list, so `insert_texture` and `invalidate_texture` can't drift apart when
+/// Single place that knows the tier list, so callers can't drift apart when
 /// tiers change.
 pub(crate) fn remove_texture(path: &str) {
     TEXTURE_CACHE.with(|cell| cell.borrow_mut().remove(path));
@@ -312,9 +299,8 @@ pub fn clear_texture_cache() {
     PENDING_PIXBUFS.with(|cell| cell.borrow_mut().clear());
 }
 
-/// Drop every cached image except the protected paths. Used on game start to
-/// release heroes/covers from previously viewed games while keeping the
-/// sidebar icons and the current screen's images warm.
+/// Called on game start to release old heroes/covers while keeping sidebar
+/// icons and the current screen's images warm.
 pub fn trim_image_caches(protected: &HashSet<String>) {
     let _s = info_span!("trim_image_caches", protected = protected.len()).entered();
     TEXTURE_CACHE.with(|cell| cell.borrow_mut().retain(protected));

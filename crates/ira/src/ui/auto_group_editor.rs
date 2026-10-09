@@ -275,7 +275,7 @@ impl CriterionEditor {
 
         let controls = ControlRows::new(&initial, values_page, state);
 
-        // The card gets the rule's rows; the add-rule row stays last.
+        // The add-rule row stays last.
         let rows: Vec<gtk4::Widget> = [dimension.clone().upcast()]
             .into_iter()
             .chain(controls.rows())

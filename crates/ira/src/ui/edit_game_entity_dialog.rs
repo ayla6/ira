@@ -578,13 +578,8 @@ pub(super) fn show_entity_dialog(
     dialog.set_content_height(520);
     let toast_overlay = adw::ToastOverlay::new();
 
-    // ——— Stacked navigation: one page per level, each with its own
-    // header. The root lists the game's own entities; Add and Manage
-    // push their pages; every row pushes the entity it belongs to and
-    // the merge picker pushes on top of that. The navigation view
-    // owns the back button, the swipe-back gesture and Escape — pages
-    // only ever exist after an explicit push, so a swipe can never
-    // land on an unopened page. ———
+    // Stacked navigation: one page per level; the view owns back/swipe/Escape.
+    // Pages exist only after a push, so a swipe never lands on an unopened page.
     let nav = adw::NavigationView::new();
     toast_overlay.set_child(Some(&nav));
     dialog.set_child(Some(&toast_overlay));
@@ -1018,12 +1013,9 @@ pub(super) fn show_entity_dialog(
     };
 
 
-    // Fetch the source's whole table when this kind's cache was never
-    // fetched: the pickers search the local cache, and a library new
-    // to matching would otherwise present three rows where the source
-    // has hundreds. The fetched-at marker makes "never" explicit and
-    // gives a future refetch its hook; the run reports on the sidebar
-    // strip like every other job.
+    // Fetch the whole table when never fetched: pickers search the local cache,
+    // so a new library would show three rows where the source has hundreds.
+    // The fetched-at marker makes "never" explicit for future refetches.
     let maybe_warm: Rc<dyn Fn()> = Rc::new({
         let state = state.clone();
         let warming = warming.clone();

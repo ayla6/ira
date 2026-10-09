@@ -6,8 +6,8 @@ pub fn set_game_hidden(conn: &DbConn, id: i64, hidden: bool) -> Result<(), Strin
 }
 
 /// Marks whether the source scan that owns this row still finds the game's
-/// files. A vanished row keeps its playtime and trophies but game loads
-/// ignore it entirely — it is not the user's hidden flag.
+/// files. A vanished row keeps its playtime and trophies, but game loads
+/// ignore it entirely.
 pub fn set_game_vanished(conn: &DbConn, id: i64, vanished: bool) -> Result<(), String> {
     crate::update_field(conn, id, "vanished", &vanished)
 }
@@ -105,8 +105,8 @@ pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<()
 
 /// Sets the Steam id alone, without touching the achievement keys: the
 /// manual link row for console games and any future single-field edit.
-/// Unlike `update_game_ids`, this never repoints RA, trophy source, or
-/// platform — a console game linked to Steam keeps its own identity.
+/// A console game linked to Steam keeps its own RA, trophy source, and
+/// platform identity.
 pub fn set_steam_id(conn: &DbConn, id: i64, steam_id: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     let tx = c.unchecked_transaction().map_err(err)?;

@@ -727,11 +727,10 @@ impl ConsoleDbMeta {
 }
 
 /// Look up or create a DB entry for a discovered console game.
-/// Resolution goes through `find_by_native_id(native, platform)` only; the
-/// historical kind/platform fallback served rows predating native storage
-/// and was removed pre-release — upgraded installs may see one-time
-/// duplicate library entries for such rows, which the user-level
-/// duplicate-game merge tooling reconciles. Logs DB errors instead of
+/// Resolution goes through `find_by_native_id(native, platform)` only;
+/// upgraded installs may see one-time duplicate library entries for such
+/// rows, which the user-level duplicate-game merge tooling reconciles.
+/// Logs DB errors instead of
 /// silently swallowing them. `trophy_id` carries the achievement identity
 /// (NPWR on Sony consoles, empty elsewhere); `native_id` the product id.
 fn find_or_create_console_entry(

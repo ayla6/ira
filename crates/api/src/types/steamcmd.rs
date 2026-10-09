@@ -1,5 +1,3 @@
-// ── steamcmd.net API ────────────────────────────────────────────────
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -10,7 +8,6 @@ pub(crate) struct SteamCmdResponse {
     pub status: String,
 }
 
-/// Per-app data from steamcmd.net.
 #[derive(Debug, Deserialize)]
 pub(crate) struct SteamCmdApp {
     #[serde(default)]
@@ -136,8 +133,6 @@ pub(crate) struct SteamCmdLaunchConfig {
     pub oslist: String,
 }
 
-// ── UFS (Unified File System) ───────────────────────────────────────
-
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct SteamCmdUfs {
     #[serde(default)]
@@ -178,7 +173,6 @@ pub(crate) struct SteamCmdPathTransform {
     pub replace: String,
 }
 
-// ── Parsed app details ──────────────────────────────────────────────
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SteamCmdInfo {
     pub name: String,
@@ -209,7 +203,6 @@ pub struct SteamCmdInfo {
     pub logo_size: i32,
 }
 
-/// A single launch entry from steamcmd.net `config.launch`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SteamCmdLaunchInfo {
     /// Executable path relative to the install directory.

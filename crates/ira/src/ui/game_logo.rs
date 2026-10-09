@@ -343,7 +343,7 @@ fn apply_steam_logo_result(ctx: &SteamLogoApply) -> glib::ControlFlow {
     };
     match ctx.rx.borrow_mut().try_recv() {
         Ok(Some((pos, size))) => {
-            // Steam naming nothing resets to the default, same as before.
+            // Without Steam naming, reset to the default.
             let pos = pos.unwrap_or(ira_models::LogoPosition::DEFAULT);
             *selected.borrow_mut() = pos;
             size_adj.set_value(size.clamp(5, 100) as f64);

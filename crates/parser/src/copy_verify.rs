@@ -44,8 +44,7 @@ pub fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
 }
 
 /// Copy a file and verify the destination byte-for-byte (a rolling
-/// digest over both files — a same-length corrupted copy used to pass).
-/// Returns true if the copy is verified safe.
+/// digest over both files).
 fn safe_copy_and_verify(src: &Path, dst: &Path) -> bool {
     use std::io::Read;
     use std::hash::{Hash, Hasher};

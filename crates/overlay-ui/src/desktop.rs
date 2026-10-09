@@ -234,10 +234,8 @@ fn update_engage(ctx: &GrabCtx, st: &mut GrabState, visible: bool) {
     }
 }
 
-/// Releases the button grab 300ms after hiding. There is deliberately no
-/// "clear while hidden" reset here: one used to sit below this check and
-/// it strangled the grace on the very next tick, wedging the buttons
-/// grabbed (and the desktop clickless) until the next show.
+/// Releases the button grab 300ms after hiding. No "clear while hidden" reset:
+/// it would strangle the grace on the next tick and wedge the buttons grabbed.
 fn update_grace(ctx: &GrabCtx, st: &mut GrabState) {
     if st.buttons_held
         && let Some(at) = st.hide_at

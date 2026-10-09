@@ -8,7 +8,7 @@
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 
-/// One cursor image with premultiplied RGBA pixels.
+/// Pixels are premultiplied RGBA.
 pub struct CursorImage {
     pub width: u32,
     pub height: u32,
@@ -84,7 +84,6 @@ pub fn parse_xcursor(data: &[u8]) -> Vec<CursorImage> {
     out
 }
 
-/// Straight ARGB → premultiplied RGBA.
 fn premult(argb: u32) -> [u8; 4] {
     let a = (argb >> 24) & 0xff;
     [

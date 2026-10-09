@@ -15,9 +15,6 @@ fn overlay_paths() -> Option<(String, String)> {
     let dev_shim = exe_dir.join("libira_overlay_shim.so");
     let dev_vk = exe_dir.join("libira_overlay_vk.so");
     if dev_shim.is_file() && dev_vk.is_file() {
-        // Generate a temporary JSON manifest with the correct absolute library_path.
-        // The static JSON in crates/overlay-vk/ points to release/, which is wrong
-        // for debug builds. Writing our own avoids modifying the source file.
         let tmp_dir = std::env::temp_dir().join("ira_overlay");
         let _ = std::fs::create_dir_all(&tmp_dir);
         let json_path = tmp_dir.join("ira_overlay.json");
@@ -148,10 +145,8 @@ pub fn add_overlay_env_external(
 ) {
     eprintln!("ira-overlay: preparing host overlay (SHM, no session injection)");
 
-    // In external mode, the VK layer must NOT be loaded — the host process
-    // creates no Vulkan instance. If VK_INSTANCE_LAYERS is set (e.g. from a
-    // previous non-external launch in the same session), the layer would
-    // hook the host's library handles pointlessly.
+    // The host creates no Vulkan instance; a stale VK_INSTANCE_LAYERS from a
+    // previous launch would hook its handles pointlessly.
     env.retain(|(k, _)| k != "VK_INSTANCE_LAYERS" && k != "VK_LAYER_PATH");
 
     if let Some(shm) = overlay_shm {
@@ -161,10 +156,8 @@ pub fn add_overlay_env_external(
     env_set(env, "IRA_OVERLAY_FONT_FAMILY", &overlay_font_family(font_family));
 }
 
-/// Splits off the game command so the host can re-wrap it.
-/// Gamescope commands carry the game after the `--` separator (everything
-/// before it is gamescope args); a plain command — a launch under an
-/// already-running gamescope session — is the game itself.
+/// Splits off the game command so the host can re-wrap it: gamescope carries
+/// the game after `--`, a plain command under a running session is the game itself.
 fn split_game_command(command: &mut Vec<String>) -> Vec<String> {
     match command.iter().position(|a| a == "--") {
         Some(sep) => command.split_off(sep + 1),
@@ -193,18 +186,13 @@ pub fn wrap_with_host_overlay(
         return false;
     };
 
-    // Gamescope commands carry the game after the `--` separator (everything
-    // before it is gamescope args). A plain command — a launch under an
-    // already-running gamescope session — is the game itself.
     let game_cmd = split_game_command(command);
 
     let quoted_bin = shlex::try_quote(&bin)
         .map(|c| c.into_owned())
         .unwrap_or(bin);
-    // The host runs as a gamescope child (DISPLAY already repointed at
-    // gamescope's X server), so the desktop display it reads input from
-    // must be passed explicitly — along with its authority file, since the
-    // inherited XAUTHORITY belongs to the gamescope session, not the desk.
+    // The host runs as a gamescope child, so pass the desktop DISPLAY and
+    // XAUTHORITY explicitly (inherited ones belong to the gamescope session).
     let host_prefix = [
         ("DISPLAY", "IRA_OVERLAY_DESKTOP_DISPLAY"),
         ("XAUTHORITY", "IRA_OVERLAY_DESKTOP_XAUTHORITY"),
@@ -241,12 +229,8 @@ pub fn wrap_with_host_overlay(
     true
 }
 
-/// Arms daemon-side overlay toggle for this launch's environment: gamescope
-/// plus overlay. In gamescope mode every in-process toggle path stands down
-/// (`IRA_OVERLAY_DISABLE_UI`: shim keyboard/gamepad hooks, layer evdev), so
-/// the daemon is the only gamepad authority and cannot double-flip.
-/// Flatpaks need no special case: with no LD_PRELOAD shim and no /dev/input
-/// in the sandbox, they were already daemon-or-nothing.
+/// Arms the daemon-side toggle for gamescope+overlay so the daemon cannot
+/// double-flip; flatpaks need no special case (no shim or /dev/input).
 pub fn maybe_add_daemon_toggle_env(
     env: &mut Vec<(String, String)>,
     command: &[String],

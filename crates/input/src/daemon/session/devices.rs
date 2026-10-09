@@ -5,8 +5,7 @@ use crate::{
     PhysicalGamepad, Sdl3SensorBackend, VirtualKeyboard, VirtualMouse,
 };
 
-/// Reconnect the previously-used controller, or detect a brand-new one when
-/// none was present at launch. Returns true when a controller is now open.
+/// Returns true when a controller is now open.
 pub(crate) fn reconnect_gamepad(gamepad: &mut Option<PhysicalGamepad>) -> Result<bool, String> {
     if let Some(existing) = gamepad.as_mut() {
         return existing.try_reconnect();
@@ -46,10 +45,8 @@ pub(crate) fn load_profile(path: Option<&Path>) -> Result<InputProfile, String> 
     Ok(profile)
 }
 
-/// Like [`load_profile`], but an unreadable or invalid profile file falls
-/// back to the builtin default layout instead of aborting: the wrapper
-/// sits between the launcher and the game command, so exiting here would
-/// stop the game from starting at all.
+/// Like [`load_profile`], but an unreadable or invalid file falls back to the
+/// builtin default: exiting here would stop the game from starting at all.
 pub(crate) fn load_profile_or_default(path: Option<&Path>) -> InputProfile {
     match load_profile(path) {
         Ok(profile) => profile,
@@ -86,16 +83,11 @@ pub(crate) fn create_mouse(needed: bool) -> Result<Option<VirtualMouse>, String>
 }
 
 pub(crate) fn open_sensor(device: &crate::DeviceInfo) -> Option<GyroSource> {
-    // The kernel IMU companion node is a hid-nintendo (or hid-sony)
-    // construct: only Nintendo-family pads can legitimately have one, and
-    // scanning other pads risks latching onto a same-identity six-axis
-    // node that is not a sensor companion — the DInput dongle's motion
-    // interface reads through SDL3, never this path.
+    // Only Nintendo-family pads can legitimately have a kernel IMU companion; scanning
+    // others risks latching onto a same-identity node that is not a sensor companion.
     if device.family() == crate::ControllerFamily::Nintendo {
-        // udev can publish the companion node a beat after the pad node; a
-        // short retry keeps a freshly connected pad from losing its gyro
-        // to that gap. Capped well under a second: this runs on the input
-        // loop, including right after a reconnect.
+        // udev can publish the companion a beat after the pad node; a short retry
+        // keeps a freshly connected pad from losing its gyro to that gap.
         for attempt in 0..10 {
             match crate::EvdevImu::open(device) {
                 Some(imu) => {
@@ -126,10 +118,8 @@ pub(crate) fn open_sensor(device: &crate::DeviceInfo) -> Option<GyroSource> {
     open_sdl_sensor(device)
 }
 
-/// One-shot sensor probe with none of [`open_sensor`]'s waiting: the hub's
-/// periodic motion retry calls this while a connected pad is still
-/// motion-less, and it must never stall the input loop the way the
-/// connect-time patient probe may.
+/// One-shot sensor probe with none of [`open_sensor`]'s waiting: the hub's retry
+/// calls this on a connected but motion-less pad, and it must never stall the loop.
 pub(crate) fn probe_sensor(device: &crate::DeviceInfo) -> Option<GyroSource> {
     if device.family() == crate::ControllerFamily::Nintendo {
         if let Some(imu) = crate::EvdevImu::open(device) {
@@ -157,9 +147,8 @@ fn open_sdl_sensor(device: &crate::DeviceInfo) -> Option<GyroSource> {
     }
 }
 
-/// Where motion comes from: the kernel's sensor companion node when the pad's
-/// driver exposes one (hid-nintendo, hid-sony), else in-process SDL3 for
-/// pads whose protocol only SDL translates (8BitDo DInput).
+/// Where motion comes from: the kernel's sensor companion node when the driver
+/// exposes one, else in-process SDL3.
 pub(crate) enum GyroSource {
     Kernel(crate::EvdevImu),
     Sdl(Sdl3SensorBackend),
@@ -183,9 +172,8 @@ impl GyroSource {
     }
 }
 
-/// Seed the mapper with the connected controller's calibrated stick
-/// deadzone; Joystick modes whose deadzone source is "Controller Preference"
-/// read it from the engine.
+/// Seed the mapper with the connected controller's calibrated stick deadzone
+/// for Joystick modes on "Controller Preference".
 pub(crate) fn apply_controller_deadzone(
     mapper: &mut MappingEngine,
     calibration_store: Option<&Path>,
@@ -204,10 +192,8 @@ pub(crate) fn apply_controller_deadzone(
     mapper.set_controller_deadzones(left, right);
 }
 
-/// Applies the controller-level Nintendo button layout from the
-/// per-controller settings, the way Steam's per-controller toggle does:
-/// face buttons swap (A↔B, X↔Y) as they leave the physical pad. A stored
-/// choice wins; with no entry, Nintendo-family pads default to swapped.
+/// Applies the controller-level Nintendo button layout (A↔B, X↔Y as they leave
+/// the pad); a stored choice wins, else the family default.
 pub(crate) fn apply_controller_layout(
     gamepad: &mut Option<PhysicalGamepad>,
     calibration_store: Option<&Path>,
@@ -227,9 +213,8 @@ pub(crate) fn resolved_layout_for(device: &crate::DeviceInfo, calibration_store:
     }
 }
 
-/// Opens the physical side of rumble passthrough. Failure reasons are logged
-/// exactly once here; a missing handle afterwards simply means "no rumble"
-/// and every forwarded command is skipped.
+/// Opens rumble passthrough; a missing handle means "no rumble" and forwarded
+/// commands are skipped. Failures are logged here.
 pub(crate) fn open_rumble(
     gamepad: Option<&PhysicalGamepad>,
     enabled: bool,
@@ -277,9 +262,8 @@ pub(crate) fn open_rumble(
     }
 }
 
-/// Finds another evdev node of the same physical controller that does
-/// declare FF_RUMBLE. Pads with the classic Linux dual-node split often
-/// keep force feedback off the node SDL picks as the gamepad.
+/// Finds another evdev node of the same controller declaring FF_RUMBLE; dual-node
+/// pads often keep force feedback off the node SDL picks as the gamepad.
 fn ff_sibling_node(info: &crate::DeviceInfo, skip: &Path) -> Option<PathBuf> {
     for entry in std::fs::read_dir("/dev/input").ok()?.flatten() {
         let name = entry.file_name();

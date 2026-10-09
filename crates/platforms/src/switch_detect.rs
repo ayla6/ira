@@ -1,16 +1,12 @@
-//! Switch emulator detection: every fork and release channel labeled on
-//! its own, searched on $PATH and in the usual non-PATH install locations
-//! (AppImages, extracted release tarballs).
-
+//! Switch emulator detection: every fork and release channel labeled, searched
+//! on $PATH and in the usual non-PATH install locations.
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::emulator_detect::{detect_flatpak, which, DetectedEmulator};
 
-/// Switch emulators searched for on this machine: binary names per
-/// fork/channel with the label shown in the picker. More specific names
-/// come before generic ones they share a prefix with, so versioned
-/// AppImages are labeled exactly once (`Ryujinx-Canary…` before `Ryujinx`).
+/// Binary names per fork with picker labels; specific names precede generic
+/// ones so versioned AppImages label exactly once.
 const SWITCH_VARIANTS: &[(&[&str], &str)] = &[
     (
         &["ryujinxcanary", "Ryujinx-Canary", "ryujinx-canary"],
@@ -36,15 +32,12 @@ const SWITCH_VARIANTS: &[(&[&str], &str)] = &[
     (&["sudachi", "Sudachi"], "Sudachi"),
 ];
 
-/// Every installable Switch emulator (native + Flatpak), each fork and
-/// release channel labeled on its own.
 pub fn choices() -> Vec<DetectedEmulator> {
     choices_in(&switch_search_dirs())
 }
 
-/// Launch commands of every Switch emulator found on this machine, so
-/// portable installs of all forks can contribute their caches and
-/// libraries — not just the emulator selected in settings.
+/// Launch commands of every Switch emulator found, so portable installs of all
+/// forks contribute caches and libraries.
 pub fn detected_launch_commands() -> Vec<String> {
     choices()
         .into_iter()
@@ -113,9 +106,8 @@ fn switch_search_dirs() -> Vec<PathBuf> {
     ]
 }
 
-/// True when `file_name` is a binary or AppImage of `name`: an exact
-/// match, or a versioned AppImage sharing the prefix
-/// (`Eden-0.0.1-x86_64.AppImage` for `Eden`).
+/// True for a binary or AppImage of `name`: exact, or a versioned AppImage
+/// sharing the prefix (`Eden-0.0.1-x86_64.AppImage` for `Eden`).
 fn name_matches_file(name: &str, file_name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     let file = file_name.to_ascii_lowercase();

@@ -18,10 +18,8 @@ use super::sensor::{open_motion_node, spawn_paired_imu, SensorPipeline};
 /// the kernel names of the devices it replaces.
 static TWIN_SERIAL: AtomicU64 = AtomicU64::new(0);
 
-/// Whether the built stack lacks motion outputs the profile wants while
-/// motion is available — the state a session is left in when its stack was
-/// built before the controller appeared, because [`build_virtual_stack`]
-/// gates the motion node and the uhid twins on motion availability.
+/// Whether the built stack lacks motion outputs the profile wants while motion
+/// is available (built before the controller appeared).
 pub(crate) fn motion_outputs_missing(
     pipeline: &SensorPipeline,
     profile: &InputProfile,
@@ -43,12 +41,8 @@ pub(crate) fn motion_outputs_missing(
     profile.wants_native_controller() && twin_missing
 }
 
-/// Whether the session's native motion rides a uinput sensor node beside
-/// the virtual pad. A passthrough never wants one: the pad's own IMU node
-/// already pairs with the pad, and a second motion device would show up in
-/// the game as one more evdev node — under SDL2's default
-/// accelerometer-as-joystick hint, as a phantom second controller whose
-/// axes are raw motion (the "sticks go haywire with native gyro" report).
+/// Whether native motion rides a uinput sensor node beside the virtual pad. A second
+/// motion device would surface as a phantom controller under SDL2's default hint.
 pub(crate) fn wants_uinput_motion_node(
     motion_available: bool,
     profile: &InputProfile,
@@ -116,14 +110,8 @@ pub(crate) fn build_virtual_stack(
         }
     };
     let backend = profile.backend;
-    // The native twin exists whenever the profile wants one, motion or not:
-    // gating it on a live motion source left sessions with a fully visible
-    // physical pad (its hidraw unheld, its buttons raw) and no virtual pad
-    // at all whenever the motion probe had not attached yet. Motion-less
-    // twins stream zero IMU until the source attaches, which still beats
-    // losing the remapped pad entirely. Passthrough flips this around: a
-    // pad that already speaks the profile's native protocol is left
-    // completely untouched — no virtual devices at all.
+    // The native twin exists whenever the profile wants one, motion or not: gating on
+    // a live source left sessions with a visible physical pad and no virtual pad at all.
     let native_transport = profile.wants_native_controller() && !native_passthrough;
     let gamepad_passthrough = native_passthrough;
     let native_ds4 = native_transport && backend == VirtualGamepadBackend::DualShock4;
@@ -147,11 +135,8 @@ pub(crate) fn build_virtual_stack(
             }
         }
     };
-    // The cemuhook stream exists as the DSU backend itself — picking that
-    // output mode always streams — and doubles as a motion-only companion
-    // next to a real virtual pad: XInput and DirectInput carry no motion of
-    // their own, so a native-motion profile streams to emulators over
-    // cemuhook instead.
+    // The cemuhook stream is the DSU backend itself, or a motion-only companion next
+    // to a real virtual pad (XInput/DirectInput carry no motion of their own).
     let motion_enabled = motion_allowed
         && (backend == VirtualGamepadBackend::Dsu
             || (motion_available && profile.native_motion));
@@ -171,19 +156,16 @@ pub(crate) fn build_virtual_stack(
         }
         _ => {}
     }
-    // The motion node must exist before the game opens the virtual pad:
-    // SDL pairs sensor nodes with a pad at open time only. A node built
-    // during a mid-session reload waits for the game's next pad (re)open.
+    // The motion node must exist before the game opens the virtual pad: SDL pairs
+    // sensor nodes with a pad at open time only.
     let motion_device = if wants_uinput_motion_node(motion_available, profile, native_passthrough)
     {
         open_motion_node(backend)
     } else {
         None
     };
-    // Experimental whole-HID DualShock4: a real hidraw device whose reports
-    // carry buttons, sticks, triggers AND motion, so SDL's DS4 driver reads
-    // our sensors natively. A companion motion-only HID shares its serial:
-    // SDL's evdev backend pairs them, which is the half flatpaks can see.
+    // Whole-HID DualShock4: reports carry buttons, sticks, triggers and motion, so
+    // SDL's DS4 driver reads our sensors natively; the paired motion HID is flatpak-visible.
     let mut ds4_hid = None;
     let mut dualsense_hid = None;
     let mut switch_pro_hid = None;
@@ -204,15 +186,13 @@ pub(crate) fn build_virtual_stack(
             }
         }
     }
-    // A virtual *real* Switch Pro over USB identity: SDL2's hidapi skips
-    // hidraw devices on any other bus, so USB is the only surface its
-    // Switch driver can claim — motion included, read straight from the
-    // 0x30 reports (the only motion path that reaches a hidapi-claimed
-    // pad). hid-nintendo binds alongside, exactly as for a wired real Pro
-    // Controller, and SDL hides its evdev nodes by the pad's identity. No
-    // paired IMU: it gets udev's accelerometer tag, which SDL2 lists as a
-    // second joystick whose axes barely move — the exact "gyro as a
-    // second analog stick" confusion this backend exists not to cause.
+    // A virtual *real* Switch Pro over USB identity: the only bus SDL2's hidapi Switch
+    // driver claims; hid-nintendo binds alongside as for a wired real Pro Controller.
+    // Motion comes straight from the 0x30 reports (the only motion path that
+    // reaches a hidapi-claimed pad). No paired IMU: it would get udev's
+    // accelerometer tag, which SDL2 lists as a second joystick whose axes
+    // barely move — the exact "gyro as a second analog stick" confusion
+    // this backend exists to avoid.
     if native_switch_pro {
         match SwitchProUhidDevice::create(&twin_uniq()) {
             Ok(device) => {
@@ -224,9 +204,8 @@ pub(crate) fn build_virtual_stack(
             }
         }
     }
-    // Same whole-HID approach as the DS4, on SDL's PS5 third-party path:
-    // the licensed HORI PID is typed PS5 in SDL's table and feature replies
-    // enable sensors with an identity calibration.
+    // Same whole-HID approach as the DS4, on SDL's PS5 third-party path with the
+    // licensed HORI PID and identity-calibrated sensor replies.
     if native_dualsense {
         let uniq = twin_uniq();
         match DualsenseUhidDevice::create(&uniq) {

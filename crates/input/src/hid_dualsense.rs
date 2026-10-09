@@ -54,11 +54,9 @@ const USB_STATE_REPORT_LEN: usize = 64;
 /// The kernel's evdev twin descriptor, byte-for-byte the wire prefix of
 /// [`usb_state_report`] (SDL's PS5 wire layout): report id 0x01, four stick
 /// axes, analog triggers on bytes 5/6, a reserved byte, the hat plus face
-/// nibbles, the shoulder/system buttons, and the guide bit. The previous
-/// stub declared a single constant input, so the twin had no controls at
-/// all and non-hidapi consumers (RetroArch's udev driver) saw an empty
-/// pad. Faces use individual usages so they land on the standard evdev
-/// buttons despite the wire's square/cross/circle/triangle bit order.
+/// nibbles, the shoulder/system buttons, and the guide bit. Faces use
+/// individual usages so they land on the standard evdev buttons despite
+/// the wire's square/cross/circle/triangle bit order.
 pub const REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x01, // Usage Page (Generic Desktop)
     0x09, 0x05, // Usage (Gamepad)
@@ -368,13 +366,9 @@ mod tests {
 
     #[test]
     fn test_sdl_mapping_matches_the_twin_identity() {
-        // The GUID is the evdev identity SDL computes from the uhid device:
-        // bus USB, no CRC, vendor/product little-endian, version zero.
         assert_eq!(SDL_GUID, "030000000d0f00006301000000000000");
         let mapping = sdl_mapping();
         assert!(mapping.starts_with(&format!("{SDL_GUID},{DEVICE_NAME},a:b0,b:b1,x:b3,y:b2")));
-        // The twin's evdev layout: square on b3, triangle on b2, analog
-        // triggers on a3/a4, right stick on a2/a5, d-pad on hat 0.
         assert!(mapping.contains("lefttrigger:a3,righttrigger:a4"));
         assert!(mapping.contains("leftx:a0,lefty:a1,rightx:a2,righty:a5"));
         assert!(mapping.contains("dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2"));

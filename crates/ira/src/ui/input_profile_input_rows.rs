@@ -1,8 +1,8 @@
 //! One binding row per physical input: a native `AdwExpanderRow` whose
 //! header identifies the input and summarizes its binding, and whose
-//! children carry everything the old floating sheet held — command,
-//! behavior, response settings, activators and mode shifts. Expansion state
-//! survives page rebuilds through [`ExpansionState`].
+//! children carry the command, behavior, response settings, activators
+//! and mode shifts. Expansion state survives page rebuilds through
+//! [`ExpansionState`].
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -293,8 +293,6 @@ fn direction_command_rows(ctx: &PagesCtx, base: &SheetBase) -> Vec<gtk4::Widget>
     rows
 }
 
-/// One binding row per input: the header identifies the input and carries
-/// its summary; everything else lives in the expander children.
 pub(crate) fn input_expander_row(
     ctx: &PagesCtx,
     source: InputSource,

@@ -237,7 +237,6 @@ fn show_link_games_dialog(
     members: &[i64],
     page: &glib::WeakRef<gtk4::Box>,
 ) {
-    // Straight from the database, so hidden entries are offered too.
     let candidates: Vec<GameEntry> = {
         let s = state.borrow();
         ira_db::load_all_games(&s.db)

@@ -1,8 +1,5 @@
-//! Shared POSIX SHM open + mmap helper.
-//!
-//! `CanvasShm` (canvas.rs) and `MappedShm` (shm.rs) were line-for-line clones:
-//! `CString::new` → `shm_open` → `ftruncate` → `prot` select → `mmap` →
-//! `close` → `MAP_FAILED` check. One helper keeps them in sync.
+//! Shared POSIX SHM open + mmap helper: `CString::new` → `shm_open` →
+//! `ftruncate` → `prot` select → `mmap` → `close` → `MAP_FAILED` check.
 
 use std::ffi::CString;
 use std::os::unix::io::RawFd;

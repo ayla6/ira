@@ -31,9 +31,7 @@ pub(crate) const STICK_MOUSE_COUNTS_PER_SECOND: f32 = 2000.0;
 const LASER_EMIT_TC: f32 = 0.02;
 /// Stick-to-wheel velocity at full deflection, in detents per second.
 /// Gyro-to-stick scaling: rotation rate (rad/s) that drives the stick to full
-/// deflection at sensitivity 1.0. Steam's camera feel lands near a
-/// moderate hand turn (~85 deg/s) reaching full deflection; the previous
-/// 4.0 made ordinary turns crawl ("barely moves").
+/// deflection at sensitivity 1.0 (~85 deg/s, a moderate hand turn).
 const GYRO_STICK_RADS_PER_UNIT: f32 = 1.5;
 /// Trigger travel that counts as a soft pull for trigger dampening.
 const DAMPENING_SOFT_PULL: f32 = 0.5;
@@ -418,9 +416,8 @@ mod tests {
 
     #[test]
     fn test_held_stick_produces_continuous_mouse_motion() {
-        // The original bug: motion only fired on events, so a held stick
-        // stopped the cursor. Now a single deflection event followed by
-        // ticks keeps producing equal deltas.
+        // A held stick must keep moving the cursor: one deflection event
+        // followed by ticks keeps producing equal deltas.
         let profile = set_profile(InputMapping {
             mode: Some(SourceMode::Mouse {
                 sensitivity: 1.0,

@@ -7,14 +7,13 @@ pub fn encode_lossless_webp(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
         .to_vec()
 }
 
-/// Check if raw bytes are an ICO file by reading the magic header.
 pub fn is_ico_data(data: &[u8]) -> bool {
     data.len() >= 4 && data[0..4] == [0x00, 0x00, 0x01, 0x00]
 }
 
-/// Decode arbitrary image bytes. TGA carries no magic bytes, so the
-/// image crate's format guessing can never find it — after a guess fails,
-/// try the TGA decoder explicitly (Cemu game icons are uncompressed TGA).
+/// Decode arbitrary image bytes. TGA carries no magic bytes, so after
+/// format guessing fails, try the TGA decoder explicitly (Cemu game
+/// icons are uncompressed TGA).
 pub fn load_image_bytes(data: &[u8]) -> Option<image::DynamicImage> {
     if let Ok(img) = image::load_from_memory(data) {
         return Some(img);
@@ -41,7 +40,7 @@ fn decode_largest_png_ico_frame(data: &[u8]) -> Option<image::DynamicImage> {
     let count = u16::from_le_bytes([data[4], data[5]]) as usize;
     let mut best: Option<(u64, image::DynamicImage)> = None;
     for index in 0..count {
-        // A malformed entry only loses itself, never the other frames.
+        // A malformed entry loses only itself.
         let Some(dir_end) = (6 + index * 16).checked_add(16).filter(|end| *end <= data.len())
         else {
             continue;
@@ -90,19 +89,16 @@ pub fn encode_bytes_to_lossless_webp(data: &[u8]) -> Option<Vec<u8>> {
     Some(encode_lossless_webp(rgba.as_raw(), w, h))
 }
 
-/// Check that raw bytes fully decode to an image. Unlike
-/// `convert_bytes_to_lossless_webp` — which passes JPEG/WebP through based on
-/// magic bytes alone — this decodes the whole payload, so callers that must
-/// never write a corrupt file to disk should run this before persisting.
+/// Check that raw bytes fully decode to an image. This decodes the whole
+/// payload, so callers that persist files should run this first and keep
+/// corrupt bytes off disk.
 pub fn is_decodable_image(data: &[u8]) -> bool {
     load_image_bytes(data).is_some()
 }
 
-/// SGDB serves a takedown notice card in place of removed art. The card
-/// only comes in a handful of fixed layouts (one per aspect ratio), so
-/// the fastest reliable check is an exact match on the 8x8 average hash
-/// of every observed variant: a thumbnail and a set lookup, no pixel
-/// scanning. New layouts are added by appending their hash here.
+/// SGDB serves a takedown notice card in place of removed art in fixed
+/// per-aspect layouts; detect it by exact 8x8 average-hash match.
+/// New layouts are added by appending their hash here.
 const DMCA_CARD_HASHES: &[u64] = &[
     0x000000ff7e000000,
     0x0000007eff000000,
@@ -128,8 +124,7 @@ pub fn image_average_hash(data: &[u8]) -> Option<u64> {
 }
 
 fn is_dmca_hash(hash: u64) -> bool {
-    // The card is byte-identical per layout, so the normalized hash is
-    // deterministic: exact match only, never a fuzzy distance.
+    // The card is byte-identical per layout; match exactly.
     DMCA_CARD_HASHES.contains(&hash)
 }
 
@@ -141,8 +136,7 @@ pub fn is_dmca_placeholder(data: &[u8]) -> bool {
 }
 
 /// Decode an image file to raw RGBA8 pixels suitable for `gdk::MemoryTexture`.
-/// Reads the file and decodes it using the `image` crate. Returns `None` if
-/// the file can't be read or the format is unsupported.
+/// Returns `None` if the file can't be read or the format is unsupported.
 ///
 /// Designed to be called on a background thread — the returned `(Vec<u8>, w, h)`
 /// is `Send` and can be passed back to the main thread to create a `MemoryTexture`.
@@ -168,11 +162,8 @@ mod tests {
 
     #[test]
     fn test_encode_lossless_webp_round_trips() {
-        // Arrange
         let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 200, 30, 255]));
-        // Act
         let encoded = encode_lossless_webp(img.as_raw(), 4, 4);
-        // Assert
         assert_eq!(image::guess_format(&encoded).unwrap(), image::ImageFormat::WebP);
         let back = image::load_from_memory(&encoded).unwrap().into_rgba8();
         assert_eq!(back.dimensions(), (4, 4));
@@ -385,9 +376,7 @@ mod ico_frame_tests {
         for bytes in [&small, &large] {
             container.extend_from_slice(bytes);
         }
-        // Act
         let img = load_image_bytes(&container).expect("largest PNG frame must decode");
-        // Assert
         assert_eq!((img.width(), img.height()), (64, 64));
     }
 }

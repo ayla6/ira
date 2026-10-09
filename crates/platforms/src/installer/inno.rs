@@ -2,17 +2,13 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-/// Check whether `innoextract` is installed and available on `PATH`.
 pub fn innoextract_available() -> bool {
     which::which("innoextract").is_ok()
 }
 
-/// Extract an Inno Setup installer using `innoextract`.
-///
-/// Runs `innoextract --gog --exclude-temp --output-dir <dest> <installer>`
-/// and captures stdout/stderr. If `dest/app/` exists after extraction
-/// (some GOG Windows installers nest everything under `app/`), its
-/// contents are moved up to `dest/`.
+/// Extract an Inno Setup installer via `innoextract`, capturing output. When
+/// `dest/app/` exists (GOG Windows installers nest everything under `app/`),
+/// its contents move up to `dest/`.
 pub fn extract_inno(installer: &Path, dest: &Path) -> Result<String, String> {
     let output = Command::new("innoextract")
         .args(["--gog", "--exclude-temp", "--output-dir"])
@@ -36,9 +32,7 @@ pub fn extract_inno(installer: &Path, dest: &Path) -> Result<String, String> {
     Ok(format!("{stdout}\n{stderr}").trim().to_string())
 }
 
-/// If `dest/app/` exists, move its contents up to `dest/`.
-/// This matches wyvern's behavior for GOG Windows installers that nest
-/// everything under `app/`.
+/// Matches wyvern's behavior for GOG Windows installers nesting under `app/`.
 fn flatten_app_subdir(dest: &Path) -> Result<(), String> {
     let app_dir = dest.join("app");
     if !app_dir.is_dir() {

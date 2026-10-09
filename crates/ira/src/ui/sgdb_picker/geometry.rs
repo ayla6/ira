@@ -7,13 +7,10 @@ use std::rc::Rc;
 /// Fresh picker window with the persisted zoom and size restored.
 /// Returns the window and the zoom it opened at.
 pub(super) fn build_picker_window(asset: &str, parent: &adw::Window) -> (adw::Window, i32) {
-    // A real window, not a sheet: sheets cannot be resized by the user,
-    // and this grid is meant to grow with its viewport like the game
-    // grid does. Modal over its parent like the settings windows, so
-    // focus and keys (Alt+F4 included) belong to it unambiguously; a
-    // modeless window under a modal parent leaves focus delivery up to
-    // the compositor. Still freely resizable; the settings teardown
-    // closes cached pickers before dropping their cache.
+    // A real resizable window instead of a sheet. Modal over its parent
+    // like the settings windows, so focus and keys (Alt+F4 included)
+    // belong to it unambiguously; the settings teardown closes cached
+    // pickers before dropping their cache.
     let persisted = ira_config::load_config();
     let zoom_initial = persisted
         .sgdb_picker_zoom
@@ -26,9 +23,8 @@ pub(super) fn build_picker_window(asset: &str, parent: &adw::Window) -> (adw::Wi
         .get(asset)
         .copied()
         .unwrap_or((900, 700));
-    // Floor the restore: degenerate saved sizes (from older builds that
-    // measured mid-teardown) would otherwise stick forever, and nothing
-    // in the UI can even produce a legitimately smaller window.
+    // Floor the restore: nothing in the UI can produce a smaller window,
+    // so anything tinier is a degenerate save that would stick forever.
     let size_w = size_w.max(640);
     let size_h = size_h.max(480);
     let picker = adw::Window::new();
@@ -36,8 +32,8 @@ pub(super) fn build_picker_window(asset: &str, parent: &adw::Window) -> (adw::Wi
     picker.set_modal(true);
     picker.set_transient_for(Some(parent));
     // Restore the saved size verbatim: it is user-produced on this
-    // machine, so clamping it to the parent (like dialog fits do)
-    // would shrink every reopen back to the settings size.
+    // machine, so clamping it to the parent would shrink every reopen
+    // back to the settings size.
     picker.set_default_size(size_w, size_h);
     (picker, zoom_initial)
 }

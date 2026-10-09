@@ -54,12 +54,8 @@ pub(crate) fn remaining(last_run: Instant, interval: Duration) -> Duration {
     interval.saturating_sub(last_run.elapsed())
 }
 
-/// The minimum time the loop parks between passes when scheduled work is due.
-/// A pass that outlasts the tick interval leaves its deadline already
-/// elapsed, and polling on a due deadline returns instantly — the loop would
-/// re-run the tick, miss the deadline again, and busy-spin one core. One
-/// poll quantum is free: `poll_timeout_ms` rounds every shorter wait up to
-/// 1 ms anyway.
+/// Minimum park between passes with due work: polling a due deadline returns
+/// instantly, so without this floor the loop would busy-spin one core.
 const POLL_FLOOR: Duration = Duration::from_millis(1);
 
 pub(crate) fn floor_poll_timeout(timeout: Option<Duration>) -> Option<Duration> {

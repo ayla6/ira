@@ -24,7 +24,6 @@ pub fn tombstone_match_miss(conn: &DbConn, game_id: i64, source: &str) -> Result
     Ok(())
 }
 
-/// The games whose automatic match for one source already came up empty.
 pub fn match_missed_ids(conn: &DbConn, source: &str) -> Result<Vec<i64>, String> {
     crate::query_scalar_all(
         conn,

@@ -55,7 +55,6 @@ pub(crate) fn refresh_auto_members(state: &SharedState) {
         state.borrow_mut().group_members.retain(|k, _| *k >= 0);
         return;
     }
-    // A dimension is queried only when some leaf rule reads it.
     let wants = |dimension: AutoDimension| {
         fn tree_wants(node: &AutoNode, dimension: AutoDimension) -> bool {
             match node {

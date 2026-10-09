@@ -17,7 +17,6 @@ pub struct YsiMetadata {
     pub zstdsz: u64,
 }
 
-/// Offset of the embedded archive in the installer file.
 fn archive_offset(meta: &YsiMetadata) -> u64 {
     let ysisk = meta.ysisz + 1;
     let yadsk = ysisk + meta.yadsz;
@@ -26,12 +25,8 @@ fn archive_offset(meta: &YsiMetadata) -> u64 {
     pvsk + meta.zstdsz
 }
 
-/// Parse YSI metadata from the first lines of an installer script.
-/// Reads up to 700 lines through a buffered stream (matching the
-/// robust_extract.sh approach) instead of loading the whole file: the
-/// installer carries a multi-gigabyte binary archive past the header, and
-/// that tail is not valid UTF-8, so a full read would both blow up memory
-/// and fail to parse.
+/// Parse YSI metadata from the first lines (up to 700, like robust_extract.sh):
+/// the multi-gigabyte binary tail is not UTF-8, so never read the whole file.
 pub fn parse_ysi_metadata(path: &Path) -> Result<YsiMetadata, String> {
     let file =
         std::fs::File::open(path).map_err(|e| format!("Failed to read installer: {e}"))?;
@@ -50,13 +45,11 @@ pub fn parse_ysi_metadata(path: &Path) -> Result<YsiMetadata, String> {
         if let Some(eq_pos) = line.find('=') {
             let key = line[..eq_pos].trim().to_string();
             let rest = &line[eq_pos + 1..];
-            // Strip surrounding quotes
             let value = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
                 rest[1..rest.len() - 1].to_string()
             } else {
                 rest.trim().to_string()
             };
-            // Only keep known variables
             if matches!(
                 key.as_str(),
                 "app"
@@ -98,7 +91,6 @@ pub fn parse_ysi_metadata(path: &Path) -> Result<YsiMetadata, String> {
     })
 }
 
-/// Check if a file is a valid YSI installer by attempting to parse metadata.
 pub fn is_ysi_installer(path: &Path) -> bool {
     parse_ysi_metadata(path).is_ok()
 }
@@ -106,16 +98,8 @@ pub fn is_ysi_installer(path: &Path) -> bool {
 /// Extraction progress callback. Receives bytes extracted and total bytes.
 pub type ProgressFn = Box<dyn Fn(u64, u64) + Send>;
 
-/// Extract a YSI installer's embedded archive to a destination directory.
-///
-/// The archive is a `.tar.zst` embedded at the end of the script. We:
-/// 1. Seek to the archive offset
-/// 2. Read `arcsz` bytes
-/// 3. Decompress with zstd
-/// 4. Extract with tar to `dest_dir`
-///
-/// The `progress` callback is called periodically with (bytes_read, total_bytes).
-/// The `pause` flag can be checked to pause extraction (returns true to abort).
+/// Extract a YSI installer's embedded archive to `dest_dir`.
+/// Progress reports (bytes_read, total_bytes); pause stalls, cancel aborts.
 pub fn extract_ysi_installer(
     installer_path: &Path,
     dest_dir: &Path,
@@ -139,9 +123,8 @@ pub fn extract_ysi_installer(
     }
     let total = file_len - offset;
 
-    // Stream the embedded `.tar.zst` straight from disk through zstd into
-    // tar: the old code buffered all `arcsz` bytes in memory, which is tens
-    // of gigabytes for real installers.
+    // Stream the archive: real installers are tens of gigabytes, never
+    // buffer `arcsz` in memory.
     let mut archive_file = file;
     archive_file
         .seek(SeekFrom::Start(offset))
@@ -150,7 +133,6 @@ pub fn extract_ysi_installer(
     let decoder =
         zstd::Decoder::new(limited).map_err(|e| format!("Failed to create zstd decoder: {e}"))?;
 
-    // Extract tar stream
     std::fs::create_dir_all(dest_dir).map_err(|e| format!("Failed to create destination: {e}"))?;
 
     let mut archive = tar::Archive::new(decoder);
@@ -162,14 +144,12 @@ pub fn extract_ysi_installer(
     let app_name = meta.app.clone();
 
     for entry in entries {
-        // Check for cancellation
         if let Some(cancel) = should_cancel {
             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err("Extraction cancelled".to_string());
             }
         }
 
-        // Check for pause (spin-wait)
         if let Some(pause) = should_pause {
             while pause.load(std::sync::atomic::Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_millis(100));

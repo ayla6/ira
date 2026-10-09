@@ -5,7 +5,7 @@ use crate::secrets;
 
 /// Serializes every config read-modify-write cycle: concurrent
 /// `std::fs::write`s on the same JSON can interleave and leave a file no
-/// parser accepts, which used to reset the whole config to defaults.
+/// parser accepts.
 pub(crate) fn config_io_lock() -> std::sync::MutexGuard<'static, ()> {
     use std::sync::{Mutex, MutexGuard};
     static CONFIG_IO_LOCK: Mutex<()> = Mutex::new(());

@@ -21,7 +21,6 @@ fn set_subreaper() {
     }
 }
 
-/// Spawns the game process with piped stdout/stderr for in-memory logging.
 pub fn spawn_game(
     command: &[String],
     env: &[(String, String)],
@@ -145,10 +144,8 @@ fn resolve_program(program: &str, env: &[(String, String)]) -> Option<std::path:
         .find(|candidate| candidate.is_file())
 }
 
-/// Spawns a process that is not tracked as a play session: nothing is
-/// recorded, no messages are sent, and the child is left running after Ira
-/// exits (aside from the subreaper). Its output is streamed into the log
-/// buffer for `log_key` so the in-app log viewer still shows it.
+/// Spawns an untracked process left running after Ira exits; its output
+/// streams into the log buffer for `log_key`.
 pub fn spawn_detached(
     command: &[String],
     env: &[(String, String)],
@@ -174,10 +171,8 @@ pub fn spawn_detached(
     let exit_log = log.clone();
     let tail_done = done.clone();
     std::thread::spawn(move || {
-        // Held until the process exits: a detached spawn opened with
-        // input remapping disabled must not be remapped underneath by
-        // the daemon's idle desktop session. Dropping the client when
-        // this thread ends releases the hold, however the process ends.
+        // Held until the process exits so the idle desktop session never remaps
+        // the pad underneath; dropping the client releases the hold.
         let _desktop_hold = desktop_hold;
         match child.wait() {
             Ok(status) => {

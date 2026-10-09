@@ -166,7 +166,6 @@ pub const STEAM_LANGUAGES: &[SteamLanguage] = &[
     },
 ];
 
-/// Get the English display name for a Steam language code.
 /// Returns the code itself if not found.
 pub fn steam_language_name(code: &str) -> &str {
     STEAM_LANGUAGES

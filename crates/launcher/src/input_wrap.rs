@@ -22,7 +22,6 @@ pub(crate) fn input_binary_path() -> Option<String> {
 }
 
 /// Wraps a final game command with the host-side input broker.
-/// The broker stays outside Wine, Proton, umu, gamescope, and Flatpak.
 pub fn wrap_with_input(
     command: &mut Vec<String>,
     profile: Option<&str>,

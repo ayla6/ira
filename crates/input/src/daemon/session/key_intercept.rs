@@ -43,9 +43,8 @@ pub(crate) struct KeyIntercept {
     matcher: KbdChord,
     shm: MappedShm,
     devices: HashMap<PathBuf, Device>,
-    /// All-keys virtual keyboard for re-emission. `None` (creation failed)
-    /// pins the intercept in snoop mode: grabbing without forwarding would
-    /// swallow the user's typing.
+    /// All-keys virtual keyboard for re-emission. `None` pins snoop mode: grabbing
+    /// without forwarding would swallow the user's typing.
     forward: Option<VirtualKeyboard>,
     /// evdev codes currently pressed on the virtual keyboard: released on
     /// every transition so nothing sticks downstream.
@@ -59,9 +58,8 @@ pub(crate) struct KeyIntercept {
 }
 
 impl KeyIntercept {
-    /// Arms from the session env: same launcher marker as the gamepad
-    /// toggle, same SHM mapping (read-write: firing flips through it).
-    /// Silent `None` otherwise.
+    /// Arms from the session env (same launcher marker and SHM as the gamepad
+    /// toggle). Silent `None` otherwise.
     pub(crate) fn arm(env: Option<&[(String, String)]>) -> Option<Self> {
         let shm_name = super::daemon_toggle_shm_name(env)?;
         let shm = MappedShm::open_rw(&shm_name).ok()?;
@@ -92,9 +90,8 @@ impl KeyIntercept {
         Some(intercept)
     }
 
-    /// One-line census of every input node at arm time: path, kernel name,
-    /// and whether it counts as a keyboard. Turns "grabbed 0" from a
-    /// mystery into a directly readable cause.
+    /// One-line census of every input node at arm time, so "grabbed 0" shows
+    /// its cause directly.
     pub(crate) fn log_input_census() {
         for (path, device) in evdev::enumerate() {
             eprintln!(
@@ -106,15 +103,13 @@ impl KeyIntercept {
         }
     }
 
-    /// Flips the SHM visibility flag. Same contract as the gamepad toggle's
-    /// flip, surfaced for logging.
+    /// Same contract as the gamepad toggle's flip, surfaced for logging.
     pub(crate) fn flip(&self) -> Option<bool> {
         self.shm.header().toggle_visible()
     }
 
-    /// Polls all watched keyboards. `want_grab` is the session's focus
-    /// gate; `overlay_open` switches forwarding to consuming. Returns true
-    /// when the chord newly completed (caller flips).
+    /// Polls all watched keyboards. Returns true when the chord newly completed
+    /// (caller flips); `want_grab` is the focus gate, `overlay_open` switches to consuming.
     pub(crate) fn poll(&mut self, want_grab: bool, overlay_open: bool) -> bool {
         if self.last_scan.elapsed() >= RESCAN_INTERVAL {
             self.last_scan = Instant::now();
@@ -154,9 +149,8 @@ impl KeyIntercept {
         fired
     }
 
-    /// Re-emits one key event on the virtual keyboard, tracking held state
-    /// for transition releases. Repeats (value 2) forward as presses,
-    /// faithful to what the kernel would have delivered.
+    /// Re-emits one key event on the virtual keyboard, tracking held state.
+    /// Repeats (value 2) forward as presses, as the kernel would deliver.
     fn forward_key(
         forward: &mut Option<VirtualKeyboard>,
         fwd_held: &mut HashSet<u16>,
@@ -251,9 +245,8 @@ impl KeyIntercept {
     fn rescan(&mut self) {
         let mut seen = HashSet::new();
         for (path, probe) in evdev::enumerate() {
-            // Never watch our own outputs: the virtual keyboard would
-            // otherwise watch (and with a grab, swallow) its own
-            // re-emitted keys.
+            // Never watch our own outputs: the virtual keyboard would swallow
+            // its own re-emitted keys.
             if is_ira_virtual_device(probe.name().unwrap_or_default()) {
                 continue;
             }
@@ -269,13 +262,11 @@ impl KeyIntercept {
                     if opened.set_nonblocking(true).is_err() {
                         continue;
                     }
-                    // Drain pre-open state: keys held before the open must
-                    // not count as fresh presses, and the drain doubles as
-                    // a liveness check.
+                    // Drain pre-open state: keys held before the open must not count
+                    // as fresh presses, and the drain doubles as a liveness check.
                     let _ = opened.fetch_events();
-                    // A failed grab keeps the device for snooping (delivery
-                    // untouched) and retries below; dropping it would blind
-                    // the chord path too.
+                    // A failed grab keeps the device for snooping and retries below;
+                    // dropping it would blind the chord path too.
                     if self.grabbed && opened.grab().is_err() {
                         self.needs_grab.insert(path.clone());
                         if self.warned.insert(path.clone()) {

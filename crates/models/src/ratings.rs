@@ -12,9 +12,7 @@
 pub struct RatingBoard {
     /// The canonical kind id stored in the database.
     pub id: &'static str,
-    /// The board's display name.
     pub name: &'static str,
-    /// The region the board rates for.
     pub region: &'static str,
     /// The board's known values, youngest first.
     pub values: &'static [&'static str],
@@ -122,8 +120,7 @@ pub const BOARDS: &[RatingBoard] = &[
         name: "SELL",
         region: "France (retired)",
         values: &["3+", "7+", "12+", "16+", "18+"],
-        // ScreenScraper stores the French marks as "JV" (Jeux Vidéo —
-        // what the old SELL ratings printed on the box).
+        // ScreenScraper stores the French marks as "JV" (Jeux Vidéo).
         aliases: &["JV"],
     },
 ];

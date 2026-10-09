@@ -20,7 +20,6 @@ pub struct Node {
 }
 
 impl Node {
-    /// First child object under `key`, if any.
     pub fn obj(&self, key: &str) -> Option<&Vec<Node>> {
         match self.get(key) {
             Some(Value::Obj(children)) => Some(children),
@@ -35,7 +34,6 @@ impl Node {
             .map(|node| &node.value)
     }
 
-    /// This node's own string value, when it is not an object.
     pub fn as_str(&self) -> Option<&str> {
         match &self.value {
             Value::Str(text) => Some(text),
@@ -43,12 +41,10 @@ impl Node {
         }
     }
 
-    /// Numeric convenience for settings values.
     pub fn as_f32(&self) -> Option<f32> {
         self.as_str().and_then(|text| text.parse().ok())
     }
 
-    /// Child nodes when this node holds an object; empty otherwise.
     pub(crate) fn children(&self) -> &[Node] {
         static EMPTY: [Node; 0] = [];
         match &self.value {
@@ -85,7 +81,6 @@ pub fn find_all<'a>(nodes: &'a [Node], key: &str) -> Vec<&'a Node> {
     nodes.iter().filter(|node| node.key == key).collect()
 }
 
-/// Parse one KeyValues document into its top-level nodes.
 pub fn parse_vdf(text: &str) -> Result<Vec<Node>, String> {
     let mut parser = Parser {
         chars: text.chars().peekable(),

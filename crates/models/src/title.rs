@@ -87,12 +87,8 @@ fn fold_accent(c: char) -> char {
     }
 }
 
-/// Moves a file-name-style article back to the front: No-Intro names write
-/// "World Ends With You, The" and "Legend of Zelda, The - Phantom
-/// Hourglass", where store titles say "The World Ends With You" and "The
-/// Legend of Zelda: Phantom Hourglass". The ", The" must sit at the end of
-/// the main title — before a subtitle, tag group or the end of the name —
-/// so a comma inside prose ("Me, the Robot") is left alone.
+/// Moves a file-name-style article back to the front; the ", The" must end
+/// the main title, so a comma inside prose is left alone.
 fn front_load_article(s: &str) -> String {
     let bytes = s.as_bytes();
     for article in ["the", "an", "a"] {

@@ -236,10 +236,8 @@ pub(crate) fn gamescope_args(launch: &GameLaunchConfig, mangoapp: bool) -> Vec<S
     gs_args
 }
 
-/// Wraps the command with gamemode/mangohud/gamescope if configured.
 /// Reads system settings from GameLaunchConfig (not WineConfig — these are
 /// system-level settings that apply to ALL games, not just Wine).
-/// Adds mangohud env vars to `env`.
 /// Returns `true` if gamescope is used (indicating external overlay mode).
 pub fn apply_performance(
     command: &mut Vec<String>,
@@ -297,7 +295,6 @@ pub fn apply_performance(
     }
 }
 
-/// Returns `true` if the command starts with `gamescope`.
 pub fn uses_gamescope(command: &[String]) -> bool {
     command.first().is_some_and(|c| c == "gamescope")
 }

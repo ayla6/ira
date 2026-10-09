@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Whether Ira's input broker runs for a game. Which virtual controller the
-/// game sees is an attribute of the selected controller profile, not of the
-/// launch configuration.
+/// game sees comes from the selected controller profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ControllerInputMode {
@@ -33,12 +32,10 @@ pub struct GameLaunchConfig {
     /// Script executed from the game's context menu.
     #[serde(default)]
     pub manual_script: String,
-    /// Whether launching waits for the pre-launch script to exit. None keeps
-    /// the historical behavior (wait), so configs saved before this field
-    /// existed keep gating the launch on the script.
+    /// Whether launching waits for the pre-launch script to exit.
+    /// None means wait.
     #[serde(default)]
     pub pre_launch_wait: Option<bool>,
-    /// Script executed after the game process exits.
     #[serde(default)]
     pub post_exit: String,
     #[serde(default)]
@@ -55,7 +52,7 @@ pub struct GameLaunchConfig {
     /// Goldberg fork (emulated Steam games). None = inherit platform/global.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pause_game_on_overlay: Option<bool>,
-    // System-level settings (moved from WineConfig — these apply to ALL games, not just Wine)
+    // System-level settings — these apply to ALL games.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gamemode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -384,11 +381,11 @@ mod tests {
 
     #[test]
     fn test_pause_game_on_overlay_defaults_to_inherit() {
-        // Arrange: fresh config, no pause preference stored.
+        // Fresh config, no pause preference stored.
         let cfg = GameLaunchConfig::default();
-        // Assert: None = inherit the platform/global setting.
+        // None = inherit the platform/global setting.
         assert_eq!(cfg.pause_game_on_overlay, None);
-        // Old configs without the key omit it on write and load as inherit.
+        // A missing key omits on write and loads as inherit.
         let json = serde_json::to_value(&cfg).unwrap();
         assert!(json.get("pause_game_on_overlay").is_none());
         let legacy: GameLaunchConfig = serde_json::from_value(json).unwrap();

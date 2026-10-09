@@ -12,9 +12,8 @@ use super::paths::{
 use super::persistent::{ms_to_hours, parse_persistent_settings};
 use super::tropusr::parse_tropusr;
 
-/// Metadata for an RPCS3 game, sourced from the DB entry.
-/// Mirrors `ShadPS4GameMeta` but drops the shadPS4 version selector
-/// (RPCS3 ships as a single binary — no version dropdown needed).
+/// Metadata for an RPCS3 game from the DB entry (no version selector:
+/// RPCS3 ships as a single binary).
 pub struct Rpcs3GameMeta {
     pub title: String,
     pub hidden: bool,
@@ -34,7 +33,6 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
     let npwr_id = &game.npwr_id;
     let serial = &game.serial;
 
-    // Playtime + last-played from persistent_settings.dat.
     let persistent = parse_persistent_settings(&persistent_settings_path_in(&game.config_dir));
     let playtime = persistent
         .playtime_ms
@@ -75,7 +73,6 @@ pub fn load_rpcs3_game(game: &Rpcs3Game, db_id: i64, meta: &Rpcs3GameMeta, save_
     ensure_default_icon(&game.game_path, &ps3_data_dir);
     apply_icon_paths(&mut out, &game.game_path, &ps3_data_dir);
 
-    // Build achievements from TROPCONF.SFM definitions + TROPUSR.DAT unlock state.
     out.achievements = load_ps3_trophies_in(npwr_id, &game.config_dir);
     out.total_count = out.achievements.len();
     out.earned_count = out.achievements.iter().filter(|a| a.earned).count();

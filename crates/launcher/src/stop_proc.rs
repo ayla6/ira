@@ -47,9 +47,8 @@ fn is_wine_bg(pid: i32) -> bool {
     false
 }
 
-/// Stop a native game process group without running the Wine cleanup sequence.
-/// Gamescope and its emulator children share the launcher's process group, so
-/// terminating the group also stops the standalone overlay promptly.
+/// Stop a native game process group (no Wine cleanup): gamescope and emulator
+/// children share the group, so this also stops the standalone overlay.
 fn stop_native_process_group(pid: i32) {
     let descendants = collect_descendants(pid);
     unsafe {
@@ -67,9 +66,7 @@ fn stop_native_process_group(pid: i32) {
     });
 }
 
-/// Poll until every pid is gone or the deadline elapses. Replaces the
-/// blind sleeps in the shutdown sequence so a clean exit doesn't pay
-/// the full grace period.
+/// Replaces blind sleeps so a clean exit never pays the full grace period.
 fn wait_all_gone(pids: &[i32], deadline: Duration) {
     let start = std::time::Instant::now();
     while start.elapsed() < deadline {
@@ -80,9 +77,8 @@ fn wait_all_gone(pids: &[i32], deadline: Duration) {
     }
 }
 
-/// Reap ALL children of the calling process, regardless of process group.
-/// Used after the Wine branch of stop_game finishes killing — by that point
-/// wineserver -k has completed so there are no conflicting waitpid calls.
+/// Reap ALL children regardless of group; safe now that wineserver -k
+/// completed, so no conflicting waitpid calls remain.
 fn reap_all() {
     loop {
         let ret = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
@@ -124,9 +120,7 @@ pub fn stop_game(
     });
 }
 
-/// The graceful Wine shutdown, run on a thread so `stop_game` returns
-/// immediately: wait for the game → `wineserver -k` → sweep stragglers →
-/// SIGKILL leftovers → reap zombies.
+/// Graceful Wine shutdown on a thread so `stop_game` returns immediately.
 fn stop_wine_process_group(
     pid: i32,
     wine_exe: Option<&str>,
@@ -167,8 +161,7 @@ fn stop_wine_process_group(
     watched.extend(descendants);
     wait_all_gone(&watched, Duration::from_secs(3));
 
-    // Step 5: SIGTERM any remaining stragglers, identifying wine bg
-    // processes via is_wine_bg() for diagnostics.
+    // Step 5: SIGTERM any remaining stragglers.
     for d in descendants {
         let alive = unsafe { libc::kill(*d, 0) } == 0;
         if alive {
@@ -190,15 +183,12 @@ fn stop_wine_process_group(
 
     sigkill_leftovers(pid, descendants);
 
-    // Step 8: Reap all zombies. Safe to use waitpid(-1) here because
-    // wineserver -k has already completed and no other blocking wait
-    // calls are in flight.
+    // Step 8: Reap all zombies; safe now (wineserver -k done, no blocking
+    // waits in flight).
     reap_all();
 }
 
-/// Step 7: final fallback — SIGKILL the entire process group, then SIGKILL
-/// any remaining stragglers that escaped the group, then the game PID
-/// itself if somehow still alive.
+/// Step 7: final fallback SIGKILL.
 fn sigkill_leftovers(pid: i32, descendants: &[i32]) {
     if pid > 0 {
         unsafe {
@@ -220,7 +210,6 @@ fn sigkill_leftovers(pid: i32, descendants: &[i32]) {
         }
     }
 
-    // Kill the original game PID if somehow still alive.
     let alive = unsafe { libc::kill(pid, 0) } == 0;
     if alive {
         eprintln!("stop: force killing game pid {}", pid);

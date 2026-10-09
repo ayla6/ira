@@ -27,14 +27,12 @@ use crate::{GamepadButton, InputSource};
 /// Press threshold, mirroring the mapping engine's button edge.
 const PRESSED_ABOVE: f32 = 0.5;
 
-/// What the session loop should do with a physical input event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToggleAction {
-    /// Forward to the mapper untouched.
     Forward,
     /// Drop silently: grip/settle press, never a real toggle intent.
     Swallow,
-    /// Drop and flip the overlay: a genuine toggle release.
+    /// Drop and flip the overlay on the release clearing the chord.
     Fire,
     /// Drop and screenshot: the screenshot chord newly completed.
     FireScreenshot,
@@ -51,10 +49,8 @@ pub(crate) struct OverlayToggle {
     screenshot: u32,
     record: u32,
     held: HashSet<u32>,
-    /// The toggle chord completed on press and is waiting for release:
-    /// like the in-process paths, the flip fires when the chord clears so
-    /// a Guide-based toggle cannot pre-empt a Guide-based screenshot or
-    /// record chord that is still being formed.
+    /// The toggle chord completed on press and waits for release, so a shared Guide
+    /// cannot pre-empt a screenshot/record chord still being formed.
     toggle_pending: bool,
     canvas: Option<CanvasShm>,
     shm: Option<MappedShm>,
@@ -62,9 +58,8 @@ pub(crate) struct OverlayToggle {
 }
 
 impl OverlayToggle {
-    /// Arms from the session env: needs the launcher marker plus a readable
-    /// game SHM to decode the chords. Silent `None` otherwise. The mapping
-    /// is kept so firing flips it directly — no IPC round trip.
+    /// Arms from the session env. Silent `None` otherwise; the mapping is kept
+    /// so firing flips it directly with no IPC round trip.
     pub(crate) fn arm(env: Option<&[(String, String)]>) -> Option<Self> {
         let shm_name = super::daemon_toggle_shm_name(env)?;
         // Read-write: firing flips the flag through this same mapping, and
@@ -100,8 +95,7 @@ impl OverlayToggle {
             .is_some_and(|until| std::time::Instant::now() < until)
     }
 
-    /// Whether the overlay is currently shown (the game should not receive
-    /// pad input while it is).
+    /// Whether the overlay is currently shown.
     pub(crate) fn is_visible(&self) -> bool {
         self.shm
             .as_ref()
@@ -125,15 +119,9 @@ impl OverlayToggle {
         self.shm.as_ref()?.header().toggle_visible()
     }
 
-    /// Filters one physical input event. Presses that newly complete the
-    /// screenshot/record chords come back `FireScreenshot`/`FireRecord`
-    /// (swallow + capture action); a press newly completing the toggle
-    /// chord arms `toggle_pending` and the flip fires on the release that
-    /// clears the chord — the same release-edge the in-process paths use,
-    /// so a shared Guide cannot pre-empt the longer chords. Taps while a
-    /// chord is already held are incidental and forward. Everything else
-    /// is `Forward`. Held tracking also makes multi-key chords work and
-    /// key-repeat never re-fire.
+    /// Filters one physical input event. Chord-completing presses arm or fire;
+    /// the toggle flips on the release clearing the chord so a shared Guide cannot
+    /// pre-empt the longer chords. Taps held alongside forward; repeats never re-fire.
     pub(crate) fn filter(&mut self, event: &InputEvent) -> ToggleAction {
         if self.toggle == 0 {
             return ToggleAction::Forward;
@@ -147,9 +135,7 @@ impl OverlayToggle {
         if event.value > PRESSED_ABOVE {
             let before = self.held_bits();
             if !self.held.insert(bit) {
-                // Repeat of a held button: chord members were consumed on
-                // their press, so swallow further repeats; anything else
-                // forwards untouched.
+                // Repeats of consumed chord members swallow; anything else forwards.
                 return if bit & self.chord_bits() != 0 {
                     ToggleAction::Swallow
                 } else {
@@ -186,10 +172,8 @@ impl OverlayToggle {
             return ToggleAction::Forward;
         }
         self.held.remove(&bit);
-        // Releases always forward (the close-edge swallow set needs to see
-        // them to retire consumed buttons); a pending toggle fires when the
-        // chord itself breaks — releases of bystander buttons held alongside
-        // must not cancel it.
+        // Releases always forward so the close-edge swallow set retires them; a pending
+        // toggle fires when the chord itself breaks, not on bystander releases.
         if self.toggle_pending && self.held_bits() & self.toggle != self.toggle {
             self.toggle_pending = false;
             return ToggleAction::Fire;
@@ -205,9 +189,8 @@ impl OverlayToggle {
         self.toggle | self.screenshot | self.record
     }
 
-    /// Pushes a screenshot capture action to the canvas ring, where the
-    /// in-process layer drains and executes it game-side. Opens the canvas
-    /// lazily: the host creates it after the session starts.
+    /// Pushes a screenshot capture action to the canvas ring for game-side execution.
+    /// Opens the canvas lazily: the host creates it after the session starts.
     pub(crate) fn push_screenshot(&mut self) -> bool {
         self.push_capture(ACT_SCREENSHOT, "screenshot")
     }
@@ -294,7 +277,6 @@ mod tests {
 
     #[test]
     fn test_single_button_chord_fires_on_release() {
-        // Arrange
         let mut toggle = armed(GAMEPAD_GUIDE);
         // Act + Assert: press arms (swallowed, game never sees it)…
         assert_eq!(
@@ -324,7 +306,6 @@ mod tests {
 
     #[test]
     fn test_multi_button_chord_fires_when_chord_breaks() {
-        // Arrange
         let mut toggle = armed(GAMEPAD_GUIDE | GAMEPAD_DPAD_DOWN);
         // Act + Assert: Guide alone forwards…
         assert_eq!(
@@ -411,7 +392,6 @@ mod tests {
 
     #[test]
     fn test_record_chord_fires_on_press() {
-        // Arrange
         let mut toggle = OverlayToggle {
             screenshot: GAMEPAD_GUIDE | GAMEPAD_DPAD_DOWN,
             record: GAMEPAD_GUIDE | GAMEPAD_DPAD_UP,

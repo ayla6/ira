@@ -157,8 +157,8 @@ pub fn start_genre_warm(state: &SharedState) -> bool {
 /// store app id. Everything else would only get a hopeful title
 /// search whose exact-hit policy almost never lands — the strip would
 /// cycle the whole library naming games nothing ever happens to.
-/// Includes games with no record at all, and the epoch dates an old
-/// diff bug wrote. A forced pass drops the gap filter — every readable
+/// Includes games with no record at all, and epoch dates, which count
+/// as missing. A forced pass drops the gap filter — every readable
 /// game is re-read, which is how stored records pick up fields that
 /// only the store page provides.
 fn steam_refetch_queue(state: &SharedState, force: bool) -> Vec<i64> {
@@ -315,8 +315,7 @@ pub(crate) fn garnish_steam_link(
 /// the stored Steam link, or the platform id for a PC game whose
 /// platform is the store. SteamCMD's timestamp wins for the release
 /// date, the store page's parsed date fills in when it has none — and
-/// an epoch date an old bug wrote counts as missing, so refetches
-/// repair it.
+/// an epoch date counts as missing, so refetches repair it.
 pub(crate) fn steam_refetch_one(
     steam: &ira_api::SteamDataClient,
     db: &ira_db::DbConn,

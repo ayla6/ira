@@ -48,8 +48,6 @@ pub(crate) fn target_env_for(
     product: Option<u16>,
     passthrough: bool,
 ) -> Vec<(String, String)> {
-    // A passthrough session leaves the physical pad fully native: no SDL
-    // environment tampering at all.
     if passthrough {
         return Vec::new();
     }

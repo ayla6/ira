@@ -82,10 +82,8 @@ fn is_dump_tag(tag: &str) -> bool {
     )
 }
 
-/// Derives a display title from a dump filename. Dump tools usually name
-/// files like `00040000000E5C00 Shin Megami Tensei IV (CTR-P-AMXE) (v0.1.0)
-/// (U).cci`; strip the leading title ID and release tags while keeping any
-/// bracketed text that is part of the game's own name.
+/// Display title from a dump filename (`00040000… Name (tags).cci`): strip
+/// the leading title ID and release tags, keeping bracketed name parts.
 pub(super) fn title_from_filename(stem: &str) -> String {
     let stem = stem.trim();
     let stem = match stem.get(..16) {

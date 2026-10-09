@@ -316,7 +316,6 @@ macro_rules! check_hook {
     // not last, so it keeps a hand-written shell (same 3-line body).
 }
 
-/// Non-blocking event check with a predicate. Used by SDL2 and most game engines.
 #[no_mangle]
 pub unsafe extern "C" fn XCheckIfEvent(
     display: *mut c_void,
@@ -342,7 +341,7 @@ check_hook!(XCheckTypedEvent(display: *mut c_void, event_type: i32) => xcheck_ty
 check_hook!(XCheckTypedWindowEvent(display: *mut c_void, w: u64, event_type: i32) => xcheck_typed_window_event);
 check_hook!(XCheckMaskEvent(display: *mut c_void, event_mask: i64) => xcheck_mask_event);
 
-/// Blocking event wait. Loops internally to skip consumed events.
+/// Loops internally to skip consumed events.
 #[no_mangle]
 pub unsafe extern "C" fn XNextEvent(display: *mut c_void, event_return: *mut c_void) -> i32 {
     let Some(real_fn) = xnext_event() else {
@@ -356,7 +355,6 @@ pub unsafe extern "C" fn XNextEvent(display: *mut c_void, event_return: *mut c_v
         if !maybe_consume_event(event_return) {
             return result;
         }
-        // Event was consumed — loop to get the next one.
     }
 }
 

@@ -530,7 +530,6 @@ fn run_terminal_interactive(
     show_interactive_done_page(wizard, ist, index);
 }
 
-/// Fallback: spawn a terminal emulator to run the installer.
 fn spawn_terminal_fallback(cmd: &str) -> bool {
     let terminals: &[(&str, &[&str])] = &[
         ("gnome-terminal", &["--"]),
@@ -753,7 +752,6 @@ fn flatten_linuxrulez_if_needed(wizard: &Rc<RefCell<Wizard>>, folder: &Path) -> 
     let lrz_dir = parent.join(format!("{name}.lrz"));
     let clean_dir = parent.join(name);
 
-    // Rename original folder to <name>.lrz
     if let Err(e) = std::fs::rename(folder, &lrz_dir) {
         eprintln!(
             "Failed to rename {} to {:?}: {}",
@@ -764,10 +762,8 @@ fn flatten_linuxrulez_if_needed(wizard: &Rc<RefCell<Wizard>>, folder: &Path) -> 
         return folder.to_path_buf();
     }
 
-    // Create clean folder and move game/game/* into it
     if let Err(e) = std::fs::create_dir_all(&clean_dir) {
         eprintln!("Failed to create {:?}: {}", clean_dir, e);
-        // Rename back
         let _ = std::fs::rename(&lrz_dir, folder);
         return folder.to_path_buf();
     }

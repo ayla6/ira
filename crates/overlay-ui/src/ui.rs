@@ -26,7 +26,6 @@ use ira_widgets::{menu, style as bp};
 use super::game::GameData;
 use super::widgets;
 
-/// Effect of an applied command that the frame loop must honor.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum UiEffect {
     None,

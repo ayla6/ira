@@ -14,8 +14,8 @@ pub(super) fn append_assets(
     start: usize,
     ctx: &SgdbPickerCtx,
 ) {
-    // No column clamp: the box wraps by width like the game grid, so the
-    // column count follows the window size and the zoom level.
+    // The box wraps by width like the game grid, so the column count
+    // follows the window size and the zoom level.
     // Dimmed cards always trail: partition the batch and park the
     // previously-settled dimmed tails behind it, so new sections never
     // stripe visible/dimmed/visible.

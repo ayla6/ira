@@ -182,8 +182,8 @@ impl ScraperMetadata {
 
     /// Fill only the gaps from a fresh answer: anything already stored —
     /// including an entry the source has since emptied — stays. Returns
-    /// whether anything was filled. The epoch date an old bug wrote
-    /// counts as a hole, not as data.
+    /// whether anything was filled. The epoch date counts as a hole,
+    /// not as data.
     pub fn fill_gaps(&mut self, fresh: &ScraperMetadata) -> bool {
         let mut changed = false;
         if self.ss_id.is_empty() && !fresh.ss_id.is_empty() {

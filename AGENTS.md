@@ -218,6 +218,23 @@ delete; migration code has to be carried forever.
 
 - **Prefer functional programming patterns when they are more readable and don't have a performance or memory drawback.**
 
+### Comments
+
+- **Comments explain WHY, never WHAT.** If the comment restates the code,
+  delete it.
+- **No defensive negatives.** Never write "not X but Y" — say what it IS
+  and why. (`Sized paintables report the tile size` beats `Sized
+  paintables, not sized Pictures`.)
+- **Absences and traps earn comments.** Code can't show what isn't there
+  (deliberately no margins, no retry) or what looks innocent but isn't
+  (a Picture ignores size requests, close-request destroys by default).
+  One or two lines stating the trap.
+- **No history lessons.** Never reference previous implementations ("like
+  the old code", "kept exact", "from older builds"). The reader only has
+  this code.
+- **Doc comments state contracts, not behavior.** Params, `None`-means,
+  ownership, and edge cases — never a prose repeat of the body.
+
 ## UI guidelines
 
 ### GTK patterns

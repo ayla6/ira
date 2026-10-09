@@ -25,11 +25,9 @@ use ira_overlay_ipc::{
     CMD_NAV_LEFT, CMD_NAV_RIGHT, CMD_NAV_UP,
 };
 
-// evdev event types
 const EV_KEY: u16 = 0x01;
 const EV_ABS: u16 = 0x03;
 
-// Button codes
 const BTN_SOUTH: u16 = 0x130; // A / Cross  (== BTN_GAMEPAD)
 const BTN_EAST: u16 = 0x131; // B / Circle — Big Picture back: hide overlay
 const BTN_TL: u16 = 0x136; // L1 / LB
@@ -45,7 +43,6 @@ const ABS_HAT0Y: u16 = 0x11;
 
 const KEY_PRESS: i32 = 1;
 
-// inotify masks
 const IN_CREATE: u32 = 0x100;
 const IN_DELETE: u32 = 0x200;
 
@@ -113,7 +110,6 @@ fn is_gamepad(fd: c_int) -> bool {
     test_bit(&buf, BTN_SOUTH as u32)
 }
 
-/// Set up inotify watch on `/dev/input/` for instant hotplug detection.
 fn init_inotify() {
     let fd = unsafe { libc::inotify_init1(libc::O_NONBLOCK) };
     if fd < 0 {
@@ -130,7 +126,6 @@ fn init_inotify() {
     INOTIFY_FD.store(fd, Ordering::Relaxed);
 }
 
-/// Returns true if a device was added or removed since last check.
 fn check_hotplug() -> bool {
     let fd = INOTIFY_FD.load(Ordering::Relaxed);
     if fd < 0 {
@@ -141,7 +136,6 @@ fn check_hotplug() -> bool {
     n > 0
 }
 
-/// Scan `/dev/input/event*` for gamepad devices. Closes old fds and opens new ones.
 fn scan_devices() {
     let mut fds = GAMEPAD_FDS.lock().unwrap();
     for &fd in &*fds {
@@ -204,13 +198,10 @@ pub fn poll() {
         return;
     }
 
-    // Instant hotplug detection via inotify
     if check_hotplug() {
         RESCAN_TIMER.store(RESCAN_DELAY, Ordering::Relaxed);
     }
 
-    // Delayed re-scan — wait a few frames for the kernel to finish
-    // initializing the newly created device node.
     if RESCAN_TIMER.load(Ordering::Relaxed) > 0 {
         let prev = RESCAN_TIMER.fetch_sub(1, Ordering::Relaxed);
         if prev == 1 {

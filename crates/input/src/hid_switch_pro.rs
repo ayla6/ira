@@ -651,7 +651,6 @@ mod tests {
 
     #[test]
     fn test_usb_commands_ack_with_matching_reply() {
-        // USB packets are padded to the endpoint size like real pads do.
         let ack = handshake_reply(&[0x80, 0x02]);
         assert_eq!(&ack[..2], &[0x81, 0x02]);
         assert_eq!(ack.len(), 64);

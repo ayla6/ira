@@ -11,7 +11,6 @@
 //! each side tracks its own read index locally (same pattern as the
 //! notification ring in `protocol.rs`).
 
-/// Layer → host command kinds.
 pub const CMD_NAV_UP: u32 = 0;
 pub const CMD_NAV_DOWN: u32 = 1;
 pub const CMD_NAV_LEFT: u32 = 2;
@@ -28,7 +27,6 @@ pub const CMD_BACK: u32 = 11;
 /// Exit the game from the overlay (kills the session).
 pub const CMD_EXIT_GAME: u32 = 12;
 
-/// Host → layer action kinds.
 pub const ACT_SCREENSHOT: u32 = 0;
 pub const ACT_TOGGLE_RECORD: u32 = 1;
 pub const ACT_HIDE_OVERLAY: u32 = 2;

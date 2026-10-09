@@ -16,8 +16,7 @@ use super::super::{
 };
 use crate::profile::VirtualGamepadBackend;
 
-/// Everything the mapping loop needs, opened once before the event loop
-/// starts. Field names mirror the locals the loop body has always used.
+/// Everything the mapping loop needs, opened once before the event loop starts.
 pub(crate) struct SessionSetup {
     pub(crate) trace: TraceState,
     pub(crate) hub: HubHandle,
@@ -78,7 +77,7 @@ fn native_passthrough_for(
     }
 }
 
-/// Spawns the game process. The legacy wrapper passes nothing but the
+/// Spawns the game process. The wrapper passes nothing but the
 /// command line: the child inherits the wrapper's environment (which the
 /// launcher already built). A daemon session carries the full environment
 /// and working directory in the request and streams the child's output back
@@ -146,11 +145,7 @@ fn spawn_session_child(
     Some(child)
 }
 
-/// Assembles the child's environment overrides in application order: the
-/// request environment first (it defines the complete environment), then
-/// the SDL target environment, which must win — an `env_clear` in the
-/// caller is what keeps the daemon's desktop environment out, and the
-/// target envs are what keep the physical pad out of the game.
+/// Request environment first, SDL target environment last so it wins.
 fn child_env_overrides<'a>(
     request_env: Option<&'a [(String, String)]>,
     target_envs: &'a [(String, String)],
@@ -316,14 +311,10 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     );
     let pad_state = crate::PadState::default();
     let schedule = LoopSchedule::new();
-    // Pause injection while the game window is unfocused (alt-tab). Without
-    // an X server to ask, the watcher cannot exist and input stays active.
-    // Sessions where the daemon owns the overlay toggle (gamescope,
-    // flatpak) never get a watcher: their game lives on an inner Xwayland
-    // server or inside the sandbox, invisible from the desktop display the
-    // watcher asks — it would read "unfocused" for the entire session and
-    // the pad would drive the overlay yet never the game. Overlay
-    // visibility already gates input there.
+    // Pause injection while the game window is unfocused. Sessions where the
+    // daemon owns the overlay toggle (gamescope, flatpak) never get a watcher:
+    // the game is invisible from the desktop display, so it would read
+    // "unfocused" forever; overlay visibility gates input there instead.
     let focus = if focus_watcher_allowed(arguments.pause_unfocused, arguments.env.as_deref()) {
         let exe_name = arguments
             .command

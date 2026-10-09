@@ -3,9 +3,8 @@ use ira_models::{GameEntry, GameKind, LogoPosition, Platform, TrophySource};
 use r2d2_sqlite::SqliteConnectionManager;
 
 /// Every games column the app reads, in one place so queries and the
-/// row mapper can't drift. `game_entry_from_row` reads them by name —
-/// positional reads here have bitten before (inserting a column used to
-/// silently shift every field after it).
+/// row mapper can't drift; reads are by name, so inserting a column can't
+/// silently shift fields.
 pub(crate) const GAME_COLUMNS: &str = "id, kind, trophy_source, steam_id, trophy_id, platform_id, title, hidden, sgdb_id, logo_position, logo_size, manual_unmatch, sort_title, shadps4_version, last_played, release_date, release_timestamp, metacritic_score, steam_review_score, steam_review_count, ra_core, emulator_override, rom_path, game_folder, playtime, cached_earned_count, cached_total_count, cached_achievement_mtime, hashes, vanished, players, synopsis, screenscraper_id, screenscraper_rating, release_dates, title_trusted, native_id";
 
 pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameEntry> {
@@ -17,7 +16,7 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
         trophy_id: row.get("trophy_id")?,
         platform_id: {
             // The parse happens once here, at the database boundary —
-            // everything downstream reads the value, never the string.
+            // everything downstream reads the value.
             let raw: String = row.get("platform_id")?;
             Platform::parse(&raw)
         },

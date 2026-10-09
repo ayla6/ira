@@ -1,9 +1,7 @@
 use crate::DbConn;
 use rusqlite::params;
 
-/// Runs an `id, name` lookup-table query and maps each row to a
-/// `ScraperEntity` — the shared shape of the company/genre/family reads
-/// and the picker searches.
+/// The shared shape of the company/genre/family reads and the picker searches.
 fn query_entities(
     conn: &DbConn,
     sql: &str,
@@ -114,7 +112,6 @@ fn game_classifications(
         .collect())
 }
 
-/// The company name a ScreenScraper id refers to, per the lookup table.
 pub fn scraper_company_name(conn: &DbConn, id: i64) -> Result<Option<String>, String> {
     crate::query_optional_scalar(
         conn,
@@ -123,7 +120,6 @@ pub fn scraper_company_name(conn: &DbConn, id: i64) -> Result<Option<String>, St
     )
 }
 
-/// The genre name a ScreenScraper id refers to, per the lookup table.
 pub fn scraper_genre_name(conn: &DbConn, id: i64) -> Result<Option<String>, String> {
     crate::query_optional_scalar(
         conn,

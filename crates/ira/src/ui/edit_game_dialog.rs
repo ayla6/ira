@@ -563,8 +563,7 @@ fn build_dialog_contents(
                 match $weak.upgrade() {
                     Some(value) => value,
                     None => {
-                        // Silent returns here made a dead Save button
-                        // impossible to diagnose; always say why.
+                        // Always say why, so a dead Save button stays diagnosable.
                         eprintln!("game settings: save aborted, {} was gone", $name);
                         return;
                     }

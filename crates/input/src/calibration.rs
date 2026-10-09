@@ -27,10 +27,8 @@ pub fn resolved_nintendo_layout(path: &Path, device: &DeviceInfo) -> bool {
         .unwrap_or_else(|| device.prefers_nintendo_layout())
 }
 
-/// A fresh calibration entry for a controller, seeded so that writing any
-/// other per-controller value does not clobber the family's layout default:
-/// an entry created implicitly carries the default the resolver would have
-/// picked had no entry existed.
+/// A fresh calibration entry, seeded with the family layout default so
+/// writing any other value does not clobber it.
 pub fn default_calibration_for(device: &DeviceInfo) -> ControllerCalibration {
     ControllerCalibration {
         nintendo_layout: device.prefers_nintendo_layout(),
@@ -38,7 +36,6 @@ pub fn default_calibration_for(device: &DeviceInfo) -> ControllerCalibration {
     }
 }
 
-/// The calibration file location for an app data directory.
 pub fn calibration_store_path(save_dir: &str) -> std::path::PathBuf {
     Path::new(save_dir).join("controller_calibration.json")
 }

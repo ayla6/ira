@@ -12,9 +12,8 @@ use super::Arguments;
 /// launch looks like the in-process session. `Err` means the daemon was
 /// unavailable and the caller should run the session locally.
 pub fn run_via_daemon(arguments: &Arguments) -> Result<i32, String> {
-    // The wrapper used to inherit this process's environment and working
-    // directory; the daemon's child gets whatever the request carries, so
-    // both travel along.
+    // The daemon's child gets whatever the request carries, so the
+    // environment and working directory travel along.
     let environment: Vec<(String, String)> = std::env::vars().collect();
     let working_dir = std::env::current_dir()
         .ok()

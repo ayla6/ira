@@ -132,7 +132,6 @@ struct ResolvedSavePath {
     centralized_path: PathBuf,
 }
 
-/// Resolve all UFS savefile entries to concrete filesystem paths.
 fn resolve_save_paths(
     savefiles: &[UfsSaveFile],
     rootoverrides: &[UfsRootOverride],
@@ -158,7 +157,6 @@ fn resolve_save_paths(
     result
 }
 
-/// Resolve paths for a Wine game. Creates symlinks in each user's AppData.
 fn resolve_wine_paths(
     sf: &UfsSaveFile,
     _rootoverrides: &[UfsRootOverride],
@@ -231,7 +229,6 @@ fn wine_root_base(root: &str) -> Vec<&'static str> {
     }
 }
 
-/// Resolve paths for a native Linux game using rootoverrides.
 fn resolve_linux_paths(
     sf: &UfsSaveFile,
     rootoverrides: &[UfsRootOverride],
@@ -270,7 +267,6 @@ fn resolve_linux_paths(
     }]
 }
 
-/// Map a Linux root key to a concrete base path.
 fn linux_root_base(root: &str) -> Option<PathBuf> {
     match root {
         "LinuxHome" => {
@@ -371,7 +367,6 @@ fn paths_resolve_to(default_path: &Path, centralized_path: &Path) -> bool {
     }
 }
 
-/// Create a symlink from `default_path` to `centralized_path`.
 /// Returns true if a symlink was created or migrated.
 fn create_save_symlink_checked(
     default_path: &Path,
@@ -392,7 +387,6 @@ fn create_save_symlink_checked(
         if meta.file_type().is_symlink() {
             return Ok(false);
         }
-        // Real directory — migrate contents safely
         eprintln!(
             "Migrating save data from {} to {}",
             default_path.display(),
@@ -478,7 +472,6 @@ fn list_wine_users(users_dir: &Path) -> Vec<PathBuf> {
             continue;
         }
 
-        // Skip symlinks to steamuser (Proton redirects $USER → steamuser)
         if let Ok(meta) = std::fs::symlink_metadata(&path) {
             if meta.file_type().is_symlink() {
                 if let Ok(target) = std::fs::read_link(&path) {

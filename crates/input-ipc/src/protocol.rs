@@ -21,30 +21,23 @@ pub enum Request {
     /// by the launch `tag`, so the sender needs no connection to the
     /// session's launch.
     ReloadProfile { tag: i64, profile: String },
-    /// While the app is open it keeps this wish on file: the daemon runs a
-    /// no-game session that routes an idle controller through its default
-    /// layout, so the pad behaves as configured on the desktop. `enabled:
-    /// false` (or the app disconnecting) releases the controller back to
-    /// native input. A game launch always supersedes it and the desktop
-    /// session resumes when the last game ends.
+    /// While the app is open it keeps this wish on file: a no-game session routes an
+    /// idle controller through its default layout. `enabled: false` (or disconnecting)
+    /// releases it; a game launch supersedes it until the last game ends.
     DesktopDefault {
         enabled: bool,
         profile: Option<String>,
         calibration: Option<String>,
         motion_port: Option<u16>,
     },
-    /// A game that will not be remapped is about to start, so the
-    /// desktop-default session must not remap the pad underneath it: the
-    /// desktop behaviour is suspended while `hold` is true. The hold lives
-    /// on the requesting client connection — disconnecting (a crash, a
-    /// finished game) releases it, so no explicit resume is needed.
+    /// A game that will not be remapped is about to start, so the desktop session
+    /// must not remap the pad underneath it. The hold lives on the requesting
+    /// connection, so disconnecting releases it with no explicit resume needed.
     HoldDesktop { hold: bool },
 }
 
-/// A game session handed to the daemon. `command` is the fully built game
-/// command line (wine/gamescope layers included) — the daemon is its last
-/// stop before exec. `env` is the complete environment for the child, the
-/// same list the launcher would apply itself.
+/// A game session handed to the daemon. `command` is the fully built game command
+/// (wine/gamescope layers included); `env` is the complete child environment.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LaunchRequest {
     pub command: Vec<String>,
@@ -70,9 +63,7 @@ pub enum Response {
     /// the session id that identifies them to their owner.
     Launched { session: u64 },
     Status(DaemonStatus),
-    /// A reload request reached its session.
     Reloaded,
-    /// A desktop-default wish was accepted.
     Applied,
     Bye,
     /// A named-field variant on purpose: serde cannot serialize an
@@ -86,9 +77,8 @@ pub struct DaemonStatus {
     pub pid: u32,
     pub protocol_version: u32,
     pub session_active: bool,
-    /// Whether the no-game desktop-default session is currently running.
-    /// A launch that bypasses the daemon waits for this to go false before
-    /// spawning, so its game never sees the desktop's remapped pad.
+    /// Whether the no-game desktop-default session is currently running. A bypassing
+    /// launch waits for false before spawning, so its game never sees the remapped pad.
     pub desktop_active: bool,
 }
 

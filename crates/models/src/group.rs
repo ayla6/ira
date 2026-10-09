@@ -11,7 +11,7 @@ pub enum GroupSelection {
     Uncategorized,
     /// A metadata-computed category (developer, publisher, ...) — the
     /// name is the category's title, and its members live in the view
-    /// state's derived-members map rather than the groups tables.
+    /// state's derived-members map.
     Derived(String),
 }
 

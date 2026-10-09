@@ -168,7 +168,6 @@ mod tests {
     #[test]
     fn test_grab_modifiers_cover_lock_combos() {
         // Arrange: Shift+Tab chord mask.
-        // Act
         let variants = grab_modifiers(0x01);
         // Assert: base plus every NumLock/CapsLock combination, no dupes.
         assert_eq!(variants, [0x01, 0x11, 0x03, 0x13]);

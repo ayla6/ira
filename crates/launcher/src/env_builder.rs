@@ -6,7 +6,6 @@
 //! [`crate::input_wrap`]; their public items are re-exported here so the
 //! `env_builder::` paths used across the app keep working.
 
-// Re-exported for downstream callers (`ira_launcher::env_builder::…`).
 pub use crate::gamescope_env::{
     apply_gamescope_display_policy, apply_performance, pin_flatpak_for_gamescope,
     strip_session_wayland, uses_gamescope, will_use_gamescope, will_wrap_gamescope,
@@ -43,7 +42,6 @@ fn filter_dev_paths(v: &str) -> Vec<&str> {
 pub fn clean_parent_env() -> Vec<(String, String)> {
     std::env::vars()
         .filter(|(k, _)| {
-            // Filter out build/dev environment variables that shouldn't reach the game
             k != "CARGO"
                 && !k.starts_with("CARGO_")
                 && k != "RUSTUP"
@@ -92,7 +90,6 @@ pub fn build_env(
     if let Some(w) = wine {
         if w.enabled {
             let wine_env = wine_launch::build_wine_env(w, wine_exe);
-            // Remove any existing keys that wine_env overrides, then extend
             for (k, _) in &wine_env {
                 env.retain(|(ek, _)| ek != k);
             }

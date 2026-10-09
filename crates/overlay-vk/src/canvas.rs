@@ -46,7 +46,6 @@ struct CanvasPush {
 
 const _: () = assert!(std::mem::size_of::<CanvasPush>() == 24);
 
-/// Panel rect + canvas frame size returned per composited frame.
 #[derive(Clone, Copy, Debug)]
 pub struct PanelDraw {
     /// Screen-space panel rect (x, y, w, h).
@@ -62,7 +61,6 @@ pub(crate) struct CanvasEntry {
     pub(crate) pipeline_layout: vk::PipelineLayout,
 }
 
-/// Per-swapchain canvas entries, keyed by raw swapchain handle.
 pub(crate) static CANVASES: Mutex<Option<HashMap<u64, CanvasEntry>>> = Mutex::new(None);
 /// Last composited panel (x, y, scale) for screen→canvas input translation.
 /// `None` while nothing is drawn — input events are dropped then.
@@ -83,7 +81,6 @@ pub fn publish_extent(shm: &mut CanvasShm, extent: vk::Extent2D) {
         .store(extent.height, std::sync::atomic::Ordering::SeqCst);
 }
 
-/// Records the pointer position (client pixels) for the layer cursor.
 pub fn set_last_mouse(x: f32, y: f32) {
     *LAST_MOUSE.lock().unwrap() = Some((x, y));
 }

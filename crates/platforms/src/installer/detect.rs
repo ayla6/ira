@@ -17,7 +17,6 @@ pub enum GamePlatform {
     Linux,
 }
 
-/// Classify an installer by its file extension.
 /// `.exe` / `.msi` → Windows, anything else → Linux.
 pub fn installer_type(path: &Path) -> InstallerType {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -28,9 +27,7 @@ pub fn installer_type(path: &Path) -> InstallerType {
     }
 }
 
-/// Determine the platform of the game an installer installs.
-/// Usually matches the installer type, but LinuxRulez `.sh` installers
-/// (YAD Simple Installer format) wrap Windows games.
+/// Usually the installer type, but LinuxRulez `.sh` installers wrap Windows games.
 pub fn game_platform(path: &Path, itype: InstallerType) -> GamePlatform {
     if itype == InstallerType::Linux && is_linuxrulez(path) {
         GamePlatform::Windows
@@ -58,12 +55,10 @@ pub(super) const MAKESELF_FILESIZE_MARKER: &[u8] = b"filesizes=\"";
 pub(super) const MAKESELF_OFFSET_MARKER: &[u8] = b"offset=`head -n ";
 
 /// Marker for LinuxRulez YAD Simple Installer releases.
-/// These are `.sh` installers that install Windows games using a YAD GUI.
 const LINUXRULEZ_MARKER: &[u8] = b"YAD Simple Installer";
 
-/// Check whether a Linux `.sh` file is a GOG makeself/mojosetup installer.
-/// Searches the first 10 KB for both the `filesizes="` and
-/// `offset=\`head -n ` markers that makeself embeds in its header.
+/// Whether a Linux `.sh` is a GOG makeself/mojosetup installer (both header
+/// markers in the first 10 KB).
 pub fn is_gog_makeself(path: &Path) -> bool {
     let head = read_head(path, 10_240);
     find_subsequence(&head, MAKESELF_FILESIZE_MARKER).is_some()
@@ -76,10 +71,8 @@ const INNO_MAGIC_OFFSET: usize = 0x30;
 const INNO_MAGIC: &[u8] = b"Inno";
 const INNO_VERSION_STRING: &[u8] = b"Inno Setup Setup Data";
 
-/// Check whether a Windows `.exe` file is an Inno Setup installer.
-/// Looks for the "Inno" magic at offset 0x30, and falls back to searching
-/// the first 64 KB for the "Inno Setup Setup Data" version string (used by
-/// GOG Galaxy-wrapped installers where the header may be embedded deeper).
+/// Whether a Windows `.exe` is Inno Setup: "Inno" at 0x30, else the version
+/// string in the first 64 KB (GOG Galaxy-wrapped embeds the header deeper).
 pub fn is_inno_setup(path: &Path) -> bool {
     let head = read_head(path, 65_536);
 
@@ -92,10 +85,7 @@ pub fn is_inno_setup(path: &Path) -> bool {
     find_subsequence(&head, INNO_VERSION_STRING).is_some()
 }
 
-/// Check whether a Linux `.sh` file is a LinuxRulez YAD Simple Installer.
-/// These are bash scripts that use YAD for a GUI and extract a zstd-compressed
-/// tar archive containing a Windows game. They run natively on Linux but the
-/// installed game is a Windows game.
+/// Linux `.sh` installing a Windows game via a YAD GUI.
 pub fn is_linuxrulez(path: &Path) -> bool {
     let head = read_head(path, 10_240);
     find_subsequence(&head, LINUXRULEZ_MARKER).is_some()

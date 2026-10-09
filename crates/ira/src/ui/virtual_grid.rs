@@ -450,14 +450,9 @@ mod imp {
                 return;
             }
 
-            // One plan for both modes: flat mode is a plain tile stream,
-            // section mode interleaves the full-width headers. Sizing,
-            // the scroll window, recycling, binding, and placement all
-            // read the plan, so the two modes cannot drift. The plan's
-            // ys are absolute; the visible window compares in the same
-            // coordinates. The allocated height rides along so the tile
-            // step keeps enough rows on screen.
             self.prev_width.set(width);
+            // One plan for both modes so they can't drift; ys are absolute
+            // and height rides along for tile stepping.
             let plan = self.build_plan(width, height, header_h, true);
             let (_, item_w, item_h, sp) = self.last_layout.get();
             let row_h = item_h + sp;

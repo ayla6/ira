@@ -36,7 +36,6 @@ fn merge_company_roles(
     Ok(())
 }
 
-/// Every game reference moves from the absorbed row to the survivor.
 fn move_junction_refs(
     tx: &rusqlite::Transaction,
     junction: &str,

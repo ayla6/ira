@@ -20,8 +20,7 @@ fn reopen_cached_picker(sgdb_cache: &Option<SgdbPickerCache>, cache_key: &str) -
         .as_ref()
         .and_then(|c| c.borrow().get(cache_key).map(|entry| entry.picker.clone()));
     if let Some(picker) = cached {
-        // No refit: the live window keeps whatever size it has, which is
-        // the whole point of persisting it.
+        // No refit: the live window keeps whatever size it has.
         picker.present();
         true
     } else {
@@ -46,7 +45,6 @@ fn wire_reopen_reset(
     });
 }
 
-/// Grid/list toggle button swaps the visible stack child.
 fn wire_view_toggle(toggle_btn: &gtk4::ToggleButton, stack: &gtk4::Stack) {
     let stack_toggle = stack.clone();
     toggle_btn.connect_toggled(move |btn| {
@@ -181,9 +179,8 @@ pub(crate) fn show_sgdb_picker(params: ShowSgdbPickerParams) {
         .and_then(|c| c.borrow().get(&cache_key).cloned())
         .filter(|e| !e.assets.is_empty())
     {
-        // Cache hit: render straight from the settings-screen cache instead of
-        // re-issuing the network request. Pagination continues from the
-        // page where the previous session left off.
+        // Pagination continues where the previous session left off:
+        // render straight from the settings-screen cache.
         render_cached_entry(
             &picker_ctx,
             &assets_store,
@@ -361,7 +358,6 @@ mod tests {
         pump();
         let win = picker().expect("picker cached after open");
         assert!(win.is_visible(), "fresh picker never became visible");
-        // Fresh config: default size applies.
         assert_eq!(win.width(), 900);
         assert_eq!(win.height(), 700);
         win.close();
@@ -370,9 +366,8 @@ mod tests {
         open();
         pump();
         assert!(win.is_visible(), "cache-hit reopen never became visible");
-        // Resize, close, and prove the geometry round-trips through the
-        // config file into a fresh window. Default size stands in for a
-        // user resize (headless has no compositor to drag against).
+        // Default size stands in for a user resize: headless has no
+        // compositor to drag against.
         win.close();
         pump();
         assert!(!win.is_visible(), "second close did not hide");
@@ -394,7 +389,6 @@ mod tests {
                 .as_i64()
                 .is_some_and(|z| (100..=500).contains(&z))
         );
-        // Fresh cache: rebuild reads the saved geometry back.
         let cache2: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>> = Default::default();
         show_sgdb_picker(ShowSgdbPickerParams {
             steam: &steam,

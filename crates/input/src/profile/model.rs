@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// Version 2 changed the default deadzone source from raw passthrough to
-/// the per-controller calibration. `validate` rejects other versions; old
-/// files are not migrated.
+/// Profile format version. `validate` rejects other versions; old files
+/// are not migrated.
 pub const PROFILE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -60,7 +59,6 @@ impl GamepadButton {
         !self.is_paddle()
     }
 
-    /// The four d-pad directions.
     pub fn is_dpad(self) -> bool {
         matches!(
             self,
@@ -215,10 +213,8 @@ pub enum StickOutputAxis {
     Vertical,
 }
 
-/// Whole-controller gyro behaviour. The old model exposed each gyro axis as
-/// three separate bindings the user had to wire up by hand; this config is
-/// the single source of truth the engine feeds with player-space yaw/pitch
-/// rates.
+/// Whole-controller gyro behaviour: the single source of truth the engine
+/// feeds with player-space yaw/pitch rates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct GyroConfig {
@@ -669,8 +665,8 @@ impl InputMapping {
         }
     }
 
-    /// Convenience constructor: a single full-press activator, the shape all
-    /// identity bindings migrate to.
+    /// Convenience constructor: a single full-press activator, the shape
+    /// identity bindings use.
     pub fn simple(source: InputSource, output: OutputAction) -> Self {
         let mut mapping = Self::new(source);
         mapping.activators.push(Activator::full_press(vec![output]));
@@ -692,8 +688,7 @@ pub enum SourceMode {
         #[serde(default)]
         stick: StickProcessing,
     },
-    /// Reserved for the phase-5 flickstick implementation; parseable now so
-    /// imported profiles round-trip.
+    /// Reserved for flickstick; parseable now so imported profiles round-trip.
     Flickstick {
         #[serde(default = "default_flickstick_rotation")]
         rotation_sensitivity: f32,
@@ -720,7 +715,7 @@ pub enum SourceMode {
 /// Steam's joystick behavior: one stick mapped onto another, with deadzone,
 /// response curve, per-axis sensitivity and invert, rotation, and axis
 /// limiting. A newtype payload of [`SourceMode::Joystick`] so the JSON shape
-/// matches the struct-variant form older profiles were written in.
+/// matches the struct-variant form.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct JoystickSettings {
@@ -918,8 +913,7 @@ pub struct Activator {
     pub kind: ActivatorKind,
     #[serde(default)]
     pub outputs: Vec<OutputAction>,
-    /// Gating that must hold for the activator to participate; carried over
-    /// from the flat-binding model.
+    /// Gating that must hold for the activator to participate.
     #[serde(default)]
     pub activation: Activation,
     #[serde(default)]
@@ -1017,8 +1011,8 @@ pub struct InputProfile {
     pub controller_calibration: ControllerCalibration,
     #[serde(default)]
     pub gyro: GyroConfig,
-    /// Action-set model. Profiles from before this model carried a flat
-    /// `bindings` list that serde ignores; those simply start empty.
+    /// A flat `bindings` list from older files is ignored; those profiles
+    /// start empty.
     #[serde(default)]
     pub action_sets: Vec<ActionSet>,
     #[serde(default)]
@@ -1210,7 +1204,6 @@ impl InputProfile {
         Ok(())
     }
 
-    /// Every output fired by any activator anywhere in the profile.
     pub fn all_activator_outputs(&self) -> impl Iterator<Item = &OutputAction> {
         self.action_sets
             .iter()
@@ -1278,7 +1271,6 @@ impl InputProfile {
         keycodes
     }
 
-    /// The discrete outputs of every stick's Outer Ring Command.
     fn outer_ring_outputs(&self) -> impl Iterator<Item = &OutputAction> {
         self.action_sets
             .iter()
@@ -1318,7 +1310,6 @@ fn default_sensitivity() -> f32 {
     1.0
 }
 
-/// Every button the backend's identity layout carries.
 fn standard_buttons(backend: VirtualGamepadBackend) -> Vec<GamepadButton> {
     let mut buttons = vec![
         GamepadButton::A,

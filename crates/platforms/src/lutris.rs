@@ -39,7 +39,6 @@ pub fn lutris_db_path() -> PathBuf {
         })
 }
 
-/// Read every game from the Lutris database, ordered by name.
 pub fn load_lutris_games() -> Result<Vec<LutrisGame>, String> {
     let path = lutris_db_path();
     let conn = Connection::open(&path).map_err(|e| format!("open {}: {}", path.display(), e))?;

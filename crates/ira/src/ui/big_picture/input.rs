@@ -32,7 +32,6 @@ const POLL_MS: u64 = 10;
 const RESCAN_EVERY_MS: u64 = 2_000;
 const IDLE_SLEEP_MS: u64 = 100;
 
-/// One step of big-picture UI navigation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum NavCommand {
     Left,
@@ -62,7 +61,6 @@ pub(super) struct PadStatus {
     pub family: ira_input::ControllerFamily,
 }
 
-/// Everything the reader thread reports: navigation steps and pad status.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum NavMsg {
     /// One navigation step. `engage` marks a fresh press — a direction

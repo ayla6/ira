@@ -25,8 +25,6 @@ pub(super) fn reclaim_free(state: &mut super::State) {
     }
 }
 
-/// Moves fence-signaled frames to the readback thread; the rest stay
-/// pending for a later present.
 pub fn check_and_readback() {
     let mut guard = super::STATE.lock().unwrap();
     let Some(state) = guard.as_mut() else { return };
@@ -159,7 +157,6 @@ unsafe fn cmd_barrier(
     );
 }
 
-/// Blit corners for a full-extent transfer: origin to (w, h, 1).
 fn full_offsets(extent: vk::Extent2D) -> (vk::Offset3D, vk::Offset3D) {
     (
         vk::Offset3D { x: 0, y: 0, z: 0 },
@@ -171,7 +168,7 @@ fn full_offsets(extent: vk::Extent2D) -> (vk::Offset3D, vk::Offset3D) {
     )
 }
 
-/// Full-extent buffer↔image copy region shared by both record paths.
+/// Shared by both record paths.
 fn copy_region(extent: vk::Extent2D) -> vk::BufferImageCopy {
     vk::BufferImageCopy::default()
         .buffer_offset(0)
@@ -191,7 +188,6 @@ fn copy_region(extent: vk::Extent2D) -> vk::BufferImageCopy {
         })
 }
 
-/// Barrier moving the swapchain image into TRANSFER_SRC_OPTIMAL.
 /// Shared by the blit and direct-copy record paths.
 fn src_to_transfer_barrier(
     src_image: vk::Image,
@@ -208,7 +204,6 @@ fn src_to_transfer_barrier(
         .subresource_range(color_sub)
 }
 
-/// Records the blit path: swapchain → intermediate RGBA → staging buffer.
 unsafe fn record_blit(
     fns: DeviceFns,
     cmd: vk::CommandBuffer,
@@ -295,8 +290,7 @@ unsafe fn record_blit(
     );
 }
 
-/// Records the direct path: swapchain → staging buffer (format converted
-/// on the CPU by the readback thread).
+/// Format conversion happens on the CPU in the readback thread.
 unsafe fn record_copy(
     fns: DeviceFns,
     cmd: vk::CommandBuffer,

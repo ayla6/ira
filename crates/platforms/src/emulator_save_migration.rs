@@ -41,7 +41,6 @@ pub fn migrate_nge_saves(save_dir: &str, wine_prefix: Option<&str>) {
     }
 }
 
-/// Convenience: run both GBE and NGE migration based on trophy source.
 pub fn migrate_emulator_saves(
     save_dir: &str,
     trophy_source: ira_models::TrophySource,

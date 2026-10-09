@@ -32,7 +32,6 @@ const KC_DOWN: u32 = ShmHeader::NAV_KEYCODES_EVDEV[2];
 const KC_LEFT: u32 = ShmHeader::NAV_KEYCODES_EVDEV[3];
 const KC_RIGHT: u32 = ShmHeader::NAV_KEYCODES_EVDEV[4];
 
-// Wayland key/button state values.
 const KEY_PRESSED: u32 = 1;
 const AXIS_VERTICAL: u32 = 0;
 
@@ -234,7 +233,6 @@ pub(crate) extern "C" fn pointer_axis(_: *mut c_void, _: *mut c_void, _: u32, ax
     crate::shim_bridge::push_canvas_command(CanvasCommand::scroll(delta_y));
 }
 
-/// Convert wl_fixed_t (24.8 fixed-point) to f32.
 fn fixed_to_f32(sx: i32, sy: i32) -> (f32, f32) {
     (sx as f32 / 256.0, sy as f32 / 256.0)
 }

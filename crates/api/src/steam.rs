@@ -194,7 +194,6 @@ impl SteamDataClient {
         Some(details)
     }
 
-    /// Fetch DLC names from steamcmd for any DLCs with empty names.
     fn fill_dlc_names(&self, details: &mut AppDetails) {
         let empty_dlcs: Vec<String> = details
             .dlcs
@@ -364,11 +363,8 @@ fn store_extras_from(data: &StoreAppShortInfo) -> StoreExtras {
 
         let settings_dir = self.game_dir(app_id).join("achievements");
         let img_dir = settings_dir.join("achievement_images");
-        // If the directories already exist, skip creation entirely
         if img_dir.is_dir() {
-            // Already exists and is a directory — nothing to do
         } else {
-            // Remove any file/symlink that conflicts with the paths we need
             for dir in [&settings_dir, &img_dir] {
                 if let Ok(meta) = std::fs::symlink_metadata(dir) {
                     if !meta.is_dir() {
@@ -522,7 +518,6 @@ fn store_extras_from(data: &StoreAppShortInfo) -> StoreExtras {
             })
     }
 
-    /// Resolve the clienticon hash for a Steam app from cached steamcmd.net data.
     /// Returns `None` if no valid cached data is available.
     pub fn cached_clienticon(&self, app_id: &str) -> Option<String> {
         let raw = self.load_appdetails_cache(app_id)?;
@@ -620,7 +615,6 @@ fn parse_appdetails_response(data: &[u8]) -> Option<SteamCmdResponse> {
     }
 }
 
-/// Convert Steam's CamelCase pinned_position to a logo position.
 /// "BottomCenter" → BottomCenter; empty (Steam names none) → None.
 fn convert_pinned_position(s: &str) -> Option<ira_models::LogoPosition> {
     if s.is_empty() {

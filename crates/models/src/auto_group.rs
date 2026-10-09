@@ -204,8 +204,7 @@ pub enum AutoNode {
 
 impl AutoNode {
     /// Empty trees match nothing, so a half-built group never swallows
-    /// the whole library: an AND with no children has nothing to agree
-    /// with, and an OR with no children has nothing to fire.
+    /// the whole library.
     pub fn matches(&self, game: &Game, ctx: &AutoGroupContext) -> bool {
         match self {
             AutoNode::None => false,

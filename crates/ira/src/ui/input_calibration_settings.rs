@@ -15,7 +15,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Which stick a deadzone row edits.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StickTab {
     Left,

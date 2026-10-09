@@ -10,16 +10,9 @@ pub struct PersistentData {
     pub last_played: HashMap<String, i64>,
 }
 
-/// Parse persistent_settings.dat (INI format) into playtime and last-played maps.
-///
-/// Format:
-///   [LastPlayed]
-///   NPUB30698=2026-07-21T16:05:18
-///
-///   [Playtime]
-///   NPUB30698=639249
-///
-/// Playtime values are in milliseconds (accumulated QElapsedTimer::restart() calls).
+/// Parse persistent_settings.dat (INI with `[LastPlayed]`/`[Playtime]` sections).
+/// Playtime is milliseconds of accumulated `QElapsedTimer::restart()` calls;
+/// LastPlayed is ISO 8601.
 pub fn parse_persistent_settings(path: &Path) -> PersistentData {
     let mut data = PersistentData::default();
     let text = match std::fs::read_to_string(path) {
@@ -105,7 +98,6 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     era * 146097 + doe as i64 - 719468
 }
 
-/// Convert milliseconds to hours (f64).
 pub fn ms_to_hours(ms: u64) -> f64 {
     ms as f64 / 3_600_000.0
 }

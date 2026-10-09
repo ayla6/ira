@@ -256,9 +256,7 @@ mod tests {
         assert_eq!(u32::from_le_bytes(event[0..4].try_into().unwrap()), 11);
         let name = &event[4..4 + "Ira Virtual DS4".len()];
         assert_eq!(std::str::from_utf8(name).unwrap(), "Ira Virtual DS4");
-        // Name is NUL padded inside its fixed 128-byte field.
         assert_eq!(event[4 + "Ira Virtual DS4".len()], 0);
-        // Uniq sits between the 64-byte phys field and rd_size, NUL padded.
         let uniq_offset = 4 + 128 + 64;
         assert_eq!(&event[uniq_offset..uniq_offset + 10], b"ira-uniq-1");
         assert_eq!(event[uniq_offset + 10], 0);

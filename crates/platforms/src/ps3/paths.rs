@@ -3,8 +3,6 @@ use crate::emu_dirs::home_dir;
 
 pub const RPCS3_FLATPAK_ID: &str = "net.rpcs3.RPCS3";
 
-/// RPCS3 config directory.
-/// Linux: ~/.config/rpcs3/
 pub fn rpcs3_config_dir() -> PathBuf {
     xdg::BaseDirectories::new()
         .get_config_home()

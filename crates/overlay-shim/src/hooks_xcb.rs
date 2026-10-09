@@ -35,7 +35,6 @@ use ira_overlay_ipc::{
 
 use crate::state;
 
-// XCB event type constants
 const XCB_KEY_PRESS: u8 = 2;
 const XCB_KEY_RELEASE: u8 = 3;
 const XCB_BUTTON_PRESS: u8 = 4;
@@ -234,7 +233,6 @@ unsafe fn consume_xcb_visible(event_type: u8, ev: *mut c_void) -> bool {
 
 // --- LD_PRELOAD hooks ---
 
-/// Non-blocking event poll. Used by Qt6/XCB for event processing.
 #[no_mangle]
 pub unsafe extern "C" fn xcb_poll_for_event(c: *mut c_void) -> *mut c_void {
     let Some(real_fn) = xcb_poll() else {
@@ -248,7 +246,7 @@ pub unsafe extern "C" fn xcb_poll_for_event(c: *mut c_void) -> *mut c_void {
     event
 }
 
-/// Blocking event wait. Loops internally to skip consumed events.
+/// Loops internally to skip consumed events.
 #[no_mangle]
 pub unsafe extern "C" fn xcb_wait_for_event(c: *mut c_void) -> *mut c_void {
     let Some(real_fn) = xcb_wait() else {
@@ -265,7 +263,6 @@ pub unsafe extern "C" fn xcb_wait_for_event(c: *mut c_void) -> *mut c_void {
         if !maybe_consume_xcb_event(event) {
             return event;
         }
-        // Event was consumed — free it and loop to get the next one.
         libc::free(event);
     }
 }

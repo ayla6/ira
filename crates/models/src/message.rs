@@ -21,7 +21,6 @@ pub enum AppMessage {
     Rpcs3PlaytimeChanged,
     /// Initial game list loaded in the background.
     GamesLoaded(Vec<Game>),
-    /// Background game-list discovery progress.
     GamesLoadProgress {
         status: String,
         completed: usize,
@@ -29,7 +28,6 @@ pub enum AppMessage {
     },
     /// Rebuild the game list after a source-settings change or manual rescan.
     ReloadGames,
-    /// A play session was recorded for a game.
     SessionRecorded {
         game_id: i64,
         variant_id: Option<i64>,
@@ -37,7 +35,6 @@ pub enum AppMessage {
         started_at: i64,
         ended_at: i64,
     },
-    /// SGDB assets downloaded for a game.
     SgdbAssetsDownloaded {
         db_id: i64,
         sgdb_id: String,

@@ -65,13 +65,6 @@ fn encode_smaller_webp(pixels: &[u8], w: u32, h: u32) -> Vec<u8> {
 /// | any        | Mild resize (ratio > .5) | Resize → lossless WebP          |
 /// | any        | ≥2× downscale            | Resize → smaller of lossless / lossy (95%) WebP |
 ///
-/// Icons are always lossless regardless of source format.
-/// JPEGs that are already the right size are copied as-is (no re-encode).
-/// Sources that need resizing stay lossless when the downscale is mild. For a
-/// ≥2× downscale the downsample already removed high-frequency detail, so both
-/// a lossless and a lossy (95%) WebP are encoded and the smaller one is kept:
-/// photos almost always pick the lossy file, while PNG/lossless-WebP sources
-/// (flat graphics, logos) keep the lossless one, which is often smaller there.
 pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
     let _s = tracing::info_span!("ensure_small_image", base_name, max_w, max_h).entered();
     if find_image_file(dir, &format!("{}_small", base_name)).is_some() {
@@ -88,11 +81,10 @@ pub fn ensure_small_image(dir: &Path, base_name: &str, max_w: u32, max_h: u32) {
 }
 
 /// Normalize a just-written image file and its thumbnail in a single
-/// decode: WebP/JPEG sources stay as-is and only gain a thumbnail (the
-/// old convert-then-ensure sequence skipped them too), while every other
-/// format converts to lossless WebP first — decoded once, written as the
-/// full image and its small variant, with the original removed. A source
-/// that does not decode is left untouched, exactly as before.
+/// decode: WebP/JPEG sources stay as-is and only gain a thumbnail, while
+/// every other format converts to lossless WebP first — decoded once,
+/// written as the full image and its small variant, with the original
+/// removed. A source that does not decode is left untouched.
 pub fn finalize_stored_image(dest: &Path, max_w: u32, max_h: u32) {
     let _s = tracing::info_span!("finalize_stored_image", path = %dest.display()).entered();
     let dir = dest.parent().unwrap_or(Path::new("."));
@@ -115,7 +107,7 @@ pub fn finalize_stored_image(dest: &Path, max_w: u32, max_h: u32) {
     let full = dir.join(format!("{base}.webp"));
     if !write_lossless_webp(&full, &img) {
         // The conversion failed with the original still on disk: fall back
-        // to thumbnailing it, like the old sequence did.
+        // to thumbnailing it.
         ensure_small_image(dir, base, max_w, max_h);
         return;
     }
@@ -169,9 +161,8 @@ fn write_small_variant(
         img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3)
     };
 
-    // Icons are always lossless (flat graphics, scaled up in the UI) and mild
-    // resizes stay lossless. For a ≥2× downscale keep whichever encoding is
-    // smaller (see `encode_smaller_webp`).
+    // Icons and mild resizes stay lossless; a ≥2× downscale keeps the
+    // smaller encoding (see `encode_smaller_webp`).
     if is_icon || ratio > 0.5 {
         write_lossless_webp(&dest, &resized);
     } else {
@@ -277,7 +268,6 @@ mod tests {
         // Arrange: a PNG hero as the save thread leaves it.
         let tmp = tempfile::tempdir().unwrap();
         write_png_source(tmp.path(), "hero.png", 480, 155);
-        // Act
         finalize_stored_image(&tmp.path().join("hero.png"), 240, 78);
         // Assert: converted in place with a small variant beside it.
         assert!(!tmp.path().join("hero.png").is_file());
@@ -287,12 +277,10 @@ mod tests {
 
     #[test]
     fn test_finalize_stored_image_keeps_jpeg_and_only_thumbnails() {
-        // Arrange
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("hero.jpg");
         let img = image::DynamicImage::new_rgb8(4, 4);
         img.save_with_format(&dest, image::ImageFormat::Jpeg).unwrap();
-        // Act
         finalize_stored_image(&tmp.path().join("hero.jpg"), 240, 78);
         // Assert: the JPEG stays; only the small copy is added.
         assert!(tmp.path().join("hero.jpg").is_file());
@@ -305,9 +293,7 @@ mod tests {
         // Arrange: undecodable bytes convert to nothing and gain no small.
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("hero.png"), b"not an image").unwrap();
-        // Act
         finalize_stored_image(&tmp.path().join("hero.png"), 240, 78);
-        // Assert
         assert!(tmp.path().join("hero.png").is_file());
         assert!(!tmp.path().join("hero.webp").is_file());
         assert!(!tmp.path().join("hero_small.webp").is_file());
@@ -315,11 +301,9 @@ mod tests {
 
     #[test]
     fn test_decode_image_file_decodes_png_rejects_missing() {
-        // Arrange
         let tmp = tempfile::tempdir().unwrap();
         let png = tmp.path().join("icon.png");
         image::RgbaImage::new(4, 4).save(&png).unwrap();
-        // Act + Assert
         let img = decode_image_file(&png).expect("valid PNG must decode");
         assert_eq!((img.width(), img.height()), (4, 4));
         assert!(decode_image_file(&tmp.path().join("missing.png")).is_none());
@@ -339,7 +323,6 @@ mod tests {
 
     #[test]
     fn test_write_lossless_webp_round_trips() {
-        // Arrange
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("icon.webp");
         let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
@@ -347,9 +330,7 @@ mod tests {
             4,
             image::Rgba([10, 200, 30, 255]),
         ));
-        // Act
         assert!(write_lossless_webp(&dest, &img));
-        // Assert
         let bytes = std::fs::read(&dest).unwrap();
         assert!(webp_is_lossless(&bytes));
         let back = image::load_from_memory(&bytes).unwrap().into_rgba8();
@@ -358,17 +339,13 @@ mod tests {
 
     #[test]
     fn test_encode_smaller_webp_prefers_lossless_for_flat() {
-        // Arrange
         let flat = vec![0u8; 240 * 78 * 4];
-        // Act
         let chosen = encode_smaller_webp(&flat, 240, 78);
-        // Assert
         assert_eq!(chosen, encode_lossless_webp(&flat, 240, 78));
     }
 
     #[test]
     fn test_encode_smaller_webp_prefers_lossy_for_noise() {
-        // Arrange
         let mut state: u32 = 7;
         let noise: Vec<u8> = (0..(240 * 78 * 4) as usize)
             .map(|_| {
@@ -376,9 +353,7 @@ mod tests {
                 (state >> 24) as u8
             })
             .collect();
-        // Act
         let chosen = encode_smaller_webp(&noise, 240, 78);
-        // Assert
         assert!(
             !webp_is_lossless(&chosen),
             "noisy pixels should pick the smaller lossy WebP"
@@ -466,7 +441,6 @@ mod tests {
         std::fs::write(dir.join("hero.jpg"), [0u8]).unwrap();
         std::fs::write(dir.join("hero.webp"), [0u8]).unwrap();
         let input = dir.join("hero.jpg").to_string_lossy().into_owned();
-        // Act
         let result = full_image_path(&input);
         // Assert: not a thumbnail, so the input comes back untouched.
         assert_eq!(result, input);

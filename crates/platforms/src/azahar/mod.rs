@@ -64,10 +64,8 @@ fn collect_rom_paths(path: &Path, depth_left: u32, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Scans files concurrently; Z3DS containers decompress forward from the
-/// start for every metadata read, which made large libraries take minutes
-/// when scanned one file at a time. `par_iter` output order matches the
-/// input, so dedup priority stays deterministic.
+/// Scans files concurrently: Z3DS containers decompress forward per read, so
+/// large libraries took minutes one at a time; `par_iter` order keeps dedup stable.
 fn scan_rom_files(
     paths: &[PathBuf],
     parse: fn(&Path) -> Option<AzaharGame>,
@@ -178,10 +176,8 @@ pub fn read_icon(path: &Path) -> Option<Vec<u8>> {
     scan_rom_file(path).and_then(|game| game.icon)
 }
 
-/// Relocates a title whose stored path vanished (moved library, renamed
-/// drive): installed titles are found again through Azahar's NAND/SDMC
-/// layout, ROM dumps by the title ID embedded in their file name. Only the
-/// matching dump is parsed, so this stays cheap at click time.
+/// Relocates a vanished title path: installed via NAND/SDMC layout, dumps by
+/// title ID in the name (only the match parses, so it stays cheap).
 pub fn find_title_path_for(executable: &str, title_id: &str) -> Option<PathBuf> {
     let paths = read_paths_for_executable(executable);
     let (category, low_id) = (title_id.get(..8)?, title_id.get(8..)?);
@@ -231,9 +227,8 @@ fn find_dump_by_name(dir: &Path, title_id: &str, depth_left: u32) -> Option<Path
 }
 
 pub fn discover_games_for_executable(executable: &str) -> Vec<AzaharGame> {
-    // A missing native executable must not stop discovery: game locations
-    // live in Azahar's own config (XDG or portable), which is readable even
-    // when the launch command is stale (renamed AppImage, wrapper script…).
+    // A missing executable must not stop discovery: locations live in Azahar's
+    // own config, readable even when the launch command is stale.
     if !executable.is_empty()
         && !executable.starts_with("flatpak:")
         && executable.contains('/')
@@ -259,9 +254,8 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<AzaharGame> {
     scan_installed_titles(&paths.nand_dir, &mut games);
     scan_installed_titles(&paths.sdmc_dir, &mut games);
 
-    // The same title can be reachable both as a ROM dump in a configured
-    // game folder and installed on the NAND/SDMC; configured folders are
-    // scanned first so the user-chosen location wins.
+    // A title ID uniquely identifies a 3DS title across roots; configured
+    // folders scan first so the user-chosen location wins.
     let mut seen = HashSet::new();
     games.retain(|game| seen.insert(game.title_id.clone()));
     games

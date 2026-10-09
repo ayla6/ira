@@ -37,8 +37,8 @@ pub(crate) struct SteamWatcher {
     finished: Arc<AtomicBool>,
     launcher_exited: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
-    /// Set only on daemon shutdown-by-signal, matching the previous
-    /// behavior: a natural end (or a daemon error) never stops the game.
+    /// Set only on daemon shutdown-by-signal: a natural end (or a daemon
+    /// error) never stops the game.
     request_stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }

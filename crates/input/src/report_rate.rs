@@ -30,8 +30,7 @@ impl Default for ReportRateEstimator {
         Self {
             gaps: VecDeque::with_capacity(64),
             last_event: None,
-            // Matches the previous fixed sample interval; replaced by the
-            // measured rate once enough events have arrived.
+            // Seed until the measured rate arrives.
             interval: Duration::from_millis(4),
         }
     }
@@ -47,7 +46,6 @@ impl ReportRateEstimator {
         if let Some(last) = self.last_event.replace(now) {
             let gap = now.saturating_duration_since(last);
             if gap >= IDLE_GAP {
-                // Long silence: restart gap collection, keep the estimate.
                 self.gaps.clear();
                 return;
             }
@@ -61,7 +59,6 @@ impl ReportRateEstimator {
         }
     }
 
-    /// Forget everything learned; the next controller starts fresh.
     pub fn reset(&mut self) {
         self.gaps.clear();
         self.last_event = None;
@@ -128,9 +125,6 @@ mod tests {
 
     #[test]
     fn test_8000hz_controller_clamps_to_1ms_pipeline() {
-        // Poll granularity is one millisecond; faster pads cannot be followed
-        // faster, and a sub-millisecond interval would leave every tick
-        // deadline already elapsed.
         let mut estimator = ReportRateEstimator::default();
         settle(&mut estimator, Duration::from_micros(125), 32);
         assert_eq!(estimator.interval(), Duration::from_millis(1));

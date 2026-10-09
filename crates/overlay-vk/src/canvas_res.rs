@@ -218,7 +218,6 @@ pub(crate) unsafe fn create_cursor(
     })
 }
 
-/// Allocates one descriptor set from a fresh single-set pool.
 unsafe fn create_set(
     fns: DeviceFns,
     device: vk::Device,

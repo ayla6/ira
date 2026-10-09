@@ -47,11 +47,8 @@ fn proton_root(wine_exe: &str) -> Option<std::path::PathBuf> {
     let bin_dir = std::path::Path::new(wine_exe).parent()?;
     bin_dir.parent()?.parent().map(|p| p.to_path_buf())
 }
-/// True if the wine version is a Proton build. This includes:
-/// - The "ge-proton" sentinel (downloaded on demand by umu)
-/// - Any version name containing "proton"
-/// - Any wine binary found inside a Proton directory structure (has a
-///   `proton` file sibling to `dist/` or `files/`)
+/// True if the wine version names a Proton build: the "ge-proton" sentinel
+/// (downloaded on demand by umu) or any version containing "proton".
 pub(crate) fn is_proton_version(version: &str) -> bool {
     let v = version.to_lowercase();
     v == "ge-proton" || v.contains("proton")
@@ -65,20 +62,15 @@ pub(crate) fn is_proton_binary(wine_exe: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Resolve PROTONPATH for a given wine version and executable.
-/// - "ge-proton" sentinel → "GE-Proton" (umu downloads it)
-/// - Specific Proton version → the Proton installation directory
-/// - Non-Proton → None
+/// Resolve PROTONPATH for a wine version and executable (None when not Proton).
 pub(crate) fn get_proton_path(version: &str, wine_exe: &str) -> Option<String> {
     let v = version.to_lowercase();
     if v == "ge-proton" {
         return Some("GE-Proton".to_string());
     }
-    // If the wine binary is inside a Proton directory, compute PROTONPATH from it
     if is_proton_binary(wine_exe) {
         return proton_root(wine_exe).map(|p| p.to_string_lossy().into_owned());
     }
-    // Fall back to version name check for names that contain "proton"
     if v.contains("proton") {
         let proton_root = proton_root(wine_exe)?;
         return Some(proton_root.to_string_lossy().into_owned());

@@ -66,9 +66,7 @@ mod paintable_imp {
             let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() else {
                 return;
             };
-            // Cover, never stretch: scale the texture to fill the slot,
-            // then center-crop the overflow (square art in a vertical
-            // slot loses its left/right edges, never its proportions).
+            // Cover, never stretch.
             let (dx, dy, dw, dh) = cover_rect(
                 texture.width() as f64,
                 texture.height() as f64,
@@ -108,8 +106,6 @@ glib::wrapper! {
         @implements gdk4::Paintable;
 }
 
-/// Cover-fit destination for a `tex_w`×`tex_h` texture in a `w`×`h`
-/// slot: `(dx, dy, dw, dh)` to draw at, centered, aspect preserved.
 /// Degenerate inputs fall back to the full slot so callers never divide
 /// by zero.
 fn cover_rect(tex_w: f64, tex_h: f64, w: f64, h: f64) -> (f64, f64, f64, f64) {

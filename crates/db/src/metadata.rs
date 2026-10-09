@@ -56,7 +56,7 @@ fn store_entities(
 }
 
 /// One row per company with role flags: a studio credited as both
-/// developer and publisher is a single company, not two.
+/// developer and publisher shares a single company row.
 fn collect_companies(
     developers: &[ira_models::ScraperEntity],
     publishers: &[ira_models::ScraperEntity],
@@ -622,9 +622,7 @@ mod tests {
     fn test_merge_replaces_the_epoch_date_but_never_a_real_one() {
         let (conn, _tmp) = setup_db();
         let game_id = test_game(&conn, "Poisoned Game");
-        // The old diff bug stored the epoch string while the timestamp
-        // column kept its real value; the merge must treat the string
-        // as a hole, not as data.
+        // The epoch string counts as a hole, not as data.
         let poisoned = ira_models::ScraperMetadata {
             ss_id: "1".into(),
             release_date: "1970-01-01".into(),
@@ -661,7 +659,6 @@ mod tests {
         let local = crate::steam_company_entity(&conn, "Whoever Studios").unwrap();
         let local_id: i64 = local.id.parse().unwrap();
 
-        // A game carries the local company in its metadata.
         let meta = ira_models::ScraperMetadata {
             ss_id: "1".into(),
             developers: vec![local.clone()],

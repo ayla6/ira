@@ -1,8 +1,6 @@
-//! The resident input daemon. One process owns the physical controllers and
-//! virtual devices across game sessions: clients hand it fully built game
-//! commands over the IPC socket, it runs the same session loop the wrapper
-//! binary uses, and it retires once nothing needs it — no stray grabs, no
-//! squat udp/26760, no stale socket after its last client goes away.
+//! The resident input daemon: one process owns physical controllers and virtual
+//! devices across game sessions, retiring once nothing needs it — no stray grabs,
+//! no squat udp/26760, no stale socket.
 
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
@@ -22,11 +20,9 @@ use super::session::run_session;
 use super::signals::{install_signal_handlers, STOP_REQUESTED};
 use super::SessionEvent;
 
-/// How long an unused daemon lingers before exiting. Long enough to cover a
-/// launcher restart between games; short enough that a dead owner leaves
-/// nothing behind.
+/// How long an unused daemon lingers before exiting: covers a launcher restart
+/// between games without leaving a dead owner behind.
 const IDLE_EXIT: Duration = Duration::from_secs(10);
-/// Cadence for pumping session events and re-checking sockets.
 const PUMP_INTERVAL: Duration = Duration::from_millis(50);
 /// One last chance for a mid-windup session to observe a shutdown request.
 const SESSION_STOP_PATIENCE: Duration = Duration::from_secs(5);
@@ -38,9 +34,8 @@ pub fn run_daemon() -> Result<i32, String> {
 struct Client {
     stream: UnixStream,
     buffer: Vec<u8>,
-    /// Connection identity for requests that live as long as the client:
-    /// a desktop hold dies with the connection that made it, so a crashed
-    /// app can never leave the controller suspended forever.
+    /// Connection identity for connection-scoped requests: a desktop hold dies
+    /// with its connection, so a crashed app never suspends the controller forever.
     id: u64,
 }
 
@@ -51,9 +46,8 @@ struct SessionHandle {
     tag: Option<i64>,
     events: Receiver<SessionEvent>,
     done: Receiver<Result<i32, String>>,
-    /// A no-game session giving an idle controller its default behaviour
-    /// while the app is open. It holds no child process and never blocks a
-    /// shutdown.
+    /// A no-game session giving an idle controller its default behaviour.
+    /// It holds no child process and never blocks a shutdown.
     desktop: bool,
     /// The desktop session's layout path, so a changed wish can replace it.
     desktop_profile: Option<String>,
@@ -68,15 +62,13 @@ struct DesktopWish {
     motion_port: Option<u16>,
 }
 
-/// Every live session plus the state sessions are created from.
 #[derive(Default)]
 struct SessionTable {
     sessions: Vec<SessionHandle>,
     next_session_id: u64,
     desktop_wish: Option<DesktopWish>,
-    /// Clients holding the desktop behaviour off (a game that bypasses the
-    /// daemon must not be remapped underneath). The desktop session neither
-    /// starts nor keeps running while this is non-empty.
+    /// Clients holding the desktop behaviour off (a bypassing game must not be
+    /// remapped underneath); the desktop session stays down while non-empty.
     desktop_holds: std::collections::HashSet<u64>,
 }
 
@@ -139,9 +131,8 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
             if let Some(id) = released {
                 table.desktop_holds.remove(&id);
                 if clients.is_empty() {
-                    // The last app went away: the desktop behaviour was
-                    // theirs. Releasing the desktop session also lets the
-                    // daemon idle out instead of holding the pad forever.
+                    // The desktop behaviour was the last app's: releasing it lets
+                    // the daemon idle out instead of holding the pad forever.
                     table.desktop_wish = None;
                     stop_desktop_session(&hub, &table.sessions);
                 }
@@ -177,9 +168,6 @@ fn loop_timeout(session_active: bool, idle_since: Option<Instant>) -> Duration {
     }
 }
 
-/// Drains every live session's event channel, broadcasts new events, and
-/// removes sessions that ended. When the last session ends while an app
-/// still holds a desktop wish, the desktop-default session resumes.
 fn pump_sessions(table: &mut SessionTable, clients: &mut Vec<Client>, hub: &HubHandle, shutdown: bool) {
     for index in (0..table.sessions.len()).rev() {
         while let Ok(event) = table.sessions[index].events.try_recv() {
@@ -235,8 +223,7 @@ fn start_desktop_session(wish: &DesktopWish, hub: &HubHandle, table: &mut Sessio
     }
 }
 
-/// Asks the desktop-default session, if any, to finish. Returns whether one
-/// was running.
+/// Returns whether a desktop-default session was running.
 fn stop_desktop_session(hub: &HubHandle, sessions: &[SessionHandle]) -> bool {
     let Some(session) = sessions.iter().find(|session| session.desktop) else {
         return false;
@@ -245,7 +232,6 @@ fn stop_desktop_session(hub: &HubHandle, sessions: &[SessionHandle]) -> bool {
     true
 }
 
-/// Forwards controller presence changes from the hub to every client.
 fn drain_controller_presence(
     controller_rx: &std::sync::mpsc::Receiver<(bool, String, String)>,
     clients: &mut Vec<Client>,
@@ -332,9 +318,8 @@ fn accept(listener: &UnixListener, clients: &mut Vec<Client>, next_client_id: &m
     }
 }
 
-/// Reads everything currently available from one client and returns the
-/// complete requests found, plus the client's id when it was dropped (EOF
-/// or socket error) so connection-scoped state can be cleaned up.
+/// Reads everything available from one client, returning complete requests plus
+/// the client's id when it was dropped so connection-scoped state is cleaned up.
 fn read_client(clients: &mut Vec<Client>, index: usize) -> (Vec<Request>, Option<u64>) {
     let client_id = clients[index].id;
     let mut chunk = [0u8; 4096];
@@ -422,10 +407,8 @@ fn process_request(
                     stop_desktop_session(hub, &table.sessions);
                 }
                 Some(wish) => {
-                    // A running desktop session with a different layout gets
-                    // replaced; a matching one just keeps running. When no
-                    // game holds the pad, the session starts right away —
-                    // otherwise the wish resumes after the games end.
+                    // A different running layout gets replaced; a matching one keeps
+                    // running, starting right away when no game holds the pad.
                     let running_layout = table
                         .sessions
                         .iter()
@@ -496,8 +479,7 @@ fn process_request(
                 return;
             }
             if table.sessions.iter().any(|session| !session.desktop) {
-                // Every session loop watches this flag and stops its game
-                // the same way a SIGTERM to the old wrapper did.
+                // Every session loop watches this flag and stops its game.
                 STOP_REQUESTED.store(true, Ordering::Relaxed);
             }
             // The desktop session holds no game: release it immediately.
@@ -546,9 +528,8 @@ fn start_session(
     std::thread::Builder::new()
         .name("ira-session".to_string())
         .spawn(move || {
-            // A panicked session must still report done: without it the
-            // handle never leaves `sessions`, the daemon never idles out,
-            // and ira-input outlives Ira itself.
+            // A panicked session must still report done, or its handle never leaves
+            // `sessions` and the daemon never idles out.
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_session(arguments)))
                     .unwrap_or_else(|panic| {
@@ -567,7 +548,6 @@ fn start_session(
     })
 }
 
-/// Best-effort text for a caught panic payload, for the done report.
 fn panic_text(panic: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(text) = panic.downcast_ref::<&str>() {
         return (*text).to_string();
@@ -603,9 +583,8 @@ fn send_line(stream: &mut UnixStream, line: &str) -> std::io::Result<()> {
     stream.write_all(b"\n")
 }
 
-/// On shutdown, gives a live session the same treatment the wrapper's
-/// SIGTERM handler did: the session loop sees the stop flag and stops the
-/// game before the daemon goes away.
+/// On shutdown the session loop sees the stop flag and stops the game
+/// before the daemon goes away.
 fn stop_running_sessions(sessions: &mut Vec<SessionHandle>) {
     if sessions.is_empty() {
         return;
@@ -613,8 +592,6 @@ fn stop_running_sessions(sessions: &mut Vec<SessionHandle>) {
     STOP_REQUESTED.store(true, Ordering::Relaxed);
     let deadline = Instant::now() + SESSION_STOP_PATIENCE;
     while !sessions.is_empty() && Instant::now() < deadline {
-        // One drain per pass: a finished session's done message is consumed
-        // here, removing it; the rest keep running until the deadline.
         sessions.retain(|session| session.done.try_recv().is_err());
         if !sessions.is_empty() {
             std::thread::sleep(Duration::from_millis(50));
@@ -642,7 +619,6 @@ mod tests {
         dir
     }
 
-    /// Connects once the server thread has bound its socket.
     fn wait_for_server(path: &Path) -> DaemonClient {
         loop {
             match DaemonClient::connect(path) {
@@ -691,9 +667,8 @@ mod tests {
         let _ = server.join();
     }
 
-    /// Waits until the desktop session's presence matches `active`; a hold
-    /// or release only lands after the pump and the session wind-down, both
-    /// of which run on their own cadences.
+    /// Waits until the desktop session's presence matches `active`; holds land
+    /// only after the pump and session wind-down on their own cadences.
     fn wait_desktop_active(client: &mut DaemonClient, active: bool, label: &str) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
@@ -819,13 +794,8 @@ mod tests {
         });
         let mut client = wait_for_server(&path);
 
-        // Rewrite the profile with a different controller kind only after
-        // the previous reload was observed: the monitor coalesces writes
-        // that land while a reload is pending, and the first loop pass can
-        // lag seconds behind the launch when a switch-protocol pad must be
-        // probed first. Fixed sleeps used to race that probe and miss the
-        // swaps entirely. The stage cell hands the first write a fallback
-        // in case the watch-establishment reload never fires.
+        // Rewrite only after the previous reload is observed: the monitor coalesces
+        // writes landing while a reload is pending, so the stage cell covers a missed watch.
         let rewrites = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let rewrites_for_timer = rewrites.clone();
         let timer_profile = profile_path.clone();
@@ -839,10 +809,8 @@ mod tests {
             }
         });
 
-        // Three seconds comfortably outlasts both swaps (the timer fires
-        // at 700ms and each coalesced reload follows within a couple of
-        // pump intervals) while keeping the test off the old five-second
-        // session that dominated the whole suite's runtime.
+        // Three seconds outlasts both swaps (timer at 700ms, each reload within
+        // a couple of pump intervals).
         let reloads = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let code = client
             .launch_and_wait(
@@ -921,9 +889,8 @@ mod tests {
             (code, reloads)
         });
 
-        // The switch must land on a live session, so poll the status until
-        // the session is active instead of guessing a fixed delay; an
-        // unknown tag must be refused either way.
+        // The switch must land on a live session, so poll until active instead of
+        // guessing a fixed delay; an unknown tag is refused either way.
         let mut switcher = wait_for_server(&path);
         let deadline = Instant::now() + Duration::from_secs(2);
         while !switcher
@@ -977,8 +944,7 @@ mod tests {
         let mut first = wait_for_server(&path);
         let mut second = DaemonClient::connect(&path).unwrap();
 
-        // Two games at once: both sessions must be accepted and both must
-        // run to completion — the old daemon refused the second launch.
+        // Two games at once: both sessions must be accepted and run to completion.
         let session_a = first
             .begin_launch(session_request(vec!["sleep".into(), "0.4".into()], None))
             .unwrap();

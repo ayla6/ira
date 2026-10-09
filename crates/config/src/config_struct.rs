@@ -100,7 +100,6 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub prefix_base_dir: String,
     /// Primary PC games folder: install destination and detection root.
-    /// Additional roots live in `extra_game_folders`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub default_game_folder: String,
     /// Additional PC games folders scanned alongside `default_game_folder`.
@@ -108,7 +107,6 @@ pub struct Config {
     pub extra_game_folders: Vec<String>,
     /// Primary ROM root. Each console uses <roms_folder>/<console id>.
     /// Empty means ROM discovery is disabled until a root is selected.
-    /// Additional roots live in `extra_roms_folders`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub roms_folder: String,
     /// Additional ROM roots, each with per-console subfolders.
@@ -142,8 +140,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linux_pause_game_on_overlay: Option<bool>,
     /// Pause games while Ira's overlay is visible. Off by default: freezing
-    /// is unsafe for online games and fragile engines, so this is opt-in
-    /// per platform or per game.
+    /// is unsafe for online games and fragile engines.
     #[serde(default)]
     pub pause_game_on_overlay: bool,
     #[serde(default)]
@@ -170,7 +167,7 @@ pub struct Config {
     #[serde(default)]
     pub sort_descending: bool,
     /// The mass matcher's "hide done and failed" toggle, remembered
-    /// across openings like any other view preference.
+    /// across openings.
     #[serde(default)]
     pub mass_match_hide_done: bool,
     #[serde(default)]
@@ -430,7 +427,6 @@ fn primary_plus_extras(primary: &str, extras: &[String]) -> Vec<PathBuf> {
     trimmed_unique_paths(entries)
 }
 
-/// Trim whitespace, drop empties, dedupe, and convert to paths in order.
 fn trimmed_unique_paths(entries: Vec<String>) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -480,7 +476,7 @@ mod tests {
     #[test]
     fn test_config_default_shows_filtered_sgdb_art() {
         assert!(Config::default().sgdb_show_filtered);
-        // Configs written before the toggle omit the key: they load as shown.
+        // A missing key loads as shown.
         let cfg: Config = serde_json::from_str(r#"{}"#).unwrap();
         assert!(cfg.sgdb_show_filtered);
     }
@@ -558,10 +554,10 @@ mod tests {
 
     #[test]
     fn test_pause_game_on_overlay_defaults_off() {
-        // Arrange: fresh config and a legacy config without the key.
+        // Fresh config and a config without the key.
         let cfg = Config::default();
         let legacy: Config = serde_json::from_str(r#"{}"#).unwrap();
-        // Assert: safe default — no pausing unless opted in.
+        // No pausing unless opted in.
         assert!(!cfg.pause_game_on_overlay);
         assert!(!legacy.pause_game_on_overlay);
     }

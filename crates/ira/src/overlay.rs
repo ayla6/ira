@@ -50,7 +50,6 @@ pub fn write_game_shm(
         hdr.replay_buffer_enabled = u32::from(settings.replay_buffer_enabled);
         hdr.replay_buffer_seconds = clamp_replay_buffer_seconds(settings.replay_buffer_seconds);
 
-        // Write hotkey config as (evdev_keycode, modifier_mask).
         let (toggle_kc, toggle_mods) = parse_hotkey(&settings.toggle_hotkey);
         let (screenshot_kc, screenshot_mods) = parse_hotkey(&settings.screenshot_hotkey);
         let (record_kc, record_mods) = parse_hotkey(&settings.record_hotkey);

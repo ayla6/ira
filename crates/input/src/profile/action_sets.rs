@@ -108,12 +108,10 @@ impl InputProfile {
         });
     }
 
-    /// Whether `name` is free for a new action set.
     pub fn is_free_set_name(&self, name: &str) -> bool {
         self.action_sets.iter().all(|set| set.name != name)
     }
 
-    /// Whether `name` is free for a new action layer.
     pub fn is_free_layer_name(&self, name: &str) -> bool {
         self.action_layers.iter().all(|layer| layer.name != name)
     }

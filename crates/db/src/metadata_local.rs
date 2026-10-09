@@ -127,8 +127,6 @@ pub fn local_genre_entity(conn: &DbConn, name: &str) -> Option<ira_models::Scrap
     local_entity(conn, "scraper_genres", name)
 }
 
-/// The family entity for a hand-typed series name — same rules as the
-/// genre mint.
 pub fn local_family_entity(conn: &DbConn, name: &str) -> Option<ira_models::ScraperEntity> {
     local_entity(conn, "scraper_families", name)
 }

@@ -136,7 +136,6 @@ fn probe_sensors() {
     }
 }
 
-/// Convert a Steam VDF layout into Ira's JSON profile format.
 fn import_vdf_file(input: &Path, output: &Path) -> Result<ira_input::ImportReport, String> {
     let (profile, report) =
         ira_input::import_vdf_file(input).map_err(|error| format!("import failed: {error}"))?;

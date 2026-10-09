@@ -523,8 +523,7 @@ fn sidebar_bind_all_games(state: &SharedState, row: &gtk4::Box) {
     row.append(&add_btn);
 }
 
-/// The pinned library root: the same "All games" row the list used to
-/// scroll, built once and kept above the `ScrolledWindow` so it never
+/// The pinned library root: built once above the `ScrolledWindow` so it never
 /// scrolls away. No store row exists for it — empty list selection IS the
 /// AllGames state, mirrored here by `update_sticky_selection`.
 pub fn build_sticky_all_games(state: &SharedState) -> gtk4::Box {

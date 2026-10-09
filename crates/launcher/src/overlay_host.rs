@@ -74,9 +74,8 @@ fn wait_canvas_ready(game_shm: &str) -> bool {
     false
 }
 
-/// Kills the host once the game exits. Waits for the `running_games` entry
-/// to appear first (both spawn paths insert it after the host starts), then
-/// for it to disappear (the monitor removes it at game end).
+/// Kills the host once the game exits, waiting for the running_games entry
+/// to appear (spawned first) then disappear at game end.
 pub fn reap_when_game_exits(
     child: Child,
     running_games: Arc<Mutex<HashMap<i64, i32>>>,

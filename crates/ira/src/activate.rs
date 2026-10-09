@@ -95,9 +95,8 @@ pub fn activate(app: &adw::Application) -> SharedState {
 
     let save_dir = cfg.save_dir.clone();
 
-    // While Ira is open, the input daemon gives idle controllers their
-    // default behaviour; controllers whose settings say Disabled keep
-    // native desktop input.
+    // While Ira is open idle controllers run their default layout;
+    // Disabled keeps native desktop input.
     crate::input_desktop::start(save_dir.clone());
 
     start_saved_game_load(db.clone(), save_dir.clone(), cfg.clone(), sender.clone());
@@ -168,7 +167,6 @@ pub fn activate(app: &adw::Application) -> SharedState {
         refresh_playtime_watchers(&state);
     }
 
-    // Warm steamcmd.net cache for any game with a steam_id in the background
     {
         let steam = state.borrow().steam.clone();
         let db = db.clone();

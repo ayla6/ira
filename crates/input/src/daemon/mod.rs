@@ -1,6 +1,4 @@
-//! Host-side input engine: argument parsing, the mapping session loop, and
-//! the subsystems it drives (steam supervision, profile watching, sensor
-//! pipeline). Shared by the wrapper binary and, later, the daemon server.
+//! Host-side input engine shared by the wrapper binary and the daemon server.
 
 pub mod args;
 mod client_mode;
@@ -22,7 +20,6 @@ pub use session::run_session;
 /// broadcasts them to every connected client.
 #[derive(Debug, Clone)]
 pub enum SessionEvent {
-    /// The session's game process was spawned.
     SessionStarted {
         child_pid: i32,
         command: Vec<String>,

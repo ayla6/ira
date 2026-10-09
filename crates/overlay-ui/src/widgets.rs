@@ -198,9 +198,6 @@ pub(super) fn watch_row(row: &gtk4::Box, weak: &Weak<RefCell<OverlayUi>>, activa
             u.pointer_press(wx, wy, 1)
         });
     });
-    // Release activates only for sidebar rows (like gamepad A, and able
-    // to hide the overlay); achievement rows are informational (Steam
-    // parity: press focuses, release does nothing).
     let release_row = row.clone();
     let release = weak.clone();
     click.connect_released(move |gesture, _, ex, ey| {

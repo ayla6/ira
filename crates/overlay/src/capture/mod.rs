@@ -169,14 +169,11 @@ fn defer_buffers(
     }
 }
 
-/// Defers every live allocation (free list, in-flight receives, and the
-/// intermediate image) for destruction once the GPU is done with it.
 fn defer_all(state: &mut State) {
     defer_buffers(&state.free_rx, &mut state.free, &mut state.intermediate);
 }
 
-/// Tears down the live capture state for a resize: defers allocations,
-/// stops recording and the replay buffer. The caller rebuilds after.
+/// The caller rebuilds after.
 fn teardown_for_resize(state: &mut State) {
     defer_all(state);
     if RECORDING.swap(false, Ordering::Relaxed) {

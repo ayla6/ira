@@ -25,7 +25,6 @@ struct Xwin {
 
 /// Created VkSurface → (Display*, Window), filled by the surface hooks.
 static SURFACE_XWIN: Mutex<Option<HashMap<u64, (usize, u64)>>> = Mutex::new(None);
-/// Swapchain → game window translation state.
 static SWAPCHAIN_XWIN: Mutex<Option<HashMap<u64, Xwin>>> = Mutex::new(None);
 
 /// Remembers which X11 window a created VkSurface wraps. Called from the

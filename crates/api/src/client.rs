@@ -187,7 +187,6 @@ impl SteamDataClient {
     }
 }
 
-/// One bit per SGDB-downloadable asset type, for the auto-download mask.
 fn sgdb_asset_bit(asset: AssetType) -> u64 {
     match asset {
         AssetType::Icon => 1 << 0,

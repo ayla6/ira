@@ -29,8 +29,6 @@ pub(crate) struct FlickState {
 }
 
 impl MappingEngine {
-    /// Emit flick/rotation mouse motion for every Flickstick-mode input;
-    /// called from tick() with the elapsed time.
     pub(crate) fn emit_flick_motion(&mut self, now_us: u64) -> Vec<OutputEvent> {
         let mut modes: Vec<(InputSource, SourceMode)> = Vec::new();
         for (source, mode) in self.mode_inputs() {
@@ -77,7 +75,6 @@ impl MappingEngine {
     }
 }
 
-/// Per-stick constants for the flick path.
 struct FlickConfig {
     /// Wheel-mode rotation scale (the snap always covers the stick angle
     /// exactly).
@@ -110,7 +107,6 @@ fn emit_flick_for_stick(
     } else {
         let angle = f32::atan2(x, -y); // 0 = up, growing clockwise.
         if state.last_angle.is_none() {
-            // Bam! New flick: snap the camera by the full stick angle.
             state.last_angle = Some(angle);
             state.flick_angle = angle;
             state.last_shaped = 0.0;
@@ -132,8 +128,7 @@ fn emit_flick_for_stick(
     }
 
     // The flick's progress is time-based and eased (fast start, gliding
-    // into the target) — the reference's shape; our old linear pacing
-    // crawled through small flicks at constant speed.
+    // into the target) — the reference's shape.
     if let Some(started) = state.flick_start_us {
         let elapsed = now_us.saturating_sub(started) as f32 / 1_000_000.0;
         let progress = (elapsed / state.flick_duration_s).clamp(0.0, 1.0);
@@ -232,7 +227,6 @@ mod tests {
         for i in 1..20 {
             total += yaw_total(&engine.tick(5_000 + i * 4_000));
         }
-        // A full half turn is dots_per_360 / 2.
         let expected = dots / 2.0;
         assert!(
             (total.abs() - expected).abs() < expected * 0.2,

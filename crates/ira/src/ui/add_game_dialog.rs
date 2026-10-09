@@ -314,7 +314,6 @@ fn spawn_add_worker(params: AddWorkerParams) {
                             eprintln!("Failed to update game title: {}", e);
                         }
 
-                        // One-time migration of existing emulator saves to centralized path
                         let wine_prefix = if kind_c == ira_models::GameKind::Wine {
                             Some(ira_launcher::wine_launch::wine_prefix(&wine_config))
                         } else {
@@ -327,7 +326,6 @@ fn spawn_add_worker(params: AddWorkerParams) {
                             wine_prefix.as_deref(),
                         );
 
-                        // Centralize game saves if UFS data is available
                         if let Some(details) =
                             crate::game_loader::read_app_details(&save_dir_c, &app_id_c)
                         {

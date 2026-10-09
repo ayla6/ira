@@ -6,15 +6,9 @@ use std::path::{Path, PathBuf};
 
 use super::detect::{find_subsequence, MAKESELF_FILESIZE_MARKER, MAKESELF_OFFSET_MARKER};
 
-/// Split a GOG makeself/mojosetup installer into its `data.zip` component.
-///
-/// A GOG Linux installer is a shell script (the makeself header) followed by
-/// a gzipped tar (mojosetup) followed by `data.zip` (the actual game files).
-/// This function parses the header to find the offsets, then writes `data.zip`
-/// to `out_dir/data.zip` and returns its path.
-///
-/// Port of `references/gogapi-rs/src/extract.rs:229`, adapted to use pure
-/// string search instead of regex.
+/// Split a GOG makeself/mojosetup installer into `out_dir/data.zip`: a shell
+/// header, gzipped mojosetup tar, then `data.zip` with the game files.
+/// Port of `references/gogapi-rs/src/extract.rs:229`.
 pub fn split_gog_installer(installer: &Path, out_dir: &Path) -> Result<PathBuf, String> {
     let mut file = fs::File::open(installer).map_err(|e| format!("open installer: {e}"))?;
 
@@ -90,14 +84,9 @@ fn parse_marker_u64(head: &[u8], marker: &[u8], label: &str) -> Result<u64, Stri
         .map_err(|e| format!("parse {label}: {e}"))
 }
 
-/// Extract `data.zip` (as produced by `split_gog_installer`) into `dest`.
-///
-/// GOG's zip layout uses paths like `data/noarch/game/start.sh` and
-/// `meta/info`. We:
-///  - Skip entries whose path contains `meta` or `scripts`.
-///  - Strip leading `noarch/` and `data/` path components.
-///  - Preserve Unix file permissions.
-///  - Call `progress(current, total)` per file for UI status.
+/// Extract `data.zip` into `dest`: skip `meta`/`scripts` entries, strip leading
+/// `noarch/` and `data/` components, preserve Unix permissions, reporting
+/// `progress(current, total)` per file.
 pub fn extract_data_zip(
     zip_path: &Path,
     dest: &Path,
@@ -151,7 +140,6 @@ pub fn extract_data_zip(
     Ok(())
 }
 
-/// Strip leading `noarch/` and `data/` components from a GOG zip entry path.
 fn strip_gog_prefixes(mut path: &str) -> &str {
     loop {
         if let Some(rest) = path.strip_prefix("noarch/") {

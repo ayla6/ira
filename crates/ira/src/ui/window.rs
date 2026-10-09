@@ -189,9 +189,8 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     sidebar_view.add_css_class(CSS_NAVIGATION_SIDEBAR);
     sidebar_view.set_show_separators(false);
     sidebar_scroll.set_child(Some(&sidebar_view));
-    // The library root stays pinned above the scrolling list: a
-    // non-scrolling header row with the same contents the first list
-    // row used to have (its store row remains, hidden, at index 0).
+    // The library root stays pinned above the scrolling list as a non-scrolling
+    // header (its store row remains, hidden, at index 0).
     let sticky_all_games = super::sidebar::build_sticky_all_games(state);
     let sidebar_column = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     sidebar_column.append(&sticky_all_games);

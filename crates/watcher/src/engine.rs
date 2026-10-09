@@ -62,7 +62,6 @@ impl AchievementWatcher {
         self.state.lock().unwrap().game_names.clone()
     }
 
-    /// Register a game for live achievement watching.
     /// `watch_file` is the specific file whose modification triggers a reload
     /// (e.g. achievements.json for GSE, TROPUSR.DAT for PS3).
     /// The parent directory is created if it doesn't exist (e.g. when GSE
@@ -114,7 +113,6 @@ impl AchievementWatcher {
         }
     }
 
-    /// Remove a game from live achievement watching.
     pub fn unwatch(&self, db_id: i64) {
         let watch_dir = {
             let mut st = self.state.lock().unwrap();

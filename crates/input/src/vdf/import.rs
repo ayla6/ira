@@ -26,7 +26,6 @@ impl ImportReport {
     }
 }
 
-/// Read and import the VDF file at `path`; used by the CLI.
 pub fn import_vdf_file(
     path: &std::path::Path,
 ) -> Result<(crate::InputProfile, ImportReport), String> {
@@ -46,7 +45,6 @@ fn source_debug_name(source: crate::InputSource) -> String {
     }
 }
 
-/// Import one Steam `controller_mappings` VDF document.
 pub fn import_vdf(text: &str) -> Result<(InputProfile, ImportReport), String> {
     let top = parse_vdf(text)?;
     let root = find(&top, "controller_mappings")
@@ -125,8 +123,8 @@ pub fn import_vdf(text: &str) -> Result<(InputProfile, ImportReport), String> {
     {
         report.warn("action layers are not imported yet");
     }
-    // Passthrough (raw local axes) is no longer offered; imported profiles
-    // get the gravity-corrected default.
+    // Imported profiles get the gravity-corrected default; passthrough
+    // (raw local axes) is not offered.
     if profile.gyro.orientation == GyroOrientation::Local {
         profile.gyro.orientation = GyroOrientation::PlayerSpace;
     }
@@ -180,18 +178,15 @@ fn strip_internal_outputs(profile: &mut InputProfile) {
     }
 }
 
-/// Numeric value of a direct string child (activator blocks).
 fn child_number(node: &Node, key: &str) -> Option<f32> {
     node.children().iter().find(|n| n.key == key)?.as_f32()
 }
 
-/// Numeric entry in a group's settings block.
 fn group_setting(group: &Node, key: &str) -> Option<f32> {
     let settings = group.obj("settings")?;
     settings.iter().find(|n| n.key == key)?.as_f32()
 }
 
-/// String-valued group setting, for keys like `mouse_dampening`.
 fn group_setting_str<'a>(group: &'a Node, key: &str) -> Option<&'a str> {
     let settings = group.obj("settings")?;
     settings

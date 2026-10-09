@@ -185,7 +185,7 @@ fn show_layout_choice(
     }
     list.append(&copy_row);
 
-    // Empty: the previous behavior, a blank layout for this game.
+    // Empty: a blank layout for this game.
     let empty_row = choice_row(
         &crate::tr!("Create an empty layout"),
         &crate::tr!("Start from scratch for this game only"),
@@ -241,7 +241,7 @@ fn show_editor(
     on_saved: std::rc::Rc<dyn Fn(&Path)>,
 ) {
     // New profiles scope to the game's own id (native product id, else
-    // the system scope) — the same values past versions stored.
+    // the system scope); stored profiles are keyed on these values.
     let scope_id = if !game.native_id.is_empty() {
         game.native_id.clone()
     } else {
@@ -380,8 +380,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     input_group.add(&pause_row);
 
     // Profiles scope to the game's own id: the native product id when the
-    // row has one, else the system scope. Either matches what past
-    // versions stored, since those values agreed wherever both existed.
+    // row has one, else the system scope; stored profiles rely on both.
     let profile_game = params.game.clone();
     let profile_scope_id = if !profile_game.native_id.is_empty() {
         profile_game.native_id.clone()

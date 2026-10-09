@@ -10,7 +10,6 @@ use gtk4::prelude::*;
 use gtk4::Widget;
 use std::cell::{Cell, RefCell};
 
-/// What the open menu does.
 #[derive(Clone)]
 pub(super) enum MenuKind {
     /// Toggle the focused game's membership of each group, or file it
@@ -24,7 +23,6 @@ pub(super) enum MenuKind {
     ConfirmDelete { id: i64, name: String },
 }
 
-/// One actionable row of the open menu.
 #[derive(Clone)]
 enum MenuRow {
     Group { id: i64 },

@@ -25,7 +25,6 @@ pub fn detect_emulator_choices(
     choices
 }
 
-/// Every installable Azahar variant (native + Flatpak).
 pub fn azahar_choices() -> Vec<DetectedEmulator> {
     detect_emulator_choices(
         &["azahar", "Azahar"],
@@ -34,7 +33,6 @@ pub fn azahar_choices() -> Vec<DetectedEmulator> {
     )
 }
 
-/// Every installable Cemu variant (native + Flatpak).
 pub fn cemu_choices() -> Vec<DetectedEmulator> {
     detect_emulator_choices(
         &["cemu", "Cemu"],
@@ -45,7 +43,6 @@ pub fn cemu_choices() -> Vec<DetectedEmulator> {
 
 pub const PRIMEHACK_FLATPAK_ID: &str = "io.github.shiiion.primehack";
 
-/// Every installable PrimeHack variant (native + Flatpak).
 pub fn primehack_choices() -> Vec<DetectedEmulator> {
     detect_emulator_choices(
         &["primehack"],
@@ -197,9 +194,8 @@ pub fn is_retroarch(launch_command: &str) -> bool {
     launch_command.contains("retroarch") || launch_command == "flatpak:org.libretro.RetroArch"
 }
 
-/// True when the launch command targets Dolphin or its PrimeHack fork (a
-/// native binary or the flatpak). Both accept every disc of a game on
-/// their command line and offer in-game disc switching.
+/// True for Dolphin or its PrimeHack fork: both take every disc on the
+/// command line and offer in-game disc switching.
 pub fn is_dolphin(launch_command: &str) -> bool {
     let lower = launch_command.to_lowercase();
     lower.contains("dolphin") || lower.contains("primehack")
@@ -303,10 +299,8 @@ pub fn build_launch_command_with_filesystem(
         vec![exe.to_string()]
     };
     if fullscreen && !fullscreen_flag.is_empty() {
-        // RetroArch only honors the long `--fullscreen`: the console defs
-        // carry the standalone-emulator `-f`, which RetroArch parses as a
-        // different option and stays windowed — a small window the
-        // compositor then upscales. Standalone emulators keep their flag.
+        // RetroArch only honors `--fullscreen` (`-f` parses as a different option
+        // and stays windowed); standalone emulators keep their flag.
         let flag = if is_retroarch(exe) {
             "--fullscreen"
         } else {
@@ -314,10 +308,8 @@ pub fn build_launch_command_with_filesystem(
         };
         cmd.push(flag.to_string());
     }
-    // Every non-empty path becomes a file argument. Multidisc emulators
-    // (Dolphin) take all of a game's discs at once for in-game switching;
-    // an empty path means "open the emulator itself" — installed titles
-    // live in the emulator's own NAND/library and launch from there.
+    // Every non-empty path becomes a file argument (Dolphin takes all discs);
+    // empty means open the emulator itself for NAND/library titles.
     for path in rom_paths {
         if !path.is_empty() {
             cmd.push(path.clone());

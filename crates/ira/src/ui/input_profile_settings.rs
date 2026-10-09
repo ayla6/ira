@@ -37,8 +37,7 @@ struct ConsoleRowsParams {
     show_pause_unfocused: bool,
 }
 
-/// The settings host (an `adw::Window` since the settings dialog became
-/// resizable), accepted as any widget so sub-dialogs can present over it.
+/// The settings host, accepted as any widget so sub-dialogs can present over it.
 pub(super) fn add_pc_profile_group(
     page: &gtk4::Box,
     cfg: &Config,
@@ -1101,8 +1100,7 @@ mod tests {
 
     #[test]
     fn test_input_mode_from_index_out_of_range_falls_back_to_inherit() {
-        // The old dropdown offered controller types at indices 3-6; those
-        // selections always behaved as Inherit and now cannot be produced.
+        // Indices 3-6 behave as Inherit, as does anything further out of range.
         for index in [3u32, 4, 5, 6, 99] {
             assert_eq!(input_mode_from_index(index), None);
         }

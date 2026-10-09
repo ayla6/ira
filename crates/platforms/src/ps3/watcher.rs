@@ -5,7 +5,6 @@ use ira_models::{AppMessage, AppSender};
 
 use super::paths::persistent_settings_path_for;
 
-/// Watches persistent_settings.dat for changes (playtime/last-played updates).
 /// Uses inotify — zero CPU when idle.
 pub struct Rpcs3Watcher {
     _watcher: DebouncedFileWatcher,

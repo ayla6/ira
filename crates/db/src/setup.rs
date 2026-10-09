@@ -67,8 +67,7 @@ fn create_tables(conn: &Connection) {
 }
 
 /// Every table and index the app reads, as one batch so a fresh database
-/// lands in a single step. Edited directly on schema changes — Ira is
-/// pre-release with a single user, so no migrations.
+/// lands in a single step. Edited directly on schema changes; no migrations.
 const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS games (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind TEXT NOT NULL,

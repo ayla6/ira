@@ -188,7 +188,6 @@ impl FocusWatcher {
     }
 
 
-    /// The window manager's managed X11 clients.
     fn client_windows(&self) -> Vec<Window> {
         let Ok(cookie) = self
             .conn
@@ -307,8 +306,8 @@ fn is_focused(active_in_game_tree: bool, desktop_active: bool, game_has_x11_wind
     !game_has_x11_windows
 }
 
-/// All pids reachable from `root` through the parent links in `pairs`
-/// (from /proc): the process itself plus every descendant.
+/// Every pid below `root` reachable through the parent links in `pairs`
+/// (from /proc); the root itself is not included.
 fn descendant_set(root: u32, pairs: &[(u32, u32)]) -> HashSet<u32> {
     let mut children: std::collections::HashMap<u32, Vec<u32>> =
         std::collections::HashMap::new();

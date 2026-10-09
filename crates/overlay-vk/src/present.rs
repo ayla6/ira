@@ -152,7 +152,6 @@ fn poll_frame_inputs() {
     crate::shim_bridge::increment_present_count();
 }
 
-/// Polls shim input, drains host actions, and syncs visibility.
 /// Returns (overlay_visible, capture_active).
 fn forward_frame_events(present_info: &vk::PresentInfoKHR) -> (bool, bool) {
     crate::shim_bridge::poll_and_forward(present_swapchain(present_info));
@@ -425,7 +424,7 @@ pub unsafe extern "system" fn queue_present(
         return chain_present(queue, present_info);
     }
 
-    // Canvas upload: runs before the swapchain barriers: layout transitions
+    // Canvas upload runs before the swapchain barriers: layout transitions
     // on the canvas image must stay outside the render pass.
     let panel = if render_ui {
         upload_canvas(&ctx, frame.cmd, swapchain)
@@ -439,8 +438,6 @@ pub unsafe extern "system" fn queue_present(
         vk::ImageLayout::PRESENT_SRC_KHR
     };
 
-    // Fail closed: a null pipeline/render-pass skips compositing rather
-    // than reaching the driver.
     match panel {
         Some(panel) if ui_usable(ctx.render_pass, ctx.pipeline) => {
             record_ui_pass(&ctx, swapchain, frame, panel, captured, src_layout)

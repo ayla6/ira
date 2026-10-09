@@ -2,7 +2,6 @@ use crate::{err, DbConn};
 use ira_models::GameDisc;
 use rusqlite::params;
 
-/// Returns all disc rom_paths for retro games on the given platform.
 /// Used to check whether a scanned ROM is already known (in the DB)
 /// without spawning `ira-disc-info` subprocesses.
 pub fn get_disc_paths_for_platform(
@@ -14,7 +13,6 @@ pub fn get_disc_paths_for_platform(
         .collect())
 }
 
-/// Returns each known disc path and the game row it belongs to.
 pub fn get_disc_owners_for_platform(
     conn: &DbConn,
     platform_id: &str,
@@ -51,8 +49,7 @@ pub fn get_discs(conn: &DbConn, game_id: i64) -> Result<Vec<GameDisc>, String> {
 }
 
 /// Disc rows for every listed game in one query per 500-id chunk, grouped by
-/// game id. The stale-ROM cleanup asked per game; this is the same rows for
-/// one round-trip.
+/// game id: the same rows as per-game reads, for one round-trip.
 pub fn get_discs_for_games(
     conn: &DbConn,
     game_ids: &[i64],

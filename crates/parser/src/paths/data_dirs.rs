@@ -47,9 +47,6 @@ pub fn retro_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
     data_dir_in(save_dir, GameKind::Retro.as_str(), db_id)
 }
 
-/// Core kind-ladder shared by `game_data_dir` / `entry_data_dir`. Arm order
-/// mirrors the original precedence: platform kinds first, then steam
-/// enrichment, then SGDB-only, then the plain steam fallback.
 fn data_dir_for(
     save_dir: &str,
     kind: GameKind,
@@ -68,9 +65,7 @@ fn data_dir_for(
         _ if enriched => data_dir(save_dir, id),
         _ if !id.is_empty() => data_dir(save_dir, id),
         // No store id at all (manually added PC games): key the
-        // directory on the unique row id — an empty id used to mean one
-        // shared directory for every such game, with each new game
-        // inheriting the previous one's images.
+        // directory on the unique row id, so games never share one.
         _ => local_data_dir(save_dir, db_id),
     }
 }
@@ -81,9 +76,6 @@ pub fn local_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
     data_dir_in(save_dir, "ira", db_id)
 }
 
-/// Returns the data directory for a game based on its kind and trophy
-/// source. Centralizes the branching logic that was duplicated across
-/// game_loader, edit_game_dialog, image_manager, and context_menu.
 pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
     data_dir_for(
         save_dir,
@@ -94,7 +86,6 @@ pub fn game_data_dir(save_dir: &str, game: &ira_models::Game) -> PathBuf {
     )
 }
 
-/// Same as `game_data_dir` but takes a `GameEntry` (DB row) instead of a `Game`.
 pub fn entry_data_dir(save_dir: &str, entry: &ira_models::GameEntry) -> PathBuf {
     let id = if !entry.steam_id.is_empty() {
         &entry.steam_id
@@ -117,7 +108,7 @@ pub fn achievements_dir(save_dir: &str, app_id: &str) -> PathBuf {
 /// Where a game's unlock state lives: Steam-native achievements read
 /// from the client, everything else from a JSON status map. GOG games
 /// key on their product id, Goldberg games on the emulator app id —
-/// both are the platform-native id, never the store match.
+/// both are the platform-native id.
 pub fn unlock_status_path(
     save_dir: &str,
     trophy_source: ira_models::TrophySource,

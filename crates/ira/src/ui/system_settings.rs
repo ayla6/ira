@@ -97,7 +97,6 @@ pub(super) fn build_env_vars_group(
     (group, env_vars_box)
 }
 
-/// Builds two EntryRows for LD_PRELOAD and LD_LIBRARY_PATH inside a group.
 pub(super) fn build_ld_paths_group(
     ld_preload: &str,
     ld_library_path: &str,

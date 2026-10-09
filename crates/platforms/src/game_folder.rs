@@ -1,15 +1,7 @@
 use std::path::{Path, PathBuf};
 
-/// Try to detect the game folder from the executable path, steamcmd
-/// install_dir, and game title. Returns the detected folder or None.
-///
-/// `game_folders` are the configured PC games roots, primary first.
-///
-/// Strategies (tried in order):
-/// 1. If exe is inside one of `game_folders`, use the first subdirectory.
-/// 2. Walk up from exe looking for game root markers.
-/// 3. Match `install_dir` in any of `game_folders`.
-/// 4. Match `title` (normalized) in any of `game_folders`.
+/// Detect the game folder (`game_folders` primary first), strategies in order:
+/// exe inside roots → walk up for markers → install_dir → title match.
 pub fn detect_game_folder(
     exe_path: &str,
     game_folders: &[PathBuf],
@@ -41,7 +33,6 @@ pub fn detect_game_folder(
 
 /// If the exe is inside one of `game_folders`, the game folder is the
 /// first subdirectory after that root.
-/// Otherwise, walk up from the exe looking for game root markers.
 fn detect_from_exe(exe_path: &str, game_folders: &[PathBuf]) -> Option<PathBuf> {
     let exe = Path::new(exe_path);
 
@@ -61,9 +52,8 @@ fn detect_from_exe(exe_path: &str, game_folders: &[PathBuf]) -> Option<PathBuf> 
     walk_up_for_game_root(exe)
 }
 
-/// Walk up from the exe path looking for a directory that contains
-/// game root markers. Markers: `steam_appid.txt`, `steam_settings/`,
-/// `_CommonRedist/`, or a `.dll` file directly in the directory.
+/// Game root markers: `steam_appid.txt`, `steam_settings/`, `_CommonRedist/`,
+/// or a `.dll` file directly in the directory.
 fn walk_up_for_game_root(exe: &Path) -> Option<PathBuf> {
     let mut current = exe.parent()?;
     for _ in 0..10 {
@@ -98,7 +88,6 @@ fn is_game_root(dir: &Path) -> bool {
     false
 }
 
-/// Match a game title against directories in one games root.
 /// Tries exact (case-insensitive), normalized, and acronym matching.
 fn match_by_title(base: &Path, title: &str) -> Option<PathBuf> {
     let entries = std::fs::read_dir(base).ok()?;
@@ -135,7 +124,6 @@ fn match_by_title(base: &Path, title: &str) -> Option<PathBuf> {
     None
 }
 
-/// Normalize a string: lowercase, keep only alphanumeric, remove common suffixes.
 fn normalize(s: &str) -> String {
     let lower = s.to_lowercase();
     let trimmed = lower
@@ -146,7 +134,6 @@ fn normalize(s: &str) -> String {
     trimmed.chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
-/// Create an acronym from a title's words (e.g. "Metaphor ReFantazio" → "mr").
 fn make_acronym(title: &str) -> String {
     title
         .split_whitespace()

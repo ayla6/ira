@@ -71,9 +71,7 @@ impl ValuesPage {
 
         let search = gtk4::SearchEntry::new();
         search.set_hexpand(true);
-        // The page opens with focus already on the search, so typing
-        // just works — with the on-screen keyboard suppressed, since a
-        // hardware keyboard is the expected input here.
+        // Focus starts on the search with the on-screen keyboard suppressed.
         if let Some(text) = search.delegate().and_downcast::<gtk4::Text>() {
             text.set_input_hints(gtk4::InputHints::INHIBIT_OSK);
         }

@@ -52,28 +52,24 @@ pub fn build_hotkey_row(
     let kb_value = Rc::new(RefCell::new(keyboard.to_string()));
     let gp_value = Rc::new(RefCell::new(gamepad.to_string()));
 
-    // Keyboard binding button
     let kb_btn = gtk4::Button::new();
     kb_btn.set_valign(gtk4::Align::Center);
     kb_btn.add_css_class(CSS_FLAT);
     kb_btn.set_size_request(100, -1);
     update_hotkey_label(&kb_btn, &kb_value.borrow());
 
-    // Reset keyboard to default (only visible when not default)
     let kb_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     kb_reset.set_valign(gtk4::Align::Center);
     kb_reset.set_tooltip_text(Some(&crate::tr!("Reset to default")));
     kb_reset.add_css_class(CSS_FLAT);
     kb_reset.set_visible(keyboard != default_kb);
 
-    // Gamepad binding button
     let gp_btn = gtk4::Button::new();
     gp_btn.set_valign(gtk4::Align::Center);
     gp_btn.add_css_class(CSS_FLAT);
     gp_btn.set_size_request(100, -1);
     update_hotkey_label(&gp_btn, &gp_value.borrow());
 
-    // Reset gamepad to default
     let gp_reset = gtk4::Button::from_icon_name("edit-undo-symbolic");
     gp_reset.set_valign(gtk4::Align::Center);
     gp_reset.set_tooltip_text(Some(&crate::tr!("Reset to default")));

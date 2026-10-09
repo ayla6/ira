@@ -257,7 +257,6 @@ impl GroupsGrid {
         // Centered, never stretched: the slot below requests a square but
         // a wider flow column would otherwise fill-stretch it (and the
         // homogeneous collage cells with it) into wide abominations.
-        // Centered tiles keep their square with even gutters instead.
         tile_box.set_halign(gtk4::Align::Center);
         let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         slot.add_css_class(CSS_BP_GROUP_SLOT);
@@ -305,8 +304,6 @@ impl GroupsGrid {
 
     fn append_group_tile(&self, state: &SharedState, name: &str, covers: &[&Game], tile: i32) {
         let slot = self.append_tile_shell(state, name, tile);
-        // A 2x2 collage of the group's first four squares, or a
-        // placeholder icon for an empty group.
         if covers.is_empty() {
             let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
             icon.set_pixel_size((tile / 3).max(24));

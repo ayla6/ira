@@ -1,11 +1,8 @@
-//! Shared `/proc` and clock helpers. The freeze watcher and the process
-//! supervisor both walk the process tree; they share one implementation so
-//! the parsing cannot drift (a wrong field here silently disables Wine
-//! background-process detection in the stop path).
-
+//! Shared `/proc` and clock helpers for the freeze watcher and supervisor.
+//! A wrong field here silently disables Wine background-process detection.
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Seconds since the Unix epoch. Session clocks in both monitors use this.
+/// Session clocks in both monitors use this.
 pub(crate) fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -13,10 +10,8 @@ pub(crate) fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
-/// Process name from `/proc/<pid>/stat` (the parenthesized comm field).
-/// Parses only up to the closing paren, so names containing spaces or
-/// parens still resolve — unlike splitting the fields after comm, which
-/// yields the ppid instead of the name.
+/// Parses only up to the closing paren, so names with spaces or parens
+/// still resolve.
 pub(crate) fn process_comm(pid: i32) -> Option<String> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let start = stat.find('(')?;
@@ -27,7 +22,6 @@ pub(crate) fn process_comm(pid: i32) -> Option<String> {
     Some(stat[start + 1..end].to_string())
 }
 
-/// Direct children of `pid` via `/proc/<pid>/task/*/children`.
 pub(crate) fn proc_children(pid: i32) -> Vec<i32> {
     let mut children = Vec::new();
     let task_dir = format!("/proc/{pid}/task");
@@ -44,8 +38,7 @@ pub(crate) fn proc_children(pid: i32) -> Vec<i32> {
     children
 }
 
-/// All descendants of `pid` (children, grandchildren, …), excluding `pid`
-/// itself. Recomputed per call so freshly spawned processes are visible.
+/// Recomputed per call so freshly spawned processes are visible.
 pub(crate) fn collect_descendants(pid: i32) -> Vec<i32> {
     let mut all = Vec::new();
     let mut stack = vec![pid];
@@ -66,12 +59,9 @@ mod tests {
 
     #[test]
     fn test_process_comm_reads_own_name_not_ppid() {
-        // Arrange: our own test process.
         let me = std::process::id() as i32;
-        // Act
         let comm = process_comm(me);
-        // Assert: the real comm — never a bare number (which is what the
-        // field-after-comm parsing returned: the ppid).
+        // Assert: the real comm — never a bare number (the ppid).
         let comm = comm.expect("must read own comm");
         assert!(!comm.is_empty());
         assert!(comm.parse::<i32>().is_err(), "comm is a ppid: {comm}");
@@ -80,7 +70,6 @@ mod tests {
 
     #[test]
     fn test_collect_descendants_contains_children() {
-        // Arrange: a scratch child we own.
         let mut child = std::process::Command::new("sleep")
             .arg("30")
             .spawn()

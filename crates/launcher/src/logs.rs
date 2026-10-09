@@ -15,7 +15,7 @@ fn game_logs() -> &'static Mutex<std::collections::HashMap<i64, GameLog>> {
     GAME_LOGS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
-/// Returns the shared log buffer for a game. Creates a new empty buffer if none exists.
+/// Creates a new empty buffer if none exists.
 pub fn get_game_log(game_id: i64) -> GameLog {
     let mut logs = game_logs().lock().unwrap();
     logs.entry(game_id)

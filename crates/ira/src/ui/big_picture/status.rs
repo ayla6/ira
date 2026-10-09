@@ -229,8 +229,7 @@ impl BottomBar {
         let pad_icon = gtk4::Image::from_icon_name("input-gaming-symbolic");
         pad_icon.set_pixel_size(32);
         pads.append(&pad_icon);
-        // The player LEDs read as a small vertical line beside the pad,
-        // Switch-style — an indicator, not a light show.
+        // Player LEDs as a small vertical Switch-style line beside the pad.
         let dots_row = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
         dots_row.set_valign(gtk4::Align::Center);
         let dots = (0..4)

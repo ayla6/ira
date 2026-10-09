@@ -7,13 +7,9 @@ struct DiscInfo {
     title: Option<String>,
 }
 
-/// File types the disc reader can extract a serial from. Consoles whose
-/// ROMs are plain cartridges (nes, snes, gba, nds, …) can never yield one,
-/// so spawning the reader for them is pure waste. `gdi` and `cdi` are
-/// Dreamcast GD-ROM dumps, whose serial lives in the IP.BIN boot header.
-/// `wbfs`/`gcz` are the Wii/GameCube disc images (including Dolphin's
-/// compressed container): multi-gigabyte files that must never be
-/// content-hashed, only serial-probed.
+/// File types the disc reader can serial-probe. Cartridges (nes/snes/gba/nds)
+/// never yield one; `gdi`/`cdi` serials live in the IP.BIN boot header;
+/// `wbfs`/`gcz` are multi-GB images probed, never hashed.
 const DISC_EXTENSIONS: &[&str] = &[
     "bin", "cue", "chd", "pbp", "iso", "ecm", "gcm", "cso", "rvz", "gcz", "wbfs", "wia",
     "wud", "wux", "mdf", "img", "gz", "gdi", "cdi",
@@ -68,10 +64,8 @@ pub fn read_serial(path: &Path) -> Option<String> {
     read_disc_info(path).and_then(|info| info.serial)
 }
 
-/// Reads a ROM's disc serial through the cache: unchanged files answer
-/// from the database instead of spawning the disc reader, and files that
-/// cannot hold a serial never spawn it at all. Probe results — including
-/// "no serial" — are cached per file size and mtime.
+/// Disc serial through the cache (per size+mtime, including "no serial"):
+/// unchanged files and non-serial types never spawn the reader.
 pub fn read_serial_cached(conn: &DbConn, path: &Path) -> Option<String> {
     if !is_disc_extension(path) {
         return None;

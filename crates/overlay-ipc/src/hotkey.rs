@@ -470,7 +470,6 @@ mod tests {
 
     #[test]
     fn test_kbd_chord_needs_its_modifiers() {
-        // Arrange
         let mut chord = KbdChord::new(15, MOD_SHIFT);
         // Act + Assert: Tab with Ctrl held does not fire…
         assert!(!chord.feed(EVDEV_LEFTCTRL, 1));

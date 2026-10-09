@@ -164,7 +164,6 @@ pub(super) fn handle_unified_sgdb_result(
             if is_grid_showing {
                 show_grid_view(&sc);
             }
-            // Update the mass match row to show unmatched state with manual search
             replace_row_actions(&action_box_c, |ab| {
                 ab.append(&manual_sgdb_search_button(
                     &sc,

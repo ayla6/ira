@@ -125,7 +125,6 @@ pub fn sensor_node_names(dir: &Path) -> Vec<String> {
     names
 }
 
-/// One live kernel IMU node, polled for motion samples.
 pub struct EvdevImu {
     device: Device,
     /// The `/dev/input/eventN` node being read, so the hub's companion
@@ -172,7 +171,6 @@ impl EvdevImu {
         })
     }
 
-    /// The node this sensor reads.
     pub fn path(&self) -> &Path {
         &self.path
     }

@@ -815,12 +815,8 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
 }
 
 fn finish_save(params: &SaveGameSettingsParams, db: &ira_db::DbConn) {
-    // No image-path reload here: the copy thread is still deleting and
-    // rewriting the `{base}*` / `{base}_small*` files, and a `load_game`
-    // landing mid-surgery captures whatever exists in that instant — an
-    // old `_small` file, or nothing — into the in-memory game. The
-    // completion callback below the copy thread is the one reload, and
-    // it runs only after every file has landed.
+    // No reload here: the copy thread is mid-surgery and a reload would capture
+    // partial files. The completion callback reloads once after every file lands.
     super::sidebar::rebuild_sidebar(&params.state);
     super::grid_view::refresh_grid_store(&params.state);
 
@@ -915,7 +911,6 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     save_dlc_config(&params);
     save_language_config(&params);
 
-    // Apply pending API emulator uninstall
     if let Some(ref pu) = params.pending_emu_uninstall {
         if *pu.borrow() {
             let exe = params.game_exe.clone();

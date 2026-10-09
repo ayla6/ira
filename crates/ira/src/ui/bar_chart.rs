@@ -90,7 +90,6 @@ mod imp {
             let chart_w = (width - Y_AXIS_W).max(1);
             let bar_w = chart_w / 7;
 
-            // Y-axis labels (right side, centered on gridlines, with gap from chart)
             for (i, lbl) in self.y_labels.borrow().iter().enumerate() {
                 let val = i as f64 * interval;
                 let pct = val / nmax;
@@ -102,7 +101,6 @@ mod imp {
                 lbl.allocate(Y_AXIS_W - 6, 18, -1, Some(tx));
             }
 
-            // Bar groups (full column, for click/tooltips)
             for (i, grp) in self.bar_groups.borrow().iter().enumerate() {
                 let x = i as i32 * bar_w;
                 let tx = gtk4::gsk::Transform::new()
@@ -133,7 +131,6 @@ mod imp {
 
             let days = self.days.borrow();
 
-            // Hover background (rounded, full column)
             if let Some(hov) = hovered {
                 let hov_x = (hov as i32 * bar_w) as f32;
                 let hov_w = bar_w as f32;
@@ -149,7 +146,6 @@ mod imp {
                 snapshot.pop();
             }
 
-            // Selection background (rounded, full column)
             {
                 let sel_x = (selected as i32 * bar_w) as f32;
                 let sel_w = bar_w as f32;
@@ -165,7 +161,6 @@ mod imp {
                 snapshot.pop();
             }
 
-            // Bars
             for (day_idx, day) in days.iter().enumerate() {
                 if day.total <= 0.0 {
                     continue;
@@ -216,7 +211,6 @@ mod imp {
                 snapshot.pop();
             }
 
-            // Gridlines on top of bars
             let num_lines = (nmax / interval) as usize + 1;
             let grid_color = fg.with_alpha(0.08);
             for i in 0..num_lines {
@@ -229,7 +223,6 @@ mod imp {
                 );
             }
 
-            // Draw child widgets (y-axis labels, bar_groups for tooltips)
             self.parent_snapshot(snapshot);
         }
     }
@@ -297,7 +290,6 @@ impl BarChart {
     ) {
         let imp = self.imp();
 
-        // Unparent old children
         for w in imp.bar_groups.borrow().iter() {
             w.unparent();
         }
@@ -309,7 +301,6 @@ impl BarChart {
         imp.interval.set(interval);
         imp.is_single_game.set(is_single_game);
 
-        // Y-axis labels
         let num_lines = (nmax / interval) as usize + 1;
         let mut y_labels = Vec::with_capacity(num_lines);
         for i in 0..num_lines {
@@ -322,7 +313,6 @@ impl BarChart {
         }
         imp.y_labels.replace(y_labels);
 
-        // Bar groups (for click handling and combined tooltips)
         let mut bar_groups = Vec::with_capacity(7);
         for (i, day) in days.iter().enumerate() {
             let grp = gtk4::Box::new(gtk4::Orientation::Vertical, 0);

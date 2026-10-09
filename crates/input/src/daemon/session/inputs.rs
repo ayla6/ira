@@ -6,10 +6,8 @@ use crate::{InputEvent, InputSource, MappingEngine, ReportRateEstimator};
 use super::outputs::{emit_mapped, emit_outputs, OutputTargets};
 use super::super::TraceState;
 
-/// Maps the hub-forwarded input events and stashes motion samples for the
-/// tick. Both arrive pre-routed: this session owns focus. The overlay
-/// toggle chord never reaches here — the session loop filters it out first
-/// (and swallows it) when the toggle is armed.
+/// Maps hub-forwarded input events and stashes motion samples for the tick.
+/// The overlay toggle chord never reaches here; the session loop filters it first.
 pub(crate) fn process_pad_events(
     pending: &mut Vec<super::super::hub::PadEvent>,
     samples: &mut Vec<crate::SensorSample>,
@@ -18,12 +16,8 @@ pub(crate) fn process_pad_events(
     mut targets: OutputTargets<'_>,
     trace: &mut TraceState,
 ) -> Result<(), String> {
-    // The report rate describes the pad's event cadence: one observation
-    // per drained batch, like the direct-read loop this replaced, not one
-    // per buffered event (those share microseconds). Motion samples count
-    // as pad traffic too — a gyro-only session would otherwise sit on the
-    // default tick interval forever instead of tightening to the sensor's
-    // own rate.
+    // One observation per drained batch, not per buffered event (those share
+    // microseconds); motion counts too, or gyro-only sessions never tighten.
     let mut observed = false;
     for event in std::mem::take(pending) {
         match event {
@@ -55,9 +49,8 @@ pub(crate) fn process_pad_events(
     Ok(())
 }
 
-/// One cursor-visibility poll: when the shown/hidden state flipped and the
-/// profile maps that state to an action set, switch to it. Held outputs of
-/// the old set are released through the returned events.
+/// One cursor-visibility poll, switching to the profile's action set for the
+/// new state. Held outputs of the old set are released through the returned events.
 pub(crate) fn poll_cursor_switch(
     watcher: &crate::CursorWatcher,
     last_visible: &mut Option<bool>,
@@ -89,10 +82,8 @@ pub(crate) fn poll_cursor_switch(
     emit_outputs(releases, targets, trace)
 }
 
-/// Synthetic releases for mapper-held buttons the physical pad reports up:
-/// input lost across a routing gap (focus flap mid-hold, reconnect)
-/// reconciles instead of sticking forever. Pure for testability; the
-/// caller maps the returned events like real input.
+/// Synthetic releases for mapper-held buttons the pad reports up, so gaps lose
+/// no release and stick forever. Pure for testability.
 pub(crate) fn releases_for_missing(
     held: Vec<InputSource>,
     pressed: &HashSet<InputSource>,
@@ -108,10 +99,8 @@ pub(crate) fn releases_for_missing(
         .collect()
 }
 
-/// Whether an event value reads as a release for its source: buttons
-/// below the press threshold, sticks back near center. Close-edge
-/// swallowing uses it to know when a consumed button is finally up.
-/// Pure for testability.
+/// Whether an event value reads as a release: buttons below threshold, sticks
+/// near center. Pure for testability.
 pub(crate) fn is_release(source: &InputSource, value: f32) -> bool {
     match source {
         InputSource::Button(_) => value <= 0.5,
@@ -121,10 +110,8 @@ pub(crate) fn is_release(source: &InputSource, value: f32) -> bool {
         InputSource::AxisDirection { .. } => false,
     }
 }
-/// Synthetic presses for physically held buttons the mapper doesn't hold:
-/// overlay-close hand-back. The open-edge release wiped the mapper while
-/// the pad stayed gripped; without re-presses those buttons stay dead
-/// until mashed. Pure for testability.
+/// Synthetic presses for physically held buttons the mapper doesn't hold
+/// (overlay-close hand-back). Pure for testability.
 pub(crate) fn presses_for_held(
     held: Vec<InputSource>,
     pressed: &HashSet<InputSource>,
@@ -183,7 +170,6 @@ mod tests {
         ];
         let pressed: HashSet<InputSource> =
             [InputSource::Button(GamepadButton::B)].into_iter().collect();
-        // Act
         let releases = releases_for_missing(held, &pressed, 7);
         // Assert: A gets a real release event, B untouched.
         assert_eq!(
@@ -211,7 +197,6 @@ mod tests {
         // Arrange: mapper clean (open-edge release), pad reports A held.
         let pressed: HashSet<InputSource> =
             [InputSource::Button(GamepadButton::A)].into_iter().collect();
-        // Act
         let presses = presses_for_held(Vec::new(), &pressed, 9);
         // Assert: one synthetic press restoring the held button.
         assert_eq!(

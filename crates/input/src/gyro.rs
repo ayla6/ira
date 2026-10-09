@@ -198,7 +198,6 @@ struct StillnessTracker {
     /// from the front so the detector spans fixed wall-clock time at any
     /// sample rate.
     samples: VecDeque<(Vec3, f32)>,
-    /// Seconds of continuous stillness accumulated so far.
     settled: f32,
 }
 
@@ -418,13 +417,6 @@ impl GyroProcessor {
         }
     }
 
-    /// Accelerometer input in the unit the sensor layer delivers. NOTE: SDL3
-    /// (and every SensorSample producer) reports m/s², so on real hardware
-    /// the magnitude gate below rejects every reading and the
-    /// gravity-referenced orientations degrade to controller-space axes —
-    /// the behavior every tuned profile to date was built on. Normalizing
-    /// units at the sensor boundary is deliberate follow-up work: doing it
-    /// here silently changes what existing profiles feel like.
     /// Accelerometer input in m/s², the unit every sensor producer
     /// delivers; the gravity filters work in g, so convert once, here.
     /// Without this the magnitude gate below rejected every real reading,
@@ -475,8 +467,6 @@ impl GyroProcessor {
             self.shakiness = wobble;
         }
         self.smooth_accel = accel.lerp(self.smooth_accel, smooth_factor);
-        // Correction speed: fast while steady, crawling while shaky, and
-        // capped relative to the gyro rate so it never fights real motion.
         let blend = ((self.shakiness - SHAKE_MIN) / (SHAKE_MAX - SHAKE_MIN)).clamp(0.0, 1.0);
         let mut speed =
             CORRECTION_STILL_SPEED + (CORRECTION_SHAKY_SPEED - CORRECTION_STILL_SPEED) * blend;

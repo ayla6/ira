@@ -64,7 +64,6 @@ impl SteamLayoutSort {
     }
 }
 
-/// One community controller layout returned by the search.
 #[derive(Debug, Clone)]
 pub struct SteamLayout {
     pub published_file_id: String,
@@ -116,7 +115,6 @@ impl SteamLayout {
     }
 }
 
-/// Search parameters for [`SteamDataClient::query_steam_layouts`].
 #[derive(Debug, Clone)]
 pub struct SteamLayoutQuery {
     pub search_text: String,
@@ -133,7 +131,6 @@ pub struct SteamLayoutQuery {
     pub sort: SteamLayoutSort,
 }
 
-/// One page of [`SteamDataClient::query_steam_layouts`] results.
 #[derive(Debug, Clone, Default)]
 pub struct SteamLayoutPage {
     pub items: Vec<SteamLayout>,

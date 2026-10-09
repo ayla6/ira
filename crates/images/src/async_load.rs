@@ -121,15 +121,13 @@ thread_local! {
     static DRAIN_ACTIVE: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Deliver one finished decode: wrap the owned pixel buffer once and hand the
-/// shared `Bytes` to every queued texture/pixbuf callback. Moving `pixels`
-/// in (instead of cloning) saves a full-frame memcpy per image.
+/// Wraps the pixel buffer once and shares the `Bytes` with every queued
+/// callback — moving it in saves a full-frame memcpy per image.
 fn deliver_decode_result(path: String, result: Option<(Vec<u8>, u32, u32)>) {
     let texture_callbacks = PENDING_LOADS.with(|cell| cell.borrow_mut().remove(&path));
     let pixbuf_callbacks = PENDING_PIXBUFS.with(|cell| cell.borrow_mut().remove(&path));
-    // One decoded byte buffer, shared by both wrappers: the texture
-    // and the pixbuf each just refcount the same `Bytes`, so the
-    // pixbuf path adds no pixel data of its own.
+    // Texture and pixbuf each refcount the same `Bytes`, so the pixbuf path
+    // adds no pixel data of its own.
     let (texture, pixbuf) = match result {
         Some((pixels, w, h)) => {
             let bytes = glib::Bytes::from_owned(pixels);

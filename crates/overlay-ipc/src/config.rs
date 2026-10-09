@@ -104,7 +104,6 @@ impl VideoEncoder {
         }
     }
 
-    /// ffmpeg codec name for this encoder.
     pub fn ffmpeg_codec(self) -> &'static str {
         match self {
             Self::Vaapi => "h264_vaapi",
@@ -115,7 +114,6 @@ impl VideoEncoder {
     }
 }
 
-/// Where the overlay panel appears on screen.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OverlayPosition {
@@ -149,7 +147,6 @@ impl OverlayPosition {
     }
 }
 
-/// Recording quality presets.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RecordingQuality {
@@ -190,7 +187,6 @@ impl RecordingQuality {
     }
 }
 
-/// Output container format.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RecordingFormat {
@@ -226,7 +222,6 @@ impl RecordingFormat {
     }
 }
 
-/// Global overlay settings, stored in the Ira config file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OverlaySettings {
     /// Global kill switch. When false, the launcher never injects the overlay.

@@ -5,7 +5,7 @@
 //! curve, mouse velocity, or four digital dpad directions. All of them are
 //! tick-driven (positions must keep producing output while held) and
 //! integrate into the same axis-composition and mouse-motion paths as the
-//! legacy bindings.
+//! event-driven bindings.
 
 use super::continuous::STICK_MOUSE_COUNTS_PER_SECOND;
 use super::{MappingEngine, OutputEvent, BUTTON_THRESHOLD, VALUE_EPSILON};
@@ -334,7 +334,6 @@ fn add_stick_deflection(
     }
 }
 
-/// The X/Y axis pair a stick source belongs to.
 fn stick_axes(source: InputSource) -> (GamepadAxis, GamepadAxis) {
     match source {
         InputSource::Axis(GamepadAxis::LeftX | GamepadAxis::LeftY)
@@ -346,7 +345,6 @@ fn stick_axes(source: InputSource) -> (GamepadAxis, GamepadAxis) {
     }
 }
 
-/// The output axis an analog trigger source drives, if it is one.
 fn trigger_axis(source: InputSource) -> Option<GamepadAxis> {
     match source {
         InputSource::Axis(GamepadAxis::LeftTrigger) => Some(GamepadAxis::LeftTrigger),
@@ -447,7 +445,6 @@ fn apply_stick_processing(
     }
 }
 
-/// The press/release event a discrete outer-ring command maps to.
 fn discrete_press_event(output: &OutputAction, pressed: bool) -> Option<OutputEvent> {
     match output {
         OutputAction::GamepadButton(button) => Some(OutputEvent::GamepadButton {

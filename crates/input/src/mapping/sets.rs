@@ -27,7 +27,6 @@ impl MappingEngine {
         set.inputs.iter().find(|input| input.source == source)
     }
 
-    /// The mode-shift currently overriding `input`, if its trigger is held.
     pub(crate) fn active_shift<'a>(&self, input: &'a InputMapping) -> Option<&'a ModeShift> {
         input
             .mode_shifts
@@ -35,7 +34,6 @@ impl MappingEngine {
             .find(|shift| self.source_value(shift.trigger) > BUTTON_THRESHOLD)
     }
 
-    /// Toggled layers plus hold-mode layers whose firing button is down.
     pub(crate) fn active_layer_indexes(&self) -> Vec<usize> {
         let mut layers = self.toggled_layers.clone();
         for (index, _) in self.profile.action_layers.iter().enumerate() {
@@ -68,7 +66,6 @@ impl MappingEngine {
         layers
     }
 
-    /// Apply engine-internal actions fired by activators.
     pub(crate) fn apply_internal_actions(&mut self, actions: &[OutputAction]) {
         for action in actions {
             match action {
@@ -131,7 +128,6 @@ impl MappingEngine {
         std::mem::take(&mut self.pending_releases)
     }
 
-    /// Run activators for one resolved input after a value change.
     pub(crate) fn run_activators(
         &mut self,
         source: InputSource,
@@ -153,8 +149,6 @@ impl MappingEngine {
         outcome.outputs
     }
 
-    /// Advance time-based activator patterns for every input in the active
-    /// set plus its layers; called from tick().
     pub(crate) fn advance_set_activators(&mut self, now_us: u64) -> Vec<OutputEvent> {
         let mut outputs = Vec::new();
         let mut mappings: Vec<InputMapping> = Vec::new();

@@ -155,7 +155,6 @@ pub fn show_play_history_dialog(
     box_.set_margin_top(12);
     box_.set_margin_bottom(12);
 
-    // Rebuild closure: re-reads the sessions and re-renders the chart.
     // Stored strongly in the registry (unregistered on close).
     let rebuild: RebuildFn = std::rc::Rc::new({
         let state = state.clone();

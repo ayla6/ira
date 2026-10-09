@@ -2,8 +2,8 @@
 //! selected tile. Square frames keep their INNER edge straight and round
 //! only the outside corners a touch; the round variant (the All Software
 //! circle) is a full circle. Drawn as the fill between an outer shape
-//! and an inner cutout (not a stroke, not CSS) so the two edges can
-//! differ and it never affects layout.
+//! and an inner cutout so the two edges can differ and it never
+//! affects layout.
 
 use gtk4::glib;
 use gtk4::prelude::*;
@@ -150,7 +150,6 @@ mod imp {
     }
 }
 
-/// Traces a rounded rectangle into `cr`.
 fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
     let r = r.min(w / 2.0).min(h / 2.0);
     cr.new_sub_path();

@@ -17,7 +17,6 @@ static MOUSE_X: AtomicI32 = AtomicI32::new(0);
 static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
 static INPUT_QUEUE: Mutex<Vec<InputEventRaw>> = Mutex::new(Vec::new());
 
-/// Returns true if the overlay system is active (IRA_OVERLAY_SHM env var is set).
 /// When false, all hooks pass events through unmodified.
 /// Cached after first call — env vars don't change at runtime.
 static OVERLAY_ACTIVE: OnceLock<bool> = OnceLock::new();
@@ -59,7 +58,6 @@ pub fn push_event(event: InputEventRaw) {
     }
 }
 
-/// Pushes a payload-free event (hotkeys): screenshot, record toggle.
 pub fn push_simple(event_type: u32) {
     push_event(InputEventRaw {
         event_type,
@@ -120,13 +118,10 @@ pub fn toggle_visible() {
             return;
         }
     }
-    // Fallback: local toggle (no SHM available).
     let v = !OVERLAY_VISIBLE.load(Ordering::SeqCst);
     set_local(v);
 }
 
-/// Single place that updates process-local visibility: marks initialized,
-/// stores the flag, and breaks the game grab when showing.
 fn set_local(v: bool) {
     VISIBILITY_INITIALIZED.store(true, Ordering::Release);
     OVERLAY_VISIBLE.store(v, Ordering::SeqCst);

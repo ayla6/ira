@@ -207,10 +207,9 @@ fn handle_button_release(button: u8) -> bool {
 }
 
 fn button_mask(button: u8) -> Option<u32> {
-    // B never reaches here: it is the hardcoded Big Picture back action
-    // above, so chords containing B cannot be expressed on the SDL path
-    // (the evdev fallback covers them in non-SDL games). Triggers have no
-    // SDL button codes at all (axes only) — same limitation.
+    // B never reaches here (hardcoded Big Picture back above) and triggers
+    // have no SDL button codes, so neither enters the chord table (the
+    // evdev fallback covers them in non-SDL games).
     //
     // Evdev codes (linux/input-event-codes.h) for the shared chord table.
     const EVDEV_SOUTH: u16 = 0x130;
@@ -255,10 +254,6 @@ fn capture_event(event_type: u32) -> InputEventRaw {
 }
 
 /// LD_PRELOAD hook for `SDL_PollEvent`.
-///
-/// Intercepts gamepad button events. When the overlay is visible, gamepad
-/// events are consumed (the game never sees them). The Guide button always
-/// toggles the overlay. Non-gamepad events always pass through.
 #[no_mangle]
 pub unsafe extern "C" fn SDL_PollEvent(event: *mut c_void) -> i32 {
     let Some(real_fn) = real_poll_event() else {

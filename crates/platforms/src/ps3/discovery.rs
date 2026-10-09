@@ -4,7 +4,6 @@ use crate::ps4::{parse_psf, psf_get_title, psf_get_title_id};
 
 use super::paths::{disc_dir_for, games_dir_for, rpcs3_config_dir_for_executable};
 
-/// A discovered RPCS3 game.
 #[derive(Debug, Clone)]
 pub struct Rpcs3Game {
     /// TITLE_ID from PARAM.SFO (e.g. "NPUB30698", "BLES01234").
@@ -18,8 +17,7 @@ pub struct Rpcs3Game {
     pub config_dir: PathBuf,
 }
 
-/// Scan a game folder for its PARAM.SFO, parse it, and find the NPWR ID from TROPDIR.
-/// Returns None if PARAM.SFO is missing or has no TITLE_ID.
+/// None if PARAM.SFO is missing or has no TITLE_ID.
 fn scan_game_folder(game_path: &Path, config_dir: &Path) -> Option<Rpcs3Game> {
     let param_sfo = game_path.join("PARAM.SFO");
     if !param_sfo.is_file() {
@@ -40,8 +38,7 @@ fn scan_game_folder(game_path: &Path, config_dir: &Path) -> Option<Rpcs3Game> {
         return None;
     }
 
-    // NPWR ID comes from the TROPDIR subfolder name (e.g. TROPDIR/NPWR00906_00/).
-    // No npbind.dat parsing needed — unlike shadPS4, the folder name IS the NPCommId.
+    // NPWR ID is the TROPDIR subfolder name (e.g. TROPDIR/NPWR00906_00/).
     let npwr_id = find_npwr_id(&game_path.join("TROPDIR"));
 
     Some(Rpcs3Game {
@@ -53,7 +50,6 @@ fn scan_game_folder(game_path: &Path, config_dir: &Path) -> Option<Rpcs3Game> {
     })
 }
 
-/// Find the first NPCommId folder under TROPDIR/ (e.g. "NPWR00906_00").
 fn find_npwr_id(tropdir: &Path) -> String {
     let entries = match std::fs::read_dir(tropdir) {
         Ok(e) => e,
@@ -73,11 +69,8 @@ fn is_dir(entry: &std::fs::DirEntry) -> bool {
     entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
 }
 
-/// Discover all installed RPCS3 games.
-///
-/// Scans:
-///   dev_hdd0/game/   — PSN games (each subfolder has PARAM.SFO at root)
-///   dev_hdd0/disc/   — disc games (each subfolder has PS3_GAME/PARAM.SFO)
+/// Discover all installed RPCS3 games: `dev_hdd0/game/` (PSN, PARAM.SFO at
+/// root) and `dev_hdd0/disc/` (`<name>/PS3_GAME/PARAM.SFO`).
 pub fn discover_games() -> Vec<Rpcs3Game> {
     discover_games_for_executable("")
 }
@@ -86,7 +79,6 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<Rpcs3Game> {
     let mut games = Vec::new();
     let config_dir = rpcs3_config_dir_for_executable(executable);
 
-    // PSN games
     let psn_dir = games_dir_for(executable);
     if let Ok(entries) = std::fs::read_dir(&psn_dir) {
         games.extend(
@@ -97,7 +89,6 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<Rpcs3Game> {
         );
     }
 
-    // Disc games (folder structure: disc/<name>/PS3_GAME/PARAM.SFO)
     let disc_dir = disc_dir_for(executable);
     if let Ok(entries) = std::fs::read_dir(&disc_dir) {
         games.extend(

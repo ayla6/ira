@@ -243,7 +243,6 @@ impl SwitchHidrawPad {
         self.send_rumble();
     }
 
-    /// Stops the motors immediately.
     pub fn stop_rumble(&mut self) {
         if self.rumble_stop_at.is_none() && self.rumble_magnitudes == (0, 0) {
             return;

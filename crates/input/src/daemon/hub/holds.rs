@@ -126,7 +126,6 @@ fn companion_event_nodes(sys_class_input: &Path, primary: &Path) -> Vec<PathBuf>
     Vec::new()
 }
 
-/// The `/dev` event nodes of every `input*/event*` pair below `dir`.
 fn event_nodes_under(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -232,9 +231,8 @@ mod tests {
     #[test]
     fn test_sibling_holds_recompute_only_on_input_change() {
         let mut holds = SiblingHolds::default();
-        // The first application records the state; identical repeats must
-        // not release and re-grab (visible only as no panic, but the cheap
-        // path is what keeps the hub pass idle).
+        // Identical repeats must not release and re-grab; the cheap path
+        // keeps the hub pass idle.
         holds.set(true, Some(Path::new("/dev/input/event4")), None);
         let applied = holds.applied.clone();
         holds.set(true, Some(Path::new("/dev/input/event4")), None);

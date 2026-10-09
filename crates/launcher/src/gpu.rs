@@ -208,7 +208,6 @@ fn get_gpu_name(pci_slot: &str, lspci: Option<&str>) -> Option<String> {
     None
 }
 
-/// Build environment variables for GPU selection.
 /// Returns a list of (key, value) pairs to set when launching with a specific GPU.
 pub fn build_gpu_env(gpu_card: &str) -> Vec<(String, String)> {
     if gpu_card.is_empty() || gpu_card == ira_models::GPU_AUTO {

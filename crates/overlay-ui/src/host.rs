@@ -104,7 +104,6 @@ fn hide_sink(state: &Rc<RefCell<Option<State>>>) -> Rc<dyn Fn()> {
     })
 }
 
-/// Builds the helper window + UI and starts the frame loop.
 pub(super) fn activate(
     app: &adw::Application,
     game: Option<MappedShm>,

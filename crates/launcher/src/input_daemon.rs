@@ -36,9 +36,8 @@ pub fn launch_via_daemon(
     }
     let binary = super::input_wrap::input_binary_path()
         .ok_or_else(|| "ira-input binary was not found".to_string())?;
-    // A daemon from an older build would misunderstand the protocol;
-    // connect_daemon refuses it so the caller falls back instead of
-    // launching something broken.
+    // An older-build daemon would misunderstand the protocol; connect_daemon
+    // refuses it so the caller falls back instead of launching broken.
     let mut client = DaemonClient::connect_daemon(&binary)?;
     client.begin_launch(LaunchRequest {
         device: None,
@@ -87,12 +86,8 @@ pub fn send_desktop_default(
     }
 }
 
-/// The desktop hold a bypassing spawn needs, given its resolved input
-/// mode: disabled means the daemon's idle desktop session must stand
-/// down for the process's lifetime, or the spawn sees the remapped
-/// virtual pad and "disabled" looks ignored. Enabled spawns own the pad
-/// through the wrapper instead, and a missing daemon (None) means the
-/// pad is already native.
+/// The desktop hold a bypassing spawn needs (disabled only): without it the
+/// spawn sees the remapped pad; no daemon means the pad is already native.
 pub fn desktop_hold_if_disabled(mode: ControllerInputMode) -> Option<DaemonClient> {
     if mode == ControllerInputMode::Disabled {
         hold_desktop_for_game()
@@ -101,13 +96,8 @@ pub fn desktop_hold_if_disabled(mode: ControllerInputMode) -> Option<DaemonClien
     }
 }
 
-/// Suspends the daemon's desktop-default controller behaviour for the
-/// lifetime of the returned client: a game that bypasses the daemon (input
-/// remapping disabled or inherited-off) must not be remapped underneath by
-/// the idle desktop session. Dropping the client releases the hold, so a
-/// crash can never leave the controller suspended. `None` means no daemon
-/// is running (the pad is already native) or one from an older build is;
-/// either way the game launches untouched.
+/// Suspends the desktop-default behaviour so the game is never remapped
+/// underneath; dropping the client releases the hold. None means no daemon.
 pub fn hold_desktop_for_game() -> Option<DaemonClient> {
     let mut client = DaemonClient::connect(&socket_path()).ok()?;
     let status = match client.status() {
@@ -130,9 +120,8 @@ pub fn hold_desktop_for_game() -> Option<DaemonClient> {
         }
         _ => return None,
     }
-    // The desktop session winds down asynchronously; give it a moment so
-    // the game never sees its virtual pad, but spawn regardless — a stuck
-    // daemon must not block the game.
+    // The desktop session winds down asynchronously; wait briefly so the game
+    // never sees its virtual pad — but spawn regardless, never block on the daemon.
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
         match client.status() {
@@ -146,11 +135,8 @@ pub fn hold_desktop_for_game() -> Option<DaemonClient> {
     Some(client)
 }
 
-/// Tells the daemon running `tag`'s game session to switch to the layout at
-/// `profile`: the session reloads it as if the file had been edited in
-/// place. Unlike a launch this never starts a daemon — no running session
-/// (or a stale one) simply surfaces as `Err` for the caller to log, and the
-/// newly picked layout applies at the next launch instead.
+/// Switches `tag`'s game session to the layout at `profile` (never starts a
+/// daemon: no session surfaces as `Err`, applying at the next launch).
 pub fn reload_session_profile(tag: i64, profile: &str) -> Result<(), String> {
     let mut client = DaemonClient::connect(&ira_input_ipc::socket_path())?;
     let status = client.status()?;

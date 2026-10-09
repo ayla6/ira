@@ -648,7 +648,6 @@ mod tests {
         engine.process(event(InputSource::Button(GamepadButton::B), 1.0));
         engine.process(event(InputSource::Button(GamepadButton::B), 0.0));
         engine.process(event(InputSource::Axis(GamepadAxis::LeftX), 0.8));
-        // Act
         let mut held = engine.held_buttons();
         held.sort_by_key(|source| format!("{source:?}"));
         // Assert: only the held button; released B and the axis excluded.

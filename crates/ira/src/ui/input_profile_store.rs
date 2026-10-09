@@ -140,8 +140,8 @@ pub(super) fn profile_matches_game(profile: &InputProfile, game_id: i64) -> bool
 
 /// A profile scoped to platforms shows only on those platforms; unscoped
 /// profiles stay global. The scope list mixes system ids (`psx`) and
-/// game ids (Steam appids, title ids) from before the columns split, so
-/// a game matches on any of its ids — native, platform, or Steam.
+/// game ids (Steam appids, title ids), so a game matches on any of its
+/// ids — native, platform, or Steam.
 pub(super) fn profile_matches_platform(profile: &InputProfile, game: &crate::Game) -> bool {
     profile.compatible_platform_ids.is_empty()
         || profile

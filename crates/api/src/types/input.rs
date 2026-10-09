@@ -1,5 +1,3 @@
-// ── Steam Input community layouts (Steam Web API) ───────────────────
-
 use serde::Deserialize;
 
 /// Numeric fields across Steam Web API responses arrive inconsistently
@@ -27,7 +25,6 @@ where
     }
 }
 
-/// One workshop item of an `IPublishedFileService/QueryFiles` result.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct PublishedFileEntry {
     #[serde(default)]
@@ -88,7 +85,6 @@ pub(crate) struct QueryFilesResult {
     pub published_file_details: Vec<PublishedFileEntry>,
 }
 
-/// One item of an `ISteamRemoteStorage/GetPublishedFileDetails` response.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct RemoteStorageFileDetail {
     #[serde(default)]

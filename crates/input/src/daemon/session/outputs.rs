@@ -55,11 +55,8 @@ pub(crate) fn reload_profile(
     Ok(())
 }
 
-/// The controller kind changed: release everything held on the outgoing
-/// devices, then rebuild the pad (and twins, motion node, cemuhook stream)
-/// for the new one. Games that re-enumerate see a fresh controller; games
-/// that only bind at startup keep the old one until they are restarted —
-/// the swap is best-effort by nature, not by refusal.
+/// The controller kind changed: release held outputs, then rebuild for the new one.
+/// Startup-bound games keep the old controller until restarted; the swap is best-effort.
 fn rebuild_output_stack(
     outputs: &mut LiveOutputs<'_>,
     new_mapper: MappingEngine,
@@ -96,9 +93,7 @@ fn rebuild_output_stack(
     );
 }
 
-/// Rebuilds every virtual output device for the profile now in the mapper,
-/// releasing the outgoing devices' held outputs first. The mapper itself is
-/// untouched.
+/// Rebuilds output devices for the mapper's current profile; the mapper itself is untouched.
 pub(crate) fn rebuild_output_devices(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState) {
     let stack = super::output_stack::build_virtual_stack(
         outputs.pipeline.motion_alive(),
@@ -123,8 +118,6 @@ pub(crate) fn rebuild_output_devices(outputs: &mut LiveOutputs<'_>, trace: &mut 
     install_stack(outputs, stack);
 }
 
-/// Swaps the live virtual devices for a freshly built stack, keeping the
-/// mapper itself untouched.
 fn install_stack(outputs: &mut LiveOutputs<'_>, stack: super::output_stack::VirtualStack) {
     *outputs.gamepad = stack.gamepad;
     *outputs.keyboard = stack.keyboard;
@@ -137,14 +130,8 @@ fn install_stack(outputs: &mut LiveOutputs<'_>, stack: super::output_stack::Virt
     outputs.pipeline.imu_hid = stack.imu_hid;
 }
 
-/// A session whose controller appeared after setup has no motion outputs:
-/// the stack was built against `motion == false`, and a motion-less stack
-/// builds neither the motion node nor the uhid twins. Attaches what the
-/// profile wants now. A uinput-backed session only gains the motion node —
-/// pad, keyboard and mouse stay put, since swapping them makes the game
-/// drop its controller. A native twin-controller profile needs the full
-/// device rebuild, because the pad choice itself depended on motion; like
-/// the reload path, that swap only reaches games that re-open their pad.
+/// Attaches motion outputs to a stack built before the controller appeared. Uinput
+/// sessions gain only the motion node (swapping the pad drops the game's controller).
 /// Returns whether the stack now carries the wanted motion outputs.
 pub(crate) fn attach_motion_outputs(outputs: &mut LiveOutputs<'_>, trace: &mut TraceState) -> bool {
     if outputs.native_passthrough {
@@ -215,8 +202,7 @@ fn hot_apply_mappings(
 }
 
 /// The virtual devices mapped events are written to, borrowed per loop pass.
-/// `pad` shadows the gamepad outputs so the DSU stream can carry the full
-/// controller state without re-deriving it from the mapping engine.
+/// `pad` shadows gamepad outputs for the DSU stream's full controller state.
 pub(crate) struct OutputTargets<'a> {
     pub(crate) gamepad: &'a mut VirtualGamepad,
     pub(crate) keyboard: Option<&'a mut VirtualKeyboard>,

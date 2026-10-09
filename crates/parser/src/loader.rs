@@ -41,9 +41,7 @@ pub fn populate_image_paths(image_dir: &Path, game: &mut Game) {
         if files.contains(&small_webp) || files.contains(&small_jpg) {
             continue;
         }
-        // The directory listing already proves whether a source exists:
-        // calling ensure when it does not just re-stats the same names
-        // before returning without writing anything.
+        // No source in the listing, nothing to ensure — skip the re-stat.
         let has_source =
             files.contains(&format!("{base}.webp")) || files.contains(&format!("{base}.jpg"));
         if !has_source {

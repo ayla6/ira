@@ -17,8 +17,7 @@ mod tests {
 
     #[test]
     fn test_pause_resolves_game_over_platform_over_global() {
-        // Arrange: every level set — game wins.
-        // Act + Assert
+        // Every level set — game wins.
         assert!(resolve_pause_game_on_overlay(Some(true), Some(false), false));
         assert!(!resolve_pause_game_on_overlay(Some(false), Some(true), true));
     }

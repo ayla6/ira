@@ -24,12 +24,9 @@ fn init_tracing() -> Option<()> {
     None
 }
 
-/// Under Gamescope's nested compositor, run GTK against its XWayland: the
-/// Wayland-native path segfaults the compositor on menus (xdg_popup).
-/// Gamescope also never draws server-side decorations, and the fullscreen
-/// shell has no headerbar of its own — without GTK_CSD=0 GTK paints a fake
-/// titlebar inside the fullscreen window. Explicit env wins; this only
-/// fills in the defaults.
+/// Run GTK on Gamescope's XWayland (Wayland segfaults on menus) without
+/// server decorations (no GTK_CSD paints a fake titlebar fullscreen).
+/// Explicit env wins; this only fills in the defaults.
 fn apply_gamescope_env_defaults() {
     if !ira::ui::big_picture::running_in_gamescope() {
         return;
@@ -41,16 +38,11 @@ fn apply_gamescope_env_defaults() {
         std::env::set_var("GTK_CSD", "0");
     }
 }
-/// Silence one benign GTK layout warning: the big-picture groups tiles
-/// carry a fixed square size request — that request IS their squareness,
-/// removing it stretches the collage — so during tab slides and first
-/// layouts GTK measures them at a transitional width below the request
-/// and complains once per tile before converging on the next frame.
-/// Anything else falls through to the default writer untouched.
-///
-/// Note: this must be a log *writer* func, not a classic log handler —
-/// real measure warnings bypass classic handlers entirely (verified with
-/// a failing-then-passing measure test in big_picture::groups).
+/// Silence the benign groups-tile measure warning: the tiles carry a fixed
+/// square size request — that request IS their squareness, removing it
+/// stretches the collage — and square requests measure transitional widths
+/// during slides. Must be a writer func — measure warnings bypass classic
+/// handlers entirely.
 fn init_layout_warning_filter() {
     gtk4::glib::log_set_writer_func(|level, fields| {
         use gtk4::glib::{LogLevel, LogWriterOutput};
@@ -77,9 +69,8 @@ fn init_layout_warning_filter() {
     });
 }
 
-/// When IRA_CRITICAL_BACKTRACE is set, every GTK critical warning prints a
-/// Rust backtrace after it, so a single run pinpoints which code path passed
-/// the stale widget pointer.
+/// When IRA_CRITICAL_BACKTRACE is set, every GTK critical prints a Rust
+/// backtrace after it, pinpointing which code path passed the stale pointer.
 fn init_critical_backtrace() {
     if std::env::var_os("IRA_CRITICAL_BACKTRACE").is_none() {
         return;
@@ -98,11 +89,9 @@ fn init_critical_backtrace() {
     );
 }
 
-/// Publishes the display size for overlay processes: the overlay host
-/// sizes its window from this at startup so the first frame is already
-/// right (no flash-then-resize). Largest monitor wins; absent without a
-/// display (headless/tests), in which case the host stays default-sized
-/// and follows the game extent instead. Inherited through spawn.
+/// Publish display size for overlay hosts so the first frame is already
+/// right (largest monitor wins). Absent headless; host stays default-sized.
+/// Inherited through spawn.
 fn publish_overlay_screen_size() {
     use gtk4::gdk::prelude::{DisplayExt, MonitorExt};
     let size = gtk4::gdk::Display::default().and_then(|d| {
@@ -136,9 +125,7 @@ fn main() {
     apply_gamescope_env_defaults();
 
     // Big-picture entry: `--big-picture` or running under Gamescope.
-    // Fullscreens the main window, dropping the desktop chrome — nothing
-    // maximizes the window for the app inside Gamescope, so its default
-    // size otherwise stays put with the header bars on.
+    // Gamescope never maximizes the window, so fullscreen explicitly.
     let big_picture = ira::ui::big_picture::is_big_picture();
     if big_picture {
         eprintln!("ira: big picture mode");
@@ -150,10 +137,8 @@ fn main() {
     let _flush_guard = init_tracing();
     init_critical_backtrace();
     init_layout_warning_filter();
-    // Keep large image buffers (covers, heroes, logos) mmap-backed so freeing
-    // them returns the memory to the OS instead of leaving fragmented holes in
-    // the sbrk arena that malloc_trim can't reclaim. Pinning the threshold
-    // also stops glibc from dynamically raising it.
+    // Keep large image buffers mmap-backed so freeing returns memory to the OS
+    // instead of fragmenting the arena; stop glibc raising the threshold.
     unsafe {
         libc::mallopt(libc::M_MMAP_THRESHOLD, 256 * 1024);
     }
@@ -193,9 +178,8 @@ fn main() {
 
     app.run();
 
-    // The input daemon outlives short-lived callers by design; tell it Ira
-    // is done so it does not linger on its idle timer (or forever, if a
-    // session wedged). A running game makes it stay until the game ends.
+    // Input daemon outlives callers by design; tell it Ira is done so it does
+    // not linger (or forever, if wedged). A running game keeps it until it ends.
     ira_launcher::input_daemon::shutdown_daemon();
 
     if let Some(state) = state_holder.borrow().as_ref() {

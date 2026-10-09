@@ -16,13 +16,9 @@ use super::super::session::{
 use super::holds::SiblingHolds;
 use super::{broadcast_motion, RouteEntry};
 
-/// Reconnect cadence for a pad that vanished, matching the old per-session
-/// reconnect interval.
 pub(super) const RECONNECT_INTERVAL: Duration = Duration::from_millis(250);
-/// First retry delay for a pad that opened without a motion source: the
-/// connect-time probe races udev and SDL's first enumeration, so a
-/// controller switched on after the daemon is ready can lose it. Retries
-/// back off so a genuinely gyroless pad pays only a small periodic probe.
+/// First retry delay for a pad that opened without a motion source: the connect-time
+/// probe races udev and SDL's first enumeration, then backs off to a small periodic probe.
 const MOTION_RETRY_START: Duration = Duration::from_millis(250);
 const MOTION_RETRY_MAX: Duration = Duration::from_secs(4);
 
@@ -62,11 +58,8 @@ impl PhysicalPad {
         }
     }
 
-    /// Re-evaluates the exclusive holds that keep every companion node of
-    /// the physical pad (IMU sensors, vendor keyboards) silent for other
-    /// processes while a remapping session owns the pad. Re-applied on
-    /// input changes: reconnects create fresh nodes, and a node our own
-    /// sensor attaches to must be released back to it.
+    /// Re-evaluates the exclusive holds on the pad's companion nodes while a
+    /// remapping session owns the pad.
     pub(super) fn set_sibling_holds(&mut self, hold: bool) {
         let primary = self
             .gamepad
@@ -80,7 +73,6 @@ impl PhysicalPad {
         self.sensor.is_some() || self.switch_hidraw.is_some()
     }
 
-    /// Claims the open pad exclusively for routed sessions.
     pub(super) fn grab(&mut self) -> Result<(), String> {
         match self.gamepad.as_mut() {
             Some(gamepad) => gamepad.grab(),
@@ -95,10 +87,8 @@ impl PhysicalPad {
         }
     }
 
-    /// Opens the first pad or reopens the previous one, re-establishing the
-    /// motion source, the Switch-protocol takeover, and rumble. The pad is
-    /// grabbed only when sessions are subscribed: an idle hub must leave
-    /// the controller to the desktop.
+    /// Opens the first pad or reopens the previous one, re-establishing motion,
+    /// takeover, and rumble. Grabbed only when sessions are subscribed.
     pub(super) fn try_open(&mut self, grab: bool) -> Option<(String, String, u16, u16, u16)> {
         // The motion probe below races udev and SDL's first enumeration;
         // schedule retries so a lost race heals itself while the pad stays
@@ -169,7 +159,6 @@ impl PhysicalPad {
             broadcast_motion(routes, true);
             return;
         }
-        // Switch-protocol fallback, mirroring `try_open`.
         let switch = self
             .gamepad
             .as_ref()
@@ -210,14 +199,8 @@ fn next_retry_delay(delay: Duration) -> Duration {
     (delay * 2).min(MOTION_RETRY_MAX)
 }
 
-/// Whether the Switch-protocol hidraw probe may run for this pad. The
-/// handshake blocks the hub thread for up to ~2s on pads that never
-/// answer — and the motion retry repeats it for as long as the pad is
-/// motion-less — so running it against anything but Switch-speaking
-/// hardware wedges input for seconds at a time. The gate is the same
-/// Nintendo-layout notion the button mapper uses: real Nintendo pads
-/// and Switch-mode dongles (Nintendo vendor id) qualify; DInput/XInput
-/// pads get their motion from SDL or nowhere, never from this wire.
+/// Whether the Switch-protocol hidraw probe may run for this pad. The handshake
+/// blocks the hub up to ~2s on non-answering pads, so only Nintendo-layout pads qualify.
 fn switch_probe_allowed(device: &DeviceInfo) -> bool {
     button_layout(device.vendor, device.product, &device.name) == ButtonLayout::Nintendo
 }

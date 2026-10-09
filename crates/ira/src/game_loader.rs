@@ -107,9 +107,8 @@ fn load_selected_games(
     games
 }
 
-/// Batch-load variants for every entry at once. A per-game failure used to
-/// mean that game's variants silently vanished; a batch failure means the
-/// same (empty map), so the output matches without a log line.
+/// Batch-load variants for every entry at once: a batch failure yields the same
+/// empty map as a per-game one, so the output matches without a log line.
 fn load_variant_map(
     conn: &DbConn,
     entries: &[GameEntry],
@@ -163,7 +162,6 @@ fn worker_thread_count(entry_count: usize) -> usize {
         .min(entry_count)
 }
 
-/// Load one slice of entries: filter, build the base game, expand variants.
 fn load_chunk(
     chunk: &[GameEntry],
     save_dir: &str,
@@ -362,7 +360,6 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     Ok(game)
 }
 
-/// Recompute the earned/total counters from the loaded achievement list.
 fn recount(game: &mut Game) {
     game.total_count = game.achievements.len();
     game.earned_count = game.achievements.iter().filter(|a| a.earned).count();
@@ -503,7 +500,6 @@ fn push_bare_status_achievements(
     }
 }
 
-/// Copy every non-empty asset path from `from` over `to`.
 fn apply_non_empty_images(from: &Game, to: &mut Game) {
     if !from.icon_path.is_empty() {
         to.icon_path = from.icon_path.clone();
@@ -693,7 +689,7 @@ mod tests {
             entry.vanished = true;
             assert!(!console_game_vanished(&entry), "{kind:?}");
         }
-        // Empty path without a vanished verdict means "unknown", not gone.
+        // Empty path without a vanished verdict means unknown.
         let legacy = entry_with_path(GameKind::Ps4, "");
         assert!(!console_game_vanished(&legacy));
     }

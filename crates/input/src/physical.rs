@@ -479,10 +479,7 @@ impl PhysicalGamepad {
             }
             Err(error) if is_transient_read_error(&error) => FetchOutcome::WouldBlock,
             // Any other read error means the node is dead or unusable
-            // (ENODEV on unplug, EIO on flaky Bluetooth, …). The old code
-            // only recognized a Gone subset and kept polling dead fds
-            // forever: no disconnect was reported, the pressed set stuck,
-            // and the virtual pad screamed the last state at the game.
+            // (ENODEV on unplug, EIO on flaky Bluetooth, …).
             // Dropping here reports the disconnect so the hub freezes the
             // session, clears truth, and reconnects on cadence.
             Err(error) => {
@@ -1367,7 +1364,6 @@ mod tests {
         use super::PhysicalGamepad;
         let dead = PathBuf::from("/dev/input/event16");
         let paths = vec![dead.clone(), PathBuf::from("/dev/input/event17")];
-        // Act
         let sorted = PhysicalGamepad::prefer_fresh(paths, &dead);
         // Assert: fresh node first, dead node last (stable otherwise).
         assert_eq!(

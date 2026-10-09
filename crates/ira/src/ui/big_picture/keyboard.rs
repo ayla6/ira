@@ -12,7 +12,6 @@ use gtk4::prelude::*;
 use gtk4::Widget;
 use std::cell::{Cell, RefCell};
 
-/// One key of the layout: a character to type, or a special action.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Key {
     Char(char),
@@ -24,7 +23,6 @@ pub(super) enum Key {
     Ok,
 }
 
-/// Which key table is showing.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Page {
     Letters,
@@ -495,7 +493,6 @@ impl Keyboard {
             key_surface.set_child(Some(&label));
         }
         button.append(&key_surface);
-        // Action keys wear their pad button in the corner, Switch-style.
         if let Some(badge) = Self::badge(key) {
             let badge_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
             badge_box.set_valign(gtk4::Align::Start);

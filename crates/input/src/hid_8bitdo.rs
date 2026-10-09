@@ -19,7 +19,6 @@ use crate::physical::DeviceInfo;
 use crate::rumble::sibling_hidraw_nodes;
 use crate::switch_hidraw::host_visible;
 
-/// 8BitDo's USB vendor id.
 pub const VENDOR_8BITDO: u16 = 0x2dc8;
 /// The Ultimate 2 Wireless in DInput mode, via the 2.4g dongle or
 /// Bluetooth (wired is XInput-only).
@@ -87,12 +86,10 @@ pub(crate) fn enable_8bitdo_reports(file: &mut File) {
     }
 }
 
-/// Report ids carrying the enhanced state packet.
 const STATE_REPORT_IDS: [u8; 3] = [0x01, 0x03, 0x04];
 /// The first Ultimate 2 firmware revision streams 12-byte reports with no
 /// power byte; from v1.03 reports are 34 bytes and the power byte is real.
 const POWERSTATE_MIN_REPORT: usize = 34;
-/// Offset of the power byte inside the enhanced state packet.
 const POWER_BYTE: usize = 14;
 
 /// One reading of the pad's power state.

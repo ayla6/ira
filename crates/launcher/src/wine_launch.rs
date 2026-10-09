@@ -33,7 +33,6 @@ pub fn build_wine_env(wine: &WineConfig, wine_exe: &str) -> Vec<(String, String)
     env
 }
 
-/// Identity and prefix: WINEDEBUG, WINE, WINEPREFIX, WINEARCH.
 fn push_base_env(
     env: &mut Vec<(String, String)>,
     wine: &WineConfig,
@@ -81,7 +80,6 @@ fn push_sync_env(env: &mut Vec<(String, String)>, wine: &WineConfig) {
     }
 }
 
-/// One-shot graphics/feature flags (FSR, NVAPI, Wayland, DXVK extras, …).
 fn push_feature_env(env: &mut Vec<(String, String)>, wine: &WineConfig) {
     if wine.fsr {
         env.push(("WINE_FULLSCREEN_FSR".to_string(), "1".to_string()));
@@ -125,8 +123,6 @@ fn push_feature_env(env: &mut Vec<(String, String)>, wine: &WineConfig) {
     }
 }
 
-/// Frame pacing and HUD: DXVK frame rate cap, the always-explicit HUD
-/// toggle, and the Proton WoW64/NTSync switches.
 fn push_frame_env(env: &mut Vec<(String, String)>, wine: &WineConfig) {
     if wine.dxvk_frame_rate > 0 {
         env.push((
@@ -148,7 +144,6 @@ fn push_frame_env(env: &mut Vec<(String, String)>, wine: &WineConfig) {
     }
 }
 
-/// Env vars that only make sense under Proton/umu.
 fn push_proton_env(env: &mut Vec<(String, String)>, wine: &WineConfig, wine_exe: &str) {
     env.push(("UMU_LOG".to_string(), "1".to_string()));
     env.push(("UMU_RUNTIME_UPDATE".to_string(), "0".to_string()));
@@ -158,11 +153,9 @@ fn push_proton_env(env: &mut Vec<(String, String)>, wine: &WineConfig, wine_exe:
         env.push(("PROTON_USE_WINED3D".to_string(), "1".to_string()));
     }
 
-    // DXVK D3D8 support when DXVK is enabled
     if wine.dxvk {
         env.push(("PROTON_DXVK_D3D8".to_string(), "1".to_string()));
     }
-
     // Disable LSteam client integration (we're not Steam)
     if wine.proton_disable_lsteamclient {
         env.push(("PROTON_DISABLE_LSTEAMCLIENT".to_string(), "1".to_string()));
@@ -209,11 +202,8 @@ pub fn wine_prefix(wine: &WineConfig) -> String {
     wine.prefix.clone()
 }
 
-/// Generate a unique prefix path from a game slug.
-///
-/// If `base_dir` is empty, falls back to `~/.local/share/ira/prefixes`.
-/// The slug is sanitized: only alphanumeric + dashes kept, lowercased.
-/// If `{base}/{slug}` already exists, tries `{slug}1`, `{slug}2`, etc.
+/// Unique prefix path from a game slug (sanitized, suffixed on collision);
+/// empty `base_dir` falls back to `~/.local/share/ira/prefixes`.
 pub fn generate_prefix_path(base_dir: &str, slug: &str) -> String {
     let base = if base_dir.is_empty() {
         let xdg = std::env::var("XDG_DATA_HOME")
@@ -258,7 +248,6 @@ pub fn generate_prefix_path(base_dir: &str, slug: &str) -> String {
     }
 }
 
-/// One `wine reg add` command: `wine reg add <key> /v <value> /t <type> /d <data> /f`.
 fn reg_add(wine_exe: &str, key: &str, value: &str, reg_type: &str, data: &str) -> Vec<String> {
     vec![
         wine_exe.to_string(),
@@ -275,7 +264,6 @@ fn reg_add(wine_exe: &str, key: &str, value: &str, reg_type: &str, data: &str) -
     ]
 }
 
-/// One `wine reg delete` command: `wine reg delete <key> /v <value> /f`.
 fn reg_delete(wine_exe: &str, key: &str, value: &str) -> Vec<String> {
     vec![
         wine_exe.to_string(),

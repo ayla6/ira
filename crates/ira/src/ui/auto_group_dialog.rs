@@ -215,15 +215,9 @@ fn dimension_menus(state: &SharedState) -> ValueMenus {
                 value: c.display_name.to_string(),
                 search: c.search_haystack(),
             })
-            // PC platforms are not consoles — the models console table
-            // drives ROM scanning and emulator settings and must stay
-            // console-only — but the Console matcher falls back to the
-            // friendly platform name, so offering these values just
-            // works. The match folds case, hence the display
-            // capitalisation; "Windows" (not "Wine") because the
-            // platform id `wine` shows as Windows. Steam (Emulated) is
-            // Goldberg games, matched on the GSE trophy source instead
-            // of any platform.
+            // Console table must stay console-only, but the matcher falls back to
+            // friendly names. Case folds, hence display capitalisation ("Windows"
+            // for id `wine`); Steam (Emulated) matches on the GSE source.
             .chain(
                 [
                     "Linux",

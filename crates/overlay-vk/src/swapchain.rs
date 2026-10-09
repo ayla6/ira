@@ -17,7 +17,6 @@ unsafe fn device_fns(device: vk::Device) -> Option<(DeviceFns, vk::PhysicalDevic
     Some((dd.fns?, dd.physical_device))
 }
 
-/// One semaphore + one signaled fence per swapchain image.
 unsafe fn alloc_sync_objects(
     fns: DeviceFns,
     device: vk::Device,
@@ -143,8 +142,7 @@ pub(crate) unsafe extern "system" fn create_swapchain(
     let extent = create_info.image_extent;
 
     let render_pass = create_render_pass(fns, device, format);
-    // The canvas pipeline + texture replace the old toolkit renderer. Any
-    // failure here is non-fatal: the game presents without overlay.
+    // Canvas failures are non-fatal: the game presents without overlay.
     let ui_enabled = std::env::var_os("IRA_OVERLAY_DISABLE_UI").is_none();
     let (pipeline, pipeline_layout, shader_vert, shader_frag) = if ui_enabled {
         crate::canvas::create_bundle(fns, device, physical_device, render_pass, sc.as_raw())

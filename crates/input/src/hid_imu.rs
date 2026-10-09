@@ -2,10 +2,10 @@
 //! half of native gyro.
 //!
 //! SDL's evdev backend attaches sensors to a gamepad by pairing nodes whose
-//! `EVIOCGUNIQ` serials match (uinput nodes fail that ioctl outright, which
-//! is why the old uinput motion node never paired). Creating the IMU as a
-//! uhid device with the same uniq as the virtual pad makes the pairing work
-//! — and evdev nodes are visible inside flatpak sandboxes, unlike hidraw.
+//! `EVIOCGUNIQ` serials match (uinput nodes fail that ioctl outright).
+//! Creating the IMU as a uhid device with the same uniq as the virtual
+//! pad makes the pairing work — and evdev nodes are visible inside
+//! flatpak sandboxes, unlike hidraw.
 //!
 //! The descriptor engineers each axis group so the kernel derives a
 //! resolution that matches the report's fixed-point scale, and SDL's
@@ -17,10 +17,9 @@
 //! logical × 573/10 × 16, landing the kernel's degree conversion on a
 //! resolution of exactly 16.
 //!
-//! This is what separates the passthrough from garbage: the old report
-//! carried plain integers (accelerometer in whole g!), so gravity read
-//! "1" at rest and a 20° tilt rounded to zero — the sensor only produced
-//! a handful of distinct values across its whole range.
+//! The fixed-point encoding matters: plain integers (accelerometer in
+//! whole g) would read "1" at rest and round a 20° tilt to zero — the
+//! sensor would produce a handful of distinct values across its range.
 
 use std::io;
 
@@ -30,7 +29,6 @@ pub const VENDOR_ID: u32 = 0x3651;
 pub const PRODUCT_ID: u32 = 0x09c5;
 pub const DEVICE_NAME: &str = "Ira Virtual Motion Sensors";
 
-/// Report scaling: accelerometer LSB = 1/256 g, gyroscope LSB = 1/16 dps.
 pub const ACCEL_LSB_PER_G: f32 = 256.0;
 pub const GYRO_LSB_PER_DPS: f32 = 16.0;
 
@@ -90,7 +88,7 @@ pub fn imu_report(accel_g: [f32; 3], gyro_dps: [f32; 3]) -> [u8; IMU_REPORT_LEN]
     report
 }
 
-/// One live virtual IMU: reports motion in the SDL sensor frame.
+/// Reports motion in the SDL sensor frame.
 pub struct ImuUhidDevice {
     device: UhidDevice,
 }

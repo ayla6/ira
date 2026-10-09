@@ -1,8 +1,5 @@
-//! Nintendo DS ROM metadata: banner (icon + title) reading and the
-//! RetroAchievements identification hash. Plain ROM files are parsed
-//! directly; compressed containers (.zip/.7z/.zst) are streamed when the
-//! caller opts into unpacking.
-
+//! Nintendo DS ROM metadata: banner reading and the RetroAchievements hash.
+//! Plain files parse directly; containers stream when the caller opts in.
 use std::io::Read;
 use std::path::Path;
 
@@ -10,7 +7,6 @@ use md5::{Digest, Md5};
 
 use crate::archives::{self, RangeCapture};
 
-/// Metadata read from a DS ROM's header and banner.
 pub struct DsRomInfo {
     /// Banner title, preferring English (UTF-16, NUL-trimmed).
     pub title: String,
@@ -28,7 +24,6 @@ const PALETTE_OFFSET: usize = 0x220;
 const TITLES_OFFSET: usize = 0x240;
 const TITLE_BYTES: usize = 128;
 
-/// ROM file name extensions that hold a plain DS ROM.
 pub fn is_ds_extension(ext: &str) -> bool {
     matches!(
         ext.to_ascii_lowercase().as_str(),
@@ -76,7 +71,6 @@ fn banner_addr(lead: &[u8]) -> Option<u64> {
     Some(u32_le(header.get(0x68..0x6C)?)? as u64 + base)
 }
 
-/// UTF-16 banner title, NUL-trimmed.
 fn title_from_bytes(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes
         .as_chunks::<2>()
@@ -129,7 +123,6 @@ fn decode_icon(icon: &[u8], palette: &[u8]) -> Vec<u8> {
     rgba
 }
 
-/// Reads the banner title and icon from a captured 0xA00 banner block.
 fn banner_info(banner: &[u8]) -> Option<(String, Vec<u8>)> {
     let titles_end = TITLES_OFFSET + TITLE_BYTES * 2;
     if banner.len() < titles_end {
@@ -155,10 +148,8 @@ fn banner_info(banner: &[u8]) -> Option<(String, Vec<u8>)> {
     Some((title, icon))
 }
 
-/// Reads title, icon and identification hashes from a DS ROM. Plain ROM
-/// files are read directly; `.zip`/`.7z`/`.zst` containers are streamed
-/// only when `unpack_archives` is on. The entry is selected by name for
-/// archives; the whole file is the entry for `.zst` and plain ROMs.
+/// Reads title, icon and hashes from a DS ROM; containers stream only when
+/// `unpack_archives` is on (entry by name; `.zst` and plain are whole-file).
 pub fn read_rom_info(path: &Path, unpack_archives: bool) -> Option<DsRomInfo> {
     let ext = path
         .extension()
@@ -171,9 +162,8 @@ pub fn read_rom_info(path: &Path, unpack_archives: bool) -> Option<DsRomInfo> {
     archives::with_entry_reader(path, &ds_entry_pick, |reader| read_from_stream(reader))
 }
 
-/// Reads only the banner icon from a DS ROM, without hashing. Always
-/// handles archives — the NDS button must work even when bulk extraction is
-/// off — and stops decompressing after the banner.
+/// Reads only the banner icon, always handling archives (the NDS button works
+/// even with bulk extraction off), stopping after the banner.
 pub fn read_icon(path: &Path) -> Option<Vec<u8>> {
     // Plain files: try direct seek first (fast, no streaming)
     if let Some(icon) = read_icon_plain(path) {
@@ -220,9 +210,8 @@ fn read_icon_from_stream(reader: &mut dyn Read) -> Option<Vec<u8>> {
     Some(icon)
 }
 
-/// Reads the four-character game code from the ROM header at 0x0C (e.g.
-/// "AQQE") — the serial every DS title ships with. Works through
-/// containers: only the first bytes of the entry are read.
+/// Reads the 4-char game code at header 0x0C through containers (first bytes
+/// of the entry only).
 pub fn read_serial(path: &Path) -> Option<String> {
     archives::with_entry_reader(path, &ds_entry_pick, |reader| {
         let mut lead = vec![0u8; 512 + 0x10];

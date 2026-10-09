@@ -319,7 +319,6 @@ mod tests {
     #[test]
     fn test_pick_display_prefers_newest_then_lowest() {
         use std::time::{Duration, UNIX_EPOCH};
-        // Arrange
         let t0 = UNIX_EPOCH;
         let t1 = UNIX_EPOCH + Duration::from_secs(10);
         // Act + Assert: empty picks nothing, newest wins, ties go low.

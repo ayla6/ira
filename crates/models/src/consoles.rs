@@ -381,15 +381,10 @@ pub fn find_console(id: &str) -> Option<&'static ConsoleDef> {
 /// A platform id resolved once into a typed value, at the moment it is
 /// read: every branch below answers from the value afterwards, so display
 /// names never re-scan tables or re-match strings at each call site.
-///
-/// The fixed variants are load-bearing, not legacy, and must never gain
-/// console-table entries: PC platform ids (`wine`, `linux`, `steam`,
-/// `gog`) are kinds, not consoles — a table entry would enable
-/// ROM-folder scanning for them — and `3ds` is emulator-integrated
-/// outside the table by design (dedicated config fields,
-/// emulator-library discovery, no RA). `Unknown` keeps forward
-/// compatibility with ids no known source issued (title ids stored as
-/// the platform on legacy rows): they render raw, exactly as before.
+/// PC platform ids (`wine`, `linux`, `steam`, `gog`) are kinds, not
+/// consoles: a table entry would enable ROM-folder scanning for them.
+/// `3ds` is emulator-integrated outside the table, and `Unknown` ids
+/// render raw.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Platform {
     /// A console-table entry (ROM-library and emulator-library consoles).
@@ -404,8 +399,7 @@ pub enum Platform {
 
 impl Platform {
     /// Resolve a stored platform id. The five fixed ids answer from a
-    /// match — faster than the table scan they can never hit — and only
-    /// genuine console ids reach `find_console`.
+    /// match, and only genuine console ids reach `find_console`.
     pub fn parse(platform_id: &str) -> Self {
         match platform_id {
             "wine" => Self::Wine,
@@ -453,15 +447,13 @@ impl Platform {
         }
     }
 
-    /// Whether RetroAchievements covers this platform at all. Unlike
-    /// [`console_has_ra`], this never scans: the answer rode in at parse
-    /// time.
+    /// Whether RetroAchievements covers this platform at all, answered
+    /// from the parsed value without scanning.
     pub fn has_ra(&self) -> bool {
         matches!(self, Self::Console(def) if def.ra_console_id != 0)
     }
 
-    /// The console-table entry, if this platform is a table console.
-    /// Unlike [`find_console`], this never scans.
+    /// The console-table entry for table consoles, answered without scanning.
     pub fn find_console_def(&self) -> Option<&'static ConsoleDef> {
         match self {
             Self::Console(def) => Some(def),

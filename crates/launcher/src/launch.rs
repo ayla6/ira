@@ -125,8 +125,7 @@ pub fn launch_game(
         ctx.game_id,
     ) {
         Ok(client) => {
-            // Daemon-supervised launches arm the freezer backend only (see
-            // run_daemon_session): computed before the plan moves the command.
+            // Daemon-supervised launches arm the freezer backend only (see run_daemon_session).
             let pause_watch = super::freeze::watch_config_daemon(
                 ctx.pause_game_on_overlay,
                 super::env_builder::uses_gamescope(&command),
@@ -213,8 +212,7 @@ fn build_wine_launch(
     let is_proton = super::wine_detect::is_proton_version(&wine.version)
         || super::wine_detect::is_proton_binary(&wine_exe);
 
-    // For Proton versions, the command uses umu-run, but WINE env var
-    // must still point to the actual Proton wine binary (umu reads it).
+    // WINE must still point at the real Proton wine binary (umu reads it).
     let mut cmd = if wine.umu_enabled || is_proton {
         let umu = super::wine_detect::find_umu_binary()?;
         let mut c = vec![umu];
@@ -236,7 +234,6 @@ fn build_wine_launch(
         &mut cmd,
     );
 
-    // Set umu env vars for Proton versions (automatic) or explicit umu_enabled
     if wine.umu_enabled || is_proton {
         env_set(&mut env, "PROTON_VERB", "waitforexitandrun");
         if !ctx.app_id.is_empty() {
@@ -259,7 +256,6 @@ fn build_wine_launch(
         run_wine_reg_commands(wine, &wine_exe, &env);
     }
 
-    // Centralize emulator saves via symlinks in the Wine prefix
     match ctx.trophy_source {
         TrophySource::Gse => super::emulator_saves::setup_gbe_saves(&pfx, &ctx.save_dir),
         TrophySource::Nge => super::emulator_saves::setup_nge_saves(&pfx, &ctx.save_dir),
@@ -309,7 +305,6 @@ fn build_native_launch(
         &mut cmd,
     );
 
-    // Centralize GBE saves via symlinks in GBE's native save directory
     if ctx.trophy_source == TrophySource::Gse {
         super::emulator_saves::setup_gbe_saves_native(&ctx.save_dir);
     }
@@ -379,12 +374,8 @@ fn monitor_context_for(
     }
 }
 
-/// The daemon supervises the game from here on; our monitor only consumes
-/// its event stream. The real pid arrives with the SessionStarted event,
-/// but the accepted launch must count as running right away: the UI
-/// rebuilds the play button from this map as soon as GameStarted lands,
-/// and an entry that only appears seconds later flipped the button back
-/// to "Play" mid-launch.
+/// The daemon supervises the game; our monitor only consumes its events.
+/// The launch counts as running right away so the play button never flips back mid-launch.
 fn run_daemon_session(
     client: DaemonClient,
     ctx: &LaunchContext,
@@ -394,11 +385,8 @@ fn run_daemon_session(
     host_child: Option<Child>,
 ) {
     ctx.running_games.lock().unwrap().insert(ctx.game_id, 0);
-    // Daemon-supervised launches arm the freezer backend only: the
-    // daemon owns the pid, so the SIGSTOP fallback stays forbidden
-    // (signals from outside could race session teardown). The
-    // freezer sends no signals, and fatal signals still land on
-    // frozen tasks, so teardown is unaffected.
+    // Daemon-supervised launches arm the freezer backend only: the daemon owns
+    // the pid, so the SIGSTOP fallback stays forbidden.
     if plan.pause_watch.is_some() {
         eprintln!("ira-pause: freeze watcher armed for '{}'", ctx.game_name);
     }
@@ -433,10 +421,8 @@ fn spawn_wrapped(req: WrappedSpawn<'_>) -> Result<i32, String> {
         wine_enabled,
         host_child,
     } = req;
-    // The game bypasses the daemon, so the daemon's desktop-default session
-    // would keep remapping the pad underneath it — the exact bug that makes
-    // "input remapping: disabled" look ignored. Hold the desktop behaviour
-    // off for the game's lifetime; dropping the client releases it.
+    // Hold the desktop session off for the game's lifetime so it never remaps
+    // the pad underneath; dropping the client releases the hold.
     let desktop_hold = if matches!(launch.input_mode, Some(ControllerInputMode::Enabled)) {
         None
     } else {
@@ -472,10 +458,8 @@ fn spawn_wrapped(req: WrappedSpawn<'_>) -> Result<i32, String> {
         .map_err(|e| e.to_string())?
         .insert(ctx.game_id, child_pid);
 
-    // Freeze only when the un-toggle survives: gamescope/external-host
-    // mode, where ira-overlay-ui owns the visible window and mirrors hide
-    // back into SHM. In-process mode would deadlock (frozen game can't see
-    // the un-toggle), so it pauses cooperatively or not at all.
+    // Freeze only where the un-toggle survives (gamescope/external-host mode).
+    // In-process mode would deadlock: the frozen game cannot see the un-toggle.
     let pause_watch = super::freeze::watch_config(
         ctx.pause_game_on_overlay,
         super::env_builder::uses_gamescope(command),
@@ -507,16 +491,14 @@ fn spawn_wrapped(req: WrappedSpawn<'_>) -> Result<i32, String> {
     Ok(child_pid)
 }
 
-/// Script-visible environment: the game directory plus Lutris-compatible
-/// names for pre/post-launch scripts, and the Proton locale propagation
-/// (`LC_ALL` → `HOST_LC_ALL`, per-game value winning).
+/// Script-visible environment: game directory plus Lutris-compatible names
+/// and Proton locale propagation, with per-game LC_ALL winning.
 fn apply_script_env(
     env: &mut Vec<(String, String)>,
     game_dir: Option<&str>,
     game_name: &str,
     wine_enabled: bool,
 ) {
-    // Set PWD to the game's working directory
     if let Some(dir) = game_dir {
         env_set(env, "PWD", dir);
     }
@@ -527,9 +509,8 @@ fn apply_script_env(
         env_set(env, "GAME_DIRECTORY", dir);
     }
 
-    // Lutris's update_proton_env propagates LC_ALL → HOST_LC_ALL for Proton.
-    // Applied after user env overrides so a per-game LC_ALL wins. Defaults to
-    // the host locale so umu/pressure-vessel get a valid HOST_LC_ALL.
+    // Lutris's update_proton_env propagates LC_ALL → HOST_LC_ALL; per-game value
+    // wins, defaulting to host locale for umu/pressure-vessel.
     if wine_enabled {
         let lc_all = env
             .iter()
@@ -545,13 +526,9 @@ fn apply_script_env(
     }
 }
 
-/// Cooperative-pause flag for our Goldberg fork: when the resolved
-/// pause-while-overlay-visible setting is on for a Goldberg-emulated game
-/// whose overlay SHM exists, the fork watches `overlay_visible` and posts
-/// `GameOverlayActivated_t` so the game pauses itself exactly as on real
-/// Steam. Returns the env pair to inject, or `None` when any precondition
-/// fails (other games have no fork to read the flag; without SHM there is
-/// no visibility signal to follow).
+/// Cooperative-pause flag for our Goldberg fork (mirrors real Steam via
+/// `GameOverlayActivated_t`). Returns the pair to inject, or `None` when
+/// any precondition fails (no fork to read it, no SHM signal to follow).
 pub(crate) fn gbe_pause_env(
     pause_game_on_overlay: bool,
     trophy_source: TrophySource,

@@ -55,9 +55,8 @@ pub(crate) const FAMILIES: EntitySpec = EntitySpec {
     column: "family_id",
 };
 
-/// The tables backing a kind constant. Unknown kinds land on companies
-/// — the callers pass the constants above, and the match only keeps
-/// the stringly kind out of the SQL.
+/// The tables backing a kind constant. Unknown kinds land on companies —
+/// the callers pass the constants above.
 pub(crate) fn spec(kind: &str) -> EntitySpec {
     match kind {
         KIND_GENRE => GENRES,
@@ -315,7 +314,6 @@ pub fn entity_fetched_at(conn: &DbConn, kind: &str) -> Result<Option<i64>, Strin
     )
 }
 
-/// Record a completed whole-table fetch.
 pub fn set_entity_fetched(conn: &DbConn, kind: &str, at: i64) -> Result<(), String> {
     crate::execute(
         conn,

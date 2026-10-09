@@ -141,9 +141,7 @@ pub(super) fn handle_steam_search_result(
         let label = status_label(&matched_text(&sid, &matched_name), CSS_SUCCESS_LABEL);
         action_box.append(&label);
     } else {
-        // No label — the button already says "not found": the row stays
-        // quiet and the affordance stays obvious. The line's source label
-        // names Steam, so the button stays short. Numeric ids search
+        // No label — the button already says "not found". Numeric ids search
         // directly — the store answers an app id query with its game.
 
         let ab = action_box.clone();

@@ -37,7 +37,6 @@ pub struct MappedShm {
 unsafe impl Send for MappedShm {}
 
 impl MappedShm {
-    /// Creates a new shared memory file, truncates it to `SHM_SIZE`, and maps it.
     /// Returns the mapped region with the header zeroed.
     /// Any stale file from a previous run is unlinked first (the old mapping
     /// stays alive until the game exits — this creates a fresh inode).

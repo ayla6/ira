@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use crate::ps4::{parse_npbind, parse_psf, psf_get_title, psf_get_title_id, shadps4_user_dir_for};
 
-/// Read install_dirs from shadPS4 config.json
 pub fn read_install_dirs() -> Vec<PathBuf> {
     read_install_dirs_for_executable("")
 }
@@ -32,7 +31,6 @@ pub fn read_install_dirs_for_executable(executable: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-/// A discovered shadPS4 game.
 pub struct ShadPS4Game {
     pub serial: String,
     pub npwr_id: String,
@@ -116,7 +114,6 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<ShadPS4Game> {
             continue;
         }
 
-        // Get NPWR ID from npbind.dat
         let npbind_path = game_path.join("sce_sys").join("npbind.dat");
         let npwr_id = match parse_npbind(&npbind_path) {
             Ok(ids) => ids.into_iter().next().unwrap_or_default(),

@@ -19,10 +19,8 @@ use crate::commands::{CanvasAction, CanvasCommand, MAX_CANVAS_ACTIONS, MAX_CANVA
 use crate::map::{map_fd, open_fd, shm_file_path};
 
 pub const CANVAS_MAGIC: u32 = 0x49524143;
-/// Bumped when the header layout changes (cursor block added in v2,
-/// screen size + bigger pixel buffer in v3).
-/// Both ends check it and refuse to speak across versions — silent
-/// garbage is worse than no overlay.
+/// Bumped when the header layout changes. Both ends check it and refuse to
+/// speak across versions — silent garbage is worse than no overlay.
 pub const CANVAS_VERSION: u32 = 3;
 
 /// Panel-sized canvas. 768×1152 RGBA is ~3.5 MB — re-rendered on change or
@@ -37,11 +35,9 @@ pub const CANVAS_MAX_BYTES: usize = CANVAS_MAX_W * CANVAS_MAX_H * CANVAS_BPP;
 pub const CURSOR_MAX: usize = 128;
 pub const CURSOR_MAX_BYTES: usize = CURSOR_MAX * CURSOR_MAX * CANVAS_BPP;
 
-/// Total mapping size: header + worst-case pixel buffer.
 pub const CANVAS_SHM_SIZE: usize =
     std::mem::size_of::<CanvasHeader>() + CANVAS_MAX_BYTES;
 
-/// Fixed-size header at the start of the canvas region.
 #[repr(C)]
 pub struct CanvasHeader {
     pub magic: u32,
@@ -82,17 +78,14 @@ pub struct CanvasHeader {
     pub cursor_pixels: [u8; CURSOR_MAX_BYTES],
 }
 
-/// POSIX SHM name for a game's canvas region.
 pub fn canvas_shm_path(db_id: i64) -> String {
     format!("/ira_canvas_{db_id}")
 }
 
-/// Filesystem path for debugging (`/dev/shm/<name>`).
 pub fn canvas_shm_file_path(name: &str) -> String {
     shm_file_path(name)
 }
 
-/// RAII wrapper around the mapped canvas region. Unmaps on drop.
 pub struct CanvasShm {
     ptr: *mut u8,
     size: usize,
@@ -167,7 +160,6 @@ impl CanvasShm {
         }
     }
 
-    /// Zeroes the region and stamps magic/version. Call after `create()`.
     pub fn init_header(&mut self) {
         let bytes = unsafe { std::slice::from_raw_parts_mut(self.ptr, self.size) };
         bytes.fill(0);
@@ -212,7 +204,7 @@ impl CanvasShm {
         )
     }
 
-    /// Host side: publish the theme cursor once. Packed premultiplied RGBA.
+    /// Host side: packed premultiplied RGBA cursor pixels, published once.
     pub fn publish_cursor(
         &mut self,
         width: u32,

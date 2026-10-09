@@ -114,9 +114,8 @@ impl RaClient {
                 .unwrap_or(false)
     }
 
-    /// True when a fresh, parseable console game-list cache exists — no
-    /// refetch needed. Detects missing, stale, and legacy-format caches so
-    /// the game list self-heals after the dorequest → Web API migration.
+    /// True when a fresh, parseable console game-list cache exists — no refetch
+    /// needed (missing, stale, and legacy-format caches all refetch).
     pub(crate) fn console_cache_is_current(save_dir: &str, console_id: u32) -> bool {
         let cache = paths::console_games_path(save_dir, console_id);
         RaClient::cached_ok(&cache) && read_console_games_cache(save_dir, console_id).is_some()
@@ -136,10 +135,8 @@ impl RaClient {
 
         let console = console_id.to_string();
         let with_hashes = "1".to_string();
-        // `f` is omitted so the list covers every game on the console,
-        // including achievement-less ones that are still worth matching as
-        // icon sources; `h=1` inlines each game's supported hashes so
-        // matching can resolve exact game IDs locally.
+        // No `f` so the list covers every game (even achievement-less icon sources);
+        // `h=1` inlines supported hashes for local exact-ID matching.
         let url = reqwest::Url::parse_with_params(
             RA_WEB_GAME_LIST,
             [("i", &console), ("y", &self.api_key), ("h", &with_hashes)],
@@ -174,10 +171,8 @@ impl RaClient {
         }
     }
 
-    /// Search the console's full game list (fetched on demand from the Web API
-    /// when no fresh cache exists) for titles matching `query`, excluding
-    /// Subset/hack variants. Matching is punctuation-insensitive, and a query
-    /// with no hit retries on the part before its first " - ".
+    /// Search the console's game list for `query` (subset/hack excluded),
+    /// punctuation-insensitive, retrying on the part before the first " - ".
     pub fn search_ra_games(
         &self,
         save_dir: &str,
@@ -214,12 +209,9 @@ impl RaClient {
         find_game_by_hash(&games, rom_hash)
     }
 
-    /// Resolves a ROM to its RA game the way the library scan does: exact
-    /// hash first, then a title equal to one of `names` under the shared
-    /// normalizer (tried in order), preferring entries that have
-    /// achievements. Hack/subset variants are never returned, and a name
-    /// that is merely *contained* in a title is not a match — the caller is
-    /// an automatic matcher and must not guess.
+    /// Resolve a ROM to its RA game as the library scan does: exact hash first,
+    /// then title equality preferring entries with achievements. Hack/subset
+    /// variants never resolve, and containment is never a match (never guess).
     pub fn match_ra_game(
         &self,
         save_dir: &str,
@@ -305,9 +297,8 @@ impl RaClient {
         String::new()
     }
 
-    /// Fetch the bytes at an RA image path, applying the `RA_IMAGE_URL`
-    /// prefix unless the path is already an absolute URL. Errors on network
-    /// failure or a non-success status.
+    /// Fetch bytes at an RA image path (prefixed unless absolute); errors on
+    /// network failure or non-success status.
     fn fetch_ra_bytes(&self, image_icon: &str) -> Result<Vec<u8>, String> {
         let url = if image_icon.starts_with("http") {
             image_icon.to_string()
@@ -327,11 +318,9 @@ impl RaClient {
             .map_err(|e| format!("RA icon download read error: {}", e))
     }
 
-    /// Download the RA game icon as image bytes without touching any game
-    /// data directory. Returns lossless WebP for PNG/ICO sources, the raw
-    /// bytes for JPEG/WebP, and an error when the fetch fails, the body
-    /// isn't a decodable image, or the path is RA's fallback placeholder.
-    /// Callers treat the result as a pending draft applied only on Save.
+    /// Download the RA game icon as bytes without touching game data (pending
+    /// draft applied only on Save). Errors on fetch failure, undecodable body,
+    /// or the fallback placeholder.
     pub fn download_game_icon_bytes(&self, image_icon: &str) -> Result<Vec<u8>, String> {
         if is_fallback_game_icon(image_icon) {
             return Err("RA icon: game has no custom icon".to_string());
@@ -350,10 +339,8 @@ impl RaClient {
         Ok(out)
     }
 
-    /// Download the game's icon from RA to `data/retro/{db_id}/icon.webp`,
-    /// reusing the on-disk copy when it already exists. Returns the icon path
-    /// on success, or an empty string when the fetch fails, the body isn't
-    /// a decodable image, or the path is RA's fallback placeholder.
+    /// Download the RA game icon to `data/retro/{db_id}/icon.webp`, reusing on-disk;
+    /// empty string on fetch failure, undecodable body, or fallback placeholder.
     pub fn download_game_icon(&self, save_dir: &str, db_id: i64, image_icon: &str) -> String {
         let _s = info_span!("download_game_icon", db_id).entered();
         let dest = ira_parser::retro_data_dir(save_dir, db_id).join("icon.webp");
@@ -404,10 +391,9 @@ pub fn is_main_ra_entry(game: &RaGameEntry) -> bool {
     !game.title.contains('~') && !game.title.contains("[Subset")
 }
 
-/// Punctuation-insensitive title filter: both sides go through
-/// [`normalize_name`], so "Castlevania - Dawn of Sorrow" finds
-/// "Castlevania: Dawn of Sorrow" and "World Ends With You, The" finds
-/// "The World Ends With You". Hack/subset variants stay excluded.
+/// Punctuation-insensitive title filter through [`normalize_name`] (subset/hack
+/// excluded): "Castlevania - Dawn" finds "Castlevania: Dawn", trailing
+/// articles match ("World Ends With You, The").
 fn filter_ra_games(games: &[RaGameEntry], q: &str) -> Vec<RaGameEntry> {
     let norm_q = normalize_name(q);
     games
@@ -441,9 +427,8 @@ fn match_by_title(games: &[RaGameEntry], names: &[&str]) -> Option<RaGameEntry> 
         })
 }
 
-/// [`filter_ra_games`], broadened: when the full query has no hit, only the
-/// part before its first " - " is searched — file names hang region dumps
-/// and subtitles off it that RA titles spell with ":" or not at all.
+/// [`filter_ra_games`], broadened: on no hit search the part before the first
+/// " - " (file names hang region dumps and subtitles off it).
 fn search_games(games: &[RaGameEntry], query: &str) -> Vec<RaGameEntry> {
     let results = filter_ra_games(games, query);
     if !results.is_empty() {

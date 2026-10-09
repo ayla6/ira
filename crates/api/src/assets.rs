@@ -4,7 +4,6 @@ use crate::steam::mirror_variants;
 use crate::SteamDataClient;
 use ira_models::AssetType;
 
-/// Steam CDN base URL for app asset images.
 fn steam_cdn_url(app_id: &str, suffix: &str) -> String {
     format!(
         "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/{}",
@@ -234,8 +233,6 @@ impl SteamDataClient {
         }
     }
 
-    // ── shared Steam CDN / WebP flows ───────────────────────────────────
-
     /// Cached-first variant of [`Self::forced_steam_asset`]: returns the
     /// existing image variant for the asset's file base when one exists.
     fn cached_steam_asset(
@@ -252,8 +249,6 @@ impl SteamDataClient {
         self.fetch_steam_cdn_asset(app_id, dir, asset, dest_ext, cdn_suffixes)
     }
 
-    /// Force a fresh download by removing existing variants first, then
-    /// delegating to [`Self::fetch_steam_cdn_asset`].
     fn forced_steam_asset(
         &self,
         app_id: &str,
@@ -353,8 +348,6 @@ impl SteamDataClient {
         }
     }
 
-    /// Re-encode already-downloaded image bytes as lossless WebP at
-    /// `{base_name}.webp` in `dir`.
     fn store_image_bytes(&self, dir: &Path, base_name: &str, bytes: &[u8]) -> String {
         Self::write_webp_bytes(dir, base_name, bytes)
     }

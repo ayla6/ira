@@ -5,7 +5,6 @@ use crate::{GyroProcessor, InputProfile, MappingEngine, SensorSample};
 use super::outputs::{emit_outputs, OutputTargets};
 use super::super::TraceState;
 
-/// Sensor-side state advanced by the tick loop.
 pub(crate) struct SensorPipeline {
     /// Whether the pad currently has any motion source (kernel IMU, SDL,
     /// or Switch-protocol takeover) — the hub reports transitions.
@@ -57,7 +56,6 @@ pub(crate) fn open_motion_node(
 /// streaming a state report. Runs unconditionally each daemon pass so
 /// handshakes and probes survive idle or paused stretches.
 impl SensorPipeline {
-    /// Whether any motion source is currently live.
     pub(crate) fn motion_alive(&self) -> bool {
         self.motion_available
     }
@@ -100,15 +98,8 @@ pub(crate) fn spawn_paired_imu(uniq: &str) -> Option<crate::ImuUhidDevice> {
     }
 }
 
-/// The passthrough's heartbeat, run per loop pass: every motion sample the
-/// hub queued goes out the moment it arrived, not on the tick grid. The
-/// accelerometer carries an instantaneous gravity direction, so its
-/// smoothness IS the wire's update cadence — batching samples into tick
-/// bursts (and on the uhid twins, keeping only the newest of each burst)
-/// showed up as choppy tilt next to a native controller streaming at its
-/// own report rate. Gyro tolerates decimation (consumers integrate rates),
-/// accel does not. Returns whether any sample was processed, so the tick
-/// knows the twins already carried fresh motion.
+/// Per-sample heartbeat: queued samples go out on arrival, not on the tick
+/// grid (batching showed up as choppy tilt). True when any sample was processed.
 pub(crate) fn forward_samples(
     pipeline: &mut SensorPipeline,
     mapper: &mut MappingEngine,
@@ -177,8 +168,6 @@ fn forward_one_sample(
         [rates.yaw, rates.pitch],
     );
     mapper.update_gyro(rates, now);
-    // Laser Pointer position deltas ride alongside the rates: the
-    // processor accumulates angles, the mapper emits them directly.
     if mapper.profile().gyro.orientation == crate::GyroOrientation::LaserPointer {
         let (yaw_delta, pitch_delta) = pipeline.gyro_processor.take_laser_deltas();
         mapper.update_gyro_position(yaw_delta, pitch_delta);
@@ -271,7 +260,7 @@ fn send_twins(
     }
 }
 
-/// Tick work left after the passthrough moved per-sample: keepalive for the
+/// Tick work after the per-sample passthrough: keepalive for the
 /// transports that need a cadence while the sensor is quiet, then the
 /// mapping engine's continuous outputs.
 pub(crate) fn process_tick(
@@ -288,9 +277,7 @@ pub(crate) fn process_tick(
     let tick_now = now_us();
     if !samples_forwarded_since_tick {
         // A gyroless session, or one whose sensor just died: the twins'
-        // button state must keep flowing. A zeroed sensor frame reads as
-        // no motion, exactly what the pre-passthrough ticks sent between
-        // samples.
+        // button state must keep flowing, so send a zeroed (motionless) frame.
         let shaped = native_gyro_shaping(mapper.profile());
         send_twins(pipeline, &targets, &shaped, [0.0; 3], [0.0; 3], tick_now);
     }

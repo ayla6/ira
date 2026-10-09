@@ -30,8 +30,8 @@ fn find_game_by(
 
 /// The row carrying a Steam id on one platform: several platforms may
 /// point at the same store entry (one Steam port, many console
-/// releases), so the platform scopes the lookup — like the trophy and
-/// native id lookups, never global.
+/// releases), so the platform scopes the lookup, like the trophy and
+/// native id lookups.
 pub fn find_by_steam_id(
     conn: &DbConn,
     steam_id: &str,
@@ -108,7 +108,6 @@ pub fn get_api_dll_folder(conn: &DbConn, game_id: i64) -> Result<String, String>
     .map_err(err)
 }
 
-/// Whether the game's UFS saves are known to be centralized.
 pub fn get_saves_centralized(conn: &DbConn, game_id: i64) -> Result<bool, String> {
     let c = lock_db(conn)?;
     c.query_row(

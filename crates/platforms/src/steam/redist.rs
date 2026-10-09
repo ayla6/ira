@@ -39,7 +39,6 @@ pub fn localize_redists(game_dir: &Path, packages: Vec<RedistPackage>) -> Vec<Re
         .canonicalize()
         .unwrap_or_else(|_| game_dir.to_path_buf());
 
-    // Check if installers are already inside the game folder
     let already_local = packages.iter().all(|p| {
         p.installers.iter().all(|inst| {
             inst.canonicalize()
@@ -51,7 +50,6 @@ pub fn localize_redists(game_dir: &Path, packages: Vec<RedistPackage>) -> Vec<Re
         return packages;
     }
 
-    // Find the _CommonRedist source directory from the first installer path
     let source_base = packages
         .iter()
         .flat_map(|p| &p.installers)
@@ -61,7 +59,6 @@ pub fn localize_redists(game_dir: &Path, packages: Vec<RedistPackage>) -> Vec<Re
         return packages;
     };
 
-    // Copy _CommonRedist to game_dir if it doesn't already exist
     if !local_base.exists() {
         if let Err(e) = copy_dir_recursive(&source_base, &local_base) {
             eprintln!("Failed to copy _CommonRedist to game folder: {}", e);
@@ -69,7 +66,6 @@ pub fn localize_redists(game_dir: &Path, packages: Vec<RedistPackage>) -> Vec<Re
         }
     }
 
-    // Remap installer paths from source_base to local_base
     packages
         .into_iter()
         .map(|pkg| RedistPackage {

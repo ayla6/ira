@@ -3,7 +3,6 @@ use std::path::Path;
 use ira_api::SteamDataClient;
 use ira_db::DbConn;
 
-/// Detect a Steam/Goldberg game by looking for steam_appid.txt.
 pub fn detect_app_id(folder: &str) -> Option<String> {
     let folder_path = Path::new(folder);
     let candidates = [
@@ -53,7 +52,6 @@ pub fn add_game_from_folder(
             .map_err(|e| format!("could not write steam_appid.txt: {}", e))?;
     }
 
-    // Create data/<app_id>/achievements/ as symlink to game's steam_settings
     let data_ach_dir = ira_parser::achievements_dir(save_dir, app_id);
     if !data_ach_dir.exists() {
         if let Some(parent) = data_ach_dir.parent() {
@@ -65,7 +63,6 @@ pub fn add_game_from_folder(
             .map_err(|e| format!("could not symlink achievements: {}", e))?;
     }
 
-    // Create emulator_saves/gbe/<app_id>/ save directory
     let saves_game_dir = Path::new(save_dir)
         .join("emulator_saves")
         .join("gbe")
@@ -73,12 +70,10 @@ pub fn add_game_from_folder(
     std::fs::create_dir_all(&saves_game_dir)
         .map_err(|e| format!("could not create saves directory: {}", e))?;
 
-    // Generate achievement definitions
     steam.generate_steam_settings(app_id)?;
 
-    // Add to DB (title will be filled from appdetails.json during enrichment).
-    // The app id is both the store match and the platform-native id here;
-    // the platform is the kind's system.
+    // Title fills from appdetails.json during enrichment; the app id doubles as
+    // store match and native id, the platform as the kind's system.
     ira_db::add_game(
         db,
         ira_db::NewGame {

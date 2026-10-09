@@ -35,7 +35,6 @@ fn unscramble(scrambled: &[u8]) -> String {
     String::from_utf8_lossy(&scramble(scrambled, SCRAMBLE_KEY)).into_owned()
 }
 
-/// The decoded developer pair baked into this build.
 fn baked_dev_pair() -> (String, String) {
     (unscramble(DEV_ID_SCRAMBLED), unscramble(DEV_PASSWORD_SCRAMBLED))
 }

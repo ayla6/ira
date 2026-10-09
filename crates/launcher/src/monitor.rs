@@ -37,7 +37,6 @@ pub struct MonitorContext {
 pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
     let game_id = ctx.game_id;
 
-    // Clear previous log and get the shared buffer for this game.
     clear_game_log(game_id);
     let log_buf = get_game_log(game_id);
 
@@ -50,10 +49,8 @@ pub fn monitor_process(mut child: Child, child_pid: i32, ctx: MonitorContext) {
         tail_file_to_log(ctx.log_file.clone(), log_buf.clone(), tail_done.clone());
     }
 
-    // Pause watcher: follows the overlay SHM flag from a thread of its own
-    // so the 2s try_wait cadence below never delays a freeze/thaw. The
-    // group id is the child's pid (spawn_game makes it a group leader).
-    // Daemon sessions never reach this monitor, so their pids stay ours.
+    // Pause watcher on its own thread so the 2s try_wait cadence never delays
+    // a freeze/thaw; the group id is the child's pid (spawn_game group leader).
     let freeze_exit = Arc::new(AtomicBool::new(false));
     let freeze_handle = ctx.pause_watch.clone().map(|cfg| {
         let exit = freeze_exit.clone();
@@ -151,10 +148,8 @@ pub(crate) fn finalize_game(
         eprintln!("Failed to send GameStopped message: {}", e);
     }
 
-    // Continue reaping zombies for a few seconds after the game exits.
-    // Wine background processes and stragglers may die after the main
-    // game process, and without a reaper they become visible as defunct
-    // processes in htop/btop.
+    // Keep reaping for a few seconds: Wine stragglers dying after the main
+    // process would otherwise sit defunct in htop/btop.
     if let Some(pid) = child_pid {
         for _ in 0..10 {
             std::thread::sleep(Duration::from_secs(1));
@@ -163,19 +158,16 @@ pub(crate) fn finalize_game(
     }
 }
 
-/// Monitor for a game handed to the resident input daemon: no child process
-/// of our own — the daemon supervises the game and reports back over the
-/// IPC socket. The playtime bookkeeping is identical to the wrapper path.
+/// Monitor for a game handed to the resident input daemon: no child of our own.
+/// The daemon supervises the game and reports back over the IPC socket.
 pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
     let game_id = ctx.game_id;
     clear_game_log(game_id);
     let log_buf = get_game_log(game_id);
     log_launch_header(&ctx.command, &ctx.env, &log_buf, "Started via the input daemon");
 
-    // Freeze watcher: spawned once the daemon reports the real pid. No
-    // thaw_group here — that helper signals process groups, and daemon
-    // pids are not ours to signal; the watcher thaws its own scope on
-    // shutdown and thaw needs no group kill.
+    // Freeze watcher once the daemon reports the real pid; no thaw_group — daemon
+    // pids are not ours to signal, the watcher thaws its own scope on shutdown.
     let freeze_exit = Arc::new(AtomicBool::new(false));
     let mut freeze_handle: Option<std::thread::JoinHandle<()>> = None;
     let mut child_pid: Option<i32> = None;
@@ -183,11 +175,8 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
         Event::SessionStarted { child_pid: pid, .. } => {
             child_pid = Some(pid);
             ctx.running_games.lock().unwrap().insert(ctx.game_id, pid);
-            // Handoff proof for the game log (daemon eprintlns land on the
-            // terminal instead): the toggle chord is armed iff the marker
-            // made it into the session env. Whether the daemon could
-            // actually arm (SHM readable, chord decoded) only shows on the
-            // terminal or on the first flip below.
+            // Handoff proof: the toggle marker made it into the session env (whether
+            // the daemon could arm only shows on the terminal or first flip).
             if ctx
                 .env
                 .iter()
@@ -238,9 +227,8 @@ pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
     let exit_code = match result {
         Ok(code) => Some(code),
         Err(error) => {
-            // The daemon connection dropped mid-session. The game itself may
-            // still be running; say so instead of pretending this was a clean
-            // end.
+            // The daemon connection dropped mid-session; the game itself may still
+            // be running, so report the drop instead of a clean end.
             let message = format!("Input daemon connection lost: {error}");
             eprintln!("launch: {message}");
             log_buf.lock().unwrap().push(message);
@@ -263,9 +251,8 @@ fn reap_zombies(pgid: i32) {
     }
 }
 
-/// Runs the game's post-exit script synchronously — the monitor thread blocks
-/// until it finishes, mirroring the pre-launch "wait" semantics. Output is
-/// appended to the in-memory game log next to the game's own output.
+/// Runs the game's post-exit script synchronously, mirroring pre-launch "wait".
+/// Output lands in the in-memory game log next to the game's own output.
 fn run_post_exit(script: &str, working_dir: Option<&str>, log: &GameLog) {
     let mut cmd = std::process::Command::new("sh");
     cmd.arg("-c").arg(script);

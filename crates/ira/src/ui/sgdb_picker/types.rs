@@ -46,14 +46,12 @@ pub(super) struct SgdbPickerCtx {
     pub(super) loading_more: Rc<Cell<bool>>,
     pub(super) is_initial_load: Rc<Cell<bool>>,
     /// Uniform tile aspect for this picker's asset type (width over
-    /// height): every card takes the type's shape like game-grid tiles,
-    /// instead of everything squeezing into squares.
+    /// height): every card takes the type's shape like game-grid tiles.
     pub(super) tile_aspect: f64,
-    /// Per-card views in render order; zoom resizes them in place.
+    /// Per-card views in render order.
     pub(super) pics: Rc<RefCell<Vec<CardViews>>>,
     pub(super) all_buttons: Rc<RefCell<Vec<glib::WeakRef<gtk4::Button>>>>,
-    /// Bounded thumbnail workers, shared by every card this picker
-    /// renders: six threads drain one queue instead of a thread per card.
+    /// Bounded thumbnail workers, shared by every card this picker renders.
     pub(super) pool: ThumbPool,
     pub(super) flow: glib::WeakRef<gtk4::FlowBox>,
     pub(super) list_view: glib::WeakRef<gtk4::ListBox>,
@@ -72,9 +70,8 @@ pub(super) type GeometrySync = Rc<dyn Fn(i32, i32, i32)>;
 /// per-origin requests, first-rendered first. A thread per card
 /// stampedes past that on long grids — hundreds of threads over a
 /// scrolling session — so one small pool drains a FIFO queue in render
-/// order instead. The visible top cards render first, so they still win
-/// without any priority machinery. Workers exit when the last pool
-/// clone drops.
+/// order instead. The visible top cards render first, so they still win.
+/// Workers exit when the last pool clone drops.
 const THUMB_POOL_SIZE: usize = 6;
 
 type ThumbJob = (String, std::sync::mpsc::Sender<Option<Vec<u8>>>);

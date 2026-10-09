@@ -130,8 +130,6 @@ impl SteamDataClient {
     }
 }
 
-/// Query string for an SGDB list endpoint: dimensions plus the page,
-/// whichever are set.
 fn sgdb_url(endpoint: &str, dimensions: &[&str], page: u32) -> String {
     let base = format!("https://www.steamgriddb.com/api/v2/{endpoint}");
     let mut params = Vec::new();
@@ -178,7 +176,6 @@ fn exclude_by<'a>(
         .collect()
 }
 
-/// Items not authored by a filtered user, preserving SGDB's order.
 fn not_filtered<'a>(
     items: &[&'a serde_json::Value],
     filtered: &[String],
@@ -186,7 +183,6 @@ fn not_filtered<'a>(
     exclude_by(items, filtered, item_author)
 }
 
-/// Items whose style is not filtered out, preserving SGDB's order.
 fn not_style_filtered<'a>(
     items: &[&'a serde_json::Value],
     filtered: &[String],

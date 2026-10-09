@@ -56,9 +56,7 @@ pub(crate) struct PatternState {
     /// Outputs whose "press" is currently held, per activator index; they
     /// must be released even when the profile swaps underneath.
     held: Vec<(usize, OutputAction)>,
-    /// Activator toggle state, activator index → on/off.
     toggles: HashMap<usize, bool>,
-    /// Soft-pull activator indices whose threshold the value is past.
     soft_held: Vec<usize>,
 }
 
@@ -137,7 +135,6 @@ pub(super) fn push_press_of(
 /// applies internal actions as they fire.
 pub(crate) struct ActivatorRunner<'a> {
     pub(crate) mapping: &'a InputMapping,
-    /// Whether the input's activation gating currently passes.
     pub(crate) active: bool,
     outcome: ActivatorOutcome,
 }
@@ -155,7 +152,6 @@ impl<'a> ActivatorRunner<'a> {
         self.outcome
     }
 
-    /// Feed a value change for the input.
     pub(crate) fn value_change(&mut self, state: &mut PatternState, value: f32, now_us: u64) {
         self.soft_crossings(state, value);
         let pressed = value > self.digital_threshold();
@@ -377,7 +373,6 @@ impl<'a> ActivatorRunner<'a> {
         }
     }
 
-    /// Fire an activator's outputs, honoring toggle semantics.
     fn fire(&mut self, activator: &Activator, state: &mut PatternState, index: usize) {
         if activator.settings.toggle {
             let enabled = state.toggles.entry(index).or_insert(false);

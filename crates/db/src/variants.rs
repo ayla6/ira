@@ -23,8 +23,6 @@ const VARIANT_WRITE_COLUMNS: &[&str] = &[
     "logo_size",
 ];
 
-/// `UPDATE` fragment: every write column bound to sequential placeholders,
-/// starting at `start`.
 fn variant_set_clause(start: usize) -> String {
     VARIANT_WRITE_COLUMNS
         .iter()
@@ -34,8 +32,6 @@ fn variant_set_clause(start: usize) -> String {
         .join(", ")
 }
 
-/// `INSERT` column list: game_id leads and sort_order sits between env_vars
-/// and pre_launch.
 fn variant_insert_columns() -> String {
     format!(
         "game_id, {}, sort_order, {}",
@@ -91,11 +87,9 @@ pub fn get_variants(conn: &DbConn, game_id: i64) -> Result<Vec<GameVariant>, Str
     )
 }
 
-/// Every variant of every listed game in one query, grouped by game id.
-///
-/// The loader built one `get_variants` query per game (N round-trips for N
-/// games); this is the same rows in the same per-game order for a single
-/// round-trip per 500-id chunk. Missing ids simply have no entry.
+/// Every variant of every listed game in one query, grouped by game id:
+/// the same rows in the same per-game order for a single round-trip per
+/// 500-id chunk. Missing ids simply have no entry.
 pub fn get_variants_for_games(
     conn: &DbConn,
     game_ids: &[i64],

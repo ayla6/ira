@@ -33,9 +33,8 @@ use ira_models::screenscraper_system_id;
 
 /// The per-game outcome of the pass. The distinction decides the
 /// tombstone: only `Miss` records one — `Failed` leaves the game untombed
-/// so the next opening asks again. PC matching shares it: a miss there
-/// used to come back as nothing at all, leaving the row "searching"
-/// forever and re-asking on every opening.
+/// so the next opening asks again. PC matching shares it: a miss must
+/// tombstone, or the row stays "searching" forever and re-asks every opening.
 pub(super) enum SsOutcome {
     Hit(Box<ScrapedGame>),
     Miss,
@@ -675,9 +674,8 @@ fn title_search(
     let hints = region_hints(&stem);
     let term = search_term(&full);
     if term.is_empty() {
-        // Not "the source does not know the game" — "we cannot ask yet"
-        // (a title-id-named dump waiting on enrichment). Leave untombed
-        // so the next opening retries with whatever name exists by then.
+        // Title-id-named dump waiting on enrichment; leave untombed so the
+        // next opening retries with whatever name exists by then.
         eprintln!("SS batch: [{platform_id}] no usable search term");
         return SsOutcome::Failed("no usable search term".to_string());
     }

@@ -125,7 +125,6 @@ pub fn find_gog_dll_folder(game_exe: &str, game_folder: &str) -> Option<PathBuf>
     find_game_dll_folder(game_exe, game_folder, NGE_VERSION_FILES)
 }
 
-/// Check if `dll_folder` contains original GOG Galaxy DLLs.
 pub fn has_original_gog_dlls(dll_folder: &Path) -> bool {
     ["galaxy.dll", "galaxy64.dll", "Galaxy.dll", "Galaxy64.dll"]
         .iter()
@@ -148,17 +147,14 @@ pub fn centralize_galaxy_settings(game_folder: &str) -> Result<Option<PathBuf>, 
 
 const GOG_DLL_NAMES: &[&str] = &["galaxy.dll", "galaxy64.dll"];
 
-/// Recursively search `game_folder` for directories containing Galaxy DLLs.
 pub fn find_gog_dlls_recursive(game_folder: &str) -> Vec<PathBuf> {
     crate::api_emulators_shared::find_dll_dirs_recursive(Path::new(game_folder), GOG_DLL_NAMES)
 }
 
-/// Check whether `dir` already has NGE backups (`.dll.bak`/`.bak.dll`/`.owo.dll`).
 pub fn has_gog_emulator_backups(dir: &Path) -> bool {
     crate::api_emulators_shared::has_emulator_backups(dir, GOG_DLL_NAMES)
 }
 
-/// List available NGE versions under api_emulators/gog/
 pub fn list_gog_versions(save_dir: &str) -> Vec<String> {
     let root = api_emulators_dir(save_dir).join("gog");
     crate::api_emulators_shared::list_version_dirs(&root, &[])
@@ -226,7 +222,6 @@ fn install_nge_into_folder(
 ) -> Result<(), String> {
     let version_dir = resolve_gog_version(save_dir, version)?;
 
-    // Backup original DLL and copy emulator file
     for (src_name, dst_name) in nge_file_map(is64) {
         let src = version_dir.join(src_name);
         let dst = dll_folder.join(dst_name);

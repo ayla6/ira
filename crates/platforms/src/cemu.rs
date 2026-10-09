@@ -108,12 +108,9 @@ pub struct CemuGame {
     pub icon_path: PathBuf,
 }
 
-/// Wii U title IDs carry their category in the top 32 bits: `00050000`
-/// applications and `00050002` demos are launchable titles, while the
-/// other categories are content attached to a base title (updates
-/// `0005000e`, DLC `0005000c`) or system firmware. Attached content ships
-/// its own `meta.xml` with the base title's display name, so scanning it
-/// would list the same game twice.
+/// Wii U title IDs carry category in the top 32 bits: `00050000` apps and
+/// `00050002` demos are launchable; updates/DLC/firmware share the base
+/// display name (scanning them would list games twice).
 fn is_game_title_id(title_id: &str) -> bool {
     matches!(title_id.get(..8), Some("00050000") | Some("00050002"))
 }
@@ -173,9 +170,8 @@ pub fn discover_games() -> Vec<CemuGame> {
 }
 
 pub fn discover_games_for_executable(executable: &str) -> Vec<CemuGame> {
-    // A missing native executable must not stop discovery: game paths live
-    // in Cemu's own settings (portable or XDG), which is readable even when
-    // the launch command is stale (renamed AppImage, moved binary…).
+    // A missing executable must not stop discovery: paths live in Cemu's own
+    // settings, readable even when the launch command is stale.
     if !executable.is_empty()
         && !executable.starts_with("flatpak:")
         && executable.contains('/')
@@ -197,9 +193,8 @@ pub fn discover_games_for_executable(executable: &str) -> Vec<CemuGame> {
         scan_dir(&root, 0, &mut games);
     }
 
-    // Same title reachable from several roots (game path + mlc storage):
-    // a title ID uniquely identifies a Wii U title. Configured paths are
-    // scanned first, so the user-chosen location wins.
+    // A title ID uniquely identifies a Wii U title across roots; configured
+    // paths scan first so the user-chosen location wins.
     let mut seen = HashSet::new();
     games.retain(|game| seen.insert(game.title_id.clone()));
     games

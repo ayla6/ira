@@ -221,8 +221,6 @@ fn open_settings_dialog(
     }
 }
 
-/// The sidebar row whose widget name is `page_id` (see
-/// [`super::settings_pages::settings_sidebar_row`]).
 fn sidebar_row_with_name(sidebar: &gtk4::ListBox, page_id: &str) -> Option<gtk4::ListBoxRow> {
     let mut index = 0;
     while let Some(row) = sidebar.row_at_index(index) {

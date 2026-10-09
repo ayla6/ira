@@ -14,8 +14,7 @@ pub fn get_game_config(
     )?;
     match row {
         Some((launch_str, wine_str, profile_id)) => {
-            // The only writer (save_game_config) always stores full JSON; an
-            // empty column can only come from pre-release app versions.
+            // The only writer always stores full JSON.
             let launch: GameLaunchConfig = serde_json::from_str(&launch_str).map_err(err)?;
             let wine: WineConfig = serde_json::from_str(&wine_str).map_err(err)?;
             Ok(Some((launch, wine, profile_id)))

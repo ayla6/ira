@@ -1,13 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// The five image asset types used throughout the app.
-/// Replaces raw string literals ("icon", "hero", "grid", "header", "logo")
-/// that were scattered across 9+ files.
-///
-/// `as_str()` returns the asset type identifier used in match arms and API calls.
-/// `file_base()` returns the on-disk filename stem (note: `Grid` → `"vertical"`).
-/// `display_name()` returns the human-readable label for UI.
-/// `thumb_dims()` returns `(max_w, max_h)` for thumbnail generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetType {
     Icon,
@@ -30,7 +22,7 @@ impl AssetType {
         }
     }
 
-    /// The on-disk filename stem. `Grid` assets are stored as `vertical.webp`.
+    /// Grid assets are stored as `vertical.webp`.
     pub fn file_base(self) -> &'static str {
         match self {
             AssetType::Grid => "vertical",
@@ -49,10 +41,8 @@ impl AssetType {
         }
     }
 
-    /// `(max_width, max_height)` for thumbnail generation. The square thumb
-    /// is couch-capsule sized: big picture draws it at viewport/6, so 384
-    /// covers 1080p-class viewports while decoding roughly half the pixels
-    /// of the 512 generation it replaced.
+    /// Square thumb covers 1080p-class viewports at viewport/6 while
+    /// decoding roughly half the pixels of 512.
     pub fn thumb_dims(self) -> (u32, u32) {
         match self {
             AssetType::Icon => (32, 32),
@@ -91,7 +81,6 @@ impl AssetType {
         }
     }
 
-    /// The asset whose `file_base()` equals `base` ("vertical" → Grid).
     pub fn from_file_base(base: &str) -> Option<Self> {
         AssetType::all()
             .iter()
@@ -141,7 +130,6 @@ impl<'de> Deserialize<'de> for AssetType {
 }
 
 /// Logo overlay position on the hero image.
-/// Replaces raw string literals ("top-left", "bottom-center", etc.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogoPosition {
     TopLeft,
@@ -305,7 +293,7 @@ mod tests {
             let back: LogoPosition = serde_json::from_str(&json).unwrap();
             assert_eq!(pos, back);
         }
-        // Unknown strings fall back to the default, like the DB parse.
+        // Unknown strings fall back to the default.
         let back: LogoPosition = serde_json::from_str("\"garbage\"").unwrap();
         assert_eq!(back, LogoPosition::BottomLeft);
     }

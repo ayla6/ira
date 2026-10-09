@@ -355,8 +355,8 @@ pub(super) fn build(
     let ring = SelectionRing::new();
     grid_overlay.add_overlay(&ring);
     grid_overlay.set_measure_overlay(&ring, false);
-    // The ring must never paint past the grid area: a mid-glide place
-    // used to smear its side edges up over the header.
+    // The ring must never paint past the grid area: mid-glide placement smears
+    // side edges over the header.
     grid_overlay.set_clip_overlay(&ring, true);
     grid_overlay.add_overlay(tooltip.widget());
     grid_overlay.set_measure_overlay(tooltip.widget(), false);

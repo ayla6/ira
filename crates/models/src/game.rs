@@ -198,7 +198,6 @@ impl Game {
         }
     }
 
-    /// Mutable access to the field storing `asset`'s path.
     pub fn asset_path_mut(&mut self, asset: AssetType) -> &mut String {
         match asset {
             AssetType::Icon => &mut self.icon_path,

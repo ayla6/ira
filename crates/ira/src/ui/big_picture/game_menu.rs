@@ -210,6 +210,18 @@ impl GameMenu {
         }
     }
 
+    /// The sort picker accepts the secondary face button as a faster confirm;
+    /// other menus keep their existing X behavior.
+    pub(super) fn activate_secondary(&self, state: &SharedState) {
+        let is_sort = {
+            let kind = self.kind.borrow();
+            matches!(kind.as_ref(), Some(MenuKind::Sort))
+        };
+        if is_sort {
+            self.activate(state);
+        }
+    }
+
     /// Rebuild the rows for the menu's flavor.
     fn rebuild(&self, state: &SharedState) {
         crate::ui::helpers::clear_children(&self.panel);

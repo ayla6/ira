@@ -320,6 +320,7 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
                 NavCommand::Up => big.game_menu.move_selection(state, -1),
                 NavCommand::Down => big.game_menu.move_selection(state, 1),
                 NavCommand::Confirm => big.game_menu.activate(state),
+                NavCommand::Secondary => big.game_menu.activate_secondary(state),
                 NavCommand::Back | NavCommand::Options => big.game_menu.close(),
                 _ => {}
             }

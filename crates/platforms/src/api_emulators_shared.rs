@@ -30,15 +30,108 @@ pub(crate) fn compute_relative(from_dir: &Path, to_path: &Path) -> PathBuf {
     result
 }
 
-pub(crate) fn backup_file(path: &Path) -> Result<(), String> {
+/// Rename `path` to its `.bak` sidecar unless one already exists.
+/// Returns true when this call created the backup — only then must a
+/// later rollback restore it.
+pub(crate) fn backup_file(path: &Path) -> Result<bool, String> {
     let bak = path.with_extension(format!(
         "{}.bak",
         path.extension().and_then(|e| e.to_str()).unwrap_or("")
     ));
     if !bak.exists() && path.exists() {
         std::fs::rename(path, &bak).map_err(|e| format!("backup failed: {}", e))?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Journal entry for one installed emulator file, so a later failure
+/// can undo it: remove a freshly created destination and restore a
+/// freshly backed-up original.
+pub(crate) struct SwappedFile {
+    pub backed_up: Option<PathBuf>,
+    pub dst: PathBuf,
+    pub dst_existed: bool,
+}
+
+/// Copy `src` onto `dst` via a temporary file in the same directory:
+/// `dst` is replaced atomically on success and untouched on failure,
+/// so a failed copy never truncates it.
+pub(crate) fn atomic_copy(src: &Path, dst: &Path) -> Result<(), String> {
+    let name = dst
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("bad destination: {}", dst.display()))?;
+    let tmp = dst.with_file_name(format!("{name}.tmp"));
+    if let Err(e) = std::fs::copy(src, &tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!(
+            "copy {} → {}: {e}",
+            src.display(),
+            dst.display()
+        ));
+    }
+    if let Err(e) = std::fs::rename(&tmp, dst) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("replace {}: {e}", dst.display()));
     }
     Ok(())
+}
+
+/// Back up `original` (when present) and atomically install `src` at
+/// `dst`. A failed copy restores the backup first, so the game is never
+/// left with a missing or half-written DLL.
+pub(crate) fn swap_in_with_backup(
+    src: &Path,
+    dst: &Path,
+    original: Option<&Path>,
+) -> Result<SwappedFile, String> {
+    let dst_existed = dst.exists();
+    let backed_up = match original {
+        Some(path) => {
+            if backup_file(path)? {
+                Some(path.to_path_buf())
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+    if let Err(e) = atomic_copy(src, dst) {
+        if let Some(path) = &backed_up {
+            if let Err(restore) = restore_backup(path) {
+                eprintln!("Failed to roll back {}: {restore}", path.display());
+            }
+        }
+        return Err(e);
+    }
+    Ok(SwappedFile {
+        backed_up,
+        dst: dst.to_path_buf(),
+        dst_existed,
+    })
+}
+
+/// Undo `files` in reverse order: remove freshly created destinations
+/// and restore freshly backed-up originals. Best-effort; failures loud.
+///
+/// A reinstall over an existing emulator records no fresh backup (the
+/// `.bak` already holds the game's original DLLs), so its entries only
+/// remove destinations they created — the pre-existing emulator files
+/// stay, which is the correct pre-install state there.
+pub(crate) fn rollback_swapped(files: &[SwappedFile]) {
+    for f in files.iter().rev() {
+        if !f.dst_existed {
+            if let Err(e) = std::fs::remove_file(&f.dst) {
+                eprintln!("Failed to remove {}: {e}", f.dst.display());
+            }
+        }
+        if let Some(path) = &f.backed_up {
+            if let Err(e) = restore_backup(path) {
+                eprintln!("Failed to roll back {}: {e}", path.display());
+            }
+        }
+    }
 }
 
 pub(crate) fn find_file_case_insensitive(dir: &Path, name: &str) -> Option<PathBuf> {
@@ -104,10 +197,7 @@ pub(crate) fn restore_backup(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn copy_file(src: &Path, dst: &Path) -> Result<(), String> {
-    std::fs::copy(src, dst).map_err(|e| format!("copy {:?} \u{2192} {:?}: {}", src, dst, e))?;
-    Ok(())
-}
+
 
 pub fn api_emulators_dir(save_dir: &str) -> PathBuf {
     Path::new(save_dir).join("api_emulators")
@@ -875,11 +965,84 @@ mod tests {
         let dst = dir.join("steam_api64.dll");
         std::fs::write(&dst, b"orig").unwrap();
 
-        copy_file(&src, &dst).unwrap();
+        atomic_copy(&src, &dst).unwrap();
         assert_eq!(std::fs::read(&dst).unwrap(), b"emu");
 
-        backup_file(&dst).unwrap();
+        assert!(backup_file(&dst).unwrap());
         assert!(dir.join("steam_api64.dll.bak").exists());
+        assert!(!backup_file(&dst).unwrap());
+    }
+
+    #[test]
+    fn test_atomic_copy_failure_leaves_dst_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("game");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dst = dir.join("steam_api64.dll");
+        std::fs::write(&dst, b"orig").unwrap();
+        // A directory is never a valid copy source: deterministic failure.
+        let src_dir = tmp.path().join("srcdir");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        assert!(atomic_copy(&src_dir, &dst).is_err());
+        assert_eq!(std::fs::read(&dst).unwrap(), b"orig");
+        assert!(!dir.join("steam_api64.dll.tmp").exists());
+    }
+
+    #[test]
+    fn test_swap_in_with_backup_restores_original_on_copy_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("game");
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = dir.join("steam_api64.dll");
+        std::fs::write(&original, b"orig").unwrap();
+        let src_dir = tmp.path().join("srcdir");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        assert!(swap_in_with_backup(&src_dir, &original, Some(&original)).is_err());
+        assert_eq!(std::fs::read(&original).unwrap(), b"orig");
+        assert!(!dir.join("steam_api64.dll.bak").exists());
+    }
+
+    #[test]
+    fn test_rollback_swapped_restores_journal_in_reverse() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("game");
+        std::fs::create_dir_all(&dir).unwrap();
+        let emu_dir = tmp.path().join("emu");
+        std::fs::create_dir_all(&emu_dir).unwrap();
+        let first_orig = dir.join("a.dll");
+        let second_orig = dir.join("libsteam_api64.so");
+        std::fs::write(&first_orig, b"orig-a").unwrap();
+        std::fs::write(&second_orig, b"orig-so").unwrap();
+        let emu_a = emu_dir.join("a.dll");
+        let emu_b = emu_dir.join("b.dll");
+        std::fs::write(&emu_a, b"emu-a").unwrap();
+        std::fs::write(&emu_b, b"emu-b").unwrap();
+
+        let journal = vec![
+            swap_in_with_backup(&emu_a, &first_orig, Some(&first_orig)).unwrap(),
+            // Linux shape: the backup lives under the 64-bit source name
+            // while the emulator lands at a fresh destination name.
+            swap_in_with_backup(&emu_b, &dir.join("libsteam_api.so"), Some(&second_orig))
+                .unwrap(),
+        ];
+        assert_eq!(std::fs::read(dir.join("libsteam_api.so")).unwrap(), b"emu-b");
+        // A later failure restores nothing with a backup left behind.
+        let src_dir = tmp.path().join("srcdir");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        let third = dir.join("c.dll");
+        std::fs::write(&third, b"orig-c").unwrap();
+        assert!(swap_in_with_backup(&src_dir, &third, Some(&third)).is_err());
+
+        rollback_swapped(&journal);
+        assert_eq!(std::fs::read(&first_orig).unwrap(), b"orig-a");
+        assert!(!dir.join("a.dll.bak").exists());
+        assert_eq!(std::fs::read(&second_orig).unwrap(), b"orig-so");
+        assert!(!dir.join("libsteam_api64.so.bak").exists());
+        assert!(!dir.join("libsteam_api.so").exists());
+        // The failed swap restored its own backup inline.
+        assert_eq!(std::fs::read(&third).unwrap(), b"orig-c");
     }
 
     #[test]

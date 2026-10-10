@@ -1,6 +1,6 @@
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
-    dir_has_any_dll, find_game_dll_folder, is_windows, prepare_original_file, restore_backup,
+    api_emulators_dir, detect_arch, detect_folder_bitness, dir_has_any_dll, find_game_dll_folder,
+    is_windows, prepare_original_file, restore_backup,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
@@ -228,24 +228,38 @@ fn install_nge_into_folder(
         ));
     }
 
-    for (src_name, dst_name) in nge_file_map(is64) {
-        let src = version_dir.join(src_name);
-        if !src.is_file() {
-            continue;
+    // Every DLL swap below is journaled: any failure rolls the folder
+    // back to its pre-install state instead of leaving a partial one.
+    let mut swapped: Vec<crate::api_emulators_shared::SwappedFile> = Vec::new();
+    let install = (|| {
+        for (src_name, dst_name) in nge_file_map(is64) {
+            let src = version_dir.join(src_name);
+            if !src.is_file() {
+                continue;
+            }
+            let original = prepare_original_file(dll_folder, src_name, dst_name)?;
+            let dst = dll_folder.join(dst_name);
+            if original.is_some() {
+                swapped.push(crate::api_emulators_shared::swap_in_with_backup(
+                    &src,
+                    &dst,
+                    original.as_deref(),
+                )?);
+            }
         }
-        let original = prepare_original_file(dll_folder, src_name, dst_name)?;
-        let dst = dll_folder.join(dst_name);
-        if let Some(original) = original {
-            backup_file(&original)?;
-        }
-        copy_file(&src, &dst)?;
+
+        let settings_dir = dll_folder.join("ngalaxye_settings");
+        std::fs::create_dir_all(&settings_dir)
+            .map_err(|e| format!("create ngalaxye_settings: {}", e))?;
+
+        crate::gog::generate_galaxy_emu_config(&dll_folder.to_string_lossy(), product_id)?;
+
+        Ok::<(), String>(())
+    })();
+    if let Err(e) = install {
+        crate::api_emulators_shared::rollback_swapped(&swapped);
+        return Err(e);
     }
-
-    let settings_dir = dll_folder.join("ngalaxye_settings");
-    std::fs::create_dir_all(&settings_dir)
-        .map_err(|e| format!("create ngalaxye_settings: {}", e))?;
-
-    crate::gog::generate_galaxy_emu_config(&dll_folder.to_string_lossy(), product_id)?;
 
     Ok(())
 }

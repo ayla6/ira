@@ -1,7 +1,6 @@
 use crate::api_emulators_shared::{
-    api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
-    dir_has_any_dll, find_game_dll_folder, has_emulator_backups, is_windows, restore_backup,
-    prepare_original_file,
+    api_emulators_dir, detect_arch, detect_folder_bitness, dir_has_any_dll, find_game_dll_folder,
+    has_emulator_backups, is_windows, prepare_original_file, restore_backup,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
@@ -430,27 +429,39 @@ fn install_gse_into_folder(
         }
     }
 
-    for (src_name, dst_name) in gse_file_map(is64, is_win) {
-        let src = version_dir.join(src_name);
-        if !src.is_file() {
-            continue;
-        }
-        let original = prepare_original_file(dll_folder, src_name, dst_name)?;
-        let dst = dll_folder.join(dst_name);
-        // Preserve the game's API surface: optional files such as
-        // `steamclient` are patched only when the game already ships them.
-        if original.is_some() || has_emulator_backups(dll_folder, &[dst_name, src_name])
-        {
-            if let Some(original) = original {
-                backup_file(&original)?;
+    // Every DLL swap below is journaled: any failure rolls the folder
+    // back to its pre-install state instead of leaving a partial one.
+    let mut swapped: Vec<crate::api_emulators_shared::SwappedFile> = Vec::new();
+    let install = (|| {
+        for (src_name, dst_name) in gse_file_map(is64, is_win) {
+            let src = version_dir.join(src_name);
+            if !src.is_file() {
+                continue;
             }
-            copy_file(&src, &dst)?;
+            let original = prepare_original_file(dll_folder, src_name, dst_name)?;
+            let dst = dll_folder.join(dst_name);
+            // Preserve the game's API surface: optional files such as
+            // `steamclient` are patched only when the game already ships them.
+            if original.is_some() || has_emulator_backups(dll_folder, &[dst_name, src_name])
+            {
+                swapped.push(crate::api_emulators_shared::swap_in_with_backup(
+                    &src,
+                    &dst,
+                    original.as_deref(),
+                )?);
+            }
         }
-    }
 
-    let appid_path = settings_dir.join("steam_appid.txt");
-    if !appid_path.exists() {
-        std::fs::write(&appid_path, app_id).map_err(|e| format!("write steam_appid.txt: {}", e))?;
+        let appid_path = settings_dir.join("steam_appid.txt");
+        if !appid_path.exists() {
+            std::fs::write(&appid_path, app_id)
+                .map_err(|e| format!("write steam_appid.txt: {}", e))?;
+        }
+        Ok::<(), String>(())
+    })();
+    if let Err(e) = install {
+        crate::api_emulators_shared::rollback_swapped(&swapped);
+        return Err(e);
     }
 
     let lang_path = settings_dir.join("supported_languages.txt");

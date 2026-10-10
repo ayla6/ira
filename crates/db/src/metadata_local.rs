@@ -29,14 +29,15 @@ pub fn steam_company_entity(conn: &DbConn, name: &str) -> Option<ira_models::Scr
     let name = name.trim().to_string();
     // A concurrent allocation of the same company loses the insert and
     // the re-scan below hands back the winner, whatever spelling it kept.
-    let _ = c.execute(
+    if let Err(e) = c.execute(
         "INSERT INTO scraper_companies (id, name) VALUES (?1, ?2)",
         rusqlite::params![id, name],
-    );
-    scan_locals(&c, &tokens).or(Some(ira_models::ScraperEntity {
-        id: id.to_string(),
-        name,
-    }))
+    ) {
+        eprintln!("steam_company_entity: insert failed for {name}: {e}");
+    }
+    // Never hand back an id that was never inserted: on total failure
+    // the caller sees None and skips the entity.
+    scan_locals(&c, &tokens)
 }
 
 /// One below the smallest local id in `table` — the next free negative
@@ -53,6 +54,32 @@ fn next_local_id(
         )
         .unwrap_or(0);
     min - 1
+}
+
+/// Token winner in a genre/family table: real ids first, then locals
+/// oldest-first. Used after a mint so a concurrent winner is returned
+/// instead of a fabricated id.
+fn scan_table_for_tokens(
+    c: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    table: &str,
+    tokens: &[String],
+) -> Option<ira_models::ScraperEntity> {
+    let mut stmt = c
+        .prepare(&format!("SELECT id, name FROM {table} ORDER BY id DESC"))
+        .ok()?;
+    let rows: Vec<(i64, String)> = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .ok()?
+        .filter_map(Result::ok)
+        .collect();
+    rows.into_iter()
+        .find(|(_, n)| ira_models::company_tokens(n) == *tokens)
+        .map(|(id, name)| ira_models::ScraperEntity {
+            id: id.to_string(),
+            name,
+        })
 }
 
 /// The whole-table token scan behind [`steam_company_entity`]: real
@@ -162,14 +189,16 @@ fn local_entity(conn: &DbConn, table: &str, name: &str) -> Option<ira_models::Sc
     };
     let id = next_local_id(&c, table);
     let name = name.trim().to_string();
-    let _ = c.execute(
+    if let Err(e) = c.execute(
         &format!("INSERT INTO {table} (id, name) VALUES (?1, ?2)"),
         rusqlite::params![id, name],
-    );
-    Some(ira_models::ScraperEntity {
-        id: id.to_string(),
-        name,
-    })
+    ) {
+        eprintln!("local_entity: insert failed in {table} for {name}: {e}");
+    }
+    // The insert may have lost a concurrent mint (same id) or duplicated
+    // its tokens under a fresher id: hand back the token winner instead
+    // of the fabricated id, and nothing when the insert failed outright.
+    scan_table_for_tokens(&c, table, &tokens)
 }
 
 /// Parse a ScreenScraper release date — `YYYY-MM-DD` or bare `YYYY` —
@@ -214,6 +243,23 @@ mod tests {
         assert_eq!(salvato.id, "54774");
         // A filler-only name agrees with nothing.
         assert!(steam_company_entity(&conn, "LLC").is_none());
+    }
+
+    #[test]
+    fn test_local_genre_entity_allocates_and_reuses_locals() {
+        let tmp = TempDir::new().unwrap();
+        let conn = init_db(&tmp.path().join("test.db").to_string_lossy());
+        let first = local_genre_entity(&conn, "Handheld Adventure").unwrap();
+        assert!(first.id.parse::<i64>().unwrap() < 0);
+        let second = local_genre_entity(&conn, "Handheld Adventure").unwrap();
+        assert_eq!(second.id, first.id);
+        let count: i64 = conn
+            .get()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM scraper_genres", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        assert!(local_genre_entity(&conn, "   ").is_none());
     }
 
     #[test]

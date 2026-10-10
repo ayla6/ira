@@ -4,6 +4,9 @@ use crate::Game;
 use ira_models::{GroupSelection, SortMode};
 use std::collections::{HashMap, HashSet};
 
+pub(crate) type PlaytimeKey = (i64, Option<i64>);
+pub(crate) type PlaytimeValues = HashMap<PlaytimeKey, f64>;
+
 pub(crate) fn entity_names_for_sort(
     db: &ira_db::DbConn,
     sort_mode: SortMode,
@@ -25,9 +28,15 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
     let _span = tracing::info_span!("filtered_games").entered();
     let s = state.borrow();
     let search = SearchQuery::parse(&s.search_query);
+    let sort_mode = s.cfg.sort_mode;
     // Publisher and developer ordering needs the credited names from
     // the cache; every other mode ignores the map.
-    let entity_names = entity_names_for_sort(&s.db, s.cfg.sort_mode);
+    let entity_names = entity_names_for_sort(&s.db, sort_mode);
+    let playtimes = if sort_mode == SortMode::HoursPlayed {
+        playtimes_for_sort(&s.db, &s.playtime_links, &s.games)
+    } else {
+        PlaytimeValues::new()
+    };
     filter_and_sort(
         &s.games,
         &GameFilter {
@@ -36,11 +45,45 @@ pub fn filtered_games(state: &SharedState) -> Vec<Game> {
             group: &s.selected_group,
             group_members: &s.group_members,
             derived_members: &s.derived_members,
-            sort_mode: s.cfg.sort_mode,
+            sort_mode,
             sort_descending: s.cfg.sort_descending,
             entity_names: &entity_names,
+            playtimes: &playtimes,
         },
     )
+}
+
+/// Resolve the values used by an hours-played sort once per refresh. Linked
+/// groups share one database total, while variants keep their own playtime
+/// when they are not linked.
+pub(crate) fn playtimes_for_sort(
+    db: &ira_db::DbConn,
+    links: &HashMap<i64, Vec<i64>>,
+    games: &[Game],
+) -> PlaytimeValues {
+    let mut group_totals: HashMap<Vec<i64>, f64> = HashMap::new();
+    games
+        .iter()
+        .map(|game| {
+            let playtime = match links.get(&game.db_id) {
+                Some(members) => *group_totals.entry(members.clone()).or_insert_with(|| {
+                    members
+                        .iter()
+                        .filter_map(|id| {
+                            ira_db::find_by_db_id(db, *id)
+                                .unwrap_or_else(|e| {
+                                    eprintln!("Failed to read linked game {id}: {e}");
+                                    None
+                                })
+                        })
+                        .map(|entry| entry.playtime)
+                        .sum()
+                }),
+                None => game.playtime,
+            };
+            ((game.db_id, game.variant_id), playtime)
+        })
+        .collect()
 }
 
 /// Everything the filter+sort core looks at besides the games.
@@ -56,6 +99,8 @@ pub struct GameFilter<'a> {
     /// The credited publisher or developer per game when the sort mode
     /// orders by one of them.
     pub entity_names: &'a HashMap<i64, String>,
+    /// Display playtimes keyed by the concrete game or variant entry.
+    pub playtimes: &'a PlaytimeValues,
 }
 
 /// The ordering every game list shares — the grid's, so the sidebar can
@@ -68,6 +113,7 @@ pub(crate) fn game_compare(
     sort_mode: SortMode,
     descending: bool,
     entity_names: &HashMap<i64, String>,
+    playtimes: &PlaytimeValues,
 ) -> std::cmp::Ordering {
     let ord = match sort_mode {
         SortMode::Publisher | SortMode::Developer => entity_names
@@ -79,6 +125,12 @@ pub(crate) fn game_compare(
                     .to_lowercase()
                     .cmp(&b.sort_key().to_lowercase())
             }),
+        SortMode::HoursPlayed => playtime_for_sort(a, playtimes)
+            .partial_cmp(&playtime_for_sort(b, playtimes))
+            .map(std::cmp::Ordering::reverse)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.sort_key().cmp(b.sort_key()))
+            .then_with(|| a.db_id.cmp(&b.db_id)),
         _ => sort_mode.compare(a, b).then_with(|| a.db_id.cmp(&b.db_id)),
     };
     if descending {
@@ -86,6 +138,13 @@ pub(crate) fn game_compare(
     } else {
         ord
     }
+}
+
+fn playtime_for_sort(game: &Game, playtimes: &PlaytimeValues) -> f64 {
+    playtimes
+        .get(&(game.db_id, game.variant_id))
+        .copied()
+        .unwrap_or(game.playtime)
 }
 
 /// The filter+sort core shared by the desktop sidebar and big-picture,
@@ -102,6 +161,7 @@ pub fn filter_and_sort(games: &[Game], f: &GameFilter) -> Vec<Game> {
         sort_mode,
         sort_descending,
         entity_names,
+        playtimes,
     } = f;
     let derived_game_ids: HashSet<i64> = match group {
         GroupSelection::Derived(name) => derived_members.get(name).cloned().unwrap_or_default(),
@@ -132,7 +192,16 @@ pub fn filter_and_sort(games: &[Game], f: &GameFilter) -> Vec<Game> {
         })
         .collect();
 
-    matched.sort_by(|a, b| game_compare(a, b, *sort_mode, *sort_descending, entity_names));
+    matched.sort_by(|a, b| {
+        game_compare(
+            a,
+            b,
+            *sort_mode,
+            *sort_descending,
+            entity_names,
+            playtimes,
+        )
+    });
     matched.into_iter().cloned().collect()
 }
 
@@ -247,9 +316,9 @@ pub(crate) fn group_categories<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{game_compare, sort_detail};
+    use super::{game_compare, playtimes_for_sort, sort_detail};
     use crate::Game;
-    use ira_models::SortMode;
+    use ira_models::{GameKind, SortMode, TrophySource};
     use std::collections::HashMap;
 
     #[test]
@@ -267,11 +336,25 @@ mod tests {
 
         // Alphabetical ascending puts Alpha first; descending flips it.
         assert_eq!(
-            game_compare(&a, &b, SortMode::Alphabetical, false, &Default::default()),
+            game_compare(
+                &a,
+                &b,
+                SortMode::Alphabetical,
+                false,
+                &Default::default(),
+                &Default::default(),
+            ),
             std::cmp::Ordering::Less
         );
         assert_eq!(
-            game_compare(&a, &b, SortMode::Alphabetical, true, &Default::default()),
+            game_compare(
+                &a,
+                &b,
+                SortMode::Alphabetical,
+                true,
+                &Default::default(),
+                &Default::default(),
+            ),
             std::cmp::Ordering::Greater
         );
         // Equal keys tiebreak on the insertion id, in both directions.
@@ -281,9 +364,98 @@ mod tests {
             ..Game::default()
         };
         assert_eq!(
-            game_compare(&a, &twin, SortMode::Alphabetical, false, &Default::default()),
+            game_compare(
+                &a,
+                &twin,
+                SortMode::Alphabetical,
+                false,
+                &Default::default(),
+                &Default::default(),
+            ),
             std::cmp::Ordering::Less
         );
+    }
+
+    #[test]
+    fn test_game_compare_hours_uses_linked_playtime() {
+        let a = Game {
+            db_id: 1,
+            playtime: 1.0,
+            ..Game::default()
+        };
+        let b = Game {
+            db_id: 2,
+            playtime: 5.0,
+            ..Game::default()
+        };
+        let playtimes = HashMap::from([((1, None), 10.0), ((2, None), 2.0)]);
+
+        assert_eq!(
+            game_compare(
+                &a,
+                &b,
+                SortMode::HoursPlayed,
+                false,
+                &Default::default(),
+                &playtimes,
+            ),
+            std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn test_playtimes_for_sort_combines_linked_database_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = ira_db::init_db(&tmp.path().join("games.db").to_string_lossy());
+        let add_game = |title: &str| {
+            ira_db::add_game(
+                &db,
+                ira_db::NewGame {
+                    kind: GameKind::Steam,
+                    trophy_source: TrophySource::Gse,
+                    steam_id: "",
+                    trophy_id: "",
+                    native_id: "",
+                    platform_id: "",
+                    title,
+                },
+            )
+            .unwrap()
+        };
+        let first = add_game("First");
+        let second = add_game("Second");
+        ira_db::update_field(&db, first, "playtime", &3.0_f64).unwrap();
+        ira_db::update_field(&db, second, "playtime", &7.0_f64).unwrap();
+        ira_db::link_games(&db, &[first, second]).unwrap();
+
+        let links = ira_db::playtime_links(&db).unwrap();
+        let mut by_game = HashMap::new();
+        for (game_id, group_id) in links {
+            by_game.entry(group_id).or_insert_with(Vec::new).push(game_id);
+        }
+        let mut links = HashMap::new();
+        for members in by_game.into_values() {
+            for id in &members {
+                links.insert(*id, members.clone());
+            }
+        }
+        let games = vec![
+            Game {
+                db_id: first,
+                playtime: 3.0,
+                ..Game::default()
+            },
+            Game {
+                db_id: second,
+                playtime: 7.0,
+                ..Game::default()
+            },
+        ];
+
+        let values = playtimes_for_sort(&db, &links, &games);
+
+        assert_eq!(values[&(first, None)], 10.0);
+        assert_eq!(values[&(second, None)], 10.0);
     }
 
     #[test]

@@ -569,5 +569,6 @@ fn handle_variants_changed(state: &SharedState, db_id: i64) {
         }
     }
     rebuild_sidebar(state);
+    super::grid_view::refresh_grid_store(state);
     super::big_picture::refresh(state);
 }

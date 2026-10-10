@@ -145,6 +145,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
         db,
         auto_groups,
         search_query,
+        playtime_links,
     ) = {
         let s = state.borrow();
         (
@@ -164,6 +165,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
             s.db.clone(),
             s.auto_groups.clone(),
             s.search_query.clone(),
+            s.playtime_links.clone(),
         )
     };
     // Every game list below is ordered by the grid's own comparator, so
@@ -178,6 +180,11 @@ pub fn rebuild_sidebar(state: &SharedState) {
                 .unwrap_or_default()
         }
         _ => Default::default(),
+    };
+    let playtimes = if sort_mode == ira_models::SortMode::HoursPlayed {
+        super::filter::playtimes_for_sort(&db, &playtime_links, &games)
+    } else {
+        super::filter::PlaytimeValues::new()
     };
 
     state.borrow_mut().restoring = true;
@@ -243,7 +250,13 @@ pub fn rebuild_sidebar(state: &SharedState) {
                 continue;
             }
             let mut sorted: Vec<&Game> = members.to_vec();
-            sort_grid_order(&mut sorted, sort_mode, sort_descending, &sort_entity_names);
+            sort_grid_order(
+                &mut sorted,
+                sort_mode,
+                sort_descending,
+                &sort_entity_names,
+                &playtimes,
+            );
             for game in &sorted {
                 items.push(SidebarItem::from_game(game, &running_games));
             }
@@ -261,6 +274,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
                 sort_mode,
                 sort_descending,
                 &sort_entity_names,
+                &playtimes,
             );
 
             if collection_games.is_empty() && member_ids.is_some_and(|ids| !ids.is_empty()) {
@@ -300,6 +314,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
                 sort_mode,
                 sort_descending,
                 &sort_entity_names,
+                &playtimes,
             );
 
             let is_collapsed = collapsed.contains(&group.id);
@@ -326,6 +341,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
             sort_mode,
             sort_descending,
             &sort_entity_names,
+            &playtimes,
         );
 
         if !uncategorized.is_empty() {
@@ -350,7 +366,13 @@ pub fn rebuild_sidebar(state: &SharedState) {
             .filter(|g| search.matches(g))
             .copied()
             .collect();
-        sort_grid_order(&mut filtered, sort_mode, sort_descending, &sort_entity_names);
+        sort_grid_order(
+            &mut filtered,
+            sort_mode,
+            sort_descending,
+            &sort_entity_names,
+            &playtimes,
+        );
 
         for game in &filtered {
             items.push(SidebarItem::from_game(game, &running_games));
@@ -377,8 +399,18 @@ fn sort_grid_order(
     sort_mode: ira_models::SortMode,
     descending: bool,
     entity_names: &HashMap<i64, String>,
+    playtimes: &super::filter::PlaytimeValues,
 ) {
-    games.sort_by(|a, b| super::filter::game_compare(a, b, sort_mode, descending, entity_names));
+    games.sort_by(|a, b| {
+        super::filter::game_compare(
+            a,
+            b,
+            sort_mode,
+            descending,
+            entity_names,
+            playtimes,
+        )
+    });
 }
 
 fn toggle_collapsed(state: &SharedState, group_id: i64) {

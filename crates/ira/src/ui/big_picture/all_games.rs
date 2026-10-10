@@ -870,6 +870,15 @@ impl AllSoftwareUi {
                 .unwrap_or(ira_models::GroupSelection::AllGames);
             let sort_mode = s.cfg.sort_mode;
             let entity_names = super::super::filter::entity_names_for_sort(&s.db, sort_mode);
+            let playtimes = if sort_mode == ira_models::SortMode::HoursPlayed {
+                super::super::filter::playtimes_for_sort(
+                    &s.db,
+                    &s.playtime_links,
+                    &s.games,
+                )
+            } else {
+                super::super::filter::PlaytimeValues::new()
+            };
             let games = super::super::filter::filter_and_sort(
                 &s.games,
                 &super::super::filter::GameFilter {
@@ -881,6 +890,7 @@ impl AllSoftwareUi {
                     sort_mode,
                     sort_descending: s.cfg.sort_descending,
                     entity_names: &entity_names,
+                    playtimes: &playtimes,
                 },
             );
             (games, sort_mode, entity_names)

@@ -86,7 +86,6 @@ pub(super) fn build_general_settings_page(
     adw::SwitchRow,
     adw::SwitchRow,
     adw::SwitchRow,
-    adw::PasswordEntryRow,
     gtk4::ListBox,
     adw::SwitchRow,
     adw::SwitchRow,
@@ -219,16 +218,6 @@ pub(super) fn build_general_settings_page(
     }
     page.append(&reload_group);
 
-    let key_group = adw::PreferencesGroup::new();
-    key_group.set_title(&crate::tr!("API keys"));
-
-    let steam_entry = adw::PasswordEntryRow::new();
-    steam_entry.set_title(&crate::tr!("Steam web API key"));
-    steam_entry.set_text(&cfg.steam_api_key);
-    key_group.add(&steam_entry);
-
-    page.append(&key_group);
-
     let lang_list = build_language_preferences_list(&cfg.language_preferences);
     let lang_section = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     let lang_title = gtk4::Label::new(Some(&crate::tr!("Language preferences")));
@@ -250,7 +239,6 @@ pub(super) fn build_general_settings_page(
         notif_row,
         bg_row,
         hidden_row,
-        steam_entry,
         lang_list,
         saves_row,
         square_row,
@@ -584,7 +572,9 @@ pub(super) fn build_lutris_settings_page(
     page
 }
 
-pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::SwitchRow) {
+pub(super) fn build_steam_settings_page(
+    cfg: &Config,
+) -> (gtk4::Box, adw::SwitchRow, adw::PasswordEntryRow) {
     let page = settings_page_container();
 
     let enable_group = adw::PreferencesGroup::new();
@@ -624,7 +614,15 @@ pub(super) fn build_steam_settings_page(cfg: &Config) -> (gtk4::Box, adw::Switch
     info_group.add(&user_row);
     page.append(&info_group);
 
-    (page, enable_row)
+    let key_group = adw::PreferencesGroup::new();
+    key_group.set_title(&crate::tr!("API keys"));
+    let steam_entry = adw::PasswordEntryRow::new();
+    steam_entry.set_title(&crate::tr!("Steam web API key"));
+    steam_entry.set_text(&cfg.steam_api_key);
+    key_group.add(&steam_entry);
+    page.append(&key_group);
+
+    (page, enable_row, steam_entry)
 }
 
 pub(super) fn build_computer_games_page(
@@ -1666,4 +1664,3 @@ pub(super) fn filtered_users(
     }
     users
 }
-

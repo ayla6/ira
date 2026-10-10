@@ -67,7 +67,6 @@ pub(super) struct GeneralSection {
     pub(super) notif_row: adw::SwitchRow,
     pub(super) bg_row: adw::SwitchRow,
     pub(super) hidden_row: adw::SwitchRow,
-    pub(super) steam_entry: adw::PasswordEntryRow,
     pub(super) lang_list: gtk4::ListBox,
     pub(super) saves_row: adw::SwitchRow,
     pub(super) square_row: adw::SwitchRow,
@@ -86,7 +85,6 @@ pub(super) fn build_general_section(
         notif_row,
         bg_row,
         hidden_row,
-        steam_entry,
         lang_list,
         saves_row,
         square_row,
@@ -193,7 +191,6 @@ pub(super) fn build_general_section(
         notif_row,
         bg_row,
         hidden_row,
-        steam_entry,
         lang_list,
         saves_row,
         square_row,
@@ -208,6 +205,7 @@ pub(super) struct RemainingPages {
     pub(super) system_page: gtk4::Box,
     pub(super) computer_games_page: gtk4::Box,
     pub(super) steam_page: gtk4::Box,
+    pub(super) steam_entry: adw::PasswordEntryRow,
     pub(super) emu_page: gtk4::Box,
     pub(super) lutris_page: gtk4::Box,
     pub(super) wine_pages: Vec<WinePage>,
@@ -273,7 +271,7 @@ pub(super) fn build_remaining_pages(
     let (computer_games_page, game_folders) = build_computer_games_page(cfg);
     let (linux_controller_profile, wine_controller_profile) =
         build_pc_controller_profiles(&computer_games_page, cfg, win, state, &profiles);
-    let (steam_page, steam_enable_row) = build_steam_settings_page(cfg);
+    let (steam_page, steam_enable_row, steam_entry) = build_steam_settings_page(cfg);
     let (emu_page, emu_version_row, emu_version_model) = build_api_emulators_page(cfg);
     let lutris_page = build_lutris_settings_page(state, win);
     let (wine_pages, wine_widgets) =
@@ -288,6 +286,7 @@ pub(super) fn build_remaining_pages(
         system_page,
         computer_games_page,
         steam_page,
+        steam_entry,
         emu_page,
         lutris_page,
         wine_pages,
@@ -339,7 +338,7 @@ pub(super) fn assemble_pages(general: GeneralSection, rest: RemainingPages) -> S
         notif_row: general.notif_row,
         bg_row: general.bg_row,
         hidden_row: general.hidden_row,
-        steam_entry: general.steam_entry,
+        steam_entry: rest.steam_entry,
         sgdb_page: rest.sgdb_page,
         sgdb_widgets: rest.sgdb_widgets,
         screenscraper_page: rest.screenscraper_page,

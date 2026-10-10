@@ -107,8 +107,13 @@ fn migrate_dir(source: &Path, target: &Path) {
         let _ = std::fs::create_dir_all(parent);
     }
     let count = ira_parser::safe_migrate_dir_contents(source, target);
-    if count > 0 {
-        let _ = std::fs::remove_dir_all(source);
+    if count > 0
+        && source
+            .read_dir()
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false)
+    {
+        let _ = std::fs::remove_dir(source);
     }
 }
 
@@ -191,6 +196,23 @@ mod tests {
         let target = tmp.path().join("target");
         migrate_dir(&source, &target);
         assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_migrate_dir_preserves_source_after_partial_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let target = tmp.path().join("target");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("good.sav"), b"data").unwrap();
+        std::os::unix::fs::symlink("missing.sav", source.join("bad.sav")).unwrap();
+
+        migrate_dir(&source, &target);
+
+        assert_eq!(std::fs::read(target.join("good.sav")).unwrap(), b"data");
+        assert!(source.exists());
+        assert!(source.join("bad.sav").is_symlink());
     }
 
     #[test]

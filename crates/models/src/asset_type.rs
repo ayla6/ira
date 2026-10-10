@@ -109,6 +109,29 @@ impl AssetType {
     }
 }
 
+/// Named SGDB asset paths, replacing the old positional 6-tuple so
+/// callers cannot silently misassociate slots when the order changes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SgdbAssetPaths {
+    pub icon: String,
+    pub hero: String,
+    pub grid: String,
+    pub logo: String,
+    pub header: String,
+    pub square: String,
+}
+
+impl SgdbAssetPaths {
+    pub fn is_empty(&self) -> bool {
+        self.icon.is_empty()
+            && self.hero.is_empty()
+            && self.grid.is_empty()
+            && self.logo.is_empty()
+            && self.header.is_empty()
+            && self.square.is_empty()
+    }
+}
+
 impl std::fmt::Display for AssetType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
@@ -217,6 +240,17 @@ impl<'de> Deserialize<'de> for LogoPosition {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sgdb_asset_paths_default_is_empty() {
+        let paths = SgdbAssetPaths::default();
+        assert!(paths.is_empty());
+        let paths = SgdbAssetPaths {
+            icon: "icon.webp".to_string(),
+            ..SgdbAssetPaths::default()
+        };
+        assert!(!paths.is_empty());
+    }
 
     #[test]
     fn test_asset_type_roundtrip() {

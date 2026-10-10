@@ -29,7 +29,7 @@ pub mod variant;
 
 pub use achievement::{AchievementStatus, GogAchievementStatus, MergedAchievement, StringOrMap};
 pub use app_details::{AppDetails, DlcInfo, UfsPathTransform, UfsRootOverride, UfsSaveFile};
-pub use asset_type::{AssetType, LogoPosition};
+pub use asset_type::{AssetType, LogoPosition, SgdbAssetPaths};
 pub use auto_group::{AutoCriterion, AutoDimension, AutoGroup, AutoGroupContext, AutoLogic, AutoNode, STEAM_EMULATED_VALUE};
 pub use consoles::{
     all_consoles, console_has_ra, find_console, is_compressed_switch_extension,

@@ -1,4 +1,4 @@
-use crate::Game;
+use crate::{Game, SgdbAssetPaths};
 use std::sync::mpsc;
 
 pub enum AppMessage {
@@ -56,12 +56,7 @@ pub enum AppMessage {
     SgdbAssetsDownloaded {
         db_id: i64,
         sgdb_id: String,
-        icon: String,
-        hero: String,
-        grid: String,
-        logo: String,
-        header: String,
-        square: String,
+        paths: SgdbAssetPaths,
     },
     /// A game's square.webp landed on disk (SGDB square or imported ROM
     /// icon); reload the game so listeners can pick the new art up.

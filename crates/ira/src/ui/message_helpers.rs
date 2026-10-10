@@ -539,16 +539,11 @@ fn spawn_sgdb_workers(ctx: &BackgroundCtx) {
             };
             steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), skip)
             }));
-            if let Ok((icon, hero, grid, logo, header, square)) = result {
+            if let Ok(paths) = result {
                 let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
                     db_id,
                     sgdb_id,
-                    icon,
-                    hero,
-                    grid,
-                    logo,
-                    header,
-                    square,
+                    paths,
                 });
             }
         }

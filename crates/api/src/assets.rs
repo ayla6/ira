@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::steam::mirror_variants;
 use crate::SteamDataClient;
-use ira_models::AssetType;
+use ira_models::{AssetType, SgdbAssetPaths};
 
 fn steam_cdn_url(app_id: &str, suffix: &str) -> String {
     format!(
@@ -27,24 +27,19 @@ impl SteamDataClient {
         dir: &Path,
         id: crate::types::SgdbId,
         skip: &[AssetType],
-    ) -> (String, String, String, String, String, String) {
+    ) -> SgdbAssetPaths {
         let _s = tracing::info_span!("ensure_sgdb_assets_in_dir", id = %id.as_str()).entered();
         let _ = std::fs::create_dir_all(dir);
 
-        let mut icon_path = String::new();
-        let mut hero_path = String::new();
-        let mut grid_path = String::new();
-        let mut logo_path = String::new();
-        let mut header_path = String::new();
-        let mut square_path = String::new();
+        let mut paths = SgdbAssetPaths::default();
 
         for (asset_type, path) in [
-            (AssetType::Icon, &mut icon_path),
-            (AssetType::Hero, &mut hero_path),
-            (AssetType::Grid, &mut grid_path),
-            (AssetType::Logo, &mut logo_path),
-            (AssetType::Header, &mut header_path),
-            (AssetType::Square, &mut square_path),
+            (AssetType::Icon, &mut paths.icon),
+            (AssetType::Hero, &mut paths.hero),
+            (AssetType::Grid, &mut paths.grid),
+            (AssetType::Logo, &mut paths.logo),
+            (AssetType::Header, &mut paths.header),
+            (AssetType::Square, &mut paths.square),
         ] {
             if skip.contains(&asset_type) {
                 continue;
@@ -64,7 +59,7 @@ impl SteamDataClient {
             };
         }
 
-        (icon_path, hero_path, grid_path, logo_path, header_path, square_path)
+        paths
     }
 
     pub fn ensure_assets(&self, app_id: &str, has_local_icon: bool) -> (String, String) {

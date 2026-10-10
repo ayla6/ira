@@ -161,7 +161,7 @@ pub(crate) fn fetch_and_report_sgdb_assets(request: SgdAssetsRequest<'_>) {
         Some(g) => ira_parser::game_data_dir(save_dir, g),
         None => ira_parser::local_data_dir(save_dir, db_id),
     };
-    let (icon, hero, grid, logo, header, square) = match game_for_dir {
+    let paths = match game_for_dir {
         Some(g) => {
             let switch_exe = cfg.console("switch").executable.clone();
             let assets = super::fetch_images::ensure_game_assets(
@@ -176,12 +176,7 @@ pub(crate) fn fetch_and_report_sgdb_assets(request: SgdAssetsRequest<'_>) {
     let _ = sender.send(AppMessage::SgdbAssetsDownloaded {
         db_id,
         sgdb_id,
-        icon,
-        hero,
-        grid,
-        logo,
-        header,
-        square,
+        paths,
     });
 }
 

@@ -192,25 +192,25 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
     {
         let switch_exe = cfg.console("switch").executable.clone();
         let dir = ira_parser::game_data_dir(&save_dir, &game);
-        let (icon, hero, grid, logo, header, square) =
+        let paths =
             super::fetch_images::ensure_game_assets(&steam, &dir, &save_dir, &db, &cfg, &game, &switch_exe);
         if game.icon_path.is_empty() {
-            game.icon_path = icon;
+            game.icon_path = paths.icon;
         }
         if game.hero_image_path.is_empty() {
-            game.hero_image_path = hero;
+            game.hero_image_path = paths.hero;
         }
         if game.grid_path.is_empty() {
-            game.grid_path = grid;
+            game.grid_path = paths.grid;
         }
         if game.logo_path.is_empty() {
-            game.logo_path = logo;
+            game.logo_path = paths.logo;
         }
         if game.header_path.is_empty() {
-            game.header_path = header;
+            game.header_path = paths.header;
         }
         if game.square_path.is_empty() {
-            game.square_path = square;
+            game.square_path = paths.square;
         }
         // Multi-disc art rides the same pass — the ensure self-gates on
         // disc count, presence, and the ScreenScraper match.

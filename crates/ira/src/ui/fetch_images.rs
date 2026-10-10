@@ -139,9 +139,9 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
                 };
                 let dir = ira_parser::entry_data_dir(&save_dir, &entry);
                 let had = count_present(&dir);
-                let (icon, hero, grid, logo, header, mut square) =
+                let mut paths =
                     ensure_game_assets(&steam, &dir, &save_dir, &db, &cfg, game, &switch_exe);
-                if square.is_empty()
+                if paths.square.is_empty()
                     && !matches!(
                         game.kind,
                         ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
@@ -151,7 +151,7 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
                     // paths it knows; the ScreenScraper box fills the rest.
                     // PS4/Switch squares are fully covered above (native,
                     // then SGDB), so they skip the second pass entirely.
-                    square = ensure_game_square(&steam, &save_dir, &db, &cfg, game);
+                    paths.square = ensure_game_square(&steam, &save_dir, &db, &cfg, game);
                 }
                 changed = count_present(&dir) > had;
                 // Multi-disc art rides the same pass — the ensure
@@ -163,12 +163,7 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
                     let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {
                         db_id: game.db_id,
                         sgdb_id: game.sgdb_id.clone(),
-                        icon,
-                        hero,
-                        grid,
-                        logo,
-                        header,
-                        square: square.clone(),
+                        paths: paths.clone(),
                     });
                 }
             } else if matches!(
@@ -500,7 +495,7 @@ pub(super) fn ensure_game_assets(
     cfg: &ira_config::Config,
     game: &Game,
     switch_exe: &str,
-) -> (String, String, String, String, String, String) {
+) -> ira_models::SgdbAssetPaths {
     let console = matches!(
         game.kind,
         ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
@@ -526,28 +521,21 @@ pub(super) fn ensure_game_assets(
     } else {
         &[]
     };
-    let (icon, hero, grid, logo, header, square) = match sgdb_id {
+    let mut paths = match sgdb_id {
         Some(id) => steam.ensure_sgdb_assets_in_dir(dir, id, skip),
         // Nothing SGDB can serve: the SS fallbacks below still run.
-        None => (
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ),
+        None => ira_models::SgdbAssetPaths::default(),
     };
-    let square = if console {
+    paths.square = if console {
         let native = native_square(dir, game, cfg, switch_exe);
         if native.is_empty() {
             // ROM icon extraction is not bulletproof (some NSP dumps yield
             // nothing) — SGDB square art beats a missing capsule.
             match sgdb_id {
                 Some(id) => {
-                    let (_, _, _, _, _, sgdb_square) =
-                        steam.ensure_sgdb_assets_in_dir(dir, id, &[]);
-                    sgdb_square
+                    steam
+                        .ensure_sgdb_assets_in_dir(dir, id, &[])
+                        .square
                 }
                 None => String::new(),
             }
@@ -555,10 +543,10 @@ pub(super) fn ensure_game_assets(
             native
         }
     } else {
-        square
+        paths.square
     };
-    let logo = if logo.is_empty() {
-        fetch_ss_slot_persisted(
+    if paths.logo.is_empty() {
+        paths.logo = fetch_ss_slot_persisted(
             steam,
             save_dir,
             db,
@@ -566,12 +554,10 @@ pub(super) fn ensure_game_assets(
             game,
             ira_models::AssetType::Logo,
             MediaKind::Wheel,
-        )
-    } else {
-        logo
-    };
-    let header = if header.is_empty() {
-        fetch_ss_slot_persisted(
+        );
+    }
+    if paths.header.is_empty() {
+        paths.header = fetch_ss_slot_persisted(
             steam,
             save_dir,
             db,
@@ -579,11 +565,9 @@ pub(super) fn ensure_game_assets(
             game,
             ira_models::AssetType::Header,
             MediaKind::SteamGrid,
-        )
-    } else {
-        header
-    };
-    (icon, hero, grid, logo, header, square)
+        );
+    }
+    paths
 }
 
 /// Download the matched game's SGDB square (and any other missing SGDB
@@ -599,9 +583,9 @@ pub(super) fn fetch_sgdb_square(
         return String::new();
     };
     let dir = ira_parser::entry_data_dir(save_dir, &entry);
-    let (_, _, _, _, _, square) =
-        steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(sgdb_id), &[]);
-    square
+    steam
+        .ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(sgdb_id), &[])
+        .square
 }
 
 /// Import a console game's ROM icon into its data dir as square.webp —

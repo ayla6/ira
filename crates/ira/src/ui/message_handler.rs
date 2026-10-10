@@ -79,26 +79,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
         AppMessage::SgdbAssetsDownloaded {
             db_id,
             sgdb_id,
-            icon,
-            hero,
-            grid,
-            logo,
-            header,
-            square,
+            paths,
         } => {
-                handle_sgdb_assets_downloaded(
-                    state,
-                    db_id,
-                    sgdb_id,
-                    SgdbAssetPaths {
-                        icon,
-                        hero,
-                        grid,
-                        logo,
-                        header,
-                        square,
-                    },
-                );
+                handle_sgdb_assets_downloaded(state, db_id, sgdb_id, paths);
                 refresh(state);
             }
         AppMessage::SquareReady(db_id) => handle_square_ready(state, db_id),
@@ -509,20 +492,11 @@ fn handle_rpcs3_playtime_changed(state: &SharedState) {
     });
 }
 
-struct SgdbAssetPaths {
-    icon: String,
-    hero: String,
-    grid: String,
-    logo: String,
-    header: String,
-    square: String,
-}
-
 fn handle_sgdb_assets_downloaded(
     state: &SharedState,
     db_id: i64,
     sgdb_id: String,
-    paths: SgdbAssetPaths,
+    paths: ira_models::SgdbAssetPaths,
 ) {
     let _span = tracing::info_span!("SgdbAssetsDownloaded", db_id).entered();
     {

@@ -9,7 +9,7 @@ ira-db = { path = "../db" }
 ira-parser = { path = "../parser" }
 ira-api = { path = "../api" }
 ira-config = { path = "../config" }
-reqwest = { version = "0.12", features = ["blocking", "json"] }
+reqwest = { version = "0.13", features = ["blocking", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

@@ -215,6 +215,20 @@ fn capsule_width(square: bool, capsule: i32) -> i32 {
     }
 }
 
+fn carousel_art_key(game: &Game, square_mode: bool) -> &str {
+    if square_mode {
+        if game.square_path.is_empty() {
+            &game.grid_path
+        } else {
+            &game.square_path
+        }
+    } else if game.grid_path.is_empty() {
+        &game.square_path
+    } else {
+        &game.grid_path
+    }
+}
+
 /// The `_small` square thumbnail beside a full square image, when one is on
 /// disk. Same directory, generated alongside the download or edit save.
 fn small_square_path(square_path: &str) -> Option<String> {
@@ -268,8 +282,7 @@ pub(super) fn refresh(state: &SharedState) {
             current.len() == games.len()
                 && current.iter().zip(&games).all(|(a, b)| {
                     a.grid_id() == b.grid_id()
-                        && a.grid_path == b.grid_path
-                        && a.square_path == b.square_path
+                        && carousel_art_key(a, square_mode) == carousel_art_key(b, square_mode)
                         && a.name == b.name
                 })
         };
@@ -861,7 +874,29 @@ fn queue_missing_squares(state: &SharedState, ui: &HomeUi, square_mode: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{boundary_target, next_selection, reacquire_index};
+    use super::{boundary_target, carousel_art_key, next_selection, reacquire_index};
+    use crate::Game;
+
+    #[test]
+    fn test_carousel_art_key_uses_only_the_displayed_slot() {
+        let game = Game {
+            grid_path: "grid.webp".to_string(),
+            square_path: "square.webp".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(carousel_art_key(&game, true), "square.webp");
+        assert_eq!(carousel_art_key(&game, false), "grid.webp");
+    }
+
+    #[test]
+    fn test_carousel_art_key_falls_back_to_the_other_slot() {
+        let game = Game {
+            grid_path: "grid.webp".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(carousel_art_key(&game, true), "grid.webp");
+        assert_eq!(carousel_art_key(&game, false), "grid.webp");
+    }
 
     #[test]
     fn test_next_selection_wraps_once_from_the_edge_on_a_fresh_press() {

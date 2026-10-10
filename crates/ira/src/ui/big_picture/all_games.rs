@@ -769,6 +769,9 @@ impl AllSoftwareUi {
             self.overlay.upcast_ref()
         };
         self.surfaces.set_visible_child(target);
+        if recent {
+            super::home::refresh(state);
+        }
         self.refresh(state);
         if tiles {
             // The ring re-anchors itself from the tiles' own allocation

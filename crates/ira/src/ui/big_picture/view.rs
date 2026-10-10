@@ -617,6 +617,8 @@ pub(crate) fn refresh(state: &SharedState) {
         big.all.revalidate_tooltip();
         super::home::revalidate_pill(&big);
     }
-    super::home::refresh(state);
+    if big.all.tab() == Tab::Recent {
+        super::home::refresh(state);
+    }
     big.all.refresh(state);
 }

@@ -281,13 +281,17 @@ pub(super) fn handle_msg(state: &SharedState, msg: NavMsg) {
 fn route(state: &SharedState, command: NavCommand, engage: bool) {
     let mouse_drove = super::mouse::note_controller_use(state);
     // While the black running screen covers the shell the library is
-    // not navigable: the game owns the screen until it exits.
+    // not navigable: B cancels the launch (stops the starting game)
+    // and every other input waits for the session to exit.
     if state
         .borrow()
         .big_picture
         .as_ref()
         .is_some_and(|big| big.is_running_showing())
     {
+        if command == NavCommand::Back && engage {
+            cancel_running(state);
+        }
         return;
     }
     // The virtual keyboard swallows navigation while it is open: arrows
@@ -421,10 +425,16 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
                 None => big.game_menu.open(state, super::game_menu::MenuKind::Sort),
             }
         }
-        NavCommand::Left => big.all.move_selection(-1, 0, engage),
-        NavCommand::Right => big.all.move_selection(1, 0, engage),
-        NavCommand::Up => big.all.move_selection(0, -1, engage),
-        NavCommand::Down => big.all.move_selection(0, 1, engage),
+        // X opens the sort picker everywhere except the groups tiles,
+        // where it deletes the selected group: Options alone can't
+        // reach sorting once a game has focus.
+        NavCommand::Secondary => {
+            big.game_menu.open(state, super::game_menu::MenuKind::Sort);
+        }
+        NavCommand::Left => big.all.move_selection(state, -1, 0, engage),
+        NavCommand::Right => big.all.move_selection(state, 1, 0, engage),
+        NavCommand::Up => big.all.move_selection(state, 0, -1, engage),
+        NavCommand::Down => big.all.move_selection(state, 0, 1, engage),
         NavCommand::Confirm => {
             let game = big.all.selected_game();
             if let Some(game) = game {
@@ -440,6 +450,34 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
             }
         }
         _ => {}
+    }
+}
+
+/// Cancel a launch still behind the black running screen: B while the
+/// session is starting drops it back to the library. Only starting
+/// sessions (no pid yet) cancel — once the game owns its pid, B
+/// belongs to the game, not the shell.
+fn cancel_running(state: &SharedState) {
+    let starting: Vec<i64> = state
+        .borrow()
+        .running_games
+        .lock()
+        .map(|games| {
+            games
+                .iter()
+                .filter(|(_, pid)| **pid <= 0)
+                .map(|(db_id, _)| *db_id)
+                .collect()
+        })
+        .unwrap_or_default();
+    if starting.is_empty() {
+        return;
+    }
+    for db_id in starting {
+        crate::ui::play_button::stop_game(state, db_id);
+    }
+    if let Some(big) = state.borrow().big_picture.clone() {
+        big.hide_running();
     }
 }
 

@@ -91,10 +91,28 @@ impl GameMenu {
         self.root.is_visible()
     }
 
-    /// Open a menu flavor and lay out its rows.
+    /// Open a menu flavor and lay out its rows. Sort and group-order
+    /// menus land on the current choice instead of the top row.
     pub(super) fn open(&self, state: &SharedState, kind: MenuKind) {
+        let initial = match &kind {
+            MenuKind::Sort => {
+                let current = state.borrow().cfg.sort_mode;
+                ira_models::SortMode::ORDERING_CHOICES
+                    .iter()
+                    .position(|mode| *mode == current)
+                    .unwrap_or(0)
+            }
+            MenuKind::GroupOrder => {
+                let current = state.borrow().cfg.group_order;
+                ira_models::GroupOrder::ALL
+                    .iter()
+                    .position(|order| *order == current)
+                    .unwrap_or(0)
+            }
+            _ => 0,
+        };
         *self.kind.borrow_mut() = Some(kind);
-        self.selection.set(0);
+        self.selection.set(initial);
         self.panel
             .set_size_request((560.0 * crate::ui::css::bp_scale()).round() as i32, -1);
         self.rebuild(state);

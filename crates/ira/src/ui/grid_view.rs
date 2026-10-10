@@ -4,7 +4,7 @@ use ira_models::{GroupBy, GroupSelection, SortMode};
 
 use super::context_menu::show_game_context_menu;
 use super::css::*;
-use super::filter::filtered_games;
+use super::filter::{entity_names_for_sort, filtered_games, sort_detail};
 use super::game_item::GameItem;
 use super::helpers::clear_children;
 use super::message_helpers::switch_to_game;
@@ -12,6 +12,7 @@ use super::recent_row::build_recent_row;
 use super::state::{LoadingWidgets, SharedState};
 use super::virtual_grid::{BindFn, SetupFn, UnbindFn, VirtualGrid};
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -75,63 +76,6 @@ pub(super) fn queue_cover_load_priority(
             }
         }
     });
-}
-
-fn badge_text(game: &Game, mode: SortMode, state: &SharedState) -> Option<String> {
-    match mode {
-        SortMode::Alphabetical => None,
-        SortMode::Completion => {
-            if game.total_count == 0 {
-                None
-            } else {
-                Some(format!("{}%", (game.completion_pct() as u8)))
-            }
-        }
-        SortMode::HoursPlayed => {
-            let playtime = super::helpers::display_playtime(state, game);
-            if playtime <= 0.0 {
-                None
-            } else {
-                Some(super::game_display::format_playtime(playtime))
-            }
-        }
-        SortMode::LastPlayed => {
-            if game.last_played == 0 {
-                None
-            } else {
-                super::helpers::local_datetime(game.last_played)
-                    .map(|dt| dt.format("%b %-d").to_string())
-            }
-        }
-        SortMode::ReleaseDate => {
-            if game.release_timestamp == 0 {
-                None
-            } else {
-                chrono::DateTime::from_timestamp(game.release_timestamp, 0)
-                    .map(|dt| dt.format("%Y").to_string())
-            }
-        }
-        SortMode::MetacriticScore => {
-            if game.metacritic_score < 0 {
-                None
-            } else {
-                Some(game.metacritic_score.to_string())
-            }
-        }
-        SortMode::Publisher | SortMode::Developer => {
-            // The credited name rides the cached entity map via the
-            // game's own name ordering; tiles without a credit show
-            // nothing rather than an empty badge.
-            None
-        }
-        SortMode::SteamReview => {
-            if game.steam_review_score < 0 {
-                None
-            } else {
-                Some(format!("{}%", game.steam_review_score))
-            }
-        }
-    }
 }
 
 fn build_grid_header(state: &SharedState, cover_height: i32) -> gtk4::Box {
@@ -313,6 +257,7 @@ fn make_bind(
     item_size: Rc<Cell<(i32, i32)>>,
     sort_mode: SortMode,
     square: bool,
+    entity_names: HashMap<i64, String>,
 ) -> BindFn {
     let state = state.clone();
     Rc::new(move |widget, game| {
@@ -372,24 +317,18 @@ fn make_bind(
             }
         }
 
-        if let Some(badge) = unsafe { vbox.steal_data::<gtk4::Label>("badge") } {
-            overlay.remove_overlay(&badge);
+        let playtime = if sort_mode == SortMode::HoursPlayed {
+            super::helpers::display_playtime(&state, game)
+        } else {
+            game.playtime
+        };
+        let mut tooltip = game.name.clone();
+        if let Some(detail) = sort_detail(game, sort_mode, playtime, &entity_names) {
+            tooltip.push('\n');
+            tooltip.push_str(&detail);
         }
-        if let Some(text) = badge_text(game, sort_mode, &state) {
-            let badge = make_cover_badge(&text);
-            overlay.add_overlay(&badge);
-            unsafe { vbox.set_data::<gtk4::Label>("badge", badge) };
-        }
+        vbox.set_tooltip_text(Some(&tooltip));
     })
-}
-
-fn make_cover_badge(text: &str) -> gtk4::Label {
-    let badge = gtk4::Label::new(Some(text));
-    badge.set_valign(gtk4::Align::End);
-    badge.set_halign(gtk4::Align::Center);
-    // GTK 4 measures labels with and without margins separately, warning once per tile.
-    badge.add_css_class(CSS_COVER_BADGE);
-    badge
 }
 
 fn bind_square_art(
@@ -459,16 +398,13 @@ fn make_unbind(item_size: Rc<Cell<(i32, i32)>>) -> UnbindFn {
             label.set_visible(false);
         }
 
-        if let Some(badge) = unsafe { vbox.steal_data::<gtk4::Label>("badge") } {
-            overlay.remove_overlay(&badge);
-        }
+        vbox.set_tooltip_text(None);
     })
 }
 
-/// Section mode's data: when a group-by dimension is active and the grid
-/// shows the whole library, the games are ordered by category and the
-/// section titles ride along for the grid's header rows. Any other view
-/// (search, a narrowed selection, no grouping) is flat.
+/// Section mode's data for an explicit group-by dimension. Sorting by a
+/// metadata field keeps the library as one flat grid; its value is shown in
+/// the tile tooltip instead of becoming a section header.
 fn arrange_sections(state: &SharedState, games: &[Game]) -> (Vec<Game>, Vec<(String, u32)>) {
     let (group_by, searching, selected_all, db) = {
         let s = state.borrow();
@@ -479,7 +415,10 @@ fn arrange_sections(state: &SharedState, games: &[Game]) -> (Vec<Game>, Vec<(Str
             s.db.clone(),
         )
     };
-    if group_by == GroupBy::Off || searching || !selected_all || games.is_empty() {
+    if searching || !selected_all || games.is_empty() {
+        return (games.to_vec(), Vec::new());
+    }
+    if group_by == GroupBy::Off {
         return (games.to_vec(), Vec::new());
     }
     let entity_names = match group_by {
@@ -526,6 +465,10 @@ fn build_grid_view(
 ) {
     let _span = tracing::info_span!("build_grid_view", count = games.len()).entered();
     let (games, sections) = arrange_sections(state, games);
+    let entity_names = {
+        let s = state.borrow();
+        entity_names_for_sort(&s.db, sort_mode)
+    };
     let store = gio::ListStore::new::<GameItem>();
     for game in &games {
         store.append(&GameItem::new(game));
@@ -560,7 +503,7 @@ fn build_grid_view(
     let item_size = grid.item_size_cell();
     grid.set_factory(
         make_setup(state, item_size.clone()),
-        make_bind(state, item_size.clone(), sort_mode, square),
+        make_bind(state, item_size.clone(), sort_mode, square, entity_names),
         make_unbind(item_size),
     );
 
@@ -607,6 +550,7 @@ pub fn show_grid_view(state: &SharedState) {
         // A visible grid means a loaded library: reopen the menu gate
         // rescans close through show_loading_view.
         s.menu_btn.set_sensitive(true);
+        s.add_btn.set_sensitive(true);
     }
 
     let (content_scroll, grid_header, square, stored_h, sort_mode, search_empty) = {
@@ -713,6 +657,7 @@ pub fn show_loading_view(state: &SharedState, status: &str, completed: usize, to
     // Every menu dialog reads the loaded library: shut the gate until the
     // load lands and show_grid_view reopens it.
     s.menu_btn.set_sensitive(false);
+    s.add_btn.set_sensitive(false);
 }
 
 /// Progress bar with a dim "N of M sources" caption below it, sized to a

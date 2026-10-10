@@ -11,6 +11,7 @@ use crate::ui::virtual_grid::VirtualGrid;
 use crate::Game;
 use adw::prelude::*;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -120,8 +121,7 @@ fn scaled_px(px: f64) -> i32 {
 /// the slide's direction.
 const TAB_ORDER: [Tab; 3] = [Tab::Recent, Tab::Everything, Tab::Groups];
 
-/// The L/R shoulder badge beside the tabs: the connected pad's glyph art
-/// when the icon set has one, the letter in a rounded box otherwise.
+/// The L/R shoulder badge beside the tabs: the connected pad's glyph.
 struct ShoulderBadge {
     slot: gtk4::Box,
     glyph: gtk4::Image,
@@ -133,9 +133,10 @@ impl ShoulderBadge {
         let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         slot.set_valign(gtk4::Align::Center);
         let glyph = gtk4::Image::new();
-        let fallback = gtk4::Label::new(None);
-        fallback.add_css_class(CSS_BP_SHOULDER);
         slot.append(&glyph);
+        let fallback = gtk4::Label::new(None);
+        fallback.set_valign(gtk4::Align::Center);
+        fallback.add_css_class(CSS_BP_PROMPT);
         slot.append(&fallback);
         Self { slot, glyph, fallback }
     }
@@ -147,16 +148,18 @@ impl ShoulderBadge {
         // and the tab picker, and the two shoulders would hang at different
         // distances from it.
         self.glyph.set_pixel_size((34.0 * scale).round().max(8.0) as i32);
-        self.fallback.set_text(&crate::ui::input_profile_assets::source_badge(
-            ira_input::InputSource::Button(button),
-            family,
-        ));
-        crate::ui::input_profile_assets::set_source_asset(
+        let source = ira_input::InputSource::Button(button);
+        let has_asset = crate::ui::input_profile_assets::set_source_asset(
             &self.glyph,
-            &self.fallback,
-            ira_input::InputSource::Button(button),
+            source,
             family,
         );
+        if !has_asset {
+            self.fallback.set_text(&crate::ui::input_profile_assets::source_badge(
+                source, family,
+            ));
+        }
+        self.fallback.set_visible(!has_asset);
     }
 }
 
@@ -168,7 +171,8 @@ pub(super) struct AllSoftwareUi {
     recent_page: gtk4::Widget,
     scrolled: gtk4::ScrolledWindow,
     grid: VirtualGrid,
-    /// The selected game's name as a tooltip pill floating above its tile.
+    /// The selected game's name and sort detail as a tooltip pill floating
+    /// above its tile.
     tooltip: Marquee,
     /// The drawn selection ring floating over the selected tile.
     ring: SelectionRing,
@@ -176,6 +180,8 @@ pub(super) struct AllSoftwareUi {
     overlay: gtk4::Overlay,
     empty: gtk4::Label,
     games: RefCell<Vec<Game>>,
+    sort_mode: Cell<ira_models::SortMode>,
+    sort_entity_names: RefCell<HashMap<i64, String>>,
     /// The focused tile, if any. Scrolling the grid by hand clears it;
     /// the arrows re-acquire from whatever is on screen.
     selected: Cell<Option<usize>>,
@@ -367,7 +373,7 @@ pub(super) fn build(
         let overlay_state = state.clone();
         Rc::new(move || {
             if let Some(big) = overlay_state.borrow().big_picture.clone() {
-                big.all.update_tooltip();
+                big.all.update_tooltip(&overlay_state);
             }
         })
     });
@@ -407,7 +413,7 @@ pub(super) fn build(
         let adj = scrolled.vadjustment();
         let track = move |_: &gtk4::Adjustment| {
             if let Some(big) = scroll_state.borrow().big_picture.clone() {
-                big.all.update_tooltip();
+                big.all.update_tooltip(&scroll_state);
             }
         };
         adj.connect_value_changed(track.clone());
@@ -440,6 +446,8 @@ pub(super) fn build(
         tooltip,
         empty: empty.clone(),
         games: RefCell::new(Vec::new()),
+        sort_mode: Cell::new(ira_models::SortMode::default()),
+        sort_entity_names: RefCell::new(HashMap::new()),
         selected: Cell::new(None),
         selected_key,
         last_selected: Cell::new(None),
@@ -765,7 +773,7 @@ impl AllSoftwareUi {
             // hooks; a tab slide reallocates the page and lands it.
             self.groups_grid.repaint(state);
         } else if !recent {
-            self.ensure_default_selection();
+            self.ensure_default_selection(state);
         }
         self.update_ordering_label(state);
         if let Some(big) = state.borrow().big_picture.clone() {
@@ -780,11 +788,13 @@ impl AllSoftwareUi {
             } else if self.groups_view.get().is_some() {
                 vec![
                     (ira_input::GamepadButton::B, crate::tr!("Back")),
+                    (ira_input::GamepadButton::X, crate::tr!("Sort")),
                     (ira_input::GamepadButton::Start, crate::tr!("Options")),
                     (ira_input::GamepadButton::A, crate::tr!("Play")),
                 ]
             } else {
                 vec![
+                    (ira_input::GamepadButton::X, crate::tr!("Sort")),
                     (ira_input::GamepadButton::Start, crate::tr!("Options")),
                     (ira_input::GamepadButton::A, crate::tr!("Play")),
                 ]
@@ -799,9 +809,9 @@ impl AllSoftwareUi {
     /// entering the page, opening a group, or switching tabs must always
     /// show a highlight. A selection cleared by manual scrolling stays
     /// cleared; only a surface (re)entry re-parks it.
-    fn ensure_default_selection(&self) {
+    fn ensure_default_selection(&self, state: &SharedState) {
         if self.selected.get().is_none() && !self.games.borrow().is_empty() {
-            self.select(0);
+            self.select(state, 0);
         }
     }
 
@@ -817,7 +827,10 @@ impl AllSoftwareUi {
         let was_empty = self.games.borrow().is_empty();
         // Same filter+sort core as the desktop sidebar; the selected
         // group maps onto the shared GroupSelection, with None = all.
-        let games = {
+        // Publisher and developer ordering needs the credited names,
+        // like the sidebar loads — an empty map would silently fall
+        // back to alphabetical.
+        let (games, sort_mode, entity_names) = {
             let s = state.borrow();
             let search = super::super::search::SearchQuery::parse(&s.search_query);
             let group = self
@@ -825,7 +838,9 @@ impl AllSoftwareUi {
                 .get()
                 .map(ira_models::GroupSelection::Collection)
                 .unwrap_or(ira_models::GroupSelection::AllGames);
-            super::super::filter::filter_and_sort(
+            let sort_mode = s.cfg.sort_mode;
+            let entity_names = super::super::filter::entity_names_for_sort(&s.db, sort_mode);
+            let games = super::super::filter::filter_and_sort(
                 &s.games,
                 &super::super::filter::GameFilter {
                     show_hidden: s.cfg.show_hidden_games,
@@ -833,12 +848,16 @@ impl AllSoftwareUi {
                     group: &group,
                     group_members: &s.group_members,
                     derived_members: &std::collections::HashMap::new(),
-                    sort_mode: s.cfg.sort_mode,
+                    sort_mode,
                     sort_descending: s.cfg.sort_descending,
-                    entity_names: &std::collections::HashMap::new(),
+                    entity_names: &entity_names,
                 },
-            )
+            );
+            (games, sort_mode, entity_names)
         };
+
+        self.sort_mode.set(sort_mode);
+        self.sort_entity_names.replace(entity_names);
 
         let unchanged = {
             let current = self.games.borrow();
@@ -851,6 +870,7 @@ impl AllSoftwareUi {
                 })
         };
         if unchanged {
+            self.update_tooltip(state);
             return;
         }
         // The games changed under a selection: keep the focused key when
@@ -869,15 +889,15 @@ impl AllSoftwareUi {
             self.selected.set(kept);
             self.selected_key.set(key.unwrap_or((0, 0)));
         }
-        self.sync_store(&games);
+        self.sync_store(state, &games);
         // The library landed with nothing selected: park on the first
         // tile.
         if was_empty && !games.is_empty() {
-            self.select(0);
+            self.select(state, 0);
         }
     }
 
-    fn sync_store(&self, games: &[Game]) {
+    fn sync_store(&self, state: &SharedState, games: &[Game]) {
         let store = gio::ListStore::new::<crate::ui::game_item::GameItem>();
         for game in games {
             store.append(&crate::ui::game_item::GameItem::new(game));
@@ -895,10 +915,10 @@ impl AllSoftwareUi {
         }
         self.empty.set_visible(games.is_empty());
         if let Some(game) = games.get(self.selected.get().unwrap_or(0)) {
-            self.tooltip.set_text(&game.name);
+            self.set_tooltip_text(state, game);
         }
         *self.games.borrow_mut() = games.to_vec();
-        self.update_tooltip();
+        self.update_tooltip(state);
     }
 
     /// Re-measure the pill after the big-picture scale changed (see
@@ -914,7 +934,13 @@ impl AllSoftwareUi {
     /// moves wrap within the row on fresh presses only, like the home
     /// carousel: held repeats hit the row's wall instead of cycling
     /// forever.
-    pub(super) fn move_selection(&self, dx: i32, dy: i32, engage: bool) {
+    pub(super) fn move_selection(
+        &self,
+        state: &SharedState,
+        dx: i32,
+        dy: i32,
+        engage: bool,
+    ) {
         let (cols, _, item_h, sp) = self.grid.current_layout();
         let count = self.games.borrow().len();
         if count == 0 {
@@ -938,26 +964,26 @@ impl AllSoftwareUi {
                 }
                 _ => (first_row.min(last_row) * cols).min(count - 1),
             };
-            self.select(index);
+            self.select(state, index);
         }
         let selected = self.selected.get().unwrap_or(0);
         if let Some(next) = grid_move(selected, count, cols as usize, dx, dy, engage) {
-            self.select(next);
+            self.select(state, next);
         }
     }
 
     /// Point the highlight at `index` and bring it into view: the gamepad
     /// and keyboard path, where the camera follows the selection.
-    fn select(&self, index: usize) {
-        if self.apply_selection(index) {
+    fn select(&self, state: &SharedState, index: usize) {
+        if self.apply_selection(state, index) {
             self.scroll_to_selected();
-            self.update_tooltip();
+            self.update_tooltip(state);
         }
     }
 
     /// Restyle the grid around `index` and set the focused key. Returns
     /// false when the index has no game.
-    fn apply_selection(&self, index: usize) -> bool {
+    fn apply_selection(&self, state: &SharedState, index: usize) -> bool {
         let game = self
             .games
             .borrow()
@@ -970,8 +996,28 @@ impl AllSoftwareUi {
         self.last_selected.set(Some(index));
         self.selected_key.set(key);
         self.grid.rebind_visible();
-        self.tooltip.set_text(&game.name);
+        self.set_tooltip_text(state, &game);
         true
+    }
+
+    fn set_tooltip_text(&self, state: &SharedState, game: &Game) {
+        let mut text = game.name.clone();
+        let playtime = if self.sort_mode.get() == ira_models::SortMode::HoursPlayed {
+            super::super::helpers::display_playtime(state, game)
+        } else {
+            game.playtime
+        };
+        let detail = super::super::filter::sort_detail(
+            game,
+            self.sort_mode.get(),
+            playtime,
+            &self.sort_entity_names.borrow(),
+        );
+        if let Some(detail) = detail {
+            text.push('\n');
+            text.push_str(&detail);
+        }
+        self.tooltip.set_text(&text);
     }
 
     /// The user scrolled the grid by hand: the focus goes away entirely.
@@ -992,7 +1038,7 @@ impl AllSoftwareUi {
     /// whatever scroll position the grid is at. The ring marks the
     /// selection whenever it is on screen, art or not (an artless tile
     /// shows its name label); only the pill needs art to point at.
-    fn update_tooltip(&self) {
+    fn update_tooltip(&self, state: &SharedState) {
         let Some(selected) = self.selected.get() else {
             self.tooltip.set_visible(false);
             self.ring.set_visible(false);
@@ -1038,7 +1084,7 @@ impl AllSoftwareUi {
         self.ring
             .place(x, tile_top, item_w as f64, item_h as f64, scale, false);
         self.tooltip.set_max_width(item_w as f64 * 3.0);
-        self.tooltip.set_text(&game.name);
+        self.set_tooltip_text(state, &game);
         // The tail tip rests just outside the selection ring on whichever
         // side the pill's actual height fits into the scrolled area —
         // above by preference, below near the top edge.
@@ -1060,14 +1106,14 @@ impl AllSoftwareUi {
     /// fully visible (the scroll target leaves a visible row alone, so
     /// the camera only moves if the tile was out of view). Returns
     /// whether the game was found.
-    pub(super) fn focus_key(&self, key: GameKey) -> bool {
+    pub(super) fn focus_key(&self, state: &SharedState, key: GameKey) -> bool {
         let index = self
             .games
             .borrow()
             .iter()
             .position(|g| game_key(g) == key);
         index.is_some_and(|index| {
-            self.select(index);
+            self.select(state, index);
             true
         })
     }
@@ -1303,7 +1349,7 @@ fn launch_from_cell(state: &SharedState, widget: &gtk4::Widget) {
     if big.all.is_selected(game_key(&game)) {
         launch(state, &game);
     } else {
-        big.all.focus_key(game_key(&game));
+        big.all.focus_key(state, game_key(&game));
     }
 }
 

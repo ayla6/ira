@@ -166,6 +166,7 @@ impl GroupsGrid {
     /// callbacks that may execute under an outstanding shared borrow, so
     /// it must never take the state mutably here.
     pub(super) fn reload(&self, state: &SharedState) {
+        let selected_group = self.selected_group_id(state);
         // Forget the previous tile size first: building from a stale
         // size while the flow is narrower measures oversized children
         // (layout warnings) and paints wrong geometry until a later
@@ -241,6 +242,15 @@ impl GroupsGrid {
             self.append_group_tile(state, name, covers, tile);
             self.order.borrow_mut().push(Some(*id));
         }
+        let selected = selected_group
+            .and_then(|id| {
+                self.order
+                    .borrow()
+                    .iter()
+                    .position(|candidate| *candidate == Some(id))
+            })
+            .unwrap_or(0);
+        self.selection.set(selected);
         self.clamp_selection(state);
         self.repaint_selection();
     }

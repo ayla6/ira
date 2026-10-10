@@ -152,6 +152,14 @@ impl DaemonClient {
         }
     }
 
+    pub fn stop_session(&mut self, tag: i64) -> Result<(), String> {
+        match self.request(Request::Stop { tag })? {
+            Response::Applied => Ok(()),
+            Response::Error { message } => Err(message),
+            _ => Err("unexpected response to stop request".to_string()),
+        }
+    }
+
     pub fn launch_and_wait(
         &mut self,
         request: LaunchRequest,

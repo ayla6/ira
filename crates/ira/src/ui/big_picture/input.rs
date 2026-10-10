@@ -244,7 +244,7 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
     let mut pads: Vec<PhysicalGamepad> = Vec::new();
     let mut nav = NavState::default();
     let started = Instant::now();
-    let mut last_rescan = 0u64;
+    let mut last_rescan = RESCAN_EVERY_MS;
     let mut pads_ui = PadUi::default();
     loop {
         let now_ms = started.elapsed().as_millis() as u64;

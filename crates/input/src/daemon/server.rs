@@ -452,6 +452,26 @@ fn process_request(
                 ),
             }
         }
+        Request::Stop { tag } => {
+            let session = table
+                .sessions
+                .iter()
+                .find(|session| session.tag == Some(tag))
+                .map(|session| session.id);
+            match session {
+                Some(id) => {
+                    hub.send(HubCommand::Stop(id));
+                    respond(clients, index, Response::Applied);
+                }
+                None => respond(
+                    clients,
+                    index,
+                    Response::Error {
+                        message: format!("no running session for game {tag}"),
+                    },
+                ),
+            }
+        }
         Request::HoldDesktop { hold } => {
             let client_id = clients[index].id;
             if hold {
@@ -779,6 +799,40 @@ mod tests {
         assert!(!status.session_active);
 
         shutdown_and_join(&mut client, server);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_daemon_stops_session_by_launch_tag() {
+        let dir = temp_test_dir("stop");
+        let path = dir.join("test.sock");
+        let server = std::thread::spawn({
+            let path = path.clone();
+            move || run_daemon_on(&path)
+        });
+        let mut launch_client = wait_for_server(&path);
+        let mut stop_client = DaemonClient::connect(&path).unwrap();
+        let mut request = session_request(vec!["sleep".into(), "5".into()], None);
+        request.tag = Some(91);
+        launch_client.begin_launch(request).unwrap();
+        let watcher = std::thread::spawn(move || {
+            launch_client
+                .wait_session(|_| {})
+                .expect("stopped session must end cleanly")
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !stop_client.status().unwrap().session_active {
+            assert!(Instant::now() < deadline, "the session never became active");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(matches!(
+            stop_client.request(Request::Stop { tag: 91 }).unwrap(),
+            Response::Applied
+        ));
+        assert_eq!(watcher.join().unwrap(), 0);
+
+        shutdown_and_join(&mut stop_client, server);
         std::fs::remove_dir_all(&dir).ok();
     }
 

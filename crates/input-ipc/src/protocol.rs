@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking message change; the daemon answers `status` with
 /// its version so a stale client can bail out cleanly.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -21,6 +21,8 @@ pub enum Request {
     /// by the launch `tag`, so the sender needs no connection to the
     /// session's launch.
     ReloadProfile { tag: i64, profile: String },
+    /// Stop the game session identified by its launch tag.
+    Stop { tag: i64 },
     /// While the app is open it keeps this wish on file: a no-game session routes an
     /// idle controller through its default layout. `enabled: false` (or disconnecting)
     /// releases it; a game launch supersedes it until the last game ends.
@@ -161,6 +163,14 @@ mod tests {
                 assert_eq!(tag, 12);
                 assert_eq!(profile, "/profiles/y.json");
             }
+            other => panic!("wrong wire message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_wire_stop_request_roundtrip() {
+        match roundtrip(&Wire::Request(Request::Stop { tag: 12 })) {
+            Wire::Request(Request::Stop { tag }) => assert_eq!(tag, 12),
             other => panic!("wrong wire message: {other:?}"),
         }
     }

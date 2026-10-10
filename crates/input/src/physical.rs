@@ -736,8 +736,15 @@ fn map_button(code: KeyCode) -> Option<GamepadButton> {
 pub enum ButtonLayout {
     /// evdev's positional standard shared by xpad, hid-sony, hid-nintendo.
     Standard,
+    /// Ira's virtual Sony pads use BTN_C for the cross button while keeping
+    /// the rest of hid-sony's evdev layout.
+    VirtualSony,
+    /// Ira's virtual Xbox pad uses the xpad/SDL face-button slots: X is
+    /// BTN_NORTH and Y is BTN_WEST. Big Picture reads this node directly.
+    VirtualXbox,
     /// The 8BitDo Ultimate 2 in DInput mode, aligned with SDL's HIDAPI
-    /// driver: P1=R4, P2=L4, P3=PR, P4=PL.
+    /// driver for its paddles: P1=R4, P2=L4, P3=PR, P4=PL. Its face
+    /// buttons remain in the controller's physical X-west/Y-north layout.
     Ultimate2DInput,
     /// A controller speaking Nintendo's positional layout through
     /// hid-nintendo, whose `BTN_Z` is the capture button, not a paddle.
@@ -749,7 +756,11 @@ pub enum ButtonLayout {
 /// the positional standard. The hub's Switch-protocol probe keys on the
 /// Nintendo arm — same pads, same notion.
 pub(crate) fn button_layout(vendor: u16, product: u16, name: &str) -> ButtonLayout {
-    if is_ultimate_2(vendor, product, name) {
+    if is_dualshock4_identity(vendor, product) || is_dualsense_identity(vendor, product) {
+        ButtonLayout::VirtualSony
+    } else if is_ira_virtual_device(name) {
+        ButtonLayout::VirtualXbox
+    } else if is_ultimate_2(vendor, product, name) {
         ButtonLayout::Ultimate2DInput
     } else if is_nintendo(vendor, name) {
         ButtonLayout::Nintendo
@@ -783,6 +794,15 @@ pub fn swap_face_buttons(button: GamepadButton) -> GamepadButton {
 
 fn map_button_for_device(code: KeyCode, layout: ButtonLayout) -> Option<GamepadButton> {
     match layout {
+        ButtonLayout::VirtualSony => Some(match code {
+            KeyCode::BTN_C => GamepadButton::X,
+            code => map_button(code)?,
+        }),
+        ButtonLayout::VirtualXbox => Some(match code {
+            KeyCode::BTN_NORTH => GamepadButton::X,
+            KeyCode::BTN_WEST => GamepadButton::Y,
+            code => map_button(code)?,
+        }),
         ButtonLayout::Ultimate2DInput => Some(match code {
             // Keep the Ultimate 2 mapping aligned with SDL's HIDAPI driver:
             // P1=R4, P2=L4, P3=PR, P4=PL.
@@ -1120,6 +1140,55 @@ mod tests {
             ),
             Some(GamepadButton::Paddle2)
         );
+
+        assert_eq!(
+            button_layout(0x045e, 0x028e, "Ira Virtual Xbox Controller"),
+            ButtonLayout::VirtualXbox
+        );
+        assert_eq!(
+            button_layout(0x4952, 0x0001, "Ira Virtual DirectInput Controller"),
+            ButtonLayout::VirtualXbox
+        );
+        assert_eq!(
+            button_layout(
+                0x057e,
+                0x2009,
+                "Ira Virtual Nintendo Switch Pro Controller"
+            ),
+            ButtonLayout::VirtualXbox
+        );
+        assert_eq!(
+            button_layout(0x28de, 0x11ff, "Ira Virtual Steam Input Controller"),
+            ButtonLayout::VirtualXbox
+        );
+        assert_eq!(
+            button_layout(0x4952, 0x0001, "Sony Interactive Entertainment (Ira)"),
+            ButtonLayout::VirtualXbox
+        );
+        assert_eq!(
+            map_button_for_device(evdev::KeyCode::BTN_NORTH, ButtonLayout::VirtualXbox),
+            Some(GamepadButton::X)
+        );
+        assert_eq!(
+            map_button_for_device(evdev::KeyCode::BTN_WEST, ButtonLayout::VirtualXbox),
+            Some(GamepadButton::Y)
+        );
+        assert_eq!(
+            button_layout(
+                0x054c,
+                0x09cc,
+                "Sony Interactive Entertainment Wireless Controller"
+            ),
+            ButtonLayout::VirtualSony
+        );
+        assert_eq!(
+            map_button_for_device(evdev::KeyCode::BTN_C, ButtonLayout::VirtualSony),
+            Some(GamepadButton::X)
+        );
+        assert_eq!(
+            map_button_for_device(evdev::KeyCode::BTN_NORTH, ButtonLayout::VirtualSony),
+            Some(GamepadButton::Y)
+        );
         assert_eq!(
             map_button_for_device(
                 evdev::KeyCode::BTN_TRIGGER_HAPPY2,
@@ -1248,6 +1317,15 @@ mod tests {
         assert_eq!(
             pad_status_summary(std::slice::from_ref(&twin)),
             (1, Some(ControllerFamily::Nintendo))
+        );
+        assert_eq!(
+            pad_status_summary(&[device(
+                "8BitDo Ultimate 2 Wireless Controller (Ira)",
+                0x045e,
+                0x028e,
+                ""
+            )]),
+            (1, Some(ControllerFamily::EightBitDo))
         );
         // Two real pads count twice; nothing connected counts zero.
         let second = device("Xbox 360 Controller", 0x045e, 0x028e, "");

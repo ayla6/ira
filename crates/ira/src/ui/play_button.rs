@@ -156,24 +156,28 @@ pub fn stop_game(state: &SharedState, game_id: i64) {
             .filter(|g| g.kind == ira_models::GameKind::Steam)
             .map(|g| g.steam_api_id().to_string())
     };
-    let pid = state
-        .borrow()
-        .running_games
-        .lock()
-        .unwrap()
-        .remove(&game_id);
     if let Some(app_id) = steam_app_id {
+        state
+            .borrow()
+            .running_games
+            .lock()
+            .unwrap()
+            .remove(&game_id);
         ira_input::steam::request_steam_stop(&app_id);
         return;
     }
+    let running_games = state.borrow().running_games.clone();
+    let pid = running_games.lock().unwrap().get(&game_id).copied();
     if let Some(pid) = pid {
-        // A daemon launch stores a placeholder pid until the daemon reports
-        // the session's real one; there is no process to signal yet, and
-        // pid 0 would aim the signals at our own process group.
         if pid <= 0 {
-            eprintln!("stop: game {} is still starting; nothing to stop yet", game_id);
+            if let Err(error) = ira_launcher::input_daemon::stop_session(game_id) {
+                eprintln!("stop: failed to cancel game {}: {}", game_id, error);
+                return;
+            }
+            running_games.lock().unwrap().remove(&game_id);
             return;
         }
+        running_games.lock().unwrap().remove(&game_id);
         let (wine_exe, wine_prefix, env) = {
             let s = state.borrow();
             let game = s.games.iter().find(|g| g.db_id == game_id);

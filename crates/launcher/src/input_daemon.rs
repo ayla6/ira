@@ -157,6 +157,13 @@ pub fn reload_session_profile(tag: i64, profile: &str) -> Result<(), String> {
     }
 }
 
+/// Stops a game session by the launch tag without starting a daemon as a side
+/// effect when the original launch connection is still winding down.
+pub fn stop_session(tag: i64) -> Result<(), String> {
+    let mut client = DaemonClient::connect(&ira_input_ipc::socket_path())?;
+    client.stop_session(tag)
+}
+
 /// Asks a running input daemon to retire. Best-effort: connecting never
 /// spawns one, and a dead socket is simply "nothing to shut down". Without
 /// this the daemon only leaves on its own idle timer, and a session that

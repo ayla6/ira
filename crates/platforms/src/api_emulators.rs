@@ -20,12 +20,14 @@ use ira_models::AppDetails;
 pub fn read_current_language(
     trophy_source: ira_models::TrophySource,
     game_exe: &str,
+    game_folder: &str,
     save_dir: &str,
     app_id: &str,
 ) -> Option<String> {
     match trophy_source {
         ira_models::TrophySource::Gse => {
-            find_steam_settings(game_exe, save_dir, app_id).and_then(|dir| read_gse_language(&dir))
+            find_steam_settings(game_exe, game_folder, save_dir, app_id)
+                .and_then(|dir| read_gse_language(&dir))
         }
         ira_models::TrophySource::Nge => {
             find_galaxy_settings(game_exe).and_then(|dir| read_nge_language(&dir))
@@ -37,6 +39,7 @@ pub fn read_current_language(
 pub fn write_language_configs(
     trophy_source: ira_models::TrophySource,
     game_exe: &str,
+    game_folder: &str,
     save_dir: &str,
     app_id: &str,
     language: &str,
@@ -46,7 +49,8 @@ pub fn write_language_configs(
     }
     match trophy_source {
         ira_models::TrophySource::Gse => {
-            if let Some(settings_dir) = find_steam_settings(game_exe, save_dir, app_id) {
+            if let Some(settings_dir) = find_steam_settings(game_exe, game_folder, save_dir, app_id)
+            {
                 if let Err(e) = write_gse_language(&settings_dir, language) {
                     eprintln!("Language config write failed: {}", e);
                 }
@@ -66,6 +70,7 @@ pub fn write_language_configs(
 pub fn write_dlc_configs(
     trophy_source: ira_models::TrophySource,
     game_exe: &str,
+    game_folder: &str,
     save_dir: &str,
     app_id: &str,
     details: &AppDetails,
@@ -75,7 +80,8 @@ pub fn write_dlc_configs(
     }
     match trophy_source {
         ira_models::TrophySource::Gse => {
-            if let Some(settings_dir) = find_steam_settings(game_exe, save_dir, app_id) {
+            if let Some(settings_dir) = find_steam_settings(game_exe, game_folder, save_dir, app_id)
+            {
                 if let Err(e) = write_gse_dlc_config(&settings_dir, details) {
                     eprintln!("DLC config write failed: {}", e);
                 }

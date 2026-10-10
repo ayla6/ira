@@ -170,7 +170,7 @@ fn build_launch_wine_advanced_pages(
             sidebar,
             stack,
             has_config,
-            saved_wine_enabled: saved_wine.enabled,
+            saved_wine_enabled: saved_wine.enabled && wine_tabs_allowed(game.kind),
             saved_profile_id,
             profiles: &profiles,
             state,
@@ -424,7 +424,7 @@ fn build_dialog_contents(
     };
 
     let emu_save_dir = state.borrow().save_dir.clone();
-    let pending_emu_uninstall = build_api_emulator_page(
+    build_api_emulator_page(
         super::edit_game_pages::ApiEmuPageParams {
             emu_exe: &saved_launch.exe,
             emu_game_folder: &game.game_folder,
@@ -433,11 +433,10 @@ fn build_dialog_contents(
             emu_app_id: &game.native_id,
             save_dir: &emu_save_dir,
             win: &win,
-            emu_pending_uninstall: None,
         },
         &state,
         &languages,
-        &sidebar,
+        Some(&sidebar),
         &stack,
     );
 
@@ -526,7 +525,6 @@ fn build_dialog_contents(
     let win_w = Downgrade::downgrade(&win);
     let game_app_id = game.app_id.clone();
     let game_store_id = game.steam_api_id().to_string();
-    let game_folder = game.game_folder.clone();
     let trophy_source = game.trophy_source;
     let game_kind = game.kind;
     let saved_platform_id_s = game.platform_id.id().to_string();
@@ -555,8 +553,6 @@ fn build_dialog_contents(
     let pending_emulator_c = pending_emulator.clone();
     let game_folder_entry_w = game_folder_entry.as_ref().map(Downgrade::downgrade);
     let runtime_row_w = runtime_row.as_ref().map(Downgrade::downgrade);
-    let pending_emu_uninstall_w = pending_emu_uninstall.as_ref().map(Rc::downgrade);
-
     save_btn.connect_clicked(move |_| {
         macro_rules! take {
             ($weak:ident, $name:literal) => {
@@ -586,7 +582,6 @@ fn build_dialog_contents(
         let steam_id_entry = steam_id_entry_w.as_ref().and_then(|w| w.upgrade());
         let game_folder_entry = game_folder_entry_w.as_ref().and_then(|w| w.upgrade());
         let runtime_row = runtime_row_w.as_ref().and_then(|w| w.upgrade());
-        let pending_emu_uninstall = pending_emu_uninstall_w.as_ref().and_then(|w| w.upgrade());
         save_btn.set_sensitive(false);
         save_game_settings(SaveGameSettingsParams {
             state,
@@ -604,8 +599,8 @@ fn build_dialog_contents(
             old_wine: old_wine_s.clone(),
             app_default_wine: app_default_wine_s.clone(),
             game_exe: game_exe_s.clone(),
+            initial_game_folder: game.game_folder.clone(),
             old_input_profile: old_input_profile_s.clone(),
-            game_folder: game_folder.clone(),
             language_row,
             languages: languages_s.clone(),
             saved_platform_id: saved_platform_id_s.clone(),
@@ -626,7 +621,6 @@ fn build_dialog_contents(
             saved_profile_id,
             game_folder_entry,
             runtime_row,
-            pending_emu_uninstall,
         });
     });
 

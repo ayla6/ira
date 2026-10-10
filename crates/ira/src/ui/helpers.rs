@@ -1,5 +1,5 @@
 use crate::Game;
-use adw::prelude::{AdwDialogExt, AlertDialogExt, AdwWindowExt, PreferencesRowExt};
+use adw::prelude::{AdwDialogExt, AdwWindowExt, AlertDialogExt, PreferencesRowExt};
 use chrono::TimeZone;
 use gtk4::prelude::*;
 use ira_db::DbConn;
@@ -25,7 +25,11 @@ pub fn crisp_label(label: &gtk4::Label) {
 pub(crate) fn logged_game_config(
     db: &DbConn,
     db_id: i64,
-) -> Option<(ira_models::GameLaunchConfig, ira_models::WineConfig, Option<i64>)> {
+) -> Option<(
+    ira_models::GameLaunchConfig,
+    ira_models::WineConfig,
+    Option<i64>,
+)> {
     ira_db::get_game_config(db, db_id).unwrap_or_else(|e| {
         eprintln!("Failed to read game config for db_id {}: {}", db_id, e);
         None
@@ -348,10 +352,7 @@ fn dialog_widgets() -> DialogWidgets {
 /// page-row matching, Enter jumping to the first match. Wired by the
 /// settings window layout, so app settings and per-game settings share
 /// it; wizard sheets (`dialog_layout`) stay unfiltered.
-fn add_sidebar_search(
-    sidebar_area: &gtk4::Box,
-    sidebar: &gtk4::ListBox,
-) -> gtk4::SearchEntry {
+fn add_sidebar_search(sidebar_area: &gtk4::Box, sidebar: &gtk4::ListBox) -> gtk4::SearchEntry {
     let search = gtk4::SearchEntry::new();
     search.set_placeholder_text(Some(&crate::tr!("Search pages")));
     search.set_margin_start(8);
@@ -516,7 +517,8 @@ pub fn set_initial_folder(dialog: &gtk4::FileDialog, path_str: &str) {
 /// to the window presenting the dialog. Needed by window-transient APIs
 /// (FileDialog, AlertDialog parents...).
 pub fn hosting_window(w: &impl IsA<gtk4::Widget>) -> Option<gtk4::Window> {
-    w.root().and_then(|root| root.downcast::<gtk4::Window>().ok())
+    w.root()
+        .and_then(|root| root.downcast::<gtk4::Window>().ok())
 }
 
 /// Standard icon-only button: flat, square, vertically centered so row
@@ -596,7 +598,8 @@ pub fn make_browse_button(
 pub fn merge_game_enrichment(existing: &Game, enriched: &Game) -> Game {
     let mut result = existing.clone();
 
-    // Achievements — enrichment loads these from disk.
+    // A successful reload is authoritative, including an empty achievement
+    // list when the source no longer provides achievement data.
     result.achievements = enriched.achievements.clone();
     if !existing.achievements.is_empty() {
         let existing_pcts: HashMap<String, f64> = existing
@@ -798,7 +801,9 @@ impl SearchStatus {
 /// Open `uri` in the system browser. The widget only anchors the launch
 /// to a window; a missing one just means no window association.
 pub(crate) fn open_uri(anchor: &gtk4::Widget, uri: &str) {
-    let win = anchor.root().and_then(|r| r.downcast::<gtk4::Window>().ok());
+    let win = anchor
+        .root()
+        .and_then(|r| r.downcast::<gtk4::Window>().ok());
     gtk4::UriLauncher::new(uri).launch(win.as_ref(), gtk4::gio::Cancellable::NONE, |_| ());
 }
 
@@ -842,10 +847,8 @@ pub(crate) fn clamped_boxed_list(max_width: i32) -> (gtk4::ScrolledWindow, gtk4:
 /// A channel whose receiving end wakes the GTK main loop on every
 /// message — worker threads send, the UI never polls. Attach `rx` with
 /// [`once_channel`], [`watch_channel`], or `glib::spawn_future_local`.
-pub(crate) fn ui_channel<T: Send + 'static>() -> (
-    async_channel::Sender<T>,
-    async_channel::Receiver<T>,
-) {
+pub(crate) fn ui_channel<T: Send + 'static>(
+) -> (async_channel::Sender<T>, async_channel::Receiver<T>) {
     async_channel::unbounded()
 }
 
@@ -1009,7 +1012,8 @@ pub fn refresh_settings_images_page(
             // Same wrapper as the initial build: the raw page's natural
             // height would become the window minimum and force the settings
             // window to grow past its size.
-            sd.stack.add_named(&scrolled_page(&new_page), Some("images"));
+            sd.stack
+                .add_named(&scrolled_page(&new_page), Some("images"));
             if images_was_visible {
                 sd.stack.set_visible_child_name("images");
             }
@@ -1085,7 +1089,6 @@ pub fn spawn_terminal(env: &[(String, String)]) {
     eprintln!("No terminal emulator found. Set $TERMINAL or install gnome-terminal/konsole/xterm.");
 }
 
-
 /// A small confirm/cancel prompt with one extra widget (usually an entry
 /// row). `on_confirm` fires only for the confirm response; the dialog
 /// closes either way.
@@ -1110,7 +1113,6 @@ pub(crate) fn confirm_dialog_with_extra(
     });
     dialog.present(Some(parent));
 }
-
 
 /// Caps a floating dialog's preferred height to the window it is presented
 /// over. A floating sheet adds its own chrome around the content, so a
@@ -1194,11 +1196,10 @@ pub fn display_playtime(state: &SharedState, game: &Game) -> f64 {
     members
         .iter()
         .filter_map(|id| {
-            ira_db::find_by_db_id(&db, *id)
-                .unwrap_or_else(|e| {
-                    eprintln!("Failed to read linked game {id}: {e}");
-                    None
-                })
+            ira_db::find_by_db_id(&db, *id).unwrap_or_else(|e| {
+                eprintln!("Failed to read linked game {id}: {e}");
+                None
+            })
         })
         .map(|entry| entry.playtime)
         .sum()
@@ -1267,8 +1268,7 @@ mod tests {
         );
         // Punctuation differences still count as the same title.
         assert_eq!(
-            super::matching_sgdb_result(&results, "fire emblem shadow dragon")
-                .map(|(id, _)| id),
+            super::matching_sgdb_result(&results, "fire emblem shadow dragon").map(|(id, _)| id),
             Some("2".to_string())
         );
         assert_eq!(
@@ -1420,6 +1420,34 @@ mod tests {
     }
 
     #[test]
+    fn test_merge_game_enrichment_clears_achievements_when_reload_is_empty() {
+        let existing = Game {
+            achievements: vec![ira_models::MergedAchievement {
+                name: "known".to_string(),
+                display_name: "Known".to_string(),
+                description: String::new(),
+                hidden: false,
+                earned: false,
+                earned_time: 0,
+                icon_path: String::new(),
+                icon_gray_path: String::new(),
+                global_percent: 0.0,
+                trophy_type: 'B',
+            }],
+            earned_count: 1,
+            total_count: 4,
+            ..Default::default()
+        };
+        let enriched = Game::default();
+
+        let result = merge_game_enrichment(&existing, &enriched);
+
+        assert!(result.achievements.is_empty());
+        assert_eq!(result.earned_count, 0);
+        assert_eq!(result.total_count, 0);
+    }
+
+    #[test]
     fn test_merge_game_enrichment_applies_enrichment_images() {
         let existing = Game::default();
 
@@ -1464,4 +1492,3 @@ mod tests {
         assert_eq!(super::fitted_height(740, 100), 740);
     }
 }
-

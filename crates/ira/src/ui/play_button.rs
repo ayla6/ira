@@ -114,9 +114,9 @@ fn set_running_state(
     running: bool,
 ) {
     if running {
+        btn.remove_css_class(CSS_SUGGESTED_ACTION);
         icon.set_icon_name(Some("window-close-symbolic"));
         label.set_text(&crate::tr!("Stop"));
-        btn.remove_css_class(CSS_SUGGESTED_ACTION);
     } else {
         icon.set_icon_name(Some("media-playback-start-symbolic"));
         label.set_text(&crate::tr!("Play"));
@@ -323,11 +323,7 @@ pub fn launch_game_disc(
 /// Show the disc picker for a multi-disc game on a single-disc emulator
 /// and report whether one was shown. Dolphin boots every disc at once,
 /// so its games never stop here.
-fn maybe_show_disc_picker(
-    state: &SharedState,
-    game_id: i64,
-    variant_id: Option<i64>,
-) -> bool {
+fn maybe_show_disc_picker(state: &SharedState, game_id: i64, variant_id: Option<i64>) -> bool {
     let (db, cfg, kind, platform_id, per_game_emu, game_name) = {
         let s = state.borrow();
         let game = s.games.iter().find(|g| g.db_id == game_id);

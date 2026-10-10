@@ -3,7 +3,7 @@ use super::css::*;
 use super::helpers::{clear_children, esc, format_duration};
 use adw::prelude::*;
 use chrono::Datelike;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 const Y_AXIS_W: i32 = 34;
@@ -43,6 +43,7 @@ pub(super) struct DaySession {
     pub session_id: i64,
     pub label: String,
     pub value: String,
+    pub deleted: bool,
 }
 #[derive(Clone)]
 pub(super) struct DayDetail {
@@ -51,6 +52,7 @@ pub(super) struct DayDetail {
     pub value: String,
     pub color_hex: Option<String>,
     pub sessions: Vec<DaySession>,
+    pub deleted: bool,
 }
 #[derive(Clone)]
 pub(super) struct DayData {
@@ -71,7 +73,7 @@ pub(super) struct ChartFocus {
     pub day: chrono::NaiveDate,
 }
 
-pub(super) type DeleteSessionFn = Rc<dyn Fn(i64, bool)>;
+pub(super) type DeleteSessionFn = Rc<dyn Fn(i64)>;
 
 /// Returns (interval_seconds, nice_max_seconds). Prefers smallest interval that fits.
 fn axis_config(max_v: f64) -> (f64, f64) {
@@ -107,7 +109,6 @@ struct State {
     prev_d: glib::WeakRef<gtk4::Button>,
     next_d: glib::WeakRef<gtk4::Button>,
     on_delete: Option<DeleteSessionFn>,
-    ctrl_held: Rc<Cell<bool>>,
 }
 
 /// Resolves a focus hint to (week index, forced day index) for chart init.
@@ -130,7 +131,6 @@ pub(super) fn build_weekly_chart(
     is_single_game: bool,
     on_delete: Option<DeleteSessionFn>,
     focus: Option<ChartFocus>,
-    ctrl_held: Rc<Cell<bool>>,
     empty_hint: Option<String>,
 ) -> gtk4::Widget {
     let container = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
@@ -172,7 +172,6 @@ pub(super) fn build_weekly_chart(
         prev_d: pd.downgrade(),
         next_d: nd.downgrade(),
         on_delete,
-        ctrl_held,
     }));
 
     wire_chart_nav(&state, &chart, &pw, &nw, &pd, &nd);
@@ -319,40 +318,24 @@ fn wire_chart_keys(container: &gtk4::Box, state: &Rc<RefCell<State>>) {
     let st = state.clone();
     let kc = gtk4::EventControllerKey::new();
     kc.set_propagation_phase(gtk4::PropagationPhase::Capture);
-    let ctrl = {
-        let s = st.borrow();
-        s.ctrl_held.clone()
-    };
-    let ctrl_pressed = ctrl.clone();
-    let ctrl_released = ctrl;
-    kc.connect_key_pressed(move |_, key, _, _| {
-        if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
-            ctrl_pressed.set(true);
+    kc.connect_key_pressed(move |_, key, _, _| match key {
+        gtk4::gdk::Key::Left | gtk4::gdk::Key::KP_Left => {
+            nav_day(&st, -1);
+            glib::Propagation::Stop
         }
-        match key {
-            gtk4::gdk::Key::Left | gtk4::gdk::Key::KP_Left => {
-                nav_day(&st, -1);
-                glib::Propagation::Stop
-            }
-            gtk4::gdk::Key::Right | gtk4::gdk::Key::KP_Right => {
-                nav_day(&st, 1);
-                glib::Propagation::Stop
-            }
-            gtk4::gdk::Key::Up | gtk4::gdk::Key::KP_Up => {
-                nav_week(&st, -1);
-                glib::Propagation::Stop
-            }
-            gtk4::gdk::Key::Down | gtk4::gdk::Key::KP_Down => {
-                nav_week(&st, 1);
-                glib::Propagation::Stop
-            }
-            _ => glib::Propagation::Proceed,
+        gtk4::gdk::Key::Right | gtk4::gdk::Key::KP_Right => {
+            nav_day(&st, 1);
+            glib::Propagation::Stop
         }
-    });
-    kc.connect_key_released(move |_, key, _, _| {
-        if key == gtk4::gdk::Key::Control_L || key == gtk4::gdk::Key::Control_R {
-            ctrl_released.set(false);
+        gtk4::gdk::Key::Up | gtk4::gdk::Key::KP_Up => {
+            nav_week(&st, -1);
+            glib::Propagation::Stop
         }
+        gtk4::gdk::Key::Down | gtk4::gdk::Key::KP_Down => {
+            nav_week(&st, 1);
+            glib::Propagation::Stop
+        }
+        _ => glib::Propagation::Proceed,
     });
     container.add_controller(kc);
 }
@@ -558,7 +541,8 @@ fn update_sidebar(s: &State, day: &DayData) {
                 r.add_prefix(&sw);
             }
             if let (Some(sid), Some(on_delete)) = (d.session_id, &s.on_delete) {
-                r.add_suffix(&make_delete_button(sid, on_delete, &s.ctrl_held));
+                apply_deleted_style(&r, d.deleted);
+                r.add_suffix(&make_session_button(sid, on_delete, d.deleted));
             }
             sidebar_list.append(&r);
         } else {
@@ -579,7 +563,8 @@ fn update_sidebar(s: &State, day: &DayData) {
                 sv.add_css_class(CSS_DIM_LABEL);
                 sub.add_suffix(&sv);
                 if let Some(on_delete) = &s.on_delete {
-                    sub.add_suffix(&make_delete_button(ses.session_id, on_delete, &s.ctrl_held));
+                    apply_deleted_style(&sub, ses.deleted);
+                    sub.add_suffix(&make_session_button(ses.session_id, on_delete, ses.deleted));
                 }
                 ex.add_row(&sub);
             }
@@ -588,24 +573,39 @@ fn update_sidebar(s: &State, day: &DayData) {
     }
 }
 
-fn make_delete_button(
+fn make_session_button(
     session_id: i64,
     on_delete: &DeleteSessionFn,
-    ctrl_held: &Rc<Cell<bool>>,
+    deleted: bool,
 ) -> gtk4::Widget {
-    let btn = gtk4::Button::from_icon_name("user-trash-symbolic");
+    let icon = if deleted {
+        "edit-undo-symbolic"
+    } else {
+        "user-trash-symbolic"
+    };
+    let btn = gtk4::Button::from_icon_name(icon);
     btn.add_css_class(CSS_FLAT);
-    btn.add_css_class(CSS_SESSION_DELETE);
+    if !deleted {
+        btn.add_css_class(CSS_SESSION_DELETE);
+    }
     btn.set_valign(gtk4::Align::Center);
-    btn.set_tooltip_text(Some(&crate::tr!(
-        "Delete session (hold Ctrl to skip confirmation)"
-    )));
+    let tooltip = if deleted {
+        crate::tr!("Restore session")
+    } else {
+        crate::tr!("Delete session")
+    };
+    btn.set_tooltip_text(Some(&tooltip));
     let on_delete = on_delete.clone();
-    let ctrl_held = ctrl_held.clone();
     btn.connect_clicked(move |_| {
-        on_delete(session_id, ctrl_held.get());
+        on_delete(session_id);
     });
     btn.upcast()
+}
+
+fn apply_deleted_style(row: &impl IsA<gtk4::Widget>, deleted: bool) {
+    if deleted {
+        row.set_opacity(0.5);
+    }
 }
 
 #[cfg(test)]
@@ -636,8 +636,14 @@ mod tests {
     #[test]
     fn test_focus_selection_none_opens_on_last_week() {
         let weeks = vec![
-            week(chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(), [0.0; 7]),
-            week(chrono::NaiveDate::from_ymd_opt(2026, 8, 17).unwrap(), [0.0; 7]),
+            week(
+                chrono::NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
+                [0.0; 7],
+            ),
+            week(
+                chrono::NaiveDate::from_ymd_opt(2026, 8, 17).unwrap(),
+                [0.0; 7],
+            ),
         ];
         assert_eq!(focus_selection(&weeks, None), (1, None));
     }
@@ -649,10 +655,7 @@ mod tests {
             week(ws, [3600.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
             week(ws + chrono::Duration::days(7), [0.0; 7]),
         ];
-        let focus = ChartFocus {
-            week: ws,
-            day: ws,
-        };
+        let focus = ChartFocus { week: ws, day: ws };
         assert_eq!(focus_selection(&weeks, Some(focus)), (0, Some(0)));
     }
 

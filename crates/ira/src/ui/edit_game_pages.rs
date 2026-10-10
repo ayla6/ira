@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -158,42 +157,12 @@ pub(super) struct ApiEmuPageParams<'a> {
     pub emu_app_id: &'a str,
     pub save_dir: &'a str,
     pub win: &'a adw::Window,
-    /// Shared pending-uninstall flag. Reused across page rebuilds so the
-    /// dialog's save handler keeps observing the same cell.
-    pub emu_pending_uninstall: Option<Rc<RefCell<bool>>>,
 }
 
-/// Remove the previously-built "api_emulator" page (sidebar row, its separator,
-/// and stack child) so the page can be rebuilt with fresh install state.
-fn remove_api_emulator_page(sidebar: &gtk4::ListBox, stack: &gtk4::Stack) {
-    if let Some(child) = stack.child_by_name("api_emulator") {
+/// Remove only the stack content so the existing sidebar entry keeps its place.
+fn remove_api_emulator_stack_page(stack: &gtk4::Stack) {
+    while let Some(child) = stack.child_by_name("api_emulator") {
         stack.remove(&child);
-    }
-    let mut iter = sidebar.first_child();
-    let mut prev: Option<gtk4::ListBoxRow> = None;
-    while let Some(c) = iter {
-        if c.widget_name() == "api_emulator" {
-            if let Some(p) = prev {
-                if p.widget_name().is_empty() {
-                    sidebar.remove(&p);
-                }
-            }
-            sidebar.remove(&c.downcast::<gtk4::ListBoxRow>().unwrap());
-            break;
-        }
-        prev = c.clone().downcast::<gtk4::ListBoxRow>().ok();
-        iter = c.next_sibling();
-    }
-}
-
-fn select_api_emulator_row(sidebar: &gtk4::ListBox) {
-    let mut iter = sidebar.first_child();
-    while let Some(c) = iter {
-        if c.widget_name() == "api_emulator" {
-            sidebar.select_row(c.downcast_ref::<gtk4::ListBoxRow>());
-            break;
-        }
-        iter = c.next_sibling();
     }
 }
 
@@ -231,9 +200,9 @@ pub(super) fn build_api_emulator_page(
     params: ApiEmuPageParams,
     state: &SharedState,
     languages: &[String],
-    sidebar: &gtk4::ListBox,
+    sidebar: Option<&gtk4::ListBox>,
     stack: &gtk4::Stack,
-) -> Option<Rc<RefCell<bool>>> {
+) {
     let (emu_exe, emu_game_folder, emu_db_id, emu_trophy_source, emu_app_id, save_dir, win) = (
         params.emu_exe,
         params.emu_game_folder,
@@ -243,14 +212,11 @@ pub(super) fn build_api_emulator_page(
         params.save_dir,
         params.win,
     );
-    let pending_uninstall = params
-        .emu_pending_uninstall
-        .unwrap_or_else(|| Rc::new(RefCell::new(false)));
     if (emu_trophy_source != ira_models::TrophySource::Gse
         && emu_trophy_source != ira_models::TrophySource::Nge)
         || emu_exe.is_empty()
     {
-        return None;
+        return;
     }
 
     let db = state.borrow().db.clone();
@@ -262,10 +228,6 @@ pub(super) fn build_api_emulator_page(
     emu_page.set_margin_end(12);
     emu_page.set_margin_top(12);
     emu_page.set_margin_bottom(12);
-    let status_group = adw::PreferencesGroup::new();
-    status_group.set_title(&crate::tr!("Status"));
-
-    let status_row = adw::ActionRow::new();
     let is_installed = dll_folder
         .as_deref()
         .map(|d| {
@@ -276,48 +238,94 @@ pub(super) fn build_api_emulator_page(
             }
         })
         .unwrap_or(false);
-    let status_title = if is_installed {
-        crate::tr!("API emulator installed")
-    } else {
-        crate::tr!("API emulator not installed")
-    };
-    status_row.set_title(&status_title);
-    status_row.set_sensitive(false);
-    status_group.add(&status_row);
-
-    emu_page.append(&status_group);
 
     let action_group = adw::PreferencesGroup::new();
     action_group.set_title(&crate::tr!("Actions"));
 
     if is_installed {
-        let uninstall_btn = gtk4::Button::with_label(&crate::tr!("Uninstall API emulator"));
+        let uninstall_btn = gtk4::Button::with_label(&crate::tr!("Remove"));
         uninstall_btn.add_css_class(CSS_DESTRUCTIVE_ACTION);
         uninstall_btn.set_valign(gtk4::Align::Center);
-        let status_c = status_row.clone();
-        let pu_c = pending_uninstall.clone();
+        let state_c = Rc::downgrade(state);
         let win_c = Downgrade::downgrade(win);
-        uninstall_btn.connect_clicked(move |_| {
-            let Some(win_c) = win_c.upgrade() else {
+        let stack_c = Downgrade::downgrade(stack);
+        let exe_c = emu_exe.to_string();
+        let game_folder_c = emu_game_folder.to_string();
+        let app_id_c = emu_app_id.to_string();
+        let save_dir_c = save_dir.to_string();
+        let db_id_c = emu_db_id;
+        let languages_c = languages.to_vec();
+        let ts_c = emu_trophy_source;
+        uninstall_btn.connect_clicked(move |button| {
+            let Some(state) = state_c.upgrade() else {
                 return;
             };
-            let pu_c = pu_c.clone();
-            let status_c = status_c.clone();
-            super::helpers::confirm_dialog(
-                &win_c,
-                &crate::tr!("Uninstall API emulator?"),
-                &crate::tr!("Restores the original Steam/GOG DLLs on Save"),
-                &crate::tr!("Uninstall"),
-                adw::ResponseAppearance::Destructive,
-                move || {
-                    *pu_c.borrow_mut() = true;
-                    status_c.set_title(&crate::tr!("API emulator will be uninstalled on save"));
-                },
-            );
+            let Some(win) = win_c.upgrade() else {
+                return;
+            };
+            let Some(stack) = stack_c.upgrade() else {
+                return;
+            };
+            button.set_sensitive(false);
+            button.set_label(&crate::tr!("Removing…"));
+
+            let exe_for_remove = exe_c.clone();
+            let game_folder_for_remove = game_folder_c.clone();
+            let (tx, rx) = super::helpers::ui_channel::<Result<(), String>>();
+            std::thread::spawn(move || {
+                let result = if ts_c == ira_models::TrophySource::Gse {
+                    ira_platforms::api_emulators::uninstall_gse(
+                        &exe_for_remove,
+                        &game_folder_for_remove,
+                    )
+                } else {
+                    ira_platforms::api_emulators::uninstall_nge(
+                        &exe_for_remove,
+                        &game_folder_for_remove,
+                    )
+                };
+                let _ = tx.try_send(result);
+            });
+
+            let page_exe = exe_c.clone();
+            let page_game_folder = game_folder_c.clone();
+            let page_app_id = app_id_c.clone();
+            let page_save_dir = save_dir_c.clone();
+            let page_languages = languages_c.clone();
+            let button = button.clone();
+            let db_for_result = state.borrow().db.clone();
+            super::helpers::once_channel(rx, move |result| match result {
+                Ok(()) => {
+                    if let Err(e) = ira_db::set_api_dll_folder(&db_for_result, db_id_c, "") {
+                        eprintln!("Failed to clear API DLL folder cache: {}", e);
+                    }
+                    remove_api_emulator_stack_page(&stack);
+                    build_api_emulator_page(
+                        ApiEmuPageParams {
+                            emu_exe: &page_exe,
+                            emu_game_folder: &page_game_folder,
+                            emu_db_id: db_id_c,
+                            emu_trophy_source: ts_c,
+                            emu_app_id: &page_app_id,
+                            save_dir: &page_save_dir,
+                            win: &win,
+                        },
+                        &state,
+                        &page_languages,
+                        None,
+                        &stack,
+                    );
+                    stack.set_visible_child_name("api_emulator");
+                }
+                Err(e) => {
+                    eprintln!("Remove failed: {}", e);
+                    button.set_label(&crate::tr!("Retry"));
+                    button.set_sensitive(true);
+                }
+            });
         });
         let uninstall_row = adw::ActionRow::new();
         uninstall_row.set_title(&crate::tr!("Remove emulator"));
-        uninstall_row.set_subtitle(&crate::tr!("Restores original API DLLs (applies on save)"));
         uninstall_row.add_suffix(&uninstall_btn);
         action_group.add(&uninstall_row);
     } else {
@@ -336,6 +344,15 @@ pub(super) fn build_api_emulator_page(
                 }
             })
             .unwrap_or(false);
+
+        let install_btn = gtk4::Button::with_label(&crate::tr!("Install"));
+        install_btn.add_css_class(CSS_SUGGESTED_ACTION);
+        install_btn.set_sensitive(has_dlls && !versions.is_empty());
+        install_btn.set_valign(gtk4::Align::Center);
+        let install_row = adw::ActionRow::new();
+        install_row.set_title(&crate::tr!("Install emulator"));
+        install_row.add_suffix(&install_btn);
+        action_group.add(&install_row);
 
         if !has_dlls {
             let missing_row = adw::ActionRow::new();
@@ -372,35 +389,24 @@ pub(super) fn build_api_emulator_page(
             None
         };
 
-        let install_btn = gtk4::Button::with_label(&crate::tr!("Install API emulator"));
-        install_btn.add_css_class(CSS_SUGGESTED_ACTION);
-        install_btn.set_sensitive(has_dlls);
-        install_btn.set_valign(gtk4::Align::Center);
         let exe_c = emu_exe.to_string();
         let game_folder_c = emu_game_folder.to_string();
         let app_id_c = emu_app_id.to_string();
         let save_dir_c = save_dir.to_string();
-        let db_c = db.clone();
         let db_id_c = emu_db_id;
-        let status_c = status_row.clone();
         let langs_c = languages.to_vec();
         let ts_c = emu_trophy_source;
         let state_c = Rc::downgrade(state);
         let win_c = Downgrade::downgrade(win);
-        let sidebar_c = Downgrade::downgrade(sidebar);
         let stack_c = Downgrade::downgrade(stack);
-        let pending_uninstall_c = pending_uninstall.clone();
-        install_btn.connect_clicked(move |_| {
-            let Some(state_c) = state_c.upgrade() else {
+        install_btn.connect_clicked(move |button| {
+            let Some(state) = state_c.upgrade() else {
                 return;
             };
-            let Some(win_c) = win_c.upgrade() else {
+            let Some(win) = win_c.upgrade() else {
                 return;
             };
-            let Some(sidebar_c) = sidebar_c.upgrade() else {
-                return;
-            };
-            let Some(stack_c) = stack_c.upgrade() else {
+            let Some(stack) = stack_c.upgrade() else {
                 return;
             };
             let ver = version_row
@@ -414,61 +420,78 @@ pub(super) fn build_api_emulator_page(
                     }
                 })
                 .unwrap_or_default();
-            let result = if ts_c == ira_models::TrophySource::Gse {
-                ira_platforms::api_emulators::install_gse(
-                    &save_dir_c,
-                    &exe_c,
-                    &game_folder_c,
-                    &app_id_c,
-                    &langs_c,
-                    &ver,
-                )
-            } else {
-                ira_platforms::api_emulators::install_nge(
-                    &save_dir_c,
-                    &exe_c,
-                    &game_folder_c,
-                    &app_id_c,
-                    &ver,
-                )
-            };
-            match result {
+            button.set_sensitive(false);
+            button.set_label(&crate::tr!("Installing…"));
+
+            let exe_for_install = exe_c.clone();
+            let game_folder_for_install = game_folder_c.clone();
+            let app_id_for_install = app_id_c.clone();
+            let save_dir_for_install = save_dir_c.clone();
+            let langs_for_install = langs_c.clone();
+            let (tx, rx) = super::helpers::ui_channel::<Result<std::path::PathBuf, String>>();
+            std::thread::spawn(move || {
+                let result = if ts_c == ira_models::TrophySource::Gse {
+                    ira_platforms::api_emulators::install_gse(
+                        &save_dir_for_install,
+                        &exe_for_install,
+                        &game_folder_for_install,
+                        &app_id_for_install,
+                        &langs_for_install,
+                        &ver,
+                    )
+                } else {
+                    ira_platforms::api_emulators::install_nge(
+                        &save_dir_for_install,
+                        &exe_for_install,
+                        &game_folder_for_install,
+                        &app_id_for_install,
+                        &ver,
+                    )
+                };
+                let _ = tx.try_send(result);
+            });
+
+            let page_exe = exe_c.clone();
+            let page_game_folder = game_folder_c.clone();
+            let page_app_id = app_id_c.clone();
+            let page_save_dir = save_dir_c.clone();
+            let page_languages = langs_c.clone();
+            let button = button.clone();
+            let db_for_result = db.clone();
+            super::helpers::once_channel(rx, move |result| match result {
                 Ok(folder) => {
-                    if let Err(e) =
-                        ira_db::set_api_dll_folder(&db_c, db_id_c, &folder.to_string_lossy())
-                    {
+                    if let Err(e) = ira_db::set_api_dll_folder(
+                        &db_for_result,
+                        db_id_c,
+                        &folder.to_string_lossy(),
+                    ) {
                         eprintln!("Failed to cache API DLL folder: {}", e);
                     }
-                    remove_api_emulator_page(&sidebar_c, &stack_c);
+                    remove_api_emulator_stack_page(&stack);
                     build_api_emulator_page(
                         ApiEmuPageParams {
-                            emu_exe: &exe_c,
-                            emu_game_folder: &game_folder_c,
+                            emu_exe: &page_exe,
+                            emu_game_folder: &page_game_folder,
                             emu_db_id: db_id_c,
                             emu_trophy_source: ts_c,
-                            emu_app_id: &app_id_c,
-                            save_dir: &save_dir_c,
-                            win: &win_c,
-                            emu_pending_uninstall: Some(pending_uninstall_c.clone()),
+                            emu_app_id: &page_app_id,
+                            save_dir: &page_save_dir,
+                            win: &win,
                         },
-                        &state_c,
-                        &langs_c,
-                        &sidebar_c,
-                        &stack_c,
+                        &state,
+                        &page_languages,
+                        None,
+                        &stack,
                     );
-                    select_api_emulator_row(&sidebar_c);
+                    stack.set_visible_child_name("api_emulator");
                 }
                 Err(e) => {
                     eprintln!("Install failed: {}", e);
-                    status_c.set_title(&crate::tr!("API emulator install failed"));
+                    button.set_label(&crate::tr!("Retry"));
+                    button.set_sensitive(true);
                 }
-            }
+            });
         });
-        let install_row = adw::ActionRow::new();
-        install_row.set_title(&crate::tr!("Install emulator"));
-        install_row.set_subtitle(&crate::tr!("Patches the game to use the API emulator"));
-        install_row.add_suffix(&install_btn);
-        action_group.add(&install_row);
     }
 
     if emu_trophy_source == ira_models::TrophySource::Gse && is_installed {
@@ -521,14 +544,15 @@ pub(super) fn build_api_emulator_page(
     emu_scroll.set_child(Some(&emu_page));
     emu_scroll.set_vexpand(true);
     emu_scroll.set_hexpand(true);
-    sidebar.append(&settings_pages::sidebar_separator());
-    sidebar.append(&settings_pages::settings_sidebar_row(
-        "applications-engineering-symbolic",
-        &crate::tr!("API emulator"),
-        "api_emulator",
-    ));
+    if let Some(sidebar) = sidebar {
+        sidebar.append(&settings_pages::sidebar_separator());
+        sidebar.append(&settings_pages::settings_sidebar_row(
+            "applications-engineering-symbolic",
+            &crate::tr!("API emulator"),
+            "api_emulator",
+        ));
+    }
     stack.add_named(&emu_scroll, Some("api_emulator"));
-    Some(pending_uninstall)
 }
 
 pub(super) struct ProfileDropdownParams<'a> {

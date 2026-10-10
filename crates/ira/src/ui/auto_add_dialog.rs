@@ -6,6 +6,7 @@ use std::sync::mpsc;
 
 use adw::prelude::*;
 
+use ira_api::types::SteamCmdLaunchInfo;
 use ira_api::ScraperCreds;
 use ira_models::{GameKind, GameLaunchConfig, GameVariant, TrophySource, WineConfig, WineProfile};
 
@@ -39,6 +40,7 @@ pub(super) enum WizardEvent {
     EmulatorPrompt {
         db_id: i64,
         game_folder: PathBuf,
+        game_exe: PathBuf,
         app_id: String,
         emu_kind: EmuKind,
     },
@@ -524,20 +526,13 @@ fn finish_identify(
     };
 
     let launches = info.launches;
-    let default = launches.first();
+    let host_os = host_steam_os();
+    let default = preferred_steam_launch_for_os(&launches, host_os);
     let steam_exe = default.map(|l| l.executable.clone()).unwrap_or_default();
-    let steam_is_windows = default
-        .map(|l| l.oslist.contains("windows") || l.oslist.is_empty())
-        .unwrap_or(info.oslist.contains("windows") || info.oslist.is_empty());
+    let steam_is_windows = steam_launch_is_windows(default, host_os, &info.oslist);
 
     let target_os = if steam_is_windows { "windows" } else { "linux" };
-    let steam_variants: Vec<String> = launches
-        .iter()
-        .skip(1)
-        .filter(|l| l.oslist.contains(target_os) || l.oslist.is_empty())
-        .filter(|l| !l.oslist.contains("macos"))
-        .map(|l| l.executable.clone())
-        .collect();
+    let steam_variants = steam_launch_variants(&launches, default, target_os);
 
     let (is_windows, exe, variants) =
         reconcile_steam_exe_with_folder(&folder, steam_is_windows, steam_exe, steam_variants);
@@ -554,29 +549,102 @@ fn finish_identify(
     })));
 }
 
-/// Steam launch configs describe the Steam install layout; a GOG Linux
-/// install keeps the real executable directly in the game folder, so Steam's
-/// paths don't apply. Local native evidence (start.sh or an ELF) wins; the
-/// Steam exe is only kept when it actually exists on disk here. One
-/// exception: when the local pick itself still looks like a helper, the
-/// Steam data naming the executable outranks it.
+fn host_steam_os() -> &'static str {
+    match std::env::consts::OS {
+        "windows" => "windows",
+        "macos" => "macos",
+        _ => "linux",
+    }
+}
+
+fn preferred_steam_launch_for_os<'a>(
+    launches: &'a [SteamCmdLaunchInfo],
+    host_os: &str,
+) -> Option<&'a SteamCmdLaunchInfo> {
+    launches
+        .iter()
+        .find(|launch| launch_supports_os(&launch.oslist, host_os))
+        .or_else(|| launches.first())
+}
+
+fn launch_supports_os(oslist: &str, target: &str) -> bool {
+    oslist
+        .split([',', ';'])
+        .any(|os| os.trim().eq_ignore_ascii_case(target))
+}
+
+fn steam_launch_is_windows(
+    launch: Option<&SteamCmdLaunchInfo>,
+    host_os: &str,
+    app_oslist: &str,
+) -> bool {
+    launch
+        .map(|launch| {
+            if is_windows_executable(&launch.executable) {
+                return true;
+            }
+            if is_linux_executable(&launch.executable) {
+                return false;
+            }
+            if launch.oslist.is_empty() {
+                return launch_supports_os(app_oslist, "windows") || app_oslist.is_empty();
+            }
+            if launch_supports_os(&launch.oslist, host_os) {
+                host_os == "windows"
+            } else {
+                launch_supports_os(&launch.oslist, "windows")
+                    && !launch_supports_os(&launch.oslist, "linux")
+            }
+        })
+        .unwrap_or_else(|| launch_supports_os(app_oslist, "windows") || app_oslist.is_empty())
+}
+
+fn is_windows_executable(executable: &str) -> bool {
+    std::path::Path::new(executable)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe") || ext.eq_ignore_ascii_case("bat"))
+}
+
+fn is_linux_executable(executable: &str) -> bool {
+    std::path::Path::new(executable)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("sh")
+                || ext.eq_ignore_ascii_case("x86_64")
+                || ext.eq_ignore_ascii_case("appimage")
+        })
+}
+
+fn steam_launch_variants(
+    launches: &[SteamCmdLaunchInfo],
+    selected: Option<&SteamCmdLaunchInfo>,
+    target_os: &str,
+) -> Vec<String> {
+    launches
+        .iter()
+        .filter(|launch| selected.is_none_or(|chosen| !std::ptr::eq(*launch, chosen)))
+        .filter(|launch| launch.oslist.is_empty() || launch_supports_os(&launch.oslist, target_os))
+        .filter(|launch| !launch_supports_os(&launch.oslist, "macos"))
+        .map(|launch| launch.executable.clone())
+        .collect()
+}
+
+/// Steam's declared executable is authoritative when that path exists in the
+/// install. Filesystem detection remains the fallback for incomplete metadata.
 fn reconcile_steam_exe_with_folder(
     folder: &Path,
     steam_is_windows: bool,
     steam_exe: String,
     steam_variants: Vec<String>,
 ) -> (bool, String, Vec<String>) {
+    if !steam_exe.is_empty() && folder.join(&steam_exe).is_file() {
+        return (steam_is_windows, steam_exe, steam_variants);
+    }
+
     let (local_windows, local_exe) = detect_game_exe(folder);
-    if !local_windows && !local_exe.is_empty() {
-        let steam_names_it = !steam_exe.is_empty() && folder.join(&steam_exe).is_file();
-        if !steam_names_it || !hits_utility_marker(&local_exe.to_lowercase()) {
-            return (false, local_exe, Vec::new());
-        }
-    }
-    if steam_exe.is_empty() || !folder.join(&steam_exe).is_file() {
-        return (local_windows, local_exe, Vec::new());
-    }
-    (steam_is_windows, steam_exe, steam_variants)
+    (local_windows, local_exe, Vec::new())
 }
 
 fn resolve_final_folder(
@@ -1166,6 +1234,7 @@ pub(super) fn spawn_add_thread(tx: mpsc::Sender<WizardEvent>, params: AddParams)
             let _ = tx.send(WizardEvent::EmulatorPrompt {
                 db_id,
                 game_folder: game.game_folder.clone(),
+                game_exe: game.game_folder.join(&game.exe),
                 app_id,
                 emu_kind,
             });
@@ -1371,6 +1440,7 @@ fn apply_language_preference(
                 ira_platforms::api_emulators::write_language_configs(
                     game.trophy_source,
                     &game_exe_str,
+                    &identified.game_folder.to_string_lossy(),
                     save_dir,
                     app_id,
                     lang,
@@ -1394,7 +1464,14 @@ fn migrate_game_saves(
     let has_gog_dlls =
         !ira_platforms::api_emulators::find_gog_dlls_recursive(&game_folder).is_empty();
     if !app_id.is_empty() || has_steam_dlls {
-        if let Err(e) = ira_platforms::api_emulators::centralize_steam_settings(&game_folder) {
+        let game_exe = game
+            .game_folder
+            .join(&game.exe)
+            .to_string_lossy()
+            .into_owned();
+        if let Err(e) =
+            ira_platforms::api_emulators::centralize_steam_settings(&game_folder, &game_exe)
+        {
             eprintln!("Failed to centralize steam_settings: {}", e);
         }
     }
@@ -1464,10 +1541,11 @@ pub(super) fn handle_add_event(wizard: &Rc<RefCell<Wizard>>, ev: WizardEvent) {
         WizardEvent::EmulatorPrompt {
             db_id,
             game_folder,
+            game_exe,
             app_id,
             emu_kind,
         } => {
-            prompt_install_emulator(wizard, db_id, game_folder, app_id, emu_kind);
+            prompt_install_emulator(wizard, db_id, game_folder, game_exe, app_id, emu_kind);
         }
         WizardEvent::InstallDone => {}
         WizardEvent::Failed(e) => show_add_error(wizard, &e),
@@ -1480,6 +1558,7 @@ fn prompt_install_emulator(
     wizard: &Rc<RefCell<Wizard>>,
     db_id: i64,
     game_folder: PathBuf,
+    game_exe: PathBuf,
     app_id: String,
     emu_kind: EmuKind,
 ) {
@@ -1497,6 +1576,7 @@ fn prompt_install_emulator(
             start_install(
                 wizard.clone(),
                 game_folder,
+                game_exe,
                 app_id,
                 default_version_cfg,
                 db_id,
@@ -1618,6 +1698,7 @@ fn prompt_install_emulator(
         start_install(
             wizard_c.clone(),
             game_folder.clone(),
+            game_exe.clone(),
             app_id.clone(),
             version,
             db_id,
@@ -1657,6 +1738,7 @@ fn persist_remember(wizard: &Rc<RefCell<Wizard>>, remember: bool, install: bool)
 fn start_install(
     wizard: Rc<RefCell<Wizard>>,
     game_folder: PathBuf,
+    game_exe: PathBuf,
     app_id: String,
     version: String,
     db_id: i64,
@@ -1665,37 +1747,43 @@ fn start_install(
     let state = wizard.borrow().state.clone();
     let save_dir = state.borrow().save_dir.clone();
 
-    let (tx, rx) = mpsc::channel::<WizardEvent>();
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
     let tx_c = tx;
     let game_folder_c = game_folder;
+    let game_exe_c = game_exe;
     let app_id_c = app_id;
     let version_c = version;
     std::thread::spawn(move || {
         let result = match emu_kind {
-            EmuKind::Nge => ira_platforms::api_emulators::install_nge_from_folder(
+            EmuKind::Nge => ira_platforms::api_emulators::install_nge(
                 &save_dir,
+                &game_exe_c.to_string_lossy(),
                 &game_folder_c.to_string_lossy(),
                 &app_id_c,
                 &version_c,
             ),
-            EmuKind::Gse => ira_platforms::api_emulators::install_gse_from_folder(
+            EmuKind::Gse => ira_platforms::api_emulators::install_gse(
                 &save_dir,
+                &game_exe_c.to_string_lossy(),
                 &game_folder_c.to_string_lossy(),
                 &app_id_c,
                 &[],
                 &version_c,
             ),
         };
-        if let Err(e) = result {
-            eprintln!("Emulator install failed: {}", e);
-        }
-        let _ = tx_c.send(WizardEvent::InstallDone);
+        let _ = tx_c.send(result.map(|_| ()));
     });
 
     let wizard_c = wizard;
     glib::source::idle_add_local_full(glib::Priority::LOW, move || match rx.try_recv() {
-        Ok(_) => {
+        Ok(Ok(())) => {
             finalize(&wizard_c, db_id);
+            glib::ControlFlow::Break
+        }
+        Ok(Err(error)) => {
+            let message = crate::tr!("Failed to install API emulator: {}")
+                .replacen("{}", &error, 1);
+            show_add_error(&wizard_c, &message);
             glib::ControlFlow::Break
         }
         Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -2089,6 +2177,101 @@ mod tests {
         assert!(is_windows);
         assert_eq!(exe, "Bin/Game.exe");
         assert_eq!(variants, vec!["Alt.exe".to_string()]);
+    }
+
+    #[test]
+    fn test_reconcile_prefers_steam_exe_over_unrelated_native_binary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_dir = tmp.path().join("RenpyGame");
+        write(&game_dir, "zsyncmake");
+        write(&game_dir, "money_for_girls.sh");
+
+        let (is_windows, exe, variants) = reconcile_steam_exe_with_folder(
+            &game_dir,
+            false,
+            "money_for_girls.sh".to_string(),
+            vec!["money_for_girls.exe".to_string()],
+        );
+
+        assert!(!is_windows);
+        assert_eq!(exe, "money_for_girls.sh");
+        assert_eq!(variants, vec!["money_for_girls.exe".to_string()]);
+    }
+
+    #[test]
+    fn test_preferred_steam_launch_uses_host_native_entry() {
+        let launches = vec![
+            SteamCmdLaunchInfo {
+                executable: "money_for_girls.exe".to_string(),
+                oslist: "windows".to_string(),
+                description: String::new(),
+            },
+            SteamCmdLaunchInfo {
+                executable: "money_for_girls.sh".to_string(),
+                oslist: "linux".to_string(),
+                description: String::new(),
+            },
+        ];
+
+        let selected = preferred_steam_launch_for_os(&launches, "linux").unwrap();
+
+        assert_eq!(selected.executable, "money_for_girls.sh");
+        assert!(steam_launch_variants(&launches, Some(selected), "linux").is_empty());
+    }
+
+    #[test]
+    fn test_steam_launch_is_windows_uses_executable_for_multiplatform_entry() {
+        let launch = SteamCmdLaunchInfo {
+            executable: "game.exe".to_string(),
+            oslist: "windows,linux".to_string(),
+            description: String::new(),
+        };
+
+        assert!(steam_launch_is_windows(
+            Some(&launch),
+            "linux",
+            "windows,linux"
+        ));
+        assert!(steam_launch_is_windows(
+            Some(&launch),
+            "windows",
+            "windows,linux"
+        ));
+
+        let launch = SteamCmdLaunchInfo {
+            executable: "start.sh".to_string(),
+            oslist: "windows,linux".to_string(),
+            description: String::new(),
+        };
+        assert!(!steam_launch_is_windows(
+            Some(&launch),
+            "linux",
+            "windows,linux"
+        ));
+    }
+
+    #[test]
+    fn test_is_windows_executable_accepts_case_insensitive_extensions() {
+        assert!(is_windows_executable("bin/Game.EXE"));
+        assert!(is_windows_executable("setup.BAT"));
+        assert!(!is_windows_executable("bin/game.sh"));
+    }
+
+    #[test]
+    fn test_steam_launch_is_windows_falls_back_for_empty_metadata() {
+        let legacy = SteamCmdLaunchInfo {
+            executable: "game".to_string(),
+            oslist: String::new(),
+            description: String::new(),
+        };
+        assert!(steam_launch_is_windows(Some(&legacy), "linux", ""));
+
+        let native = SteamCmdLaunchInfo {
+            executable: "start.sh".to_string(),
+            oslist: String::new(),
+            description: String::new(),
+        };
+        assert!(!steam_launch_is_windows(Some(&native), "linux", ""));
     }
 
     #[test]

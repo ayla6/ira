@@ -64,7 +64,11 @@ pub fn get_sessions_range(conn: &DbConn, from: i64, to: i64) -> Result<Vec<PlayS
 }
 
 pub fn delete_sessions_for_game(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    crate::execute(conn, "DELETE FROM play_sessions WHERE game_id = ?1", params![game_id])?;
+    crate::execute(
+        conn,
+        "DELETE FROM play_sessions WHERE game_id = ?1",
+        params![game_id],
+    )?;
     Ok(())
 }
 
@@ -84,6 +88,72 @@ pub fn delete_session(conn: &DbConn, session_id: i64) -> Result<Option<PlaySessi
         Some(row) => Ok(Some(play_session_from_row(row).map_err(err)?)),
         None => Ok(None),
     }
+}
+
+/// Delete one session and update its playtime and last-played metadata in the
+/// same transaction. The removed row and its new last-played value are
+/// returned so the UI cache can apply the same change after commit.
+pub fn delete_session_with_metadata(
+    conn: &DbConn,
+    session_id: i64,
+) -> Result<Option<(PlaySession, i64)>, String> {
+    let c = crate::lock_db(conn)?;
+    let tx = c.unchecked_transaction().map_err(err)?;
+    let session = {
+        let mut stmt = tx
+            .prepare(&format!(
+                "DELETE FROM play_sessions WHERE id = ?1 RETURNING {SESSION_COLUMNS}"
+            ))
+            .map_err(err)?;
+        let mut rows = stmt.query(params![session_id]).map_err(err)?;
+        match rows.next().map_err(err)? {
+            Some(row) => Some(play_session_from_row(row).map_err(err)?),
+            None => None,
+        }
+    };
+    let Some(session) = session else {
+        tx.commit().map_err(err)?;
+        return Ok(None);
+    };
+
+    let hours = (session.duration_seconds as f64) / 3600.0;
+    if let Some(variant_id) = session.variant_id {
+        tx.execute(
+            "UPDATE game_variants SET playtime = MAX(playtime - ?1, 0) WHERE id = ?2",
+            params![hours, variant_id],
+        )
+        .map_err(err)?;
+    } else {
+        tx.execute(
+            "UPDATE games SET playtime = MAX(playtime - ?1, 0) WHERE id = ?2",
+            params![hours, session.game_id],
+        )
+        .map_err(err)?;
+    }
+
+    let latest: i64 = tx
+        .query_row(
+            &format!("SELECT MAX(started_at) FROM play_sessions WHERE {GAME_VARIANT_WHERE}"),
+            params![session.game_id, session.variant_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .map_err(err)?
+        .unwrap_or(0);
+    if let Some(variant_id) = session.variant_id {
+        tx.execute(
+            "UPDATE game_variants SET last_played = ?1 WHERE id = ?2",
+            params![latest, variant_id],
+        )
+        .map_err(err)?;
+    } else {
+        tx.execute(
+            "UPDATE games SET last_played = ?1 WHERE id = ?2",
+            params![latest, session.game_id],
+        )
+        .map_err(err)?;
+    }
+    tx.commit().map_err(err)?;
+    Ok(Some((session, latest)))
 }
 
 /// Recompute a game (or variant) `last_played` from its remaining sessions:
@@ -202,10 +272,77 @@ mod tests {
     }
 
     #[test]
+    fn test_delete_session_with_metadata_updates_base_and_variant() {
+        use ira_models::{GameKind, TrophySource};
+
+        let (conn, _tmp) = setup_db();
+        let game = super::super::add_game(
+            &conn,
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "1",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "G",
+            },
+        )
+        .unwrap();
+        super::super::update_field(&conn, game, "playtime", &2.0_f64).unwrap();
+        let base_session = record_session(&conn, game, None, 1000, 4600).unwrap();
+        let (removed, latest) = delete_session_with_metadata(&conn, base_session)
+            .unwrap()
+            .unwrap();
+        assert_eq!(removed.id, base_session);
+        assert_eq!(latest, 0);
+        let base = super::super::find_by_db_id(&conn, game).unwrap().unwrap();
+        assert_eq!(base.playtime, 1.0);
+        assert_eq!(base.last_played, 0);
+
+        let variant = super::super::add_variant(
+            &conn,
+            &ira_models::GameVariant {
+                game_id: game,
+                name: "v".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        super::super::update_variant_playtime(&conn, variant, 2.0).unwrap();
+        let variant_session = record_session(&conn, game, Some(variant), 2000, 5600).unwrap();
+        delete_session_with_metadata(&conn, variant_session)
+            .unwrap()
+            .unwrap();
+        let variants = super::super::get_variants(&conn, game).unwrap();
+        assert_eq!(variants[0].playtime, 1.0);
+        assert_eq!(variants[0].last_played, 0);
+        assert_eq!(
+            super::super::find_by_db_id(&conn, game)
+                .unwrap()
+                .unwrap()
+                .playtime,
+            1.0
+        );
+    }
+
+    #[test]
     fn test_recompute_last_played_after_delete_keeps_newest() {
         use ira_models::{GameKind, TrophySource};
         let (conn, _tmp) = setup_db();
-        let game = super::super::add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "1", trophy_id: "", native_id: "", platform_id: "", title: "G" }).unwrap();
+        let game = super::super::add_game(
+            &conn,
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "1",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "G",
+            },
+        )
+        .unwrap();
         super::super::set_last_played(&conn, game, 2000).unwrap();
         let old = record_session(&conn, game, None, 1000, 1100).unwrap();
         let new = record_session(&conn, game, None, 2000, 2100).unwrap();
@@ -222,7 +359,19 @@ mod tests {
     fn test_recompute_last_played_clears_when_empty() {
         use ira_models::{GameKind, TrophySource};
         let (conn, _tmp) = setup_db();
-        let game = super::super::add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "1", trophy_id: "", native_id: "", platform_id: "", title: "G" }).unwrap();
+        let game = super::super::add_game(
+            &conn,
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "1",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "G",
+            },
+        )
+        .unwrap();
         super::super::set_last_played(&conn, game, 1000).unwrap();
         let id = record_session(&conn, game, None, 1000, 1100).unwrap();
         delete_session(&conn, id).unwrap();
@@ -237,7 +386,19 @@ mod tests {
     fn test_recompute_last_played_variant_scope() {
         use ira_models::{GameKind, TrophySource};
         let (conn, _tmp) = setup_db();
-        let game = super::super::add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "1", trophy_id: "", native_id: "", platform_id: "", title: "G" }).unwrap();
+        let game = super::super::add_game(
+            &conn,
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "1",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "G",
+            },
+        )
+        .unwrap();
         let vid = super::super::add_variant(
             &conn,
             &ira_models::GameVariant {

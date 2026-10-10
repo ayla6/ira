@@ -1,6 +1,6 @@
 use crate::api_emulators_shared::{
     api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
-    find_game_dll_folder, is_windows, restore_backup,
+    dir_has_any_dll, find_game_dll_folder, is_windows, prepare_original_file, restore_backup,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
@@ -126,23 +126,20 @@ pub fn find_gog_dll_folder(game_exe: &str, game_folder: &str) -> Option<PathBuf>
 }
 
 pub fn has_original_gog_dlls(dll_folder: &Path) -> bool {
-    ["galaxy.dll", "galaxy64.dll", "Galaxy.dll", "Galaxy64.dll"]
-        .iter()
-        .any(|d| dll_folder.join(d).exists())
+    dir_has_any_dll(dll_folder, &["galaxy.dll", "galaxy64.dll"])
 }
 
-/// Find `ngalaxye_settings/` in the game folder. If it exists somewhere other
-/// than the root, leave it in place and create a symlink at the game root
-/// pointing to it. If it doesn't exist, create it at the root. Then create
-/// symlinks from every directory containing Galaxy DLLs to the root settings.
+/// Find `ngalaxye_settings/` in the game folder. Move a discovered directory
+/// to the game root, link its old location back to the root, and point every
+/// Galaxy-DLL directory at the same canonical settings directory.
 pub fn centralize_galaxy_settings(game_folder: &str) -> Result<Option<PathBuf>, String> {
     crate::api_emulators_shared::centralize_settings(
         game_folder,
         "ngalaxye_settings",
         GOG_DLL_NAMES,
+        None,
     )
 }
-
 
 
 const GOG_DLL_NAMES: &[&str] = &["galaxy.dll", "galaxy64.dll"];
@@ -221,14 +218,27 @@ fn install_nge_into_folder(
     version: &str,
 ) -> Result<(), String> {
     let version_dir = resolve_gog_version(save_dir, version)?;
+    let (primary_src, _) = nge_file_map(is64)
+        .first()
+        .ok_or_else(|| "No NGE API files configured".to_string())?;
+    if !version_dir.join(primary_src).is_file() {
+        return Err(format!(
+            "NGE version is missing required file {}",
+            version_dir.join(primary_src).display()
+        ));
+    }
 
     for (src_name, dst_name) in nge_file_map(is64) {
         let src = version_dir.join(src_name);
-        let dst = dll_folder.join(dst_name);
-        if src.is_file() {
-            backup_file(&dst)?;
-            copy_file(&src, &dst)?;
+        if !src.is_file() {
+            continue;
         }
+        let original = prepare_original_file(dll_folder, src_name, dst_name)?;
+        let dst = dll_folder.join(dst_name);
+        if let Some(original) = original {
+            backup_file(&original)?;
+        }
+        copy_file(&src, &dst)?;
     }
 
     let settings_dir = dll_folder.join("ngalaxye_settings");
@@ -272,6 +282,13 @@ mod tests {
         assert!(!is_nge_installed(dir));
         std::fs::write(dir.join("Galaxy64.dll.bak"), b"x").unwrap();
         assert!(is_nge_installed(dir));
+    }
+
+    #[test]
+    fn test_has_original_gog_dlls_accepts_mixed_case() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("GALAXY64.DLL"), b"x").unwrap();
+        assert!(has_original_gog_dlls(tmp.path()));
     }
 
     fn nge_config(dir: &std::path::Path, body: &str) {

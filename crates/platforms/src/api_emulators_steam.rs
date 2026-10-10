@@ -1,11 +1,17 @@
 use crate::api_emulators_shared::{
     api_emulators_dir, backup_file, copy_file, detect_arch, detect_folder_bitness,
-    find_game_dll_folder, has_emulator_backups, is_windows, restore_backup,
+    dir_has_any_dll, find_game_dll_folder, has_emulator_backups, is_windows, restore_backup,
+    prepare_original_file,
 };
 use ira_models::AppDetails;
 use std::path::{Path, PathBuf};
 
-pub fn find_steam_settings(game_exe: &str, save_dir: &str, app_id: &str) -> Option<PathBuf> {
+pub fn find_steam_settings(
+    game_exe: &str,
+    game_folder: &str,
+    save_dir: &str,
+    app_id: &str,
+) -> Option<PathBuf> {
     let ach_dir = ira_parser::achievements_dir(save_dir, app_id);
     if ach_dir.exists() {
         if let Ok(meta) = std::fs::symlink_metadata(&ach_dir) {
@@ -19,29 +25,29 @@ pub fn find_steam_settings(game_exe: &str, save_dir: &str, app_id: &str) -> Opti
             return Some(ach_dir);
         }
     }
-    let mut current = Path::new(game_exe).parent()?.to_path_buf();
-    loop {
-        let candidate = current.join("steam_settings");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
+    crate::api_emulators_shared::find_settings_from_exe(
+        Path::new(game_exe),
+        Path::new(game_folder),
+        "steam_settings",
+    )
 }
 
-/// Find `steam_settings/` in the game folder. If it exists somewhere other
-/// than the root, leave it in place and create a symlink at the game root
-/// pointing to it. If it doesn't exist, create it at the root. Then create
-/// symlinks from every directory containing Steam DLLs to the root
-/// `steam_settings/`.
+/// Find `steam_settings/` in the game folder. Move a discovered directory to
+/// the game root, link its old location back to the root, and point every
+/// Steam-DLL directory at the same canonical settings directory.
 ///
 /// This ensures GBE/GSE finds its config regardless of which subdirectory the
 /// Steam DLL lives in, without duplicating or moving config files.
-pub fn centralize_steam_settings(game_folder: &str) -> Result<Option<PathBuf>, String> {
-    crate::api_emulators_shared::centralize_settings(game_folder, "steam_settings", STEAM_DLL_NAMES)
+pub fn centralize_steam_settings(
+    game_folder: &str,
+    game_exe: &str,
+) -> Result<Option<PathBuf>, String> {
+    crate::api_emulators_shared::centralize_settings(
+        game_folder,
+        "steam_settings",
+        STEAM_DLL_NAMES,
+        Some(Path::new(game_exe)),
+    )
 }
 
 
@@ -172,10 +178,13 @@ pub fn find_steam_dll_folder(game_exe: &str, game_folder: &str) -> Option<PathBu
 /// Check if `dll_folder` contains original Steam API DLLs, either in place or
 /// renamed under a backup-style name (`.bak`, `.owo`, `_o`) by another tool.
 pub fn has_original_steam_dlls(dll_folder: &Path) -> bool {
-    const ORIGINAL_API_FILES: &[&str] = &["libsteam_api.so", "steam_api.dll", "steam_api64.dll"];
-    ORIGINAL_API_FILES
-        .iter()
-        .any(|d| dll_folder.join(d).exists())
+    const ORIGINAL_API_FILES: &[&str] = &[
+        "libsteam_api.so",
+        "libsteam_api64.so",
+        "steam_api.dll",
+        "steam_api64.dll",
+    ];
+    dir_has_any_dll(dll_folder, ORIGINAL_API_FILES)
         || has_emulator_backups(dll_folder, ORIGINAL_API_FILES)
 }
 
@@ -264,8 +273,7 @@ pub fn install_gse_from_folder(
         .find(|d| !has_steam_emulator_backups(d))
         .ok_or_else(|| "Steam DLLs already have an emulator (backups found)".to_string())?;
 
-    let is_win =
-        dll_folder.join("steam_api.dll").exists() || dll_folder.join("steam_api64.dll").exists();
+    let is_win = dir_has_any_dll(dll_folder, &["steam_api.dll", "steam_api64.dll"]);
     let is64 = detect_folder_bitness(dll_folder, STEAM_64_FILES, STEAM_32_FILES).unwrap_or(false);
 
     install_gse_into_folder(
@@ -391,6 +399,15 @@ fn install_gse_into_folder(
     version: &str,
 ) -> Result<(), String> {
     let version_dir = resolve_gse_version(save_dir, version)?;
+    let (primary_src, _) = gse_file_map(is64, is_win)
+        .first()
+        .ok_or_else(|| "No GSE API files configured".to_string())?;
+    if !version_dir.join(primary_src).is_file() {
+        return Err(format!(
+            "GSE version is missing required file {}",
+            version_dir.join(primary_src).display()
+        ));
+    }
 
     let settings_dir = dll_folder.join("steam_settings");
     std::fs::create_dir_all(&settings_dir).map_err(|e| format!("create steam_settings: {}", e))?;
@@ -404,7 +421,8 @@ fn install_gse_into_folder(
         } else {
             "steam_api.dll"
         };
-        let dll_path = dll_folder.join(dll_name);
+        let dll_path = crate::api_emulators_shared::find_file_case_insensitive(dll_folder, dll_name)
+            .unwrap_or_else(|| dll_folder.join(dll_name));
         if dll_path.is_file() {
             if let Err(e) = generate_steam_interfaces(&dll_path, &interfaces_path) {
                 eprintln!("Failed to generate steam_interfaces.txt: {}", e);
@@ -414,9 +432,18 @@ fn install_gse_into_folder(
 
     for (src_name, dst_name) in gse_file_map(is64, is_win) {
         let src = version_dir.join(src_name);
+        if !src.is_file() {
+            continue;
+        }
+        let original = prepare_original_file(dll_folder, src_name, dst_name)?;
         let dst = dll_folder.join(dst_name);
-        if src.is_file() {
-            backup_file(&dst)?;
+        // Preserve the game's API surface: optional files such as
+        // `steamclient` are patched only when the game already ships them.
+        if original.is_some() || has_emulator_backups(dll_folder, &[dst_name, src_name])
+        {
+            if let Some(original) = original {
+                backup_file(&original)?;
+            }
             copy_file(&src, &dst)?;
         }
     }
@@ -455,9 +482,31 @@ pub fn uninstall_gse(game_exe: &str, game_folder: &str) -> Result<(), String> {
         .or_else(|| Path::new(game_exe).parent().map(|p| p.to_path_buf()))
         .ok_or_else(|| "Cannot determine game DLL folder".to_string())?;
 
+    let is_win = is_windows(game_exe);
+    let is64 = has_emulator_backups(&dll_folder, STEAM_64_FILES)
+        || detect_folder_bitness(&dll_folder, STEAM_64_FILES, STEAM_32_FILES)
+            .unwrap_or_else(|| detect_arch(game_exe) == "x64");
+    let generated_targets: Vec<PathBuf> = if is_win {
+        Vec::new()
+    } else {
+        gse_file_map(is64, false)
+            .iter()
+            .filter(|(source, destination)| {
+                source != destination && has_emulator_backups(&dll_folder, &[*source])
+            })
+            .map(|(_, destination)| dll_folder.join(destination))
+            .collect()
+    };
+
     for file in GSE_VERSION_FILES {
         let path = dll_folder.join(file);
         restore_backup(&path)?;
+    }
+    for path in generated_targets {
+        if path.is_file() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("remove generated Steam DLL {}: {e}", path.display()))?;
+        }
     }
     Ok(())
 }
@@ -569,6 +618,172 @@ mod tests {
     }
 
     #[test]
+    fn test_gse_preserves_missing_steamclient_and_restores_api() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().join("save");
+        let version_dir = save_dir.join("api_emulators/steam/v1");
+        let game_dir = tmp.path().join("game");
+        let game_exe = game_dir.join("game.exe");
+        std::fs::create_dir_all(&version_dir).unwrap();
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::write(&game_exe, b"exe").unwrap();
+        std::fs::write(game_dir.join("steam_api64.dll"), b"original api").unwrap();
+        std::fs::write(version_dir.join("steam_api64.dll"), b"emulator api").unwrap();
+        std::fs::write(version_dir.join("steamclient64.dll"), b"emulator client").unwrap();
+
+        install_gse(
+            &save_dir.to_string_lossy(),
+            &game_exe.to_string_lossy(),
+            &game_dir.to_string_lossy(),
+            "123",
+            &[],
+            "v1",
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(game_dir.join("steam_api64.dll")).unwrap(),
+            b"emulator api"
+        );
+        assert!(!game_dir.join("steamclient64.dll").exists());
+
+        uninstall_gse(
+            &game_exe.to_string_lossy(),
+            &game_dir.to_string_lossy(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(game_dir.join("steam_api64.dll")).unwrap(),
+            b"original api"
+        );
+        assert!(!game_dir.join("steamclient64.dll").exists());
+    }
+
+    #[test]
+    fn test_gse_normalizes_mixed_case_linux_api_before_installing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().join("save");
+        let version_dir = save_dir.join("api_emulators/steam/v1");
+        let game_dir = tmp.path().join("game");
+        let game_exe = game_dir.join("game.x86_64");
+        std::fs::create_dir_all(&version_dir).unwrap();
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::write(&game_exe, b"elf").unwrap();
+        std::fs::write(game_dir.join("LibSteam_Api64.So"), b"original api").unwrap();
+        std::fs::write(version_dir.join("libsteam_api64.so"), b"emulator api").unwrap();
+
+        install_gse(
+            &save_dir.to_string_lossy(),
+            &game_exe.to_string_lossy(),
+            &game_dir.to_string_lossy(),
+            "123",
+            &[],
+            "v1",
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(game_dir.join("libsteam_api.so")).unwrap(),
+            b"emulator api"
+        );
+        assert_eq!(
+            std::fs::read(game_dir.join("libsteam_api64.so.bak")).unwrap(),
+            b"original api"
+        );
+        assert!(!game_dir.join("LibSteam_Api64.So").exists());
+
+        uninstall_gse(
+            &game_exe.to_string_lossy(),
+            &game_dir.to_string_lossy(),
+        )
+        .unwrap();
+        assert!(!game_dir.join("libsteam_api.so").exists());
+        assert_eq!(
+            std::fs::read(game_dir.join("libsteam_api64.so")).unwrap(),
+            b"original api"
+        );
+    }
+
+    #[test]
+    fn test_gse_missing_api_does_not_create_settings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let save_dir = tmp.path().join("save");
+        let version_dir = save_dir.join("api_emulators/steam/v1");
+        let game_dir = tmp.path().join("game");
+        let game_exe = game_dir.join("game.exe");
+        std::fs::create_dir_all(&version_dir).unwrap();
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::write(&game_exe, b"exe").unwrap();
+        std::fs::write(game_dir.join("steam_api64.dll"), b"original api").unwrap();
+
+        assert!(install_gse(
+            &save_dir.to_string_lossy(),
+            &game_exe.to_string_lossy(),
+            &game_dir.to_string_lossy(),
+            "123",
+            &[],
+            "v1",
+        )
+        .is_err());
+        assert!(!game_dir.join("steam_settings").exists());
+        assert!(!ira_parser::achievements_dir(&save_dir.to_string_lossy(), "123").exists());
+    }
+
+    #[test]
+    fn test_find_steam_settings_searches_nested_game_platforms() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_root = tmp.path().join("RenpyGame");
+        let linux_dir = game_root.join("Linux");
+        let linux_settings = linux_dir.join("steam_settings");
+        let windows_settings = game_root.join("Windows").join("steam_settings");
+        std::fs::create_dir_all(&linux_settings).unwrap();
+        std::fs::create_dir_all(&windows_settings).unwrap();
+        std::fs::write(linux_dir.join("money_for_girls.sh"), b"x").unwrap();
+        std::fs::write(linux_settings.join("steam_appid.txt"), b"123").unwrap();
+        std::fs::write(windows_settings.join("steam_appid.txt"), b"123").unwrap();
+
+        let found = find_steam_settings(
+            &linux_dir.join("money_for_girls.sh").to_string_lossy(),
+            &game_root.to_string_lossy(),
+            &tmp.path().join("save").to_string_lossy(),
+            "123",
+        );
+
+        assert_eq!(found, Some(linux_settings.clone()));
+
+        std::fs::remove_dir_all(&linux_settings).unwrap();
+        let found = find_steam_settings(
+            &linux_dir.join("money_for_girls.sh").to_string_lossy(),
+            &game_root.to_string_lossy(),
+            &tmp.path().join("save").to_string_lossy(),
+            "123",
+        );
+        assert_eq!(found, Some(windows_settings));
+    }
+
+    #[test]
+    fn test_find_steam_settings_stays_inside_game_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game_root = tmp.path().join("CurrentGame");
+        let other_settings = tmp.path().join("OtherGame").join("steam_settings");
+        let exe = game_root.join("bin").join("game.exe");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&other_settings).unwrap();
+        std::fs::write(&exe, b"x").unwrap();
+        std::fs::write(other_settings.join("steam_appid.txt"), b"123").unwrap();
+
+        let found = find_steam_settings(
+            &exe.to_string_lossy(),
+            &game_root.to_string_lossy(),
+            &tmp.path().join("save").to_string_lossy(),
+            "123",
+        );
+
+        assert_eq!(found, None);
+    }
+
+    #[test]
     fn test_has_original_steam_dlls_accepts_o_renamed() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
@@ -586,5 +801,12 @@ mod tests {
     fn test_has_original_steam_dlls_empty_folder() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(!has_original_steam_dlls(tmp.path()));
+    }
+
+    #[test]
+    fn test_has_original_steam_dlls_accepts_mixed_case_linux_64_api() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("LibSteam_Api64.So"), b"x").unwrap();
+        assert!(has_original_steam_dlls(tmp.path()));
     }
 }

@@ -37,7 +37,7 @@ pub(super) struct SaveGameSettingsParams {
     pub old_wine: WineConfig,
     pub app_default_wine: WineConfig,
     pub game_exe: String,
-    pub game_folder: String,
+    pub initial_game_folder: String,
     /// The game's controller layout before the dialog opened, so a changed
     /// selection can reach a running input session.
     pub old_input_profile: Option<String>,
@@ -63,7 +63,6 @@ pub(super) struct SaveGameSettingsParams {
     pub saved_profile_id: Option<i64>,
     pub game_folder_entry: Option<adw::EntryRow>,
     pub runtime_row: Option<adw::ComboRow>,
-    pub pending_emu_uninstall: Option<Rc<RefCell<bool>>>,
 }
 
 struct AppIdResult {
@@ -488,6 +487,7 @@ fn save_dlc_config(params: &SaveGameSettingsParams) {
     ira_platforms::api_emulators::write_dlc_configs(
         params.trophy_source,
         &params.game_exe,
+        &game_folder(params),
         &params.save_dir,
         &params.store_id,
         &details,
@@ -501,12 +501,21 @@ fn save_language_config(params: &SaveGameSettingsParams) {
             ira_platforms::api_emulators::write_language_configs(
                 params.trophy_source,
                 &params.game_exe,
+                &game_folder(params),
                 &params.save_dir,
                 &params.store_id,
                 lang,
             );
         }
     }
+}
+
+fn game_folder(params: &SaveGameSettingsParams) -> String {
+    params
+        .game_folder_entry
+        .as_ref()
+        .map(|row| row.text().to_string())
+        .unwrap_or_else(|| params.initial_game_folder.clone())
 }
 
 fn update_game_state_in_memory(
@@ -910,27 +919,6 @@ pub(super) fn save_game_settings(params: SaveGameSettingsParams) {
     save_logo_settings(&db, &params);
     save_dlc_config(&params);
     save_language_config(&params);
-
-    if let Some(ref pu) = params.pending_emu_uninstall {
-        if *pu.borrow() {
-            let exe = params.game_exe.clone();
-            let game_folder = params.game_folder.clone();
-            let ts = params.trophy_source;
-            let result = if ts == TrophySource::Gse {
-                ira_platforms::api_emulators::uninstall_gse(&exe, &game_folder)
-            } else {
-                ira_platforms::api_emulators::uninstall_nge(&exe, &game_folder)
-            };
-            match result {
-                Ok(()) => {
-                    if let Err(e) = ira_db::set_api_dll_folder(&db, params.db_id, "") {
-                        eprintln!("Failed to clear API DLL folder cache: {}", e);
-                    }
-                }
-                Err(e) => eprintln!("Failed to uninstall API emulator: {}", e),
-            }
-        }
-    }
 
     update_game_state_in_memory(&params, &title, &sort_title, &app_id_result);
     update_game_names(&params.state, &app_id_result, &params.app_id, &title);

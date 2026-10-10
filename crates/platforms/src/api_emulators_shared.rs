@@ -41,6 +41,48 @@ pub(crate) fn backup_file(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn find_file_case_insensitive(dir: &Path, name: &str) -> Option<PathBuf> {
+    let lower = name.to_lowercase();
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|entry_name| entry_name.to_lowercase() == lower)
+        })
+        .map(|entry| entry.path())
+}
+
+pub(crate) fn normalize_file_name(dir: &Path, name: &str) -> Result<PathBuf, String> {
+    let canonical = dir.join(name);
+    if canonical.exists() {
+        return Ok(canonical);
+    }
+    if let Some(actual) = find_file_case_insensitive(dir, name) {
+        std::fs::rename(&actual, &canonical)
+            .map_err(|e| format!("normalize {}: {e}", actual.display()))?;
+    }
+    Ok(canonical)
+}
+
+pub(crate) fn prepare_original_file(
+    dir: &Path,
+    source_name: &str,
+    destination_name: &str,
+) -> Result<Option<PathBuf>, String> {
+    let name = if find_file_case_insensitive(dir, destination_name).is_some() {
+        destination_name
+    } else if find_file_case_insensitive(dir, source_name).is_some() {
+        source_name
+    } else {
+        return Ok(None);
+    };
+    normalize_file_name(dir, name).map(Some)
+}
+
 /// Restore the original file behind `path` from whichever backup variant
 /// exists (ours: `.dll.bak`; other tools: `.bak.dll`, `.owo`, `_o.dll`).
 /// Our own `.ext.bak` wins when several variants coexist, since it holds
@@ -92,7 +134,7 @@ pub fn list_denuvo_versions(save_dir: &str) -> Vec<String> {
 }
 
 pub(crate) fn detect_arch(game_exe: &str) -> &'static str {
-    if game_exe.ends_with(".exe") || game_exe.ends_with(".bat") {
+    if is_windows(game_exe) {
         let is64 = game_exe.contains("64")
             || std::fs::metadata(game_exe)
                 .map(|m| m.len() > 1_500_000)
@@ -106,7 +148,10 @@ pub(crate) fn detect_arch(game_exe: &str) -> &'static str {
 }
 
 pub(crate) fn is_windows(game_exe: &str) -> bool {
-    game_exe.ends_with(".exe") || game_exe.ends_with(".bat")
+    Path::new(game_exe)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe") || ext.eq_ignore_ascii_case("bat"))
 }
 
 /// Detect bitness from the DLLs actually present in `dir`, most specific
@@ -183,7 +228,7 @@ pub(crate) fn find_api_emu_dll_folder(game_exe: &str, dll_names: &[&str]) -> Opt
 
 /// Case-insensitive check whether `dir` directly contains any of `dll_names`.
 /// Both sides are lowercased, so mixed-case lists like `Galaxy.dll` match.
-fn dir_has_any_dll(dir: &Path, dll_names: &[&str]) -> bool {
+pub(crate) fn dir_has_any_dll(dir: &Path, dll_names: &[&str]) -> bool {
     let lower: Vec<String> = dll_names.iter().map(|n| n.to_lowercase()).collect();
     std::fs::read_dir(dir)
         .into_iter()
@@ -240,13 +285,24 @@ pub(crate) fn find_game_dll_folder(
     game_folder: &str,
     dll_names: &[&str],
 ) -> Option<PathBuf> {
-    if let Some(folder) = find_api_emu_dll_folder(game_exe, dll_names) {
+    let extension = if is_windows(game_exe) { ".dll" } else { ".so" };
+    let platform_names: Vec<&str> = dll_names
+        .iter()
+        .copied()
+        .filter(|name| name.ends_with(extension))
+        .collect();
+    let names = if platform_names.is_empty() {
+        dll_names
+    } else {
+        &platform_names
+    };
+    if let Some(folder) = find_api_emu_dll_folder(game_exe, names) {
         return Some(folder);
     }
     if game_folder.is_empty() {
         return None;
     }
-    let mut dirs = find_dll_dirs_recursive(Path::new(game_folder), dll_names);
+    let mut dirs = find_dll_dirs_recursive(Path::new(game_folder), names);
     dirs.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
     dirs.into_iter().next()
 }
@@ -359,67 +415,163 @@ pub(crate) fn find_settings_recursive(root: &Path, name: &str) -> Option<PathBuf
     None
 }
 
-/// Whether `path` is a real directory rather than a symlink.
-pub(crate) fn is_real_dir(path: &Path) -> bool {
-    if path.is_symlink() {
-        return false;
+pub(crate) fn find_settings_from_exe(
+    game_exe: &Path,
+    game_root: &Path,
+    name: &str,
+) -> Option<PathBuf> {
+    let root = if game_root.as_os_str().is_empty() {
+        game_exe.parent()?
+    } else {
+        game_root
+    };
+    let mut current = game_exe.parent()?.to_path_buf();
+    while current.starts_with(root) {
+        let candidate = current.join(name);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if current == root || !current.pop() {
+            break;
+        }
     }
-    path.is_dir()
+    find_settings_recursive(root, name)
 }
 
-/// For every directory containing one of `dll_names` under `root`, create a
-/// relative symlink called `settings_name` to `settings_dir` unless one
-/// already exists.
+#[cfg(unix)]
+fn merge_settings_contents(source: &Path, target: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(target).map_err(|e| format!("create settings target: {e}"))?;
+    for entry in std::fs::read_dir(source)
+        .map_err(|e| format!("read settings directory {}: {e}", source.display()))?
+    {
+        let entry = entry.map_err(|e| format!("read settings entry: {e}"))?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        let source_meta = std::fs::symlink_metadata(&source_path)
+            .map_err(|e| format!("stat settings entry {}: {e}", source_path.display()))?;
+        let target_meta = std::fs::symlink_metadata(&target_path).ok();
+        match target_meta {
+            None => std::fs::rename(&source_path, &target_path)
+                .map_err(|e| format!("move settings entry {}: {e}", source_path.display()))?,
+            Some(target_meta) if source_meta.is_dir() && target_meta.is_dir() => {
+                merge_settings_contents(&source_path, &target_path)?;
+                if std::fs::read_dir(&source_path)
+                    .map_err(|e| format!("read merged settings: {e}"))?
+                    .next()
+                    .is_none()
+                {
+                    std::fs::remove_dir(&source_path)
+                        .map_err(|e| format!("remove merged settings: {e}"))?;
+                }
+            }
+            Some(_) => remove_settings_path(&source_path)?,
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn remove_settings_path(path: &Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|e| format!("stat {}: {e}", path.display()))?;
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        std::fs::remove_file(path).map_err(|e| format!("remove {}: {e}", path.display()))?;
+    } else if metadata.is_dir() {
+        std::fs::remove_dir_all(path).map_err(|e| format!("remove {}: {e}", path.display()))?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn replace_settings_with_link(link: &Path, target: &Path) -> Result<(), String> {
+    if link == target {
+        return Ok(());
+    }
+    if let Ok(metadata) = std::fs::symlink_metadata(link) {
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            merge_settings_contents(link, target)?;
+        }
+        remove_settings_path(link)?;
+    }
+    let parent = link
+        .parent()
+        .ok_or_else(|| format!("settings link has no parent: {}", link.display()))?;
+    let relative = compute_relative(parent, target);
+    std::os::unix::fs::symlink(relative, link)
+        .map_err(|e| format!("link {} to {}: {e}", link.display(), target.display()))
+}
+
+/// Point every directory containing one of `dll_names` under `root` at the
+/// canonical settings directory.
 pub(crate) fn symlink_dll_dirs_to_settings(
     root: &Path,
     settings_dir: &Path,
     settings_name: &str,
     dll_names: &[&str],
-) {
+) -> Result<(), String> {
     for dir in find_dll_dirs_recursive(root, dll_names) {
         let link = dir.join(settings_name);
-        if link.exists() {
+        if link == settings_dir {
             continue;
         }
         #[cfg(unix)]
-        {
-            let rel = compute_relative(&dir, settings_dir);
-            let _ = std::os::unix::fs::symlink(&rel, &link);
-        }
+        replace_settings_with_link(&link, settings_dir)?;
     }
+    Ok(())
 }
 
 /// Shared body of `centralize_steam_settings` / `centralize_galaxy_settings`:
-/// keep a nested settings dir in place with a root symlink to it, or create
-/// the settings dir at the root, then link every DLL directory to it.
+/// move discovered settings to the game root, link the old location back to
+/// the root, then point every DLL directory at the same canonical directory.
 pub(crate) fn centralize_settings(
     game_folder: &str,
     settings_name: &str,
     dll_names: &[&str],
+    game_exe: Option<&Path>,
 ) -> Result<Option<PathBuf>, String> {
     let root = Path::new(game_folder);
     let root_settings = root.join(settings_name);
 
-    if is_real_dir(&root_settings) {
-        symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names);
+    if root_settings.is_dir() {
+        symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names)?;
         return Ok(Some(root_settings));
     }
 
-    if let Some(found_dir) = find_settings_recursive(root, settings_name) {
+    let found_dir = game_exe
+        .and_then(|exe| find_settings_from_exe(exe, root, settings_name))
+        .filter(|path| path.starts_with(root))
+        .or_else(|| find_settings_recursive(root, settings_name));
+    if let Some(found_dir) = found_dir {
         #[cfg(unix)]
         {
-            if !root_settings.exists() {
-                let rel = compute_relative(&root_settings, &found_dir);
-                let _ = std::os::unix::fs::symlink(&rel, &root_settings);
+            let target = if std::fs::symlink_metadata(&found_dir)
+                .map_err(|e| format!("stat settings directory: {e}"))?
+                .file_type()
+                .is_symlink()
+            {
+                std::fs::canonicalize(&found_dir)
+                    .map_err(|e| format!("resolve settings directory: {e}"))?
+            } else {
+                std::fs::rename(&found_dir, &root_settings)
+                    .map_err(|e| format!("move settings to root: {e}"))?;
+                root_settings.clone()
+            };
+            if target != root_settings {
+                replace_settings_with_link(&root_settings, &target)?;
+            }
+            if found_dir != root_settings {
+                replace_settings_with_link(&found_dir, &root_settings)?;
             }
         }
-        symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names);
+        #[cfg(not(unix))]
+        std::fs::create_dir_all(&root_settings)
+            .map_err(|e| format!("create {settings_name} at root: {e}"))?;
+        symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names)?;
         return Ok(Some(root_settings));
     }
 
     std::fs::create_dir_all(&root_settings)
         .map_err(|e| format!("create {settings_name} at root: {e}"))?;
-    symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names);
+    symlink_dll_dirs_to_settings(root, &root_settings, settings_name, dll_names)?;
     Ok(Some(root_settings))
 }
 
@@ -650,6 +802,21 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_file_name_renames_mixed_case_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let actual = tmp.path().join("GALAXY64.DLL");
+        let canonical = tmp.path().join("Galaxy64.dll");
+        std::fs::write(&actual, b"original").unwrap();
+
+        assert_eq!(
+            normalize_file_name(tmp.path(), "Galaxy64.dll").unwrap(),
+            canonical
+        );
+        assert!(!actual.exists());
+        assert_eq!(std::fs::read(canonical).unwrap(), b"original");
+    }
+
+    #[test]
     fn test_find_dll_dirs_recursive_empty_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let found = find_dll_dirs_recursive(tmp.path(), &["steam_api64.dll"]);
@@ -685,6 +852,8 @@ mod tests {
     fn test_is_windows_by_extension() {
         assert!(is_windows("game.exe"));
         assert!(is_windows("setup.bat"));
+        assert!(is_windows("GAME.EXE"));
+        assert!(is_windows("SETUP.BAT"));
         assert!(!is_windows("game.x86_64"));
         assert!(!is_windows("game.sh"));
     }
@@ -693,6 +862,7 @@ mod tests {
     fn test_detect_arch_windows_heuristic() {
         assert_eq!(detect_arch("game64.exe"), "x64");
         assert_eq!(detect_arch("game.exe"), "x86");
+        assert_eq!(detect_arch("GAME64.EXE"), "x64");
     }
 
     #[test]
@@ -732,6 +902,49 @@ mod tests {
         )
         .unwrap();
         assert_eq!(found, deep);
+    }
+
+    #[test]
+    fn test_find_game_dll_folder_matches_executable_platform() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let windows = root.join("0-Windows");
+        let linux = root.join("1-Linux");
+        std::fs::create_dir_all(&windows).unwrap();
+        std::fs::create_dir_all(&linux).unwrap();
+        std::fs::write(windows.join("steam_api64.dll"), b"x").unwrap();
+        std::fs::write(linux.join("libsteam_api.so"), b"x").unwrap();
+        let exe = root.join("money_for_girls.sh");
+        std::fs::write(&exe, b"x").unwrap();
+
+        let found = find_game_dll_folder(
+            &exe.to_string_lossy(),
+            &root.to_string_lossy(),
+            &["steam_api64.dll", "libsteam_api.so"],
+        )
+        .unwrap();
+
+        assert_eq!(found, linux);
+    }
+
+    #[test]
+    fn test_find_game_dll_folder_accepts_uppercase_windows_executable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let dll_dir = root.join("Windows");
+        std::fs::create_dir_all(&dll_dir).unwrap();
+        std::fs::write(dll_dir.join("steam_api64.dll"), b"x").unwrap();
+        let exe = root.join("Game.EXE");
+        std::fs::write(&exe, b"x").unwrap();
+
+        let found = find_game_dll_folder(
+            &exe.to_string_lossy(),
+            &root.to_string_lossy(),
+            &["steam_api64.dll", "libsteam_api.so"],
+        )
+        .unwrap();
+
+        assert_eq!(found, dll_dir);
     }
 
     #[test]
@@ -799,5 +1012,83 @@ mod tests {
             Some(nested)
         );
         assert_eq!(find_settings_recursive(tmp.path(), "missing"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_centralize_settings_moves_nested_config_to_root_and_links_all_dll_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("game");
+        let linux = root.join("Linux");
+        let windows = root.join("Windows");
+        let old_settings = windows.join("steam_settings");
+        std::fs::create_dir_all(&linux).unwrap();
+        std::fs::create_dir_all(&old_settings).unwrap();
+        std::fs::write(linux.join("libsteam_api.so"), b"x").unwrap();
+        std::fs::write(windows.join("steam_api64.dll"), b"x").unwrap();
+        std::fs::write(old_settings.join("steam_appid.txt"), b"123").unwrap();
+        let exe = linux.join("game.sh");
+        std::fs::write(&exe, b"x").unwrap();
+
+        let result = centralize_settings(
+            &root.to_string_lossy(),
+            "steam_settings",
+            &["steam_api64.dll", "libsteam_api.so"],
+            Some(&exe),
+        )
+        .unwrap();
+
+        let root_settings = root.join("steam_settings");
+        assert_eq!(result, Some(root_settings.clone()));
+        assert!(root_settings.is_dir());
+        assert!(!std::fs::symlink_metadata(&root_settings)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::read(root_settings.join("steam_appid.txt")).unwrap(),
+            b"123"
+        );
+        assert!(std::fs::symlink_metadata(&old_settings)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(std::fs::symlink_metadata(linux.join("steam_settings"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(std::fs::symlink_metadata(windows.join("steam_settings"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_centralize_settings_replaces_stale_dll_dir_settings_link() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("game");
+        let dll_dir = root.join("bin");
+        let stale = dll_dir.join("steam_settings");
+        let root_settings = root.join("steam_settings");
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::create_dir_all(&root_settings).unwrap();
+        std::fs::write(root_settings.join("steam_appid.txt"), b"123").unwrap();
+        std::fs::write(dll_dir.join("steam_api64.dll"), b"x").unwrap();
+        std::fs::write(stale.join("steam_appid.txt"), b"456").unwrap();
+
+        centralize_settings(
+            &root.to_string_lossy(),
+            "steam_settings",
+            &["steam_api64.dll"],
+            Some(&dll_dir.join("game.exe")),
+        )
+        .unwrap();
+
+        assert!(std::fs::symlink_metadata(&stale)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read(stale.join("steam_appid.txt")).unwrap(), b"123");
     }
 }

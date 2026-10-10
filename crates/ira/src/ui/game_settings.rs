@@ -597,6 +597,7 @@ fn build_language_section(
     let current_lang = ira_platforms::api_emulators::read_current_language(
         game.trophy_source,
         &game_exe,
+        &game.game_folder,
         &save_dir,
         &game.app_id,
     );

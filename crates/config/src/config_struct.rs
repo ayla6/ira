@@ -365,24 +365,34 @@ impl Config {
         Ok(())
     }
 
-    /// Stash one secret in the keyring and return what the config file
-    /// should carry: empty on success, the plaintext itself when the
-    /// keyring write failed, so the setting survives on disk instead of
-    /// vanishing.
-    fn stashed(key: &str, value: &str) -> String {
-        if let Err(err) = secrets::set_secret(key, value) {
-            eprintln!("keyring store failed for {key}: {err}; keeping the value in the config file");
-            return value.to_string();
+    fn stashed_with(
+        key: &str,
+        value: &str,
+        set_secret: impl FnOnce(&str, &str) -> Result<(), String>,
+    ) -> Result<String, String> {
+        if value.is_empty() {
+            if let Err(err) = set_secret(key, value) {
+                eprintln!("keyring clear failed for {key}: {err}");
+            }
+            return Ok(String::new());
         }
-        String::new()
+        set_secret(key, value)
+            .map(|_| String::new())
+            .map_err(|err| format!("cannot save secret {key} to the keyring: {err}"))
+    }
+
+    /// Stash one secret in the keyring. Non-empty secrets never enter the
+    /// config file, even when the keyring is unavailable.
+    fn stashed(key: &str, value: &str) -> Result<String, String> {
+        Self::stashed_with(key, value, secrets::set_secret)
     }
 
     pub fn save(&self) -> Result<(), String> {
         let _guard = crate::load::config_io_lock();
-        let steam = Self::stashed("steam", &self.steam_api_key);
-        let sgdb = Self::stashed("steamgriddb", &self.steam_griddb_api_key);
-        let ra_web = Self::stashed("ra_web_api_key", &self.ra_web_api_key);
-        let screenscraper = Self::stashed("screenscraper", &self.screenscraper_password);
+        let steam = Self::stashed("steam", &self.steam_api_key)?;
+        let sgdb = Self::stashed("steamgriddb", &self.steam_griddb_api_key)?;
+        let ra_web = Self::stashed("ra_web_api_key", &self.ra_web_api_key)?;
+        let screenscraper = Self::stashed("screenscraper", &self.screenscraper_password)?;
         let mut plaintext = self.clone();
         plaintext.steam_api_key = steam;
         plaintext.steam_griddb_api_key = sgdb;
@@ -685,5 +695,16 @@ mod tests {
     #[test]
     fn test_resolve_rom_path_none_without_roots() {
         assert!(Config::default().resolve_rom_path("gba", "x.gba").is_none());
+    }
+
+    #[test]
+    fn test_stashed_rejects_plaintext_when_keyring_fails() {
+        let secret = "must-not-reach-config";
+        let result = Config::stashed_with("steam", secret, |_, _| {
+            Err("keyring unavailable".to_string())
+        });
+
+        assert!(result.is_err());
+        assert!(!result.unwrap_err().contains(secret));
     }
 }

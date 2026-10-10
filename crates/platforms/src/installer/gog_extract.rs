@@ -114,7 +114,10 @@ pub fn extract_data_zip(
             continue;
         }
 
-        let out_path = dest.join(stripped);
+        let Some(out_path) = sanitized_output_path(dest, stripped) else {
+            eprintln!("Skipping unsafe zip entry: {raw_name:?}");
+            continue;
+        };
 
         if entry.is_dir() {
             fs::create_dir_all(&out_path).map_err(|e| format!("create dir {:?}: {e}", out_path))?;
@@ -138,6 +141,27 @@ pub fn extract_data_zip(
     }
 
     Ok(())
+}
+
+/// Join a stripped entry onto `dest`, rejecting anything that could
+/// escape it: `..`, absolute, and prefix components never become output.
+/// Runs after [`strip_gog_prefixes`], which already removes GOG's leading
+/// `/`, `data/`, and `noarch/` segments — so this guards the remainder.
+/// Returns `None` for unsafe entries, which the caller skips loudly.
+fn sanitized_output_path(dest: &Path, stripped: &str) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut out = PathBuf::from(dest);
+    for comp in Path::new(stripped).components() {
+        match comp {
+            Component::Normal(s) => out.push(s),
+            _ => return None,
+        }
+    }
+    if out.starts_with(dest) {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 fn strip_gog_prefixes(mut path: &str) -> &str {
@@ -209,6 +233,39 @@ mod tests {
         assert!(dest.join("game/data.bin").exists());
         assert!(!dest.join("meta").exists());
         assert!(!dest.join("scripts").exists());
+    }
+
+    #[test]
+    fn test_extract_data_zip_skips_traversal_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let zip_path = tmp.path().join("data.zip");
+        make_test_zip(
+            &zip_path,
+            &[
+                ("data/noarch/../../evil.txt", b"evil", false),
+                ("data/noarch/../../evil_dir/", b"", true),
+                ("data/noarch/game/../../evil2.txt", b"evil", false),
+                ("data/noarch/game/ok.txt", b"ok", false),
+            ],
+        );
+
+        let dest = tmp.path().join("out");
+        extract_data_zip(&zip_path, &dest, |_, _| {}).unwrap();
+
+        assert!(dest.join("game/ok.txt").exists());
+        assert!(!dest.join("evil.txt").exists());
+        assert!(!dest.join("evil2.txt").exists());
+        assert!(!dest.join("evil_dir").exists());
+        assert!(!tmp.path().join("evil.txt").exists());
+    }
+
+    #[test]
+    fn test_sanitized_output_path_rejects_escapes() {
+        let dest = Path::new("/tmp/out");
+        assert!(sanitized_output_path(dest, "game/a.txt").is_some());
+        assert!(sanitized_output_path(dest, "../evil.txt").is_none());
+        assert!(sanitized_output_path(dest, "a/../../evil.txt").is_none());
+        assert!(sanitized_output_path(dest, "/abs.txt").is_none());
     }
 
     #[test]

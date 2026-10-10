@@ -180,7 +180,7 @@ impl GameMenu {
                 }
                 if let Some(big) = &big {
                     big.all.update_ordering_label(state);
-                    big.all.refresh(state);
+                    big.all.reset_after_sort(state);
                 }
                 self.close();
             }

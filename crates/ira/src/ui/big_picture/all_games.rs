@@ -171,6 +171,7 @@ pub(super) struct AllSoftwareUi {
     recent_page: gtk4::Widget,
     scrolled: gtk4::ScrolledWindow,
     grid: VirtualGrid,
+    store: gio::ListStore,
     /// The selected game's name and sort detail as a tooltip pill floating
     /// above its tile.
     tooltip: Marquee,
@@ -443,6 +444,7 @@ pub(super) fn build(
         recent_page: recent_page.clone().upcast::<gtk4::Widget>(),
         scrolled,
         grid,
+        store,
         tooltip,
         empty: empty.clone(),
         games: RefCell::new(Vec::new()),
@@ -815,6 +817,21 @@ impl AllSoftwareUi {
         }
     }
 
+    /// A sort change starts a new browse session: the first tile is the
+    /// anchor, rather than the old game's new position somewhere below it.
+    pub(super) fn reset_after_sort(&self, state: &SharedState) {
+        self.scroll_glide.finish();
+        self.selected.set(None);
+        self.last_selected.set(None);
+        self.selected_key.set((0, 0));
+        self.grid.rebind_visible();
+        self.tooltip.set_visible(false);
+        self.ring.set_visible(false);
+        self.scrolled.vadjustment().set_value(0.0);
+        self.refresh(state);
+        self.ensure_default_selection(state);
+    }
+
     pub(super) fn refresh(&self, state: &SharedState) {
         if self.groups_grid.ensure_sized() {
             self.groups_grid.reload(state);
@@ -898,13 +915,12 @@ impl AllSoftwareUi {
     }
 
     fn sync_store(&self, state: &SharedState, games: &[Game]) {
-        let store = gio::ListStore::new::<crate::ui::game_item::GameItem>();
-        for game in games {
-            store.append(&crate::ui::game_item::GameItem::new(game));
-        }
-        // The model swap replays items_changed with removed != added, so the
-        // grid clears its visible cells and rebinds from the new store.
-        self.grid.set_model(&store);
+        let items: Vec<crate::ui::game_item::GameItem> =
+            games.iter().map(crate::ui::game_item::GameItem::new).collect();
+        // Same-size reorderings keep the visible cells alive: ListStore emits
+        // items_changed with equal removed/added counts, so VirtualGrid marks
+        // them dirty instead of tearing down the whole visible row.
+        self.store.splice(0, self.store.n_items(), &items);
 
         if let Some(selected) = self.selected.get() {
             let selected = selected.min(games.len().saturating_sub(1));

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::ps4::parse_trop_xml;
+use crate::sony::parse_trop_xml;
 use ira_models::{Game, MergedAchievement};
 
 use super::discovery::Rpcs3Game;

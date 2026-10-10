@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::ps4::{parse_psf, psf_get_title, psf_get_title_id};
+use crate::sony::{parse_psf, psf_get_title, psf_get_title_id};
 use crate::emu_dirs::home_dir;
 
 pub fn vita_fs_path_for(executable: &str) -> PathBuf {

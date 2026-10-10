@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::ps4::{
-    parse_playtime, parse_trop_xml, parse_user_trophies, read_play_times_from_path, ShadPS4Game,
-    TrophyDef,
-};
+use crate::ps4::{parse_playtime, read_play_times_from_path, ShadPS4Game};
+use crate::sony::{parse_trop_xml, parse_user_trophies, TrophyDef};
 use ira_models::{Game, MergedAchievement};
 
 pub struct ShadPS4GameMeta {

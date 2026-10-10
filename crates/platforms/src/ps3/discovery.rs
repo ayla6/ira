@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::ps4::{parse_psf, psf_get_title, psf_get_title_id};
+use crate::sony::{parse_psf, psf_get_title, psf_get_title_id};
 
 use super::paths::{disc_dir_for, games_dir_for, rpcs3_config_dir_for_executable};
 

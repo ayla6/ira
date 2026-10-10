@@ -22,6 +22,7 @@ pub mod ps4;
 pub mod retroachievements;
 pub mod rom_hash;
 pub mod rom_serial;
+pub mod sony;
 pub mod steam;
 pub mod switch;
 mod switch_detect;

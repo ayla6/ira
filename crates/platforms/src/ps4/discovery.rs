@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::ps4::{parse_npbind, parse_psf, psf_get_title, psf_get_title_id, shadps4_user_dir_for};
+use crate::ps4::{parse_npbind, shadps4_user_dir_for};
+use crate::sony::{parse_psf, psf_get_title, psf_get_title_id};
 
 pub fn read_install_dirs() -> Vec<PathBuf> {
     read_install_dirs_for_executable("")

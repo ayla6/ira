@@ -533,6 +533,7 @@ mod imp {
                 .filter(|&&slot| slot < first_slot || slot >= last_slot)
                 .copied()
                 .collect();
+            let mut newly_visible = Vec::new();
 
             {
                 let mut visible = self.visible.borrow_mut();
@@ -584,15 +585,19 @@ mod imp {
                     if fresh {
                         widget.set_parent(&*self.obj());
                     }
+                    newly_visible.push(slot_idx);
                     visible.insert(slot_idx, (is_header, widget));
                 }
             }
 
             {
                 let sections = self.sections.borrow().clone();
-                let mut visible = self.visible.borrow_mut();
-                for (slot_idx, slot) in plan.iter().enumerate().take(last_slot).skip(first_slot) {
-                    let Some((is_header, widget)) = visible.get_mut(&slot_idx) else {
+                let visible = self.visible.borrow();
+                for slot_idx in &newly_visible {
+                    let Some(slot) = plan.get(*slot_idx) else {
+                        continue;
+                    };
+                    let Some((is_header, widget)) = visible.get(slot_idx) else {
                         continue;
                     };
                     if *is_header {
@@ -623,6 +628,9 @@ mod imp {
                 let sections = self.sections.borrow().clone();
                 let visible = self.visible.borrow();
                 for (slot_idx, (is_header, widget)) in visible.iter() {
+                    if newly_visible.contains(slot_idx) {
+                        continue;
+                    }
                     let Some(slot) = plan.get(*slot_idx) else {
                         continue;
                     };

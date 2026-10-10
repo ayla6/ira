@@ -8,7 +8,7 @@ use crate::ui::selection_ring::SelectionRing;
 use super::view::BigPictureUi;
 use crate::ui::css::*;
 use crate::ui::recent_carousel::RecentRow;
-use crate::ui::recent_row::build_cover;
+use crate::ui::recent_row::{build_cover, update_cover};
 use crate::ui::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
@@ -36,7 +36,7 @@ pub(super) struct HomeUi {
     scrolled: gtk4::ScrolledWindow,
     marquee: Marquee,
     ring: SelectionRing,
-    /// The active capsule size; the carousel rebuilds when it changes.
+    /// The active capsule size; retained covers resize when it changes.
     capsule: Rc<Cell<i32>>,
     /// The capsule and square-mode the current covers were built at: a
     /// viewport resize changes the capsule without touching the game
@@ -229,6 +229,15 @@ fn carousel_art_key(game: &Game, square_mode: bool) -> &str {
     }
 }
 
+fn carousel_art_path(game: &Game, square_mode: bool) -> String {
+    let path = carousel_art_key(game, square_mode);
+    if square_mode && !game.square_path.is_empty() {
+        small_square_path(path).unwrap_or_else(|| path.to_string())
+    } else {
+        path.to_string()
+    }
+}
+
 /// The `_small` square thumbnail beside a full square image, when one is on
 /// disk. Same directory, generated alongside the download or edit save.
 fn small_square_path(square_path: &str) -> Option<String> {
@@ -237,32 +246,14 @@ fn small_square_path(square_path: &str) -> Option<String> {
 }
 
 /// Repopulate the carousel from the shared game list. Message handlers call
-/// it whenever the game list or its artwork changes; the rebuild is skipped
-/// when nothing visible differs.
+/// it whenever the game list or its artwork changes; unchanged visible state
+/// is left untouched.
 pub(super) fn refresh(state: &SharedState) {
     let Some(big) = state.borrow().big_picture.clone() else {
         return;
     };
     let ui = &big.home;
     let games = crate::ui::helpers::recently_played(state, RECENT_LIMIT);
-
-    // Pre-load stage: with no games yet, the stage stays empty — no
-    // covers, no All Software tile, nothing floating over it. Everything
-    // appears together once the library lands.
-    if games.is_empty() {
-        ui.row.clear_covers();
-        ui.covers.borrow_mut().clear();
-        *ui.games.borrow_mut() = Vec::new();
-        ui.selected.set(None);
-        ui.marquee.set_visible(false);
-        ui.ring.set_visible(false);
-        // Zero means "nothing built", so the first real refresh rebuilds.
-        ui.built_capsule.set(0);
-        ui.built_square.set(false);
-        return;
-    }
-
-    // The row's cover height is kept in step so covers stay square.
     let square_mode = state.borrow().cfg.big_picture_square_capsules;
     let viewport = state.borrow().window.width();
     let capsule = if viewport >= 960 {
@@ -271,10 +262,37 @@ pub(super) fn refresh(state: &SharedState) {
         ui.capsule.get().max(320)
     };
 
-    // The achievement watcher re-reports games constantly; rebuilding the
-    // whole carousel for each report churns covers for no visible change.
-    // Only rebuild when the carousel's content — or the size it is built
-    // at — actually differs.
+    let current_games = ui.games.borrow().clone();
+    let current_covers = ui.covers.borrow().clone();
+    let selected_index = ui.selected.get();
+    let selected_key = selected_index.and_then(|index| {
+        current_games.get(index).map(Game::grid_id)
+    });
+    let at_tile = matches!(
+        selected_index,
+        Some(index) if index >= current_games.len() && index > 0
+    );
+    let was_empty = current_games.is_empty();
+
+    // The empty state is also diffed: repeated watcher messages must not
+    // detach an already-empty row or clear the overlay state again.
+    if games.is_empty() {
+        if !current_games.is_empty() || !current_covers.is_empty() {
+            ui.row.replace_covers(&[]);
+            ui.covers.borrow_mut().clear();
+        }
+        *ui.games.borrow_mut() = Vec::new();
+        ui.selected.set(None);
+        ui.marquee.set_visible(false);
+        ui.ring.set_visible(false);
+        ui.built_capsule.set(0);
+        ui.built_square.set(false);
+        return;
+    }
+
+    // The achievement watcher re-reports games constantly. A refresh is a
+    // diff: retained cover widgets keep their paintable, hover state and
+    // parentage while only changed paths or labels are updated.
     let unchanged = ui.built_capsule.get() == capsule
         && ui.built_square.get() == square_mode
         && {
@@ -282,7 +300,7 @@ pub(super) fn refresh(state: &SharedState) {
             current.len() == games.len()
                 && current.iter().zip(&games).all(|(a, b)| {
                     a.grid_id() == b.grid_id()
-                        && carousel_art_key(a, square_mode) == carousel_art_key(b, square_mode)
+                        && carousel_art_path(a, square_mode) == carousel_art_path(b, square_mode)
                         && a.name == b.name
                 })
         };
@@ -290,28 +308,18 @@ pub(super) fn refresh(state: &SharedState) {
         return;
     }
 
-    // Keep pointing at the same selection across rebuilds when it survives;
-    // resting on the tile follows the games count. A selection the pointer
-    // cleared stays cleared.
-    let selected_index = ui.selected.get();
-    let at_tile = matches!(selected_index, Some(i) if i >= ui.games.borrow().len() && i > 0);
-    let previous = selected_index.and_then(|i| {
-        ui.games
-            .borrow()
-            .get(i)
-            .map(Game::grid_id)
-    });
-    let was_empty = ui.games.borrow().is_empty();
-
-    ui.row.clear_covers();
-
     ui.capsule.set(capsule);
     ui.built_capsule.set(capsule);
     ui.built_square.set(square_mode);
     ui.row.set_cover_height(capsule);
     let width = capsule_width(square_mode, capsule);
+    let mut old_covers = current_games
+        .iter()
+        .zip(current_covers.iter())
+        .map(|(game, cover)| (game.grid_id(), cover.clone()))
+        .collect::<Vec<_>>();
     let mut covers = Vec::with_capacity(games.len() + 1);
-    for (index, game) in games.iter().enumerate() {
+    for game in &games {
         // Square mode: cover-fit the art into a square capsule. A game
         // whose square.webp has not landed yet falls back to its vertical
         // capsule, scaled to cover (centered, overflow cropped). The
@@ -319,26 +327,30 @@ pub(super) fn refresh(state: &SharedState) {
         // the capsule never draws larger than it. Outside square mode the
         // mirror applies: a missing vertical capsule falls back to the
         // square, so neither slot ever blanks for want of the other.
-        let art: String = if square_mode {
-            if !game.square_path.is_empty() {
-                small_square_path(&game.square_path).unwrap_or_else(|| game.square_path.clone())
-            } else {
-                game.grid_path.clone()
-            }
-        } else if !game.grid_path.is_empty() {
-            game.grid_path.clone()
+        let art = carousel_art_path(game, square_mode);
+        let key = game.grid_id();
+        let cover = if let Some(position) = old_covers
+            .iter()
+            .position(|(old_key, _)| *old_key == key)
+        {
+            let (_, cover) = old_covers.remove(position);
+            update_cover(&cover, game, &art, width, capsule, square_mode);
+            cover
         } else {
-            game.square_path.clone()
+            let click_key = key.clone();
+            build_cover(state, game, &art, width, capsule, square_mode, move |state| {
+                on_cover_clicked_key(state, &click_key)
+            })
         };
-        let cover = build_cover(state, game, &art, width, capsule, square_mode, move |state| {
-            on_cover_clicked(state, index)
-        });
-        ui.row.append_cover(&cover);
         covers.push(cover);
     }
-    let tile = build_all_tile(state, capsule);
-    ui.row.append_cover(&tile);
+    let tile = current_covers
+        .get(current_games.len())
+        .cloned()
+        .unwrap_or_else(|| build_all_tile(state, capsule));
+    update_all_tile(&tile, capsule);
     covers.push(tile);
+    ui.row.replace_covers(&covers);
     *ui.covers.borrow_mut() = covers;
 
     let selected = if at_tile {
@@ -347,9 +359,9 @@ pub(super) fn refresh(state: &SharedState) {
         match selected_index {
             // The same game if it survives; otherwise its old slot clamped
             // into the new list, so the camera never jumps to the start.
-            Some(i) => games
-                .iter()
-                .position(|g| Some(g.grid_id()) == previous)
+            Some(i) => selected_key
+                .as_deref()
+                .and_then(|key| games.iter().position(|g| g.grid_id() == key))
                 .or_else(|| Some(i.min(games.len() - 1))),
             None => None,
         }
@@ -366,7 +378,7 @@ pub(super) fn refresh(state: &SharedState) {
     }
     *ui.games.borrow_mut() = games;
     ui.marquee.set_max_width(width as f64 * 2.0);
-    apply_selection(&big);
+    refresh_selection(&big);
     // Queued after the swap so it sees the freshly loaded list.
     queue_missing_squares(state, ui, square_mode);
 }
@@ -411,6 +423,23 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
         restyle_selection(&big);
         sync_title_text(&big.home);
         sync_title_position(&big);
+    }
+}
+
+fn on_cover_clicked_key(state: &SharedState, key: &str) {
+    let index = state
+        .borrow()
+        .big_picture
+        .as_ref()
+        .and_then(|big| {
+            big.home
+                .games
+                .borrow()
+                .iter()
+                .position(|game| game.grid_id() == key)
+        });
+    if let Some(index) = index {
+        on_cover_clicked(state, index);
     }
 }
 
@@ -617,6 +646,24 @@ fn apply_selection(big: &Rc<BigPictureUi>) {
     sync_title_text(&big.home);
     sync_title_position(big);
     update_scroll(big);
+}
+
+/// Refresh visual state without starting a new camera movement. If a user
+/// navigation glide is active, only its destination changes to follow the
+/// retained selection's new geometry.
+fn refresh_selection(big: &Rc<BigPictureUi>) {
+    restyle_selection(big);
+    sync_title_text(&big.home);
+    sync_title_position(big);
+    let ui = &big.home;
+    if ui.scroll_glide.is_active() {
+        if let Some(selected) = ui.selected.get() {
+            let adj = ui.scrolled.hadjustment();
+            if let Some(target) = whole_cover_target(ui, &adj, selected) {
+                ui.scroll_glide.retarget(adj.value(), target);
+            }
+        }
+    }
 }
 
 /// Restyle the covers and re-anchor the floating title and ring to the
@@ -828,6 +875,26 @@ fn build_all_tile(state: &SharedState, capsule: i32) -> gtk4::Widget {
     });
     vbox.add_controller(click);
     vbox.upcast()
+}
+
+fn update_all_tile(tile: &gtk4::Widget, capsule: i32) {
+    let Some(tile) = tile.downcast_ref::<gtk4::Box>() else {
+        return;
+    };
+    tile.set_size_request(capsule, capsule);
+    let Some(circle) = tile
+        .first_child()
+        .and_then(|child| child.downcast::<gtk4::Box>().ok())
+    else {
+        return;
+    };
+    circle.set_size_request(capsule / 2, capsule / 2);
+    if let Some(icon) = circle
+        .first_child()
+        .and_then(|child| child.downcast::<gtk4::Image>().ok())
+    {
+        icon.set_pixel_size((capsule as f64 * 0.175).round().max(8.0) as i32);
+    }
 }
 
 /// Start background fills of missing square.webp files so the carousel

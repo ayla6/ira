@@ -569,4 +569,5 @@ fn handle_variants_changed(state: &SharedState, db_id: i64) {
         }
     }
     rebuild_sidebar(state);
+    super::big_picture::refresh(state);
 }

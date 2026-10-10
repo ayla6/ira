@@ -21,6 +21,8 @@ const SNAP_PIXELS: f64 = 0.5;
 #[derive(Clone)]
 pub(super) struct ScrollGlide {
     goal: Rc<Cell<f64>>,
+    start: Rc<Cell<f64>>,
+    started: Rc<RefCell<Instant>>,
     anim: Rc<RefCell<Option<gtk4::TickCallbackId>>>,
 }
 
@@ -28,6 +30,8 @@ impl ScrollGlide {
     pub(super) fn new() -> Self {
         Self {
             goal: Rc::new(Cell::new(0.0)),
+            start: Rc::new(Cell::new(0.0)),
+            started: Rc::new(RefCell::new(Instant::now())),
             anim: Rc::new(RefCell::new(None)),
         }
     }
@@ -48,15 +52,19 @@ impl ScrollGlide {
             return;
         }
         let adj = adj.clone();
-        let start = adj.value();
-        let started = Instant::now();
+        self.start.set(adj.value());
+        *self.started.borrow_mut() = Instant::now();
+        let start = Rc::clone(&self.start);
+        let started = Rc::clone(&self.started);
         let goal = Rc::clone(&self.goal);
         let anim = Rc::clone(&self.anim);
         let id = scrolled.add_tick_callback(move |_, _| {
-            let t = (started.elapsed().as_millis() as f64 / SCROLL_MILLIS as f64).min(1.0);
+            let t = (started.borrow().elapsed().as_millis() as f64 / SCROLL_MILLIS as f64)
+                .min(1.0);
             let eased = 1.0 - (1.0 - t) * (1.0 - t);
             let g = goal.get();
-            adj.set_value(start + (g - start) * eased);
+            let s = start.get();
+            adj.set_value(s + (g - s) * eased);
             if t >= 1.0 {
                 adj.set_value(g);
                 *anim.borrow_mut() = None;
@@ -66,6 +74,22 @@ impl ScrollGlide {
             }
         });
         *self.anim.borrow_mut() = Some(id);
+    }
+
+    /// Change a refresh's destination without interrupting the user's
+    /// current glide. Input uses [`Self::animate_to`] because held presses
+    /// intentionally snap; data refreshes must preserve the motion already
+    /// visible on screen.
+    pub(super) fn retarget(&self, current: f64, target: f64) {
+        if self.anim.borrow().is_some() {
+            self.start.set(current);
+            *self.started.borrow_mut() = Instant::now();
+            self.goal.set(target);
+        }
+    }
+
+    pub(super) fn is_active(&self) -> bool {
+        self.anim.borrow().is_some()
     }
 
     /// End any in-flight glide, leaving the value where it is. Tab

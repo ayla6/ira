@@ -1,13 +1,18 @@
 use super::context_menu::show_game_context_menu;
 use super::css::*;
-use super::grid_view::queue_cover_load_priority;
 use super::message_helpers::switch_to_game;
 use super::recent_carousel::RecentRow;
 use super::state::SharedState;
 use super::virtual_grid::VirtualGrid;
 use crate::Game;
 use gtk4::prelude::*;
+use std::cell::RefCell;
 use std::rc::Rc;
+
+const COVER_KEY_DATA: &str = "ira-cover-key";
+const COVER_ART_DATA: &str = "ira-cover-art";
+const COVER_PRESENTATION_DATA: &str = "ira-cover-presentation";
+const COVER_NAME_DATA: &str = "ira-cover-name";
 
 pub(super) fn build_recent_row(
     state: &SharedState,
@@ -186,55 +191,31 @@ pub(super) fn build_cover(
     // cover spams layout warnings for the whole window.
     pic.set_can_shrink(true);
     pic.add_css_class(CSS_GAME_COVER_PIC);
-    if !image_path.is_empty() {
-        if square {
-            // Cover-fit: hand the Picture the raw texture so its
-            // ContentFit::Cover scales it, centered, cropping the
-            // overflow — the scaled paintable the desktop row uses would
-            // stretch mismatched ratios instead.
-            let pic_weak = pic.downgrade();
-            let path = image_path.to_string();
-            let set = move |texture: Option<gdk4::Texture>| {
-                if let (Some(pic), Some(texture)) = (pic_weak.upgrade(), texture) {
-                    pic.set_paintable(Some(&texture));
-                }
-            };
-            match ira_images::cached_texture(image_path) {
-                Some(texture) => set(Some(texture)),
-                None => ira_images::load_texture_async_with_priority(
-                    &path,
-                    glib::Priority::DEFAULT,
-                    set,
-                ),
-            }
-        } else {
-            queue_cover_load_priority(
-                pic.clone(),
-                image_path.to_string(),
-                (w, h),
-                game.db_id,
-                game.variant_id.unwrap_or(0),
-                vbox.clone(),
-                glib::Priority::DEFAULT,
-            );
-        }
-    }
     overlay.set_child(Some(&pic));
 
-    if image_path.is_empty() {
-        let name_label = gtk4::Label::new(Some(&game.name));
-        name_label.set_wrap(true);
-        name_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-        name_label.set_max_width_chars(15);
-        name_label.set_halign(gtk4::Align::Center);
-        name_label.set_valign(gtk4::Align::Center);
-        name_label.set_margin_start(6);
-        name_label.set_margin_end(6);
-        name_label.add_css_class(CSS_COVER_NAME_FALLBACK);
-        overlay.add_overlay(&name_label);
-    }
+    let name_label = gtk4::Label::new(Some(&game.name));
+    name_label.set_wrap(true);
+    name_label.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    name_label.set_max_width_chars(15);
+    name_label.set_halign(gtk4::Align::Center);
+    name_label.set_valign(gtk4::Align::Center);
+    name_label.set_margin_start(6);
+    name_label.set_margin_end(6);
+    name_label.add_css_class(CSS_COVER_NAME_FALLBACK);
+    name_label.set_visible(image_path.is_empty());
+    overlay.add_overlay(&name_label);
 
     vbox.append(&overlay);
+    unsafe {
+        vbox.set_data::<RefCell<String>>(COVER_KEY_DATA, RefCell::new(game.grid_id()));
+        vbox.set_data::<RefCell<String>>(COVER_ART_DATA, RefCell::new(image_path.to_string()));
+        vbox.set_data::<RefCell<String>>(
+            COVER_PRESENTATION_DATA,
+            RefCell::new(cover_presentation(square, w, h)),
+        );
+        vbox.set_data::<gtk4::Label>(COVER_NAME_DATA, name_label.clone());
+    }
+    set_cover_art(&pic, &vbox, image_path, w, h, square, true);
 
     let click_state = state.clone();
     let click = gtk4::GestureClick::new();
@@ -242,18 +223,167 @@ pub(super) fn build_cover(
     vbox.add_controller(click);
 
     let sc = state.clone();
-    let gc = game.clone();
+    let game_key = game.grid_id();
+    let fallback_game = game.clone();
     let v_weak = vbox.downgrade();
     let right_click = gtk4::GestureClick::new();
     right_click.set_button(3);
     right_click.connect_pressed(move |_, _, x, y| {
         if let Some(v) = v_weak.upgrade() {
-            show_game_context_menu(&sc, &gc, &v, x, y, None::<&gtk4::ListBoxRow>);
+            let game = sc
+                .borrow()
+                .games
+                .iter()
+                .find(|game| game.grid_id() == game_key)
+                .cloned()
+                .unwrap_or_else(|| fallback_game.clone());
+            show_game_context_menu(&sc, &game, &v, x, y, None::<&gtk4::ListBoxRow>);
         }
     });
     vbox.add_controller(right_click);
 
     vbox.upcast()
+}
+
+/// Update a retained cover without replacing its widget or current paintable.
+/// Keeping old art visible while a changed path decodes avoids a blank frame;
+/// callbacks validate the current key and path before painting.
+pub(super) fn update_cover(
+    widget: &gtk4::Widget,
+    game: &Game,
+    image_path: &str,
+    w: i32,
+    h: i32,
+    square: bool,
+) {
+    let Some(vbox) = widget.downcast_ref::<gtk4::Box>() else {
+        return;
+    };
+    let Some(overlay) = vbox
+        .first_child()
+        .and_then(|child| child.downcast::<gtk4::Overlay>().ok())
+    else {
+        return;
+    };
+    let Some(pic) = overlay
+        .child()
+        .and_then(|child| child.downcast::<gtk4::Picture>().ok())
+    else {
+        return;
+    };
+    let old_key = cover_data(vbox, COVER_KEY_DATA);
+    let old_art = cover_data(vbox, COVER_ART_DATA);
+    let old_presentation = cover_data(vbox, COVER_PRESENTATION_DATA);
+    let key = game.grid_id();
+    let key_changed = old_key != key;
+    let presentation = cover_presentation(square, w, h);
+    let changed = old_key != key || old_art != image_path || old_presentation != presentation;
+
+    vbox.set_size_request(w, h);
+    pic.set_size_request(w, h);
+    if square {
+        vbox.add_css_class(CSS_BP_SQ);
+    } else {
+        vbox.remove_css_class(CSS_BP_SQ);
+    }
+    if let Some(name_label) = unsafe { vbox.data::<gtk4::Label>(COVER_NAME_DATA) }
+        .map(|ptr| unsafe { ptr.as_ref() }.clone())
+    {
+        name_label.set_text(&game.name);
+        name_label.set_visible(image_path.is_empty());
+    }
+    set_cover_data(vbox, COVER_KEY_DATA, key.clone());
+    set_cover_data(vbox, COVER_ART_DATA, image_path.to_string());
+    set_cover_data(vbox, COVER_PRESENTATION_DATA, presentation);
+    if changed {
+        set_cover_art(
+            &pic,
+            vbox,
+            image_path,
+            w,
+            h,
+            square,
+            key_changed || image_path.is_empty(),
+        );
+    }
+}
+
+fn set_cover_data(vbox: &gtk4::Box, name: &str, value: String) {
+    if let Some(ptr) = unsafe { vbox.data::<RefCell<String>>(name) } {
+        unsafe { ptr.as_ref() }.replace(value);
+    }
+}
+
+fn cover_data(vbox: &gtk4::Box, name: &str) -> String {
+    unsafe { vbox.data::<RefCell<String>>(name) }
+        .map(|ptr| unsafe { ptr.as_ref() }.borrow().clone())
+        .unwrap_or_default()
+}
+
+fn cover_is_current(vbox: &gtk4::Box, key: &str, art: &str, presentation: &str) -> bool {
+    cover_data(vbox, COVER_KEY_DATA) == key
+        && cover_data(vbox, COVER_ART_DATA) == art
+        && cover_data(vbox, COVER_PRESENTATION_DATA) == presentation
+}
+
+fn cover_presentation(square: bool, w: i32, h: i32) -> String {
+    format!("{square}:{w}:{h}")
+}
+
+fn set_cover_art(
+    pic: &gtk4::Picture,
+    vbox: &gtk4::Box,
+    path: &str,
+    w: i32,
+    h: i32,
+    square: bool,
+    clear_first: bool,
+) {
+    if clear_first {
+        let empty = ira_images::ScaledPaintable::new_empty(w, h);
+        pic.set_paintable(Some(&empty));
+    }
+    if path.is_empty() {
+        return;
+    }
+
+    let key = cover_data(vbox, COVER_KEY_DATA);
+    let path_owned = path.to_string();
+    let presentation = cover_data(vbox, COVER_PRESENTATION_DATA);
+    let pic_weak = pic.downgrade();
+    let vbox_weak = vbox.downgrade();
+    let set = move |texture: Option<gdk4::Texture>| {
+        let Some(pic) = pic_weak.upgrade() else {
+            return;
+        };
+        let Some(vbox) = vbox_weak.upgrade() else {
+            return;
+        };
+        if !cover_is_current(&vbox, &key, &path_owned, &presentation) {
+            return;
+        }
+        match texture {
+            Some(texture) if square => pic.set_paintable(Some(&texture)),
+            Some(texture) => {
+                let paintable = ira_images::ScaledPaintable::new(&texture, w, h);
+                pic.set_paintable(Some(&paintable));
+            }
+            None => {
+                pic.set_paintable(None::<&gdk4::Paintable>);
+                if let Some(ptr) = unsafe { vbox.data::<gtk4::Label>(COVER_NAME_DATA) } {
+                    unsafe { ptr.as_ref() }.set_visible(true);
+                }
+            }
+        }
+    };
+    match ira_images::cached_texture(path) {
+        Some(texture) => set(Some(texture)),
+        None => ira_images::load_texture_async_with_priority(
+            path,
+            glib::Priority::DEFAULT,
+            set,
+        ),
+    }
 }
 
 fn update_scroll_buttons(adj: &gtk4::Adjustment, left: &gtk4::Button, right: &gtk4::Button) {

@@ -139,7 +139,7 @@ mod imp {
             if let Some(adj) = self.adj.borrow().as_ref() {
                 // No covers borrow may be live here: configure() emits
                 // `changed` synchronously, and the home hook rebuilds the
-                // carousel from that signal — a re-entrant clear_covers()
+                // carousel from that signal — a re-entrant replace_covers()
                 // would hit the borrow mid-allocation.
                 let max_val = (upper - page).max(0.0);
                 let cur = adj.value().clamp(0.0, max_val);
@@ -279,13 +279,30 @@ impl RecentRow {
         }
     }
 
-    /// Detach every cover (drop without destroying the widgets).
-    pub fn clear_covers(&self) {
-        for cover in self.imp().covers.borrow_mut().drain(..) {
+    /// Replace the row's order in one operation while retaining widgets that
+    /// the caller reused. GTK does not paint between the detach and attach
+    /// loops, so an update never exposes the transient empty row to a frame.
+    pub fn replace_covers(&self, ordered: &[gtk4::Widget]) {
+        let imp = self.imp();
+        let selected = imp.selected.borrow().as_ref().map(|w| w.as_ptr());
+        let hovered = imp.hovered.borrow().as_ref().map(|w| w.as_ptr());
+
+        for cover in imp.covers.borrow().iter() {
             cover.unparent();
         }
-        *self.imp().hovered.borrow_mut() = None;
-        *self.imp().selected.borrow_mut() = None;
+        for cover in ordered {
+            cover.set_parent(self);
+        }
+
+        *imp.covers.borrow_mut() = ordered.to_vec();
+        *imp.selected.borrow_mut() = ordered
+            .iter()
+            .find(|cover| Some(cover.as_ptr()) == selected)
+            .cloned();
+        *imp.hovered.borrow_mut() = ordered
+            .iter()
+            .find(|cover| Some(cover.as_ptr()) == hovered)
+            .cloned();
         self.queue_resize();
     }
 

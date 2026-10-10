@@ -21,9 +21,14 @@ type GameKey = (i64, i64);
 
 /// Width the floating name tooltip clips its text to.
 const TOOLTIP_MAX_WIDTH: f64 = 480.0;
+const CELL_ART_DATA: &str = "ira-cell-art";
 
 fn game_key(game: &Game) -> GameKey {
     (game.db_id, game.variant_id.unwrap_or(0))
+}
+
+fn should_clear_cell_art(old_key: GameKey, new_key: GameKey, new_art: &str) -> bool {
+    old_key != new_key || new_art.is_empty()
 }
 
 /// Where pressing (dx, dy) from `current` lands in a `cols`-wide grid of
@@ -196,6 +201,9 @@ pub(super) struct AllSoftwareUi {
     /// home carousel: discrete presses ease, held repeats snap so the
     /// camera never trails the selection.
     scroll_glide: super::scroll_glide::ScrollGlide,
+    /// A model refresh waits for its next allocation before retargeting the
+    /// glide, so ordinary scroll allocations never reset animation timing.
+    retarget_after_layout: Cell<bool>,
     /// The "sorted by …" label in the header.
     ordering: gtk4::Label,
     /// The header line and its wings; their margins and spacings are
@@ -375,6 +383,7 @@ pub(super) fn build(
         Rc::new(move || {
             if let Some(big) = overlay_state.borrow().big_picture.clone() {
                 big.all.update_tooltip(&overlay_state);
+                big.all.retarget_scroll_after_refresh();
             }
         })
     });
@@ -454,6 +463,7 @@ pub(super) fn build(
         selected_key,
         last_selected: Cell::new(None),
         scroll_glide: super::scroll_glide::ScrollGlide::new(),
+        retarget_after_layout: Cell::new(false),
         ring,
         overlay: grid_overlay,
         ordering,
@@ -907,7 +917,9 @@ impl AllSoftwareUi {
                     .position(|g| (g.db_id, g.variant_id.unwrap_or(0)) == key)
             });
             self.selected.set(kept);
-            self.selected_key.set(key.unwrap_or((0, 0)));
+            self.selected_key.set(kept
+                .and_then(|index| games.get(index).map(game_key))
+                .unwrap_or((0, 0)));
         }
         self.sync_store(state, &games);
         // The library landed with nothing selected: park on the first
@@ -915,6 +927,8 @@ impl AllSoftwareUi {
         if was_empty && !games.is_empty() {
             self.select(state, 0);
         }
+        self.retarget_after_layout
+            .set(self.scroll_glide.is_active());
     }
 
     fn sync_store(&self, state: &SharedState, games: &[Game]) {
@@ -925,8 +939,11 @@ impl AllSoftwareUi {
         // them dirty instead of tearing down the whole visible row.
         self.store.splice(0, self.store.n_items(), &items);
 
-        if let Some(selected) = self.selected.get() {
-            let selected = selected.min(games.len().saturating_sub(1));
+        if games.is_empty() {
+            self.selected.set(None);
+            self.selected_key.set((0, 0));
+        } else if let Some(selected) = self.selected.get() {
+            let selected = selected.min(games.len() - 1);
             self.selected.set(Some(selected));
             if let Some(game) = games.get(selected) {
                 self.selected_key.set(game_key(game));
@@ -1047,6 +1064,7 @@ impl AllSoftwareUi {
             return;
         }
         self.selected.set(None);
+        self.selected_key.set((0, 0));
         self.grid.rebind_visible();
         self.tooltip.set_visible(false);
         self.ring.set_visible(false);
@@ -1149,6 +1167,14 @@ impl AllSoftwareUi {
             .animate_to(&self.scrolled, &adj, self.snapped_scroll_target(&adj));
     }
 
+    pub(super) fn retarget_scroll_after_refresh(&self) {
+        if self.retarget_after_layout.replace(false) && self.scroll_glide.is_active() {
+            let adj = self.scrolled.vadjustment();
+            self.scroll_glide
+                .retarget(adj.value(), self.snapped_scroll_target(&adj));
+        }
+    }
+
     /// The scroll value that rests exactly on the selected row — never
     /// between rows, which is what puts a half-visible tile at the
     /// viewport edge. Zero before the first layout: the page height then
@@ -1242,6 +1268,7 @@ fn build_cell(state: &SharedState) -> gtk4::Widget {
 
     unsafe { vbox.set_data::<AtomicI64>("game-db-id", AtomicI64::new(0)) };
     unsafe { vbox.set_data::<AtomicI64>("game-variant-id", AtomicI64::new(0)) };
+    unsafe { vbox.set_data::<RefCell<String>>(CELL_ART_DATA, RefCell::new(String::new())) };
     unsafe { vbox.set_data::<gtk4::Label>("name-label", name_label) };
 
     let click_state = state.clone();
@@ -1270,6 +1297,15 @@ fn bind_cell(
     let pic = pic_widget.downcast_ref::<gtk4::Picture>().unwrap();
     let name_label = unsafe { vbox.data::<gtk4::Label>("name-label") }
         .map(|ptr| unsafe { ptr.as_ref() }.clone());
+    let old_key = cell_key(pic);
+    let old_art = cell_art_path(pic);
+    let expected = game_key(game);
+    let art = if game.square_path.is_empty() {
+        &game.grid_path
+    } else {
+        &game.square_path
+    };
+    let art_changed = old_key != expected || old_art != *art;
     vbox.set_size_request(cover_width, cover_height);
     pic.set_size_request(cover_width, cover_height);
 
@@ -1285,18 +1321,13 @@ fn bind_cell(
         vbox.remove_css_class(CSS_BP_SELECTED);
     }
 
-    // A recycled cell still shows the game it played in its last life;
-    // blank it before the new art resolves or scrolling flashes wrong
-    // covers everywhere.
-    let blank = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
-    pic.set_paintable(Some(&blank));
-
-    let art = if game.square_path.is_empty() {
-        &game.grid_path
-    } else {
-        &game.square_path
-    };
+    if let Some(ptr) = unsafe { vbox.data::<RefCell<String>>(CELL_ART_DATA) } {
+        unsafe { ptr.as_ref() }.replace(art.clone());
+    }
     if art.is_empty() {
+        if should_clear_cell_art(old_key, expected, art) {
+            pic.set_paintable(None::<&gdk4::Paintable>);
+        }
         if let Some(ref label) = name_label {
             label.set_text(&game.name);
             label.set_visible(true);
@@ -1306,16 +1337,31 @@ fn bind_cell(
     if let Some(ref label) = name_label {
         label.set_visible(false);
     }
+    if !art_changed {
+        return;
+    }
+    // Keep the current paintable while a replacement path decodes. The
+    // callback swaps it atomically once the new texture is ready.
+    if should_clear_cell_art(old_key, expected, art) {
+        let blank = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
+        pic.set_paintable(Some(&blank));
+    }
     let pic_weak = pic.downgrade();
-    let expected = game_key(game);
     let path = art.clone();
+    let expected_path = path.clone();
+    let fallback = name_label.clone();
     let set = move |texture: Option<gdk4::Texture>| {
         if let Some(pic) = pic_weak.upgrade() {
             // The cell may have been rebound to another game while the
             // texture was decoding; only paint if it is still ours.
-            if cell_key(&pic) == expected {
+            if cell_key(&pic) == expected && cell_art_path(&pic) == expected_path {
                 if let Some(texture) = texture {
                     pic.set_paintable(Some(&texture));
+                } else {
+                    pic.set_paintable(None::<&gdk4::Paintable>);
+                    if let Some(ref label) = fallback {
+                        label.set_visible(true);
+                    }
                 }
             }
         }
@@ -1344,6 +1390,18 @@ fn cell_key(pic: &gtk4::Picture) -> GameKey {
             .unwrap_or(0)
     };
     (read("game-db-id"), read("game-variant-id"))
+}
+
+fn cell_art_path(pic: &gtk4::Picture) -> String {
+    let Some(vbox) = pic
+        .ancestor(gtk4::Box::static_type())
+        .and_then(|w| w.downcast::<gtk4::Box>().ok())
+    else {
+        return String::new();
+    };
+    unsafe { vbox.data::<RefCell<String>>(CELL_ART_DATA) }
+        .map(|ptr| unsafe { ptr.as_ref() }.borrow().clone())
+        .unwrap_or_default()
 }
 
 fn launch_from_cell(state: &SharedState, widget: &gtk4::Widget) {
@@ -1481,9 +1539,16 @@ fn icon_drop_px(baseline: i32, cap_height: i32, line_height: i32) -> Option<i32>
 
 #[cfg(test)]
 mod tests {
-    use super::{grid_move, icon_drop_px, scroll_target};
+    use super::{grid_move, icon_drop_px, scroll_target, should_clear_cell_art};
 
     const COLS: usize = 5;
+
+    #[test]
+    fn test_cell_art_clears_recycled_cell_for_new_game() {
+        assert!(!should_clear_cell_art((4, 0), (4, 0), "new-square.webp"));
+        assert!(should_clear_cell_art((5, 0), (4, 0), "square.webp"));
+        assert!(should_clear_cell_art((4, 0), (4, 0), ""));
+    }
 
     #[test]
     fn test_grid_move_wraps_within_the_row() {

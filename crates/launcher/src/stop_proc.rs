@@ -77,17 +77,6 @@ fn wait_all_gone(pids: &[i32], deadline: Duration) {
     }
 }
 
-/// Reap ALL children regardless of group; safe now that wineserver -k
-/// completed, so no conflicting waitpid calls remain.
-fn reap_all() {
-    loop {
-        let ret = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
-        if ret <= 0 {
-            break;
-        }
-    }
-}
-
 pub fn stop_game(
     pid: i32,
     wine_exe: Option<&str>,
@@ -183,9 +172,6 @@ fn stop_wine_process_group(
 
     sigkill_leftovers(pid, descendants);
 
-    // Step 8: Reap all zombies; safe now (wineserver -k done, no blocking
-    // waits in flight).
-    reap_all();
 }
 
 /// Step 7: final fallback SIGKILL.

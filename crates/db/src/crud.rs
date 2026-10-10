@@ -45,13 +45,15 @@ pub fn add_game(conn: &DbConn, game: NewGame<'_>) -> Result<i64, String> {
             |row| row.get(0),
         )
         .map_err(err)
-    } else {
+    } else if !native_id.is_empty() {
         c.query_row(
             "SELECT id FROM games WHERE native_id = ?1 AND platform_id = ?2",
             params![native_id, platform_id],
             |row| row.get(0),
         )
         .map_err(err)
+    } else {
+        Ok(c.last_insert_rowid())
     }
 }
 
@@ -350,6 +352,39 @@ mod tests {
 
         assert_ne!(first, second);
         assert_eq!(repeated, first);
+    }
+
+    #[test]
+    fn test_add_game_without_identity_returns_inserted_ids() {
+        let (conn, _tmp) = setup_db();
+        let first = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "First",
+            },
+        )
+        .unwrap();
+        let second = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Second",
+            },
+        )
+        .unwrap();
+
+        assert_ne!(first, second);
     }
 
     #[test]

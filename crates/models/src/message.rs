@@ -15,6 +15,24 @@ pub enum AppMessage {
     },
     GameStopped(i64, Option<i64>),
     GameStarted(i64, Option<i64>),
+    /// A game launch failed before a process became runnable.
+    GameLaunchFailed {
+        db_id: i64,
+        error: String,
+    },
+    /// Opening an emulator without a game finished successfully.
+    EmulatorOpened(i64),
+    /// Opening an emulator without a game failed in a background worker.
+    EmulatorOpenFailed {
+        db_id: i64,
+        error: String,
+    },
+    /// The launch path updated a game's last-played timestamp in the DB.
+    GameLastPlayedUpdated {
+        game_id: i64,
+        variant_id: Option<i64>,
+        started_at: i64,
+    },
     /// Fired by the ShadPS4Watcher when play_time.txt changes.
     ShadPS4PlaytimeChanged,
     /// Fired by the Rpcs3Watcher when persistent_settings.dat changes.

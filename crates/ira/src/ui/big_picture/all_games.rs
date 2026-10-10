@@ -1463,7 +1463,10 @@ fn launch(state: &SharedState, game: &Game) {
         let _ = state
             .borrow()
             .sender
-            .send(crate::AppMessage::AddGameError(error));
+            .send(crate::AppMessage::GameLaunchFailed {
+                db_id: game.db_id,
+                error,
+            });
     }
 }
 

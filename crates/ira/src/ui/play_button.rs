@@ -1,7 +1,9 @@
 use crate::AppMessage;
 use gtk4::prelude::*;
 use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use super::css::*;
 use super::input_profile_store::read_profile;
@@ -13,6 +15,78 @@ const PLAY_BTN_HEIGHT: i32 = 48;
 const PLAY_BTN_H_MARGIN: i32 = 16;
 const PLAY_BTN_ICON_SIZE: i32 = 20;
 const PLAY_BTN_LABEL_WIDTH: i32 = 5;
+
+struct LaunchGameInfo {
+    game: ira_models::Game,
+    per_game_version: String,
+    per_game_ra_core: String,
+    per_game_emu: String,
+    platform_id: String,
+}
+
+struct LaunchRequest {
+    running_games: Arc<Mutex<HashMap<i64, i32>>>,
+    launching_games: Arc<Mutex<HashSet<i64>>>,
+    sender: ira_models::AppSender,
+    db: ira_db::DbConn,
+    save_dir: String,
+    cfg: ira_config::Config,
+    global_shadps4_exe: String,
+    global_rpcs3_exe: String,
+    global_vita3k_exe: String,
+    global_cemu_exe: String,
+    global_azahar_exe: String,
+    overlay_global_enabled: bool,
+    overlay_font_family: Option<String>,
+    system_defaults: ira_config::SystemDefaults,
+    controller_registry: Arc<ira_input::ControllerRegistry>,
+    app_default_wine: ira_models::WineConfig,
+    default_native_env_vars: Vec<(String, String)>,
+    screen_resolution: (u32, u32),
+    playtime_members: Vec<i64>,
+    variant_id: Option<i64>,
+    disc_override: Option<i64>,
+    in_big_picture: bool,
+    game_info: LaunchGameInfo,
+}
+
+struct LaunchingGameGuard {
+    launching_games: Arc<Mutex<HashSet<i64>>>,
+    db_id: i64,
+}
+
+impl Drop for LaunchingGameGuard {
+    fn drop(&mut self) {
+        match self.launching_games.lock() {
+            Ok(mut games) => {
+                games.remove(&self.db_id);
+            }
+            Err(error) => eprintln!("Failed to clear launching game state: {error}"),
+        }
+    }
+}
+
+struct LaunchProcessArgs<'a, 'b> {
+    ctx: &'a play_button_helpers::LaunchCtx<'b>,
+    cfg: &'a ira_config::Config,
+    kind: ira_models::GameKind,
+    platform_id: &'a str,
+    game_path: &'a str,
+    per_game_version: &'a str,
+    per_game_emu: &'a str,
+    per_game_ra_core: &'a str,
+    global_shadps4_exe: &'a str,
+    global_rpcs3_exe: &'a str,
+    global_vita3k_exe: &'a str,
+    global_cemu_exe: &'a str,
+    global_azahar_exe: &'a str,
+    in_big_picture: bool,
+    variant_id: Option<i64>,
+    variant_count_playtime: bool,
+    app_default_wine: &'a ira_models::WineConfig,
+    default_native_env_vars: &'a [(String, String)],
+    app_id: &'a str,
+}
 
 fn build_play_btn_hbox() -> gtk4::Box {
     let hbox = gtk4::Box::new(gtk4::Orientation::Horizontal, 6);
@@ -84,11 +158,12 @@ fn toggle_play_clicked(
         match launch_game(state, db_id, variant_id) {
             Ok(true) => {
                 set_running_state(icon, label, btn, true);
+                btn.set_sensitive(false);
             }
             Ok(false) => {}
             Err(e) => {
                 eprintln!("Failed to launch game: {}", e);
-                let _ = sender.send(AppMessage::AddGameError(e));
+                let _ = sender.send(AppMessage::GameLaunchFailed { db_id, error: e });
             }
         }
     }
@@ -100,6 +175,15 @@ fn is_game_running(state: &SharedState, db_id: i64) -> bool {
         .running_games
         .lock()
         .map(|m| m.contains_key(&db_id))
+        .unwrap_or(false)
+}
+
+fn is_game_launching(state: &SharedState, db_id: i64) -> bool {
+    state
+        .borrow()
+        .launching_games
+        .lock()
+        .map(|games| games.contains(&db_id))
         .unwrap_or(false)
 }
 
@@ -287,111 +371,164 @@ fn launch_game_with_disc(
     variant_id: Option<i64>,
     disc_override: Option<i64>,
 ) -> Result<bool, String> {
-    let (
+    if is_game_running(state, game_id) || is_game_launching(state, game_id) {
+        return Ok(false);
+    }
+    let request = snapshot_launch_request(state, game_id, variant_id, disc_override)?;
+    let game_kind = request.game_info.game.kind;
+    let exes = play_button_helpers::EmulatorExes {
+        platform_id: &request.game_info.platform_id,
+        per_game_version: &request.game_info.per_game_version,
+        per_game_emu: &request.game_info.per_game_emu,
+        shadps4: &request.global_shadps4_exe,
+        rpcs3: &request.global_rpcs3_exe,
+        vita3k: &request.global_vita3k_exe,
+        cemu: &request.global_cemu_exe,
+        azahar: &request.global_azahar_exe,
+    };
+    if let Some(page_id) =
+        play_button_helpers::missing_emulator_page(&request.cfg, &exes, game_kind)
+    {
+        let _ = request.sender.send(crate::AppMessage::EmulatorMissing {
+            game_name: request.game_info.game.name.clone(),
+            page_id,
+        });
+        return Ok(false);
+    }
+    let launching_games = request.launching_games.clone();
+    if !launching_games.lock().unwrap().insert(game_id) {
+        return Ok(false);
+    }
+    let sender = request.sender.clone();
+    std::thread::spawn(move || {
+        if let Err(error) = launch_game_on_worker(request) {
+            let _ = sender.send(crate::AppMessage::GameLaunchFailed {
+                db_id: game_id,
+                error,
+            });
+        }
+    });
+    Ok(true)
+}
+
+fn snapshot_launch_request(
+    state: &SharedState,
+    game_id: i64,
+    variant_id: Option<i64>,
+    disc_override: Option<i64>,
+) -> Result<LaunchRequest, String> {
+    let screen_resolution = play_button_helpers::detect_screen_resolution();
+    let in_big_picture = super::big_picture::is_big_picture();
+    let s = state.borrow();
+    let game = s
+        .games
+        .iter()
+        .find(|game| game.db_id == game_id)
+        .cloned()
+        .ok_or_else(|| crate::tr!("Game not found"))?;
+    let source_id = game.overlay_source_id();
+    let mut system_defaults = s.cfg.default_system.clone();
+    system_defaults.gamescope = source_id
+        .and_then(|id| s.cfg.overlay.source_gamescope.get(id).copied())
+        .unwrap_or(system_defaults.gamescope);
+    let playtime_members = s
+        .playtime_links
+        .get(&game.db_id)
+        .cloned()
+        .unwrap_or_else(|| vec![game.db_id]);
+    Ok(LaunchRequest {
+        running_games: s.running_games.clone(),
+        launching_games: s.launching_games.clone(),
+        sender: s.sender.clone(),
+        db: s.db.clone(),
+        save_dir: s.save_dir.clone(),
+        cfg: s.cfg.clone(),
+        global_shadps4_exe: s.cfg.shadps4_executable.clone(),
+        global_rpcs3_exe: s.cfg.rpcs3_executable.clone(),
+        global_vita3k_exe: s.cfg.vita3k_executable.clone(),
+        global_cemu_exe: s.cfg.cemu_executable.clone(),
+        global_azahar_exe: s.cfg.azahar_executable.clone(),
+        overlay_global_enabled: source_id
+            .map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id)),
+        overlay_font_family: s.cfg.overlay.font_family.clone(),
+        system_defaults,
+        controller_registry: s.controller_registry.clone(),
+        app_default_wine: s.cfg.default_wine_config.clone(),
+        default_native_env_vars: s.cfg.default_native_env_vars.clone(),
+        screen_resolution,
+        playtime_members,
+        variant_id,
+        disc_override,
+        in_big_picture,
+        game_info: LaunchGameInfo {
+            per_game_version: game.shadps4_version.clone(),
+            per_game_ra_core: game.ra_core.clone(),
+            per_game_emu: game.emulator_override.clone(),
+            platform_id: game.platform_id.id().to_string(),
+            game,
+        },
+    })
+}
+
+fn launch_game_on_worker(request: LaunchRequest) -> Result<(), String> {
+    let LaunchRequest {
         running_games,
+        launching_games,
         sender,
-        game_info,
+        db,
+        save_dir,
+        cfg: cfg_clone,
         global_shadps4_exe,
         global_rpcs3_exe,
         global_vita3k_exe,
         global_cemu_exe,
         global_azahar_exe,
-        db,
-        save_dir,
-        app_default_wine,
-        default_native_env_vars,
-        cfg_clone,
-        overlay_shm,
         overlay_global_enabled,
         overlay_font_family,
         system_defaults,
         controller_registry,
-    ) = {
-        let s = state.borrow();
-        let game = s.games.iter().find(|g| g.db_id == game_id);
-        let source_id = game.and_then(|g| g.overlay_source_id());
-        let overlay_global_enabled =
-            source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
-        let mut system_defaults = s.cfg.default_system.clone();
-        system_defaults.gamescope = source_id
-            .and_then(|id| s.cfg.overlay.source_gamescope.get(id).copied())
-            .unwrap_or(system_defaults.gamescope);
-        let overlay_shm = game.and_then(|game| {
-            let launch = ira_db::get_game_config(&s.db, game.db_id)
-                .ok()
-                .flatten()
-                .map(|(launch, _, _)| launch)
-                .unwrap_or_default();
-            // The list entry is fast-loaded (cached counts, no achievement
-            // rows); the overlay needs the real rows, so reload fully here.
-            // Falls back to the list entry (counts only) on any error.
-            let full = ira_db::find_by_db_id(&s.db, game.db_id)
-                .ok()
-                .flatten()
-                .and_then(|entry| crate::game_loader::load_game(&entry, &s.save_dir).ok());
-            let shm_game = full.as_ref().unwrap_or(game);
-            crate::overlay::write_game_shm(
-                shm_game,
-                super::helpers::display_playtime(state, game),
-                &s.cfg.overlay,
-                launch.overlay_encoder,
-                launch.overlay_recording_quality,
-            )
-        });
-        let game_info = game
-            .map(|g| {
-                (
-                    g.kind,
-                    g.game_path.clone(),
-                    g.name.clone(),
-                    g.shadps4_version.clone(),
-                    g.db_id,
-                    g.steam_api_id().to_string(),
-                    g.platform_id.id().to_string(),
-                    g.ra_core.clone(),
-                    g.emulator_override.clone(),
-                    g.trophy_source,
-                )
-            })
-            .unwrap_or_default();
-        (
-            s.running_games.clone(),
-            s.sender.clone(),
-            game_info,
-            s.cfg.shadps4_executable.clone(),
-            s.cfg.rpcs3_executable.clone(),
-            s.cfg.vita3k_executable.clone(),
-            s.cfg.cemu_executable.clone(),
-            s.cfg.azahar_executable.clone(),
-            s.db.clone(),
-            s.save_dir.clone(),
-            s.cfg.default_wine_config.clone(),
-            s.cfg.default_native_env_vars.clone(),
-            s.cfg.clone(),
-            overlay_shm,
-            overlay_global_enabled,
-            s.cfg.overlay.font_family.clone(),
-            system_defaults,
-            s.controller_registry.clone(),
-        )
-    };
-
-    if is_game_running(state, game_id) {
-        return Ok(false);
-    }
-
-    let (
-        kind,
-        game_path,
-        game_name,
-        per_game_version,
+        app_default_wine,
+        default_native_env_vars,
+        screen_resolution,
+        playtime_members,
+        variant_id,
+        disc_override,
+        in_big_picture,
+        game_info,
+        ..
+    } = request;
+    let game = game_info.game;
+    let kind = game.kind;
+    let game_path = game.game_path.clone();
+    let game_name = game.name.clone();
+    let db_id = game.db_id;
+    let _launching_guard = LaunchingGameGuard {
+        launching_games,
         db_id,
-        app_id,
-        platform_id,
-        per_game_ra_core,
-        per_game_emu,
-        trophy_source,
-    ) = game_info;
+    };
+    let app_id = game.steam_api_id().to_string();
+    let platform_id = game_info.platform_id;
+    let per_game_version = game_info.per_game_version;
+    let per_game_ra_core = game_info.per_game_ra_core;
+    let per_game_emu = game_info.per_game_emu;
+    let trophy_source = game.trophy_source;
+    let launch = ira_db::get_game_config(&db, db_id)
+        .ok()
+        .flatten()
+        .map(|(launch, _, _)| launch)
+        .unwrap_or_default();
+    let shm_game = ira_db::find_by_db_id(&db, db_id)
+        .ok()
+        .flatten()
+        .and_then(|entry| crate::game_loader::load_game(&entry, &save_dir).ok())
+        .unwrap_or_else(|| game.clone());
+    let overlay_shm = crate::overlay::write_game_shm(
+        &shm_game,
+        launch_display_playtime(&db, &game, &playtime_members),
+        &cfg_clone.overlay,
+        launch.overlay_encoder,
+        launch.overlay_recording_quality,
+    );
 
     let (ufs_savefiles, ufs_rootoverrides) =
         crate::game_loader::read_app_details(&save_dir, &app_id)
@@ -425,7 +562,7 @@ fn launch_game_with_disc(
     let ctx = play_button_helpers::LaunchCtx {
         db: &db,
         save_dir: &save_dir,
-        game_id,
+        game_id: db_id,
         db_id,
         game_name: &game_name,
         game_kind: kind,
@@ -444,258 +581,321 @@ fn launch_game_with_disc(
         system_defaults,
         controller_input_mode,
         controller_input_profile,
+        screen_resolution,
         disc_override,
     };
 
-    // An emulated game with no emulator configured never reaches the spawn:
-    // the alert offers to open the settings page that configures one.
-    let exes = play_button_helpers::EmulatorExes {
+    let launched = launch_process(LaunchProcessArgs {
+        ctx: &ctx,
+        cfg: &cfg_clone,
+        kind,
         platform_id: &platform_id,
+        game_path: &game_path,
         per_game_version: &per_game_version,
         per_game_emu: &per_game_emu,
-        shadps4: &global_shadps4_exe,
-        rpcs3: &global_rpcs3_exe,
-        vita3k: &global_vita3k_exe,
-        cemu: &global_cemu_exe,
-        azahar: &global_azahar_exe,
-    };
-    if let Some(page_id) = play_button_helpers::missing_emulator_page(&cfg_clone, &exes, kind) {
-        let _ = sender.send(crate::AppMessage::EmulatorMissing {
-            game_name: game_name.clone(),
-            page_id,
-        });
-        return Ok(false);
+        per_game_ra_core: &per_game_ra_core,
+        global_shadps4_exe: &global_shadps4_exe,
+        global_rpcs3_exe: &global_rpcs3_exe,
+        global_vita3k_exe: &global_vita3k_exe,
+        global_cemu_exe: &global_cemu_exe,
+        global_azahar_exe: &global_azahar_exe,
+        in_big_picture,
+        variant_id,
+        variant_count_playtime,
+        app_default_wine: &app_default_wine,
+        default_native_env_vars: &default_native_env_vars,
+        app_id: &app_id,
+    })?;
+    if !launched {
+        return Err(crate::tr!("Game launch did not start").to_string());
+    }
+    if kind == ira_models::GameKind::Steam {
+        let _ = sender.send(crate::AppMessage::GameStarted(db_id, variant_id));
+        return Ok(());
     }
 
-    let in_big_picture = super::big_picture::is_big_picture();
-    if matches!(
-        kind,
-        ira_models::GameKind::Retro | ira_models::GameKind::Switch
-    ) {
-        play_button_helpers::launch_retro(
-            &ctx,
-            &cfg_clone,
-            &platform_id,
-            &per_game_emu,
-            &per_game_ra_core,
-            &game_path,
-        )?;
-    } else if kind == ira_models::GameKind::Ps4 {
-        play_button_helpers::launch_ps4(
-            &ctx,
-            &per_game_version,
-            &global_shadps4_exe,
-            &game_path,
-            cfg_clone.console_fullscreen("ps4", in_big_picture),
-            play_button_helpers::ConsoleInput {
-                mode: cfg_clone.console("ps4").controller_mode,
-                profile: (!cfg_clone.console("ps4").controller_profile.is_empty())
-                    .then_some(cfg_clone.console("ps4").controller_profile.as_str()),
-                pause_unfocused: cfg_clone.console("ps4").input_pause_unfocused,
-            },
-        )?;
-    } else if kind == ira_models::GameKind::Ps3 {
-        play_button_helpers::launch_ps3(
-            &ctx,
-            &per_game_emu,
-            &global_rpcs3_exe,
-            &game_path,
-            cfg_clone.console_fullscreen("ps3", in_big_picture),
-            play_button_helpers::ConsoleInput {
-                mode: cfg_clone.console("ps3").controller_mode,
-                profile: (!cfg_clone.console("ps3").controller_profile.is_empty())
-                    .then_some(cfg_clone.console("ps3").controller_profile.as_str()),
-                pause_unfocused: cfg_clone.console("ps3").input_pause_unfocused,
-            },
-        )?;
-    } else if kind == ira_models::GameKind::PsVita {
-        play_button_helpers::launch_vita3k(
-            &ctx,
-            &global_vita3k_exe,
-            &game_path,
-            cfg_clone.console_fullscreen("psvita", in_big_picture),
-            play_button_helpers::ConsoleInput {
-                mode: cfg_clone.console("psvita").controller_mode,
-                profile: (!cfg_clone.console("psvita").controller_profile.is_empty())
-                    .then_some(cfg_clone.console("psvita").controller_profile.as_str()),
-                pause_unfocused: cfg_clone.console("psvita").input_pause_unfocused,
-            },
-        )?;
-    } else if kind == ira_models::GameKind::WiiU {
-        play_button_helpers::launch_cemu(
-            &ctx,
-            &per_game_emu,
-            &global_cemu_exe,
-            &game_path,
-            cfg_clone.console_fullscreen("wiiu", in_big_picture),
-            play_button_helpers::ConsoleInput {
-                mode: cfg_clone.console("wiiu").controller_mode,
-                profile: (!cfg_clone.console("wiiu").controller_profile.is_empty())
-                    .then_some(cfg_clone.console("wiiu").controller_profile.as_str()),
-                pause_unfocused: cfg_clone.console("wiiu").input_pause_unfocused,
-            },
-        )?;
-    } else if kind == ira_models::GameKind::ThreeDS {
-        play_button_helpers::launch_azahar(
-            &ctx,
-            &per_game_emu,
-            &global_azahar_exe,
-            &game_path,
-            cfg_clone.console_fullscreen("3ds", in_big_picture),
-            play_button_helpers::ConsoleInput {
-                mode: cfg_clone.console("3ds").controller_mode,
-                profile: (!cfg_clone.console("3ds").controller_profile.is_empty())
-                    .then_some(cfg_clone.console("3ds").controller_profile.as_str()),
-                pause_unfocused: cfg_clone.console("3ds").input_pause_unfocused,
-            },
-        )?;
-    } else if kind == ira_models::GameKind::Steam {
-        let result = play_button_helpers::launch_steam(&ctx, &app_id);
-        if result == Ok(true) {
-            let _ = sender.send(crate::AppMessage::GameStarted(db_id, variant_id));
-        }
-        return result;
-    } else {
-        play_button_helpers::launch_other(
-            &ctx,
-            &app_default_wine,
-            variant_id,
-            variant_count_playtime,
-            &default_native_env_vars,
-            play_button_helpers::PcControllerProfiles {
-                linux: (
-                    cfg_clone.linux_controller_mode,
-                    cfg_clone.linux_controller_profile.as_str(),
-                ),
-                wine: (
-                    cfg_clone.wine_controller_mode,
-                    cfg_clone.wine_controller_profile.as_str(),
-                ),
-            },
-            &app_id,
-        )?;
-    }
-
-    play_button_helpers::update_last_played(
-        state,
+    if let Some((variant_id, last_played)) = play_button_helpers::update_last_played(
         &ctx,
         variant_id,
         variant_count_playtime,
         variant_show_as_entry,
-    );
+    ) {
+        let _ = sender.send(crate::AppMessage::GameLastPlayedUpdated {
+            game_id: db_id,
+            variant_id,
+            started_at: last_played,
+        });
+    }
 
     // The sidebar playing style is driven by GameStarted, and launch_game is
     // the single launch path (sidebar click, context menu and play buttons),
     // so report the start here to keep every entry point in sync.
     let _ = sender.send(crate::AppMessage::GameStarted(db_id, variant_id));
 
-    Ok(true)
+    Ok(())
 }
 
-/// Opens this game's configured emulator with no game loaded (the
-/// "Open emulator without game" menu entries). The process is detached:
-/// no playtime is recorded, no play state changes, no messages are sent.
-pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), String> {
-    if is_game_running(state, db_id) {
-        return Err(crate::tr!(
-            "Stop the running game before opening its emulator"
-        ));
-    }
-
-    let (
-        sender,
-        game_info,
+fn launch_process(args: LaunchProcessArgs<'_, '_>) -> Result<bool, String> {
+    let LaunchProcessArgs {
+        ctx,
+        cfg,
+        kind,
+        platform_id,
+        game_path,
+        per_game_version,
+        per_game_emu,
+        per_game_ra_core,
         global_shadps4_exe,
         global_rpcs3_exe,
         global_vita3k_exe,
         global_cemu_exe,
         global_azahar_exe,
+        in_big_picture,
+        variant_id,
+        variant_count_playtime,
+        app_default_wine,
+        default_native_env_vars,
+        app_id,
+    } = args;
+    if matches!(
+        kind,
+        ira_models::GameKind::Retro | ira_models::GameKind::Switch
+    ) {
+        play_button_helpers::launch_retro(
+            ctx,
+            cfg,
+            platform_id,
+            per_game_emu,
+            per_game_ra_core,
+            game_path,
+        )?;
+    } else if kind == ira_models::GameKind::Ps4 {
+        play_button_helpers::launch_ps4(
+            ctx,
+            per_game_version,
+            global_shadps4_exe,
+            game_path,
+            cfg.console_fullscreen("ps4", in_big_picture),
+            play_button_helpers::ConsoleInput {
+                mode: cfg.console("ps4").controller_mode,
+                profile: (!cfg.console("ps4").controller_profile.is_empty())
+                    .then_some(cfg.console("ps4").controller_profile.as_str()),
+                pause_unfocused: cfg.console("ps4").input_pause_unfocused,
+            },
+        )?;
+    } else if kind == ira_models::GameKind::Ps3 {
+        play_button_helpers::launch_ps3(
+            ctx,
+            per_game_emu,
+            global_rpcs3_exe,
+            game_path,
+            cfg.console_fullscreen("ps3", in_big_picture),
+            play_button_helpers::ConsoleInput {
+                mode: cfg.console("ps3").controller_mode,
+                profile: (!cfg.console("ps3").controller_profile.is_empty())
+                    .then_some(cfg.console("ps3").controller_profile.as_str()),
+                pause_unfocused: cfg.console("ps3").input_pause_unfocused,
+            },
+        )?;
+    } else if kind == ira_models::GameKind::PsVita {
+        play_button_helpers::launch_vita3k(
+            ctx,
+            global_vita3k_exe,
+            game_path,
+            cfg.console_fullscreen("psvita", in_big_picture),
+            play_button_helpers::ConsoleInput {
+                mode: cfg.console("psvita").controller_mode,
+                profile: (!cfg.console("psvita").controller_profile.is_empty())
+                    .then_some(cfg.console("psvita").controller_profile.as_str()),
+                pause_unfocused: cfg.console("psvita").input_pause_unfocused,
+            },
+        )?;
+    } else if kind == ira_models::GameKind::WiiU {
+        play_button_helpers::launch_cemu(
+            ctx,
+            per_game_emu,
+            global_cemu_exe,
+            game_path,
+            cfg.console_fullscreen("wiiu", in_big_picture),
+            play_button_helpers::ConsoleInput {
+                mode: cfg.console("wiiu").controller_mode,
+                profile: (!cfg.console("wiiu").controller_profile.is_empty())
+                    .then_some(cfg.console("wiiu").controller_profile.as_str()),
+                pause_unfocused: cfg.console("wiiu").input_pause_unfocused,
+            },
+        )?;
+    } else if kind == ira_models::GameKind::ThreeDS {
+        play_button_helpers::launch_azahar(
+            ctx,
+            per_game_emu,
+            global_azahar_exe,
+            game_path,
+            cfg.console_fullscreen("3ds", in_big_picture),
+            play_button_helpers::ConsoleInput {
+                mode: cfg.console("3ds").controller_mode,
+                profile: (!cfg.console("3ds").controller_profile.is_empty())
+                    .then_some(cfg.console("3ds").controller_profile.as_str()),
+                pause_unfocused: cfg.console("3ds").input_pause_unfocused,
+            },
+        )?;
+    } else if kind == ira_models::GameKind::Steam {
+        return play_button_helpers::launch_steam(ctx, app_id);
+    } else {
+        play_button_helpers::launch_other(
+            ctx,
+            app_default_wine,
+            variant_id,
+            variant_count_playtime,
+            default_native_env_vars,
+            play_button_helpers::PcControllerProfiles {
+                linux: (
+                    cfg.linux_controller_mode,
+                    cfg.linux_controller_profile.as_str(),
+                ),
+                wine: (
+                    cfg.wine_controller_mode,
+                    cfg.wine_controller_profile.as_str(),
+                ),
+            },
+            app_id,
+        )?;
+    }
+    Ok(true)
+}
+
+fn launch_display_playtime(db: &ira_db::DbConn, game: &ira_models::Game, members: &[i64]) -> f64 {
+    if members.len() <= 1 {
+        return game.playtime;
+    }
+    members
+        .iter()
+        .filter_map(|id| {
+            ira_db::find_by_db_id(db, *id).unwrap_or_else(|error| {
+                eprintln!("Failed to read linked game {id}: {error}");
+                None
+            })
+        })
+        .map(|entry| entry.playtime)
+        .sum()
+}
+
+/// Opens this game's configured emulator with no game loaded (the
+/// "Open emulator without game" menu entries). The process is detached:
+/// no playtime is recorded and no play state changes; failures are reported
+/// through the application message channel.
+pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), String> {
+    if is_game_running(state, db_id) || is_game_launching(state, db_id) {
+        return Err(crate::tr!(
+            "Stop the running game before opening its emulator"
+        ));
+    }
+
+    let request = snapshot_launch_request(state, db_id, None, None)?;
+    let game_kind = request.game_info.game.kind;
+    if !game_kind.has_standalone_emulator() {
+        return Err(crate::tr!(
+            "'{}' does not run through an emulator that can be opened on its own"
+        )
+        .replacen("{}", &request.game_info.game.name, 1));
+    }
+    let exes = play_button_helpers::EmulatorExes {
+        platform_id: &request.game_info.platform_id,
+        per_game_version: &request.game_info.per_game_version,
+        per_game_emu: &request.game_info.per_game_emu,
+        shadps4: &request.global_shadps4_exe,
+        rpcs3: &request.global_rpcs3_exe,
+        vita3k: &request.global_vita3k_exe,
+        cemu: &request.global_cemu_exe,
+        azahar: &request.global_azahar_exe,
+    };
+    if let Some(page_id) =
+        play_button_helpers::missing_emulator_page(&request.cfg, &exes, game_kind)
+    {
+        let _ = request.sender.send(crate::AppMessage::EmulatorMissing {
+            game_name: request.game_info.game.name.clone(),
+            page_id,
+        });
+        return Ok(());
+    }
+
+    let launching_games = request.launching_games.clone();
+    if !launching_games.lock().unwrap().insert(db_id) {
+        return Ok(());
+    }
+    let sender = request.sender.clone();
+    std::thread::spawn(move || {
+        let result = launch_emulator_no_game_on_worker(request);
+        match result {
+            Ok(()) => {
+                let _ = sender.send(crate::AppMessage::EmulatorOpened(db_id));
+            }
+            Err(error) => {
+                let _ = sender.send(crate::AppMessage::EmulatorOpenFailed { db_id, error });
+            }
+        }
+    });
+    Ok(())
+}
+
+fn launch_emulator_no_game_on_worker(request: LaunchRequest) -> Result<(), String> {
+    let LaunchRequest {
+        running_games,
+        launching_games,
+        sender,
         db,
         save_dir,
-        cfg_clone,
-        overlay_shm,
+        cfg,
+        global_shadps4_exe,
+        global_rpcs3_exe,
+        global_vita3k_exe,
+        global_cemu_exe,
+        global_azahar_exe,
         overlay_global_enabled,
         overlay_font_family,
         system_defaults,
         controller_registry,
-        running_games,
-    ) = {
-        let s = state.borrow();
-        let game = s.games.iter().find(|g| g.db_id == db_id);
-        let source_id = game.and_then(|g| g.overlay_source_id());
-        let overlay_global_enabled =
-            source_id.map_or(s.cfg.overlay.enabled, |id| s.cfg.overlay.source_enabled(id));
-        let mut system_defaults = s.cfg.default_system.clone();
-        system_defaults.gamescope = source_id
-            .and_then(|id| s.cfg.overlay.source_gamescope.get(id).copied())
-            .unwrap_or(system_defaults.gamescope);
-        let overlay_shm = game.and_then(|game| {
-            let launch = ira_db::get_game_config(&s.db, game.db_id)
-                .ok()
-                .flatten()
-                .map(|(launch, _, _)| launch)
-                .unwrap_or_default();
-            // The list entry is fast-loaded (cached counts, no achievement
-            // rows); the overlay needs the real rows, so reload fully here.
-            // Falls back to the list entry (counts only) on any error.
-            let full = ira_db::find_by_db_id(&s.db, game.db_id)
-                .ok()
-                .flatten()
-                .and_then(|entry| crate::game_loader::load_game(&entry, &s.save_dir).ok());
-            let shm_game = full.as_ref().unwrap_or(game);
-            crate::overlay::write_game_shm(
-                shm_game,
-                super::helpers::display_playtime(state, game),
-                &s.cfg.overlay,
-                launch.overlay_encoder,
-                launch.overlay_recording_quality,
-            )
-        });
-        let game_info = game
-            .map(|g| {
-                (
-                    g.kind,
-                    g.name.clone(),
-                    g.shadps4_version.clone(),
-                    g.platform_id.id().to_string(),
-                    g.emulator_override.clone(),
-                    g.trophy_source,
-                )
-            })
-            .unwrap_or_default();
-        (
-            s.sender.clone(),
-            game_info,
-            s.cfg.shadps4_executable.clone(),
-            s.cfg.rpcs3_executable.clone(),
-            s.cfg.vita3k_executable.clone(),
-            s.cfg.cemu_executable.clone(),
-            s.cfg.azahar_executable.clone(),
-            s.db.clone(),
-            s.save_dir.clone(),
-            s.cfg.clone(),
-            overlay_shm,
-            overlay_global_enabled,
-            s.cfg.overlay.font_family.clone(),
-            system_defaults,
-            s.controller_registry.clone(),
-            s.running_games.clone(),
-        )
+        screen_resolution,
+        playtime_members,
+        game_info,
+        ..
+    } = request;
+    let game = game_info.game;
+    let db_id = game.db_id;
+    let _launching_guard = LaunchingGameGuard {
+        launching_games,
+        db_id,
     };
-
-    let (kind, game_name, per_game_version, platform_id, per_game_emu, trophy_source) = game_info;
-
+    let game_name = game.name.clone();
+    let platform_id = game_info.platform_id;
+    let per_game_version = game_info.per_game_version;
+    let per_game_emu = game_info.per_game_emu;
+    let launch = ira_db::get_game_config(&db, db_id)
+        .ok()
+        .flatten()
+        .map(|(launch, _, _)| launch)
+        .unwrap_or_default();
+    let shm_game = ira_db::find_by_db_id(&db, db_id)
+        .ok()
+        .flatten()
+        .and_then(|entry| crate::game_loader::load_game(&entry, &save_dir).ok())
+        .unwrap_or_else(|| game.clone());
+    let overlay_shm = crate::overlay::write_game_shm(
+        &shm_game,
+        launch_display_playtime(&db, &game, &playtime_members),
+        &cfg.overlay,
+        launch.overlay_encoder,
+        launch.overlay_recording_quality,
+    );
     let (controller_input_mode, controller_input_profile) =
-        active_controller_input(&cfg_clone, &save_dir, &controller_registry);
-
+        active_controller_input(&cfg, &save_dir, &controller_registry);
     let ctx = play_button_helpers::LaunchCtx {
         db: &db,
         save_dir: &save_dir,
         game_id: db_id,
         db_id,
         game_name: &game_name,
-        game_kind: kind,
-        trophy_source,
+        game_kind: game.kind,
+        trophy_source: game.trophy_source,
         ufs_savefiles: Vec::new(),
         ufs_rootoverrides: Vec::new(),
         centralize_saves: false,
@@ -705,18 +905,17 @@ pub fn open_emulator_no_game(state: &SharedState, db_id: i64) -> Result<(), Stri
         overlay_shm,
         overlay_global_enabled,
         overlay_font_family,
-        // No-game emulator window: nothing to pause.
         pause_platform: None,
         pause_global: false,
         system_defaults,
         controller_input_mode,
         controller_input_profile,
+        screen_resolution,
         disc_override: None,
     };
-
     play_button_helpers::launch_emulator_no_game(
         &ctx,
-        &cfg_clone,
+        &cfg,
         &play_button_helpers::EmulatorExes {
             platform_id: &platform_id,
             per_game_version: &per_game_version,
@@ -748,23 +947,27 @@ pub fn play_button(state: &SharedState, db_id: i64, variant_id: Option<i64>) -> 
     let has_discs = !discs.is_empty();
 
     let is_running = is_game_running(state, db_id);
+    let is_launching = is_game_launching(state, db_id);
+    let is_active = is_running || is_launching;
 
-    if !has_variants && !has_discs {
-        return build_simple_play_button(state, db_id, &sender, is_running);
+    let button = if !has_variants && !has_discs {
+        build_simple_play_button(state, db_id, &sender, is_active)
+    } else if has_discs {
+        build_disc_play_button(state, db_id, &discs, &sender, is_active)
+    } else {
+        build_variant_play_button(state, db_id, &variants, variant_id, &sender, is_active)
+    };
+    if is_launching {
+        button.set_sensitive(false);
     }
-
-    if has_discs {
-        return build_disc_play_button(state, db_id, &discs, &sender, is_running);
-    }
-
-    build_variant_play_button(state, db_id, &variants, variant_id, &sender, is_running)
+    button
 }
 
 fn build_simple_play_button(
     state: &SharedState,
     db_id: i64,
     sender: &ira_models::AppSender,
-    is_running: bool,
+    is_active: bool,
 ) -> gtk4::Widget {
     let btn = gtk4::Button::new();
     btn.set_valign(gtk4::Align::Center);
@@ -775,7 +978,7 @@ fn build_simple_play_button(
 
     btn.set_child(Some(&hbox));
 
-    set_running_state(&icon, &label, &btn, is_running);
+    set_running_state(&icon, &label, &btn, is_active);
 
     let icon_click = icon;
     let label_click = label;
@@ -793,7 +996,7 @@ fn build_disc_play_button(
     db_id: i64,
     discs: &[ira_models::GameDisc],
     sender: &ira_models::AppSender,
-    is_running: bool,
+    is_active: bool,
 ) -> gtk4::Widget {
     let split = adw::SplitButton::new();
 
@@ -805,7 +1008,7 @@ fn build_disc_play_button(
     split.set_valign(gtk4::Align::Center);
     split.set_dropdown_tooltip(&crate::tr!("Select disc"));
 
-    set_running_state(&icon, &label, &split, is_running);
+    set_running_state(&icon, &label, &split, is_active);
 
     let default_did = ira_db::get_default_disc(&state.borrow().db, db_id)
         .ok()
@@ -874,7 +1077,7 @@ fn build_variant_play_button(
     variants: &[ira_models::GameVariant],
     variant_id: Option<i64>,
     sender: &ira_models::AppSender,
-    is_running: bool,
+    is_active: bool,
 ) -> gtk4::Widget {
     let split = adw::SplitButton::new();
 
@@ -886,7 +1089,7 @@ fn build_variant_play_button(
     split.set_valign(gtk4::Align::Center);
     split.set_dropdown_tooltip(&crate::tr!("Select variant"));
 
-    set_running_state(&icon, &label, &split, is_running);
+    set_running_state(&icon, &label, &split, is_active);
 
     let default_vid = variant_id.or_else(|| {
         ira_db::get_default_variant(&state.borrow().db, db_id)
@@ -987,7 +1190,7 @@ fn add_open_emulator_menu_item(
     open_action.connect_activate(move |_, _| {
         if let Err(e) = open_emulator_no_game(&st_open, db_id) {
             eprintln!("Failed to open emulator: {}", e);
-            let _ = sender_open.send(AppMessage::AddGameError(e));
+            let _ = sender_open.send(AppMessage::EmulatorOpenFailed { db_id, error: e });
         }
     });
     actions.add_action(&open_action);
@@ -1002,9 +1205,11 @@ fn add_open_emulator_menu_item(
 
 #[cfg(test)]
 mod tests {
-    use super::sorted_controller_snapshot;
+    use super::{sorted_controller_snapshot, LaunchingGameGuard};
     use ira_input::DeviceInfo;
+    use std::collections::HashSet;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     fn device(path: &str) -> DeviceInfo {
         DeviceInfo {
@@ -1028,5 +1233,20 @@ mod tests {
 
         assert_eq!(devices[0].path, PathBuf::from("/dev/input/event2"));
         assert_eq!(devices[1].path, PathBuf::from("/dev/input/event9"));
+    }
+
+    #[test]
+    fn test_launching_game_guard_clears_state_on_drop() {
+        let launching_games = Arc::new(Mutex::new(HashSet::new()));
+        launching_games.lock().unwrap().insert(42);
+
+        {
+            let _guard = LaunchingGameGuard {
+                launching_games: launching_games.clone(),
+                db_id: 42,
+            };
+        }
+
+        assert!(!launching_games.lock().unwrap().contains(&42));
     }
 }

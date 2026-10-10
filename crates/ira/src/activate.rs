@@ -11,11 +11,8 @@ use ira_platforms::ps4::ShadPS4Watcher;
 use ira_watcher::AchievementWatcher;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
-
-extern "C" {
-    fn g_unix_fd_source_new(fd: i32, condition: u32) -> *mut std::ffi::c_void;
-}
 
 struct MainLoopData {
     read_fd: i32,
@@ -23,23 +20,22 @@ struct MainLoopData {
     state: SharedState,
 }
 
-unsafe extern "C" fn source_trampoline(
-    _fd: i32,
-    _condition: u32,
-    data: glib::ffi::gpointer,
-) -> glib::ffi::gboolean {
-    let data: &MainLoopData = &*(data as *const MainLoopData);
-    let mut buf = [0u8; 256];
-    while libc::read(data.read_fd, buf.as_mut_ptr() as *mut _, 256) > 0 {}
-    while let Ok(msg) = data.receiver.borrow_mut().try_recv() {
-        handle_app_message(&data.state, msg);
+impl MainLoopData {
+    fn drain(&self) {
+        let mut buf = [0u8; 256];
+        while unsafe { libc::read(self.read_fd, buf.as_mut_ptr() as *mut _, 256) } > 0 {}
+        while let Ok(msg) = self.receiver.borrow_mut().try_recv() {
+            handle_app_message(&self.state, msg);
+        }
     }
-    glib::ffi::G_SOURCE_CONTINUE
 }
 
-unsafe extern "C" fn source_destroy(data: glib::ffi::gpointer) {
-    let data = Box::from_raw(data as *mut MainLoopData);
-    libc::close(data.read_fd);
+impl Drop for MainLoopData {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.read_fd);
+        }
+    }
 }
 
 pub fn remove_source(state: &SharedState) {
@@ -52,6 +48,20 @@ pub fn remove_source(state: &SharedState) {
     if removed == glib::ffi::GFALSE {
         eprintln!("Failed to remove GLib application message source {source_id}");
     }
+}
+
+fn attach_message_source(state: &SharedState, read_fd: i32, receiver: mpsc::Receiver<AppMessage>) {
+    let data = Rc::new(MainLoopData {
+        read_fd,
+        receiver: RefCell::new(receiver),
+        state: state.clone(),
+    });
+    let source_data = data.clone();
+    let source_id = glib_unix::unix_fd_add_local(read_fd, glib::IOCondition::IN, move |_, _| {
+        source_data.drain();
+        glib::ControlFlow::Continue
+    });
+    state.borrow().source_id.set(Some(source_id.as_raw()));
 }
 
 pub fn activate(app: &adw::Application) -> SharedState {
@@ -188,33 +198,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
     }
 
     {
-        let data = Box::new(MainLoopData {
-            read_fd,
-            receiver: RefCell::new(rx),
-            state: state.clone(),
-        });
-        let data_ptr = Box::into_raw(data) as *mut std::ffi::c_void;
-        unsafe {
-            let source = g_unix_fd_source_new(read_fd, glib::ffi::G_IO_IN);
-            let func_ptr: unsafe extern "C" fn(
-                i32,
-                u32,
-                glib::ffi::gpointer,
-            ) -> glib::ffi::gboolean = source_trampoline;
-            glib::ffi::g_source_set_callback(
-                source as *mut glib::ffi::GSource,
-                std::mem::transmute::<
-                    unsafe extern "C" fn(i32, u32, glib::ffi::gpointer) -> glib::ffi::gboolean,
-                    glib::ffi::GSourceFunc,
-                >(func_ptr),
-                data_ptr,
-                Some(source_destroy),
-            );
-            let source_id =
-                glib::ffi::g_source_attach(source as *mut glib::ffi::GSource, std::ptr::null_mut());
-            state.borrow().source_id.set(Some(source_id));
-            glib::ffi::g_source_unref(source as *mut glib::ffi::GSource);
-        }
+        attach_message_source(&state, read_fd, rx);
     }
 
     if std::env::var("AV_BENCH").is_ok() {

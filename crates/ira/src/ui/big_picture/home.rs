@@ -626,7 +626,10 @@ pub(super) fn launch_selected(state: &SharedState) {
         let _ = state
             .borrow()
             .sender
-            .send(crate::AppMessage::AddGameError(error));
+            .send(crate::AppMessage::GameLaunchFailed {
+                db_id: game.db_id,
+                error,
+            });
     }
 }
 

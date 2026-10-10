@@ -444,6 +444,7 @@ mod imp {
             let n_items = self.n_items.get();
 
             if n_items == 0 || width <= 0 || height <= 0 {
+                self.plan.borrow_mut().clear();
                 if let Some(adj) = self.vadj.borrow().as_ref() {
                     let upper = (header_h as f64).max(height as f64);
                     let ps = (height as f64).min(upper);
@@ -462,7 +463,8 @@ mod imp {
             self.prev_width.set(width);
             // One plan for both modes so they can't drift; ys are absolute
             // and height rides along for tile stepping.
-            let plan = self.build_plan(width, height, header_h, true);
+            *self.plan.borrow_mut() = self.build_plan(width, height, header_h, true);
+            let plan = self.plan.borrow();
             let (_, item_w, item_h, sp) = self.last_layout.get();
             let row_h = item_h + sp;
 
@@ -694,6 +696,7 @@ mod imp {
 
 
 
+            drop(plan);
             if let Some(post) = self.post_layout_fn.borrow().as_ref() {
                 post();
             }
@@ -766,6 +769,7 @@ impl VirtualGrid {
         }
 
         clear_visible(imp);
+        imp.plan.borrow_mut().clear();
 
         let n_items = model.n_items();
         imp.n_items.set(n_items);
@@ -818,6 +822,7 @@ impl VirtualGrid {
         *imp.sections.borrow_mut() = sections;
         if changed {
             clear_visible(imp);
+            imp.plan.borrow_mut().clear();
         }
         self.queue_allocate();
     }

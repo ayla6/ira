@@ -32,6 +32,25 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             refresh(state);
         }
         AppMessage::GameStarted(db_id, _) => handle_game_started(state, db_id),
+        AppMessage::GameLaunchFailed { db_id, error } => {
+            clear_launching_game(state, db_id);
+            refresh_selected_game(state, db_id);
+            handle_game_launch_failed(state, error);
+        }
+        AppMessage::EmulatorOpened(db_id) => {
+            clear_launching_game(state, db_id);
+            refresh_selected_game(state, db_id);
+        }
+        AppMessage::EmulatorOpenFailed { db_id, error } => {
+            clear_launching_game(state, db_id);
+            refresh_selected_game(state, db_id);
+            handle_emulator_open_failed(state, error);
+        }
+        AppMessage::GameLastPlayedUpdated {
+            game_id,
+            variant_id,
+            started_at,
+        } => handle_game_last_played_updated(state, game_id, variant_id, started_at),
         AppMessage::SessionRecorded {
             game_id,
             variant_id,
@@ -114,6 +133,33 @@ fn handle_add_game_error(state: &SharedState, e: String) {
     dialog.present(Some(&active_toplevel_or(&window)));
 }
 
+fn handle_game_launch_failed(state: &SharedState, error: String) {
+    let window = state.borrow().window.clone();
+    let dialog = adw::AlertDialog::new(Some(&crate::tr!("Couldn't launch game")), Some(&error));
+    dialog.add_response("ok", &crate::tr!("OK"));
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(&active_toplevel_or(&window)));
+}
+
+fn handle_emulator_open_failed(state: &SharedState, error: String) {
+    let window = state.borrow().window.clone();
+    let dialog = adw::AlertDialog::new(Some(&crate::tr!("Couldn't open emulator")), Some(&error));
+    dialog.add_response("ok", &crate::tr!("OK"));
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(&active_toplevel_or(&window)));
+}
+
+fn clear_launching_game(state: &SharedState, db_id: i64) {
+    state
+        .borrow()
+        .launching_games
+        .lock()
+        .unwrap()
+        .remove(&db_id);
+}
+
 /// A launch was blocked because the game's emulator is not configured: offer
 /// to open the settings page that configures one instead of just reporting
 /// the failure.
@@ -168,6 +214,7 @@ fn active_toplevel_or(fallback: &adw::ApplicationWindow) -> gtk4::Widget {
 }
 
 fn handle_game_stopped(state: &SharedState, db_id: i64) {
+    clear_launching_game(state, db_id);
     let watcher = {
         let s = state.borrow();
         s.running_games.lock().unwrap().remove(&db_id);
@@ -183,6 +230,17 @@ fn handle_game_stopped(state: &SharedState, db_id: i64) {
 }
 
 fn handle_game_started(state: &SharedState, db_id: i64) {
+    let still_running = state
+        .borrow()
+        .running_games
+        .lock()
+        .map(|games| games.contains_key(&db_id))
+        .unwrap_or(false);
+    if !still_running {
+        clear_launching_game(state, db_id);
+        return;
+    }
+    clear_launching_game(state, db_id);
     set_sidebar_playing(state, db_id, true);
     let (game_name, watcher, game, save_dir) = {
         let s = state.borrow();
@@ -216,6 +274,31 @@ fn handle_game_started(state: &SharedState, db_id: i64) {
         }
     }
     refresh_selected_game(state, db_id);
+}
+
+fn handle_game_last_played_updated(
+    state: &SharedState,
+    game_id: i64,
+    variant_id: Option<i64>,
+    started_at: i64,
+) {
+    let changed = {
+        let mut state = state.borrow_mut();
+        if let Some(game) = state
+            .games
+            .iter_mut()
+            .find(|game| game.db_id == game_id && game.variant_id == variant_id)
+        {
+            game.last_played = started_at;
+            true
+        } else {
+            false
+        }
+    };
+    if changed {
+        rebuild_sidebar(state);
+        refresh_selected_game(state, game_id);
+    }
 }
 
 /// Release the decoded heroes/covers/achievements of previously viewed games

@@ -12,9 +12,8 @@ use ira_models::{resolve_pause_game_on_overlay, AppSender, ControllerInputMode, 
 
 use super::helpers::logged_game_config;
 use super::input_profile_store::read_profile;
-use super::state::SharedState;
 
-fn detect_screen_resolution() -> (u32, u32) {
+pub(super) fn detect_screen_resolution() -> (u32, u32) {
     Display::default()
         .and_then(|d| {
             let monitors = d.monitors();
@@ -54,6 +53,7 @@ pub(super) struct LaunchCtx<'a> {
     pub system_defaults: SystemDefaults,
     pub controller_input_mode: ControllerInputMode,
     pub controller_input_profile: Option<String>,
+    pub screen_resolution: (u32, u32),
     /// The disc the disc-picker chose, winning over the stored default.
     /// `None` keeps the pre-picker behavior (boot the default disc).
     pub disc_override: Option<i64>,
@@ -383,7 +383,7 @@ fn build_emulator_env_and_wrap(
     apply_system_defaults(&mut launch, &ctx.system_defaults);
     apply_emulator_gpu_policy(&mut launch, ctx.game_kind);
     if launch.gamescope_w == Some(0) || launch.gamescope_h == Some(0) {
-        let (sw, sh) = detect_screen_resolution();
+        let (sw, sh) = ctx.screen_resolution;
         if launch.gamescope_w == Some(0) {
             launch.gamescope_w = Some(sw);
         }
@@ -1000,10 +1000,10 @@ pub(super) fn launch_emulator_no_game(
     let platform_id = exes.platform_id;
     let per_game_emu = exes.per_game_emu;
     if !ctx.game_kind.has_standalone_emulator() {
-        return Err(format!(
-            "'{}' does not run through an emulator that can be opened on its own",
-            ctx.game_name
-        ));
+        return Err(crate::tr!(
+            "'{}' does not run through an emulator that can be opened on its own"
+        )
+        .replacen("{}", ctx.game_name, 1));
     }
     if let Some(page_id) = missing_emulator_page(cfg, exes, ctx.game_kind) {
         let _ = ctx.sender.send(ira_models::AppMessage::EmulatorMissing {
@@ -1158,7 +1158,7 @@ pub(super) fn launch_other(
 
     apply_system_defaults(&mut launch, &ctx.system_defaults);
     if launch.gamescope_w == Some(0) || launch.gamescope_h == Some(0) {
-        let (sw, sh) = detect_screen_resolution();
+        let (sw, sh) = ctx.screen_resolution;
         if launch.gamescope_w == Some(0) {
             launch.gamescope_w = Some(sw);
         }
@@ -1276,39 +1276,29 @@ pub(super) fn launch_other(
 }
 
 pub(super) fn update_last_played(
-    state: &SharedState,
     ctx: &LaunchCtx,
     variant_id: Option<i64>,
     variant_count_playtime: bool,
     variant_show_as_entry: bool,
-) {
+) -> Option<(Option<i64>, i64)> {
     if variant_count_playtime && variant_show_as_entry {
         if let Some(vid) = variant_id {
             if let Err(e) = ira_db::set_variant_last_played(ctx.db, vid, ctx.started_at) {
                 eprintln!("Failed to update variant last played: {}", e);
+                return None;
             }
+            return Some((Some(vid), ctx.started_at));
         }
-        if let Some(g) = state
-            .borrow_mut()
-            .games
-            .iter_mut()
-            .find(|g| g.db_id == ctx.game_id && g.variant_id == variant_id)
-        {
-            g.last_played = ctx.started_at;
-        }
-    } else if variant_count_playtime {
+        return None;
+    }
+    if variant_count_playtime {
         if let Err(e) = ira_db::set_last_played(ctx.db, ctx.db_id, ctx.started_at) {
             eprintln!("Failed to update last played: {}", e);
+            return None;
         }
-        if let Some(g) = state
-            .borrow_mut()
-            .games
-            .iter_mut()
-            .find(|g| g.db_id == ctx.game_id && g.variant_id.is_none())
-        {
-            g.last_played = ctx.started_at;
-        }
+        return Some((None, ctx.started_at));
     }
+    None
 }
 
 #[cfg(test)]

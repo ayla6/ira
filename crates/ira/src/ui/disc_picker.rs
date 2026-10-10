@@ -14,7 +14,10 @@ use std::rc::Rc;
 pub(super) fn launch_disc(state: &SharedState, db_id: i64, variant_id: Option<i64>, disc_id: i64) {
     if let Err(e) = super::play_button::launch_game_disc(state, db_id, variant_id, disc_id) {
         eprintln!("Failed to launch game: {e}");
-        let _ = state.borrow().sender.send(crate::AppMessage::AddGameError(e));
+        let _ = state
+            .borrow()
+            .sender
+            .send(crate::AppMessage::GameLaunchFailed { db_id, error: e });
     }
 }
 

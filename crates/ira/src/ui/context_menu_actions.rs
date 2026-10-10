@@ -27,7 +27,10 @@ pub(super) fn setup_play_action(actions: &gio::SimpleActionGroup, state: SharedS
                 Ok(_) => {}
                 Err(e) => {
                     eprintln!("Failed to launch game: {}", e);
-                    let _ = state.borrow().sender.send(AppMessage::AddGameError(e));
+                    let _ = state
+                        .borrow()
+                        .sender
+                        .send(AppMessage::GameLaunchFailed { db_id, error: e });
                 }
             }
         }

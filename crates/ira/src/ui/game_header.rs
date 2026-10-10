@@ -352,6 +352,10 @@ fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
                 super::play_button::open_emulator_no_game(&st_open, db_id)
             {
                 eprintln!("Failed to open emulator: {}", e);
+                let _ = st_open
+                    .borrow()
+                    .sender
+                    .send(crate::AppMessage::EmulatorOpenFailed { db_id, error: e });
             }
         });
         actions.add_action(&open_action);

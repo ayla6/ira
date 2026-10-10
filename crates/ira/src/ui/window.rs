@@ -96,6 +96,7 @@ pub fn build_ui(
         content_unloaded: false,
         restoring: false,
         running_games: Arc::new(Mutex::new(HashMap::new())),
+        launching_games: Arc::new(Mutex::new(HashSet::new())),
         grid_store: gio::ListStore::new::<crate::ui::game_item::GameItem>(),
         grid: glib::WeakRef::new(),
         sidebar_rebuild_pending: false,
@@ -666,7 +667,7 @@ fn connect_window_signals(
                             let _ = state_clone
                                 .borrow()
                                 .sender
-                                .send(crate::AppMessage::AddGameError(error));
+                                .send(crate::AppMessage::GameLaunchFailed { db_id, error });
                         }
                     }
                 }

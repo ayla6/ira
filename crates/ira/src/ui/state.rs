@@ -95,6 +95,7 @@ pub struct AppState {
     pub content_unloaded: bool,
     pub restoring: bool,
     pub running_games: Arc<Mutex<HashMap<i64, i32>>>,
+    pub launching_games: Arc<Mutex<HashSet<i64>>>,
     pub grid_store: gio::ListStore,
     pub grid: glib::WeakRef<super::virtual_grid::VirtualGrid>,
     pub sidebar_rebuild_pending: bool,

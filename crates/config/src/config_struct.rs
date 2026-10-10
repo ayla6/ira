@@ -14,9 +14,9 @@ use crate::secrets;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(skip)]
     pub steam_api_key: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(skip)]
     pub steam_griddb_api_key: String,
     #[serde(default = "default_true")]
     pub notifications_enabled: bool,
@@ -174,14 +174,14 @@ pub struct Config {
     pub ra_enabled: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ra_username: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(skip)]
     pub ra_web_api_key: String,
     /// Personal ScreenScraper account, for quota attribution on top of the
     /// developer identity baked into the binary; the password lives in the
     /// keyring.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub screenscraper_id: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(skip)]
     pub screenscraper_password: String,
     /// Master switch for ScreenScraper use: the automatic match on add,
     /// the search dialogs and the metadata passes. Off until asked for —
@@ -706,5 +706,23 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!result.unwrap_err().contains(secret));
+    }
+
+    #[test]
+    fn test_config_ignores_plaintext_secret_fields() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "steam_api_key": "old-plaintext-key",
+                "steam_griddb_api_key": "old-plaintext-sgdb-key",
+                "ra_web_api_key": "old-plaintext-ra-key",
+                "screenscraper_password": "old-plaintext-password"
+            }"#,
+        )
+        .unwrap();
+
+        assert!(config.steam_api_key.is_empty());
+        assert!(config.steam_griddb_api_key.is_empty());
+        assert!(config.ra_web_api_key.is_empty());
+        assert!(config.screenscraper_password.is_empty());
     }
 }

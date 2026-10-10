@@ -29,8 +29,12 @@ const REPEAT_EVERY_MS: u64 = 140;
 const REPEAT_RAMP_MS: u64 = 1_500;
 /// Per-pad event wait and how often disconnected pads are re-discovered.
 const POLL_MS: u64 = 10;
-const RESCAN_EVERY_MS: u64 = 2_000;
+/// The daemon may create a virtual twin after it grabs the physical pad;
+/// bound that handoff so Big Picture does not wait seconds for input.
+const RESCAN_EVERY_MS: u64 = 500;
 const IDLE_SLEEP_MS: u64 = 100;
+/// Keep controller messages below one frame without making the GTK loop spin.
+const MESSAGE_POLL_MS: u64 = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum NavCommand {
@@ -226,7 +230,7 @@ pub(super) fn start(state: &SharedState) {
     let (tx, rx) = std::sync::mpsc::channel::<NavMsg>();
     let save_dir = state.borrow().save_dir.clone();
     let nav_state = state.clone();
-    glib::timeout_add_local(Duration::from_millis(30), move || loop {
+    glib::timeout_add_local(Duration::from_millis(MESSAGE_POLL_MS), move || loop {
         match rx.try_recv() {
             Ok(msg) => super::view::handle_msg(&nav_state, msg),
             Err(std::sync::mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
@@ -244,8 +248,12 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
     let mut pads: Vec<PhysicalGamepad> = Vec::new();
     let mut nav = NavState::default();
     let started = Instant::now();
-    let mut last_rescan = RESCAN_EVERY_MS;
     let mut pads_ui = PadUi::default();
+    // Open the pad before entering the wait loop. A delayed first discovery
+    // made the controller appear dead while the page was already usable.
+    rescan(&mut pads, &calibration_path);
+    pads_ui.after_rescan(&pads);
+    let mut last_rescan = started.elapsed().as_millis() as u64;
     loop {
         let now_ms = started.elapsed().as_millis() as u64;
         if now_ms.saturating_sub(last_rescan) >= RESCAN_EVERY_MS {

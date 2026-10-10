@@ -121,6 +121,11 @@ pub(super) fn activate(
     // it over the game.
     let gamescope = gamescope::is_gamescope_mode();
     ira_widgets::style::install_bp_css(1.0);
+    // Controller glyphs ride the binary's GResource like the app's own
+    // icons, so prompts resolve by name on every display.
+    if let Some(display) = gtk4::gdk::Display::default() {
+        gtk4::IconTheme::for_display(&display).add_resource_path("/com/github/ira-overlay/icons");
+    }
 
     let window = gtk4::Window::new();
     window.set_application(Some(app));

@@ -9,7 +9,7 @@ pub const ACTIVE: (&str, &[(&str, &[u8])]) = (
     "M PLUS 2",
     &[(
         "MPLUS2-VariableFont_wght.ttf",
-        include_bytes!("../assets/fonts/M_PLUS_2/MPLUS2-VariableFont_wght.ttf"),
+        include_bytes!("../resources/fonts/M_PLUS_2/MPLUS2-VariableFont_wght.ttf"),
     )],
 );
 

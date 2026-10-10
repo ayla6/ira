@@ -17,9 +17,32 @@
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/steam-train-symbolic.svg">icons/steam-train-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/shift-symbolic.svg">icons/shift-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/shift-filled-symbolic.svg">icons/shift-filled-symbolic.svg</file>
-    <file preprocess="xml-stripblanks" alias="icons/16x16/actions/left-large-symbolic.svg">icons/left-large-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/16x16/actions/left-large-symbolic.svg">icons/right-left-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/right-large-symbolic.svg">icons/right-large-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/entry-clear-symbolic.svg">icons/entry-clear-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/16x16/actions/funnel-symbolic.svg">icons/funnel-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-bumper-l-symbolic.svg">../../widgets/resources/glyphs/bumper-l.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-bumper-r-symbolic.svg">../../widgets/resources/glyphs/bumper-r.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-button-a-symbolic.svg">../../widgets/resources/glyphs/button-a.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-button-b-symbolic.svg">../../widgets/resources/glyphs/button-b.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-button-circle-symbolic.svg">../../widgets/resources/glyphs/button-circle.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-button-cross-symbolic.svg">../../widgets/resources/glyphs/button-cross.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-button-square-symbolic.svg">../../widgets/resources/glyphs/button-square.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-button-triangle-symbolic.svg">../../widgets/resources/glyphs/button-triangle.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-button-x-symbolic.svg">../../widgets/resources/glyphs/button-x.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-button-y-symbolic.svg">../../widgets/resources/glyphs/button-y.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-click-l-symbolic.svg">../../widgets/resources/glyphs/stick-l-click.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-click-r-symbolic.svg">../../widgets/resources/glyphs/stick-r-click.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-dpad-down-symbolic.svg">../../widgets/resources/glyphs/dpad-down.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-dpad-left-symbolic.svg">../../widgets/resources/glyphs/dpad-left.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-dpad-right-symbolic.svg">../../widgets/resources/glyphs/dpad-right.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-dpad-up-symbolic.svg">../../widgets/resources/glyphs/dpad-up.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-home-symbolic.svg">../../widgets/resources/glyphs/button-home.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-minus-symbolic.svg">../../widgets/resources/glyphs/button-minus.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-plus-symbolic.svg">../../widgets/resources/glyphs/button-plus.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-stick-l-symbolic.svg">../../widgets/resources/glyphs/stick-l.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-stick-r-symbolic.svg">../../widgets/resources/glyphs/stick-r.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-trigger-l-symbolic.svg">../../widgets/resources/glyphs/trigger-l.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/ira-trigger-r-symbolic.svg">../../widgets/resources/glyphs/trigger-r.svg</file>
   </gresource>
 </gresources>

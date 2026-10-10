@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 
-use super::css::{CSS_DIM_LABEL, CSS_SOURCE_BADGE};
+use super::css::CSS_DIM_LABEL;
 use super::input_profile_assets::{set_source_asset, source_badge};
 use super::input_profile_options::output_display_label;
 use super::input_profile_editor_regions::source_label;
@@ -301,9 +301,8 @@ pub(crate) fn input_expander_row(
 ) -> adw::ExpanderRow {
     let expander = adw::ExpanderRow::new();
     add_source_prefix(&expander, source, family, mapping.is_none());
-    // The input's glyph — or its badge text when the glyph set lacks it —
-    // identifies the row; it carries no text title. The bound command stays
-    // text, right-aligned, "Not mapped" included.
+    // The input's glyph identifies the row; it carries no text title. The
+    // bound command stays text, right-aligned, "Not mapped" included.
     let value_label = gtk4::Label::new(Some(&summary_text(source, mapping)));
     value_label.add_css_class(CSS_DIM_LABEL);
     value_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -381,17 +380,29 @@ fn add_source_prefix(
     family: ira_input::ControllerFamily,
     dim: bool,
 ) {
-    let badge = gtk4::Label::new(Some(&source_badge(source, family)));
-    badge.add_css_class(CSS_SOURCE_BADGE);
-    if dim {
-        badge.add_css_class(CSS_DIM_LABEL);
-    }
-    badge.set_valign(gtk4::Align::Center);
+    let prefix = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+    prefix.set_valign(gtk4::Align::Center);
     let asset = gtk4::Image::new();
+    // Keep the control art legible beside the row label; the source SVGs
+    // remain vectors, so this does not introduce raster scaling.
     asset.set_pixel_size(24);
-    set_source_asset(&asset, &badge, source, family);
-    expander.add_prefix(&asset);
-    expander.add_prefix(&badge);
+    asset.set_valign(gtk4::Align::Center);
+    if dim {
+        asset.add_css_class(CSS_DIM_LABEL);
+    }
+    prefix.append(&asset);
+    let fallback = gtk4::Label::new(None);
+    fallback.set_valign(gtk4::Align::Center);
+    if dim {
+        fallback.add_css_class(CSS_DIM_LABEL);
+    }
+    let has_asset = set_source_asset(&asset, source, family);
+    if !has_asset {
+        fallback.set_text(&source_badge(source, family));
+    }
+    fallback.set_visible(!has_asset);
+    prefix.append(&fallback);
+    expander.add_prefix(&prefix);
 }
 
 /// Steam's behavior list for an analog source: the modes it can take, each

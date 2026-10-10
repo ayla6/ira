@@ -287,9 +287,8 @@ impl BottomBar {
 
     /// Replace the prompt row, e.g. A/Play on the home screen, B/Back plus
     /// A/Play on the All Software grid. Glyphs come from the same gamepad
-    /// icon set the input customization uses, with the badge letter as the
-    /// fallback. Both live in one fixed-size slot so the row never shifts
-    /// while the icons come in.
+    /// icon set the input customization uses. Both live in one fixed-size
+    /// slot so the row stays aligned while prompts are rebuilt.
     pub(super) fn set_prompts(&self, items: &[(ira_input::GamepadButton, &str)]) {
         *self.prompt_items.borrow_mut() =
             items.iter().map(|(b, l)| (*b, l.to_string())).collect();
@@ -304,7 +303,9 @@ impl BottomBar {
         for (button, label) in items {
             let label = label.as_str();
             let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            item.set_valign(gtk4::Align::Center);
             let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
+            slot.set_valign(gtk4::Align::Center);
             let key = (32.0 * self.ui_scale.get()).round().max(8.0) as i32;
             slot.set_size_request(key, key);
             let glyph = gtk4::Image::new();
@@ -312,24 +313,27 @@ impl BottomBar {
             glyph.set_halign(gtk4::Align::Center);
             glyph.set_valign(gtk4::Align::Center);
             slot.append(&glyph);
-            let fallback = gtk4::Label::new(Some(&crate::ui::input_profile_assets::source_badge(
-                ira_input::InputSource::Button(button),
-                family,
-            )));
-            fallback.add_css_class(CSS_BP_PROMPT_KEY);
-            fallback.set_halign(gtk4::Align::Center);
+            let fallback = gtk4::Label::new(None);
             fallback.set_valign(gtk4::Align::Center);
-            slot.append(&fallback);
-            crate::ui::input_profile_assets::set_source_asset(
+            fallback.add_css_class(CSS_BP_PROMPT);
+            let source = ira_input::InputSource::Button(button);
+            let has_asset = crate::ui::input_profile_assets::set_source_asset(
                 &glyph,
-                &fallback,
-                ira_input::InputSource::Button(button),
+                source,
                 family,
             );
+            if !has_asset {
+                fallback.set_text(&crate::ui::input_profile_assets::source_badge(
+                    source, family,
+                ));
+            }
+            fallback.set_visible(!has_asset);
             let text = gtk4::Label::new(Some(label));
+            text.set_valign(gtk4::Align::Center);
             text.add_css_class(CSS_BP_PROMPT);
             crate::ui::helpers::crisp_label(&text);
             item.append(&slot);
+            slot.append(&fallback);
             item.append(&text);
             self.prompts.append(&item);
         }

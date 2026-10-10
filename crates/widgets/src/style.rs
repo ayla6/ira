@@ -15,7 +15,6 @@ pub const CSS_BP_BOTTOM: &str = "bp-bottom";
 pub const CSS_BP_PAD_DOT: &str = "bp-pad-dot";
 pub const CSS_BP_PAD_LIT: &str = "bp-pad-lit";
 pub const CSS_BP_PROMPT: &str = "bp-prompt";
-pub const CSS_BP_PROMPT_KEY: &str = "bp-prompt-key";
 pub const CSS_BP_ALL: &str = "bp-all";
 pub const CSS_BP_ALL_TILE: &str = "bp-all-tile";
 pub const CSS_BP_ALL_PAGE: &str = "bp-all-page";
@@ -30,7 +29,6 @@ pub const CSS_BP_MENU_TITLE: &str = "bp-menu-title";
 pub const CSS_BP_MENU_ROW: &str = "bp-menu-row";
 pub const CSS_BP_MENU_ROW_SELECTED: &str = "bp-menu-row-selected";
 pub const CSS_BP_MENU_ROW_ACTIVE: &str = "bp-menu-row-active";
-pub const CSS_BP_SHOULDER: &str = "bp-shoulder";
 pub const CSS_BP_CURSOR_HIDDEN: &str = "bp-cursor-hidden";
 pub const CSS_BP_GROUP_SLOT: &str = "bp-group-slot";
 pub const CSS_BP_RUNNING: &str = "bp-running";
@@ -42,7 +40,6 @@ pub const CSS_BP_KEY_ACTIVE: &str = "bp-key-active";
 pub const CSS_BP_KEY_DISABLED: &str = "bp-key-disabled";
 pub const CSS_BP_KEY_OK: &str = "bp-key-ok";
 pub const CSS_BP_KEY_CARET: &str = "bp-key-caret";
-pub const CSS_BP_KEY_BADGE: &str = "bp-key-badge";
 pub const CSS_BP_KEY_PREVIEW: &str = "bp-key-preview";
 pub const CSS_BP_KEYBOARD: &str = "bp-keyboard";
 
@@ -114,12 +111,7 @@ pub fn install_bp_css(scale: f64) {
 }
 
 fn big_picture_css(s: f64) -> String {
-    [
-        bp_css_header(s),
-        bp_css_tabs_menu(s),
-        bp_css_keyboard(s),
-    ]
-    .concat()
+    [bp_css_header(s), bp_css_tabs_menu(s), bp_css_keyboard(s)].concat()
 }
 
 /// Shared pixel helpers for the big-picture sections, scaled from the
@@ -178,15 +170,6 @@ fn bp_css_header(s: f64) -> String {
     padding: {pad_v} {pad_h};
     min-height: {min_h};
 }}
-.bp-prompt-key {{
-    min-width: {key};
-    min-height: {key};
-    padding: 0;
-    border-radius: 9999px;
-    border: {prompt_ring} solid alpha(@theme_fg_color, 0.9);
-    font-weight: 800;
-    font-size: {key_font};
-}}
 .bp-title {{
     font-size: {title};
     font-weight: 400;
@@ -204,13 +187,10 @@ fn bp_css_header(s: f64) -> String {
         status_pad_v = p.px(12),
         status_pad_x = p.px(24),
         clock_pad = p.pxs(2),
-        prompt_ring = p.pxs(2),
         small = p.px(24),
         pad_v = p.px(18),
         pad_h = p.px(36),
         min_h = p.px(72),
-        key = p.px(32),
-        key_font = p.px(16),
         title = p.px(28),
         page_title = p.px(30),
         subtitle = p.px(22),
@@ -223,9 +203,9 @@ fn bp_css_tabs_menu(s: f64) -> String {
     let p = BpPx::new(s);
     let (ring_rest, ring_on) = bp_focus_ring(&p);
     /* The tab picker: libadwaita's toggle-group metrics, ported from its
-       stylesheet (3px group padding, 9px group radius, 34x28 toggles with
-       8px side padding, 6px icon-label spacing) and scaled to the
-       big-picture type size — minus the bold labels. */
+    stylesheet (3px group padding, 9px group radius, 34x28 toggles with
+    8px side padding, 6px icon-label spacing) and scaled to the
+    big-picture type size — minus the bold labels. */
     format!(
         r#".bp-tabs toggle,
 .bp-tabs toggle label {{
@@ -334,18 +314,12 @@ fn bp_css_tabs_menu(s: f64) -> String {
     )
 }
 
-/// The on-screen keyboard: shoulder buttons, keys, caret, badges.
+/// The on-screen keyboard: keys, caret and preview.
 fn bp_css_keyboard(s: f64) -> String {
     let p = BpPx::new(s);
     let (ring_rest, ring_on) = bp_focus_ring(&p);
     format!(
-        r#".bp-shoulder {{
-    padding: {shoulder_pad_y} {shoulder_pad_x} {shoulder_pad_bottom};
-    border: {shoulder_ring} solid alpha(@theme_fg_color, 0.55);
-    border-radius: {shoulder_radius};
-    font-size: {small};
-}}
-.bp-group-slot {{
+        r#".bp-group-slot {{
     background: alpha(white, 0.06);
 }}
 .bp-key {{
@@ -388,13 +362,6 @@ fn bp_css_keyboard(s: f64) -> String {
     border-radius: {kbd_radius} {kbd_radius} 0 0;
     padding-top: {kbd_pad_top};
 }}
-.bp-key-badge {{
-    min-width: {badge};
-    min-height: {badge};
-    border-radius: 9999px;
-    background: alpha(black, 0.55);
-    font-size: {key_font};
-}}
 .bp-key-preview {{
     padding: {group_row_pad};
     padding-left: {preview_inset_x};
@@ -405,15 +372,6 @@ fn bp_css_keyboard(s: f64) -> String {
     font-size: {page_title};
 }}
 "#,
-        shoulder_pad_y = p.pxs(2),
-        shoulder_pad_x = p.px(10),
-        // The badge rides the same optical center as the tab pill: the
-        // bundled font's glyph mass sits low in its line box, and the same
-        // extra bottom padding lifts the badge letters to match the tabs.
-        shoulder_pad_bottom = p.pxs(7),
-        shoulder_ring = p.pxs(2),
-        shoulder_radius = p.px(8),
-        small = p.px(24),
         key_radius = p.px(8),
         ring_rest = ring_rest,
         ring_on = ring_on,
@@ -421,8 +379,6 @@ fn bp_css_keyboard(s: f64) -> String {
         caret_width = p.px(2),
         kbd_radius = p.px(16),
         kbd_pad_top = p.px(10),
-        badge = p.px(22),
-        key_font = p.px(16),
         group_row_pad = p.px(14),
         preview_inset_x = p.px(22),
         row_radius = p.px(10),

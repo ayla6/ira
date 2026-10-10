@@ -178,6 +178,8 @@ fn main() {
     i18n::init();
     // Same type as big picture, before GTK initializes text rendering.
     ira_widgets::font::install();
+    gio::resources_register_include!("ira-overlay.gresource")
+        .expect("failed to register application resources");
     setup_gamescope_display();
     // Injected mode renders on our own stub compositor: zero visible
     // output anywhere (snapshots require a mapped window).

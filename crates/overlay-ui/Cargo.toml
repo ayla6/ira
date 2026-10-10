@@ -24,3 +24,6 @@ x11rb = "0.13"
 
 [lints]
 workspace = true
+
+[build-dependencies]
+glib-build-tools = "0.22.8"

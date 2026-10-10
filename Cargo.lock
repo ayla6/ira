@@ -2026,6 +2026,7 @@ dependencies = [
  "gettext-rs",
  "gio",
  "glib",
+ "glib-build-tools",
  "graphene-rs",
  "gsk4",
  "gtk4",

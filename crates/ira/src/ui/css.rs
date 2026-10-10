@@ -5,19 +5,18 @@ pub const CSS_BOXED_LIST: &str = "boxed-list";
 pub use ira_widgets::style::{
     bp_ring_outset, bp_scale, set_bp_scale, CSS_BP_ALL, CSS_BP_ALL_PAGE,
     CSS_BP_ALL_TILE, CSS_BP_BATT, CSS_BP_BOTTOM, CSS_BP_CLOCK, CSS_BP_CURSOR_HIDDEN,
-    CSS_BP_DATE, CSS_BP_GROUP_SLOT, CSS_BP_KEY, CSS_BP_KEY_ACTIVE, CSS_BP_KEY_BADGE,
+    CSS_BP_DATE, CSS_BP_GROUP_SLOT, CSS_BP_KEY, CSS_BP_KEY_ACTIVE,
     CSS_BP_KEY_CARET, CSS_BP_KEY_DISABLED, CSS_BP_KEY_OK, CSS_BP_KEY_PREVIEW,
     CSS_BP_KEY_SELECTED, CSS_BP_KEYBOARD, CSS_BP_MENU_DIM, CSS_BP_MENU_PANEL,
     CSS_BP_MENU_ROW_ACTIVE, CSS_BP_MENU_ROW_SELECTED,
     CSS_BP_OPTION_PANEL, CSS_BP_PAD_DOT, CSS_BP_PAD_LIT, CSS_BP_PAGE_SUBTITLE,
-    CSS_BP_PAGE_TITLE, CSS_BP_PROMPT, CSS_BP_PROMPT_KEY, CSS_BP_ROOT, CSS_BP_RUNNING,
-    CSS_BP_RUNNING_STATUS, CSS_BP_RUNNING_TITLE, CSS_BP_SELECTED, CSS_BP_SHOULDER,
+    CSS_BP_PAGE_TITLE, CSS_BP_PROMPT, CSS_BP_ROOT, CSS_BP_RUNNING,
+    CSS_BP_RUNNING_STATUS, CSS_BP_RUNNING_TITLE, CSS_BP_SELECTED,
     CSS_BP_SQ, CSS_BP_STATUS, CSS_BP_TABS, CSS_BP_TITLE,
 };
 pub const CSS_CAPTION: &str = "caption";
 pub const CSS_CIRCULAR: &str = "circular";
 pub const CSS_CLICKABLE_STAT: &str = "clickable-stat";
-pub const CSS_COVER_BADGE: &str = "cover-badge";
 pub const CSS_COVER_ITEM: &str = "cover-item";
 pub const CSS_COVER_NAME_FALLBACK: &str = "cover-name-fallback";
 pub const CSS_DESTRUCTIVE_ACTION: &str = "destructive-action";
@@ -58,7 +57,6 @@ pub const CSS_LOCKED_TROPHY: &str = "locked-trophy";
 pub const CSS_MASS_MATCH_ID_LINK: &str = "mass-match-id-link";
 pub const CSS_MASS_MATCH_LINE: &str = "mass-match-line";
 pub const CSS_SIDEBAR_SECTION_TITLE: &str = "sidebar-section-title";
-pub const CSS_SOURCE_BADGE: &str = "source-badge";
 pub const CSS_SQUARE_BUTTON: &str = "square-button";
 pub const CSS_STATUS_NO_SCROLL: &str = "status-no-scroll";
 pub const CSS_COMMAND_TILE: &str = "command-tile";
@@ -188,14 +186,6 @@ gridview.game-grid child:focus-within {
     box-shadow: 0 6px 24px 6px rgba(0,0,0,0.5);
 }
 
-.cover-badge {
-    background-color: rgba(0, 0, 0, 0.75);
-    color: white;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-weight: 600;
-}
-
 .cover-name-fallback {
     color: @theme_fg_color;
     opacity: 0.7;
@@ -269,13 +259,6 @@ gridview.game-grid child:focus-within {
     min-height: 24px;
     padding: 4px;
 }
-.source-badge {
-    padding: 2px 8px;
-    border-radius: 8px;
-    background-color: alpha(@theme_fg_color, 0.08);
-    font-weight: 600;
-}
-
 .command-tile {
     min-width: 92px;
     min-height: 52px;

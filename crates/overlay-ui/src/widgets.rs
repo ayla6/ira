@@ -34,8 +34,8 @@ pub(super) fn build_hint_panel() -> gtk4::Box {
     gtk4::Box::new(gtk4::Orientation::Vertical, 0)
 }
 
-/// Footer prompt: real controller glyph with a keycap fallback plus label,
-/// the big-picture prompt pattern.
+/// Footer prompt: the control's glyph plus label, the big-picture
+/// prompt pattern.
 pub(super) fn build_prompt(
     button: GamepadButton,
     label: &str,
@@ -49,15 +49,16 @@ pub(super) fn build_prompt(
     glyph.set_halign(gtk4::Align::Center);
     glyph.set_valign(gtk4::Align::Center);
     slot.append(&glyph);
-    let fallback = gtk4::Label::new(Some(&glyphs::source_badge(
-        InputSource::Button(button),
-        family,
-    )));
-    fallback.add_css_class(bp::CSS_BP_PROMPT_KEY);
-    fallback.set_halign(gtk4::Align::Center);
+    let fallback = gtk4::Label::new(None);
     fallback.set_valign(gtk4::Align::Center);
+    fallback.add_css_class(bp::CSS_BP_PROMPT);
+    let source = InputSource::Button(button);
+    let has_asset = glyphs::set_source_asset(&glyph, source, family);
+    if !has_asset {
+        fallback.set_text(&glyphs::source_badge(source, family));
+    }
+    fallback.set_visible(!has_asset);
     slot.append(&fallback);
-    glyphs::set_source_asset(&glyph, &fallback, InputSource::Button(button), family);
     item.append(&slot);
     let text = gtk4::Label::new(Some(label));
     text.add_css_class(bp::CSS_BP_PROMPT);

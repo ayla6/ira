@@ -1,66 +1,79 @@
-//! Controller glyphs: Steam's per-family button art resolved from the
-//! local Steam client, with text-badge fallbacks. Shared so the app and
-//! the overlay show the same glyphs from one mapping.
-use gtk4::prelude::WidgetExt;
+//! Controller glyph mapping shared by the main app and overlay.
+//!
+//! The existing controller SVGs are used as-is. Controls without an asset
+//! deliberately return no icon so each caller can show a readable text badge.
+use gtk4::prelude::*;
 use ira_input::{ControllerFamily, GamepadAxis, GamepadButton, InputSource};
 
-/// Loads a Steam glyph into `image`, reporting whether one was found. The
-/// caller shows its text fallback only when this returns false.
-pub fn set_asset_from_name(image: &gtk4::Image, asset_name: Option<&str>) -> bool {
-    let Some(asset_name) = asset_name else {
+#[cfg(test)]
+const GLYPH_KEYS: &[&str] = &[
+    "bumper-l",
+    "bumper-r",
+    "button-a",
+    "button-b",
+    "button-circle",
+    "button-cross",
+    "button-square",
+    "button-triangle",
+    "button-x",
+    "button-y",
+    "click-l",
+    "click-r",
+    "dpad-down",
+    "dpad-left",
+    "dpad-right",
+    "dpad-up",
+    "home",
+    "minus",
+    "plus",
+    "stick-l",
+    "stick-r",
+    "trigger-l",
+    "trigger-r",
+];
+
+/// The icon name a glyph key resolves under.
+pub fn icon_name(key: &str) -> String {
+    format!("ira-{key}-symbolic")
+}
+
+/// Set a source icon. Returns false when the source has no SVG and the caller
+/// should show its text fallback.
+pub fn set_source_asset(
+    image: &gtk4::Image,
+    source: InputSource,
+    family: ControllerFamily,
+) -> bool {
+    let Some(key) = source_asset_name(source, family) else {
         image.clear();
         image.set_visible(false);
         return false;
     };
-    let dark = !gtk4::Settings::default()
-        .is_some_and(|settings| settings.is_gtk_application_prefer_dark_theme());
-    if let Some(path) = steam_asset_path(asset_name, dark) {
-        image.set_from_file(Some(&path));
-        image.set_visible(true);
-        true
-    } else {
-        image.clear();
-        image.set_visible(false);
-        false
-    }
+    image.set_icon_name(Some(&icon_name(key)));
+    image.set_visible(true);
+    true
 }
 
-pub fn set_source_asset(
-    image: &gtk4::Image,
-    fallback: &gtk4::Label,
-    source: InputSource,
-    family: ControllerFamily,
-) {
-    if set_asset_from_name(image, source_asset_name(source, family)) {
-        fallback.set_visible(false);
-    } else {
-        fallback.set_visible(true);
-    }
-}
-
-pub fn source_asset_name(
-    source: InputSource,
-    family: ControllerFamily,
-) -> Option<&'static str> {
+/// The bundled glyph key for a source, when an SVG currently exists.
+pub fn source_asset_name(source: InputSource, family: ControllerFamily) -> Option<&'static str> {
     match source {
         InputSource::Button(button) => match button {
-            GamepadButton::A => Some("shared_buttons_s.svg"),
-            GamepadButton::B => Some("shared_buttons_e.svg"),
-            GamepadButton::X => Some("shared_buttons_w.svg"),
-            GamepadButton::Y => Some("shared_buttons_n.svg"),
-            GamepadButton::LeftShoulder => family_asset(family, "lb"),
-            GamepadButton::RightShoulder => family_asset(family, "rb"),
-            GamepadButton::LeftTrigger => family_asset(family, "lt"),
-            GamepadButton::RightTrigger => family_asset(family, "rt"),
-            GamepadButton::Back => family_asset(family, "back"),
-            GamepadButton::Start => family_asset(family, "start"),
-            GamepadButton::Guide => family_asset(family, "guide"),
-            GamepadButton::LeftStick => Some("shared_lstick_click.svg"),
-            GamepadButton::RightStick => Some("shared_rstick_click.svg"),
-            GamepadButton::DpadUp => Some("shared_dpad_up.svg"),
-            GamepadButton::DpadDown => Some("shared_dpad_down.svg"),
-            GamepadButton::DpadLeft => Some("shared_dpad_left.svg"),
-            GamepadButton::DpadRight => Some("shared_dpad_right.svg"),
+            GamepadButton::A | GamepadButton::B | GamepadButton::X | GamepadButton::Y => {
+                face_button_asset(button, family)
+            }
+            GamepadButton::LeftShoulder => Some("bumper-l"),
+            GamepadButton::RightShoulder => Some("bumper-r"),
+            GamepadButton::LeftTrigger => Some("trigger-l"),
+            GamepadButton::RightTrigger => Some("trigger-r"),
+            GamepadButton::Back => Some("minus"),
+            GamepadButton::Start => Some("plus"),
+            GamepadButton::Guide => Some("home"),
+            GamepadButton::LeftStick => Some("click-l"),
+            GamepadButton::RightStick => Some("click-r"),
+            GamepadButton::DpadUp => Some("dpad-up"),
+            GamepadButton::DpadDown => Some("dpad-down"),
+            GamepadButton::DpadLeft => Some("dpad-left"),
+            GamepadButton::DpadRight => Some("dpad-right"),
             GamepadButton::Paddle1
             | GamepadButton::Paddle2
             | GamepadButton::Paddle3
@@ -68,173 +81,83 @@ pub fn source_asset_name(
             | GamepadButton::Paddle5
             | GamepadButton::Paddle6
             | GamepadButton::Paddle7
-            | GamepadButton::Paddle8 => paddle_asset(family, button),
+            | GamepadButton::Paddle8 => None,
         },
         InputSource::AxisDirection { axis, .. } => {
             source_asset_name(InputSource::Axis(axis), family)
         }
         InputSource::Axis(axis) => match axis {
-            GamepadAxis::LeftX | GamepadAxis::LeftY => Some("shared_lstick.svg"),
-            GamepadAxis::RightX | GamepadAxis::RightY => Some("shared_rstick.svg"),
-            GamepadAxis::LeftTrigger => family_asset(family, "lt"),
-            GamepadAxis::RightTrigger => family_asset(family, "rt"),
+            GamepadAxis::LeftX | GamepadAxis::LeftY => Some("stick-l"),
+            GamepadAxis::RightX | GamepadAxis::RightY => Some("stick-r"),
+            GamepadAxis::LeftTrigger => Some("trigger-l"),
+            GamepadAxis::RightTrigger => Some("trigger-r"),
         },
     }
 }
 
-fn paddle_asset(family: ControllerFamily, button: GamepadButton) -> Option<&'static str> {
-    let number = match button {
-        GamepadButton::Paddle1 => "1",
-        GamepadButton::Paddle2 => "2",
-        GamepadButton::Paddle3 => "3",
-        GamepadButton::Paddle4 => "4",
-        GamepadButton::Paddle5 => "5",
-        GamepadButton::Paddle6 => "6",
-        GamepadButton::Paddle7 => "7",
-        GamepadButton::Paddle8 => "8",
-        _ => return None,
-    };
-    if family == ControllerFamily::EightBitDo {
-        return match number {
-            "1" => Some("sc_r4.svg"),
-            "2" => Some("sc_l4.svg"),
-            "3" => Some("shared_pr.svg"),
-            "4" => Some("shared_pl.svg"),
-            _ => Some(universal_paddle_asset(number)),
-        };
+fn face_button_asset(button: GamepadButton, family: ControllerFamily) -> Option<&'static str> {
+    if family == ControllerFamily::PlayStation {
+        return Some(match button {
+            GamepadButton::A => "button-cross",
+            GamepadButton::B => "button-circle",
+            GamepadButton::X => "button-square",
+            GamepadButton::Y => "button-triangle",
+            _ => unreachable!("face_button_asset called for a non-face button"),
+        });
     }
-    Some(universal_paddle_asset(number))
+    Some(match button {
+        GamepadButton::A => "button-a",
+        GamepadButton::B => "button-b",
+        GamepadButton::X => "button-x",
+        GamepadButton::Y => "button-y",
+        _ => unreachable!("face_button_asset called for a non-face button"),
+    })
 }
 
-fn universal_paddle_asset(number: &str) -> &'static str {
-    match number {
-        "1" => "shared_m1.svg",
-        "2" => "shared_m2.svg",
-        "3" => "shared_m3.svg",
-        "4" => "shared_m4.svg",
-        "5" => "shared_m5.svg",
-        "6" => "shared_m6.svg",
-        "7" => "shared_m7.svg",
-        _ => "shared_m8.svg",
-    }
-}
-
-fn family_asset(family: ControllerFamily, control: &str) -> Option<&'static str> {
-    match family {
-        ControllerFamily::PlayStation => match control {
-            "lb" => Some("ps_l1.svg"),
-            "rb" => Some("ps_r1.svg"),
-            "lt" => Some("ps_l2.svg"),
-            "rt" => Some("ps_r2.svg"),
-            "back" => Some("ps4_button_share.svg"),
-            "start" => Some("ps4_button_options.svg"),
-            "guide" => Some("ps4_button_logo.svg"),
-            "dpad_up" => Some("ps_dpad_up.svg"),
-            "dpad_down" => Some("ps_dpad_down.svg"),
-            "dpad_left" => Some("ps_dpad_left.svg"),
-            "dpad_right" => Some("ps_dpad_right.svg"),
-            _ => None,
-        },
-        ControllerFamily::Nintendo => match control {
-            "lb" => Some("switchpro_l.svg"),
-            "rb" => Some("switchpro_r.svg"),
-            "lt" => Some("switchpro_l2.svg"),
-            "rt" => Some("switchpro_r2.svg"),
-            "back" => Some("switchpro_button_minus.svg"),
-            "start" => Some("switchpro_button_plus.svg"),
-            "guide" => Some("switchpro_button_home.svg"),
-            "dpad_up" => Some("switchpro_dpad_up.svg"),
-            "dpad_down" => Some("switchpro_dpad_down.svg"),
-            "dpad_left" => Some("switchpro_dpad_left.svg"),
-            "dpad_right" => Some("switchpro_dpad_right.svg"),
-            _ => None,
-        },
-        ControllerFamily::EightBitDo => match control {
-            "back" => Some("switchpro_button_minus.svg"),
-            "start" => Some("switchpro_button_plus.svg"),
-            "guide" => Some("8bitdo_button_home.svg"),
-            _ => family_asset(ControllerFamily::Generic, control),
-        },
-        ControllerFamily::Steam => match control {
-            "guide" => Some("sc_button_steam.svg"),
-            _ => family_asset(ControllerFamily::Generic, control),
-        },
-        ControllerFamily::Xbox | ControllerFamily::Generic => match control {
-            "lb" => Some("xbox_lb.svg"),
-            "rb" => Some("xbox_rb.svg"),
-            "lt" => Some("xbox_lt.svg"),
-            "rt" => Some("xbox_rt.svg"),
-            "back" => Some("xbox_button_select.svg"),
-            "start" => Some("xbox_button_start.svg"),
-            "guide" => Some("xbox_button_logo.svg"),
-            "dpad_up" => Some("shared_dpad_up.svg"),
-            "dpad_down" => Some("shared_dpad_down.svg"),
-            "dpad_left" => Some("shared_dpad_left.svg"),
-            "dpad_right" => Some("shared_dpad_right.svg"),
-            _ => None,
-        },
-    }
-}
-
-fn steam_asset_path(name: &str, dark: bool) -> Option<std::path::PathBuf> {
-    let data_home = std::env::var_os("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/share"))
-        })?;
-    let path = data_home
-        .join(format!(
-            "Steam/controller_base/images/api/{}",
-            if dark { "dark" } else { "light" }
-        ))
-        .join(name);
-    path.is_file().then_some(path)
-}
-
+/// Text shown when a controller source has no SVG yet.
 pub fn source_badge(source: InputSource, family: ControllerFamily) -> String {
     match source {
         InputSource::Button(button) => match button {
-            GamepadButton::A => "A".to_string(),
-            GamepadButton::B => "B".to_string(),
-            GamepadButton::X => "X".to_string(),
-            GamepadButton::Y => "Y".to_string(),
-            GamepadButton::LeftShoulder => "LB".to_string(),
-            GamepadButton::RightShoulder => "RB".to_string(),
-            GamepadButton::LeftTrigger => "LT".to_string(),
-            GamepadButton::RightTrigger => "RT".to_string(),
-            GamepadButton::Back if family == ControllerFamily::EightBitDo => "-".to_string(),
-            GamepadButton::Start if family == ControllerFamily::EightBitDo => "+".to_string(),
-            GamepadButton::Guide if family == ControllerFamily::EightBitDo => "Home".to_string(),
-            GamepadButton::Back => "Back".to_string(),
-            GamepadButton::Start => "Start".to_string(),
-            GamepadButton::Guide => "Guide".to_string(),
-            GamepadButton::LeftStick => "L3".to_string(),
-            GamepadButton::RightStick => "R3".to_string(),
-            GamepadButton::DpadUp => "D-Up".to_string(),
-            GamepadButton::DpadDown => "D-Down".to_string(),
-            GamepadButton::DpadLeft => "D-Left".to_string(),
-            GamepadButton::DpadRight => "D-Right".to_string(),
-            GamepadButton::Paddle1 if family == ControllerFamily::EightBitDo => "R4".to_string(),
-            GamepadButton::Paddle2 if family == ControllerFamily::EightBitDo => "L4".to_string(),
-            GamepadButton::Paddle3 if family == ControllerFamily::EightBitDo => "PR".to_string(),
-            GamepadButton::Paddle4 if family == ControllerFamily::EightBitDo => "PL".to_string(),
-            GamepadButton::Paddle1 => "P1".to_string(),
-            GamepadButton::Paddle2 => "P2".to_string(),
-            GamepadButton::Paddle3 => "P3".to_string(),
-            GamepadButton::Paddle4 => "P4".to_string(),
-            GamepadButton::Paddle5 => "P5".to_string(),
-            GamepadButton::Paddle6 => "P6".to_string(),
-            GamepadButton::Paddle7 => "P7".to_string(),
-            GamepadButton::Paddle8 => "P8".to_string(),
-        },
+            GamepadButton::A => "A",
+            GamepadButton::B => "B",
+            GamepadButton::X => "X",
+            GamepadButton::Y => "Y",
+            GamepadButton::LeftShoulder => "LB",
+            GamepadButton::RightShoulder => "RB",
+            GamepadButton::LeftTrigger => "LT",
+            GamepadButton::RightTrigger => "RT",
+            GamepadButton::Back => "-",
+            GamepadButton::Start => "+",
+            GamepadButton::Guide => "Home",
+            GamepadButton::LeftStick => "L3",
+            GamepadButton::RightStick => "R3",
+            GamepadButton::DpadUp => "D-Up",
+            GamepadButton::DpadDown => "D-Down",
+            GamepadButton::DpadLeft => "D-Left",
+            GamepadButton::DpadRight => "D-Right",
+            GamepadButton::Paddle1 if family == ControllerFamily::EightBitDo => "R4",
+            GamepadButton::Paddle2 if family == ControllerFamily::EightBitDo => "L4",
+            GamepadButton::Paddle3 if family == ControllerFamily::EightBitDo => "PR",
+            GamepadButton::Paddle4 if family == ControllerFamily::EightBitDo => "PL",
+            GamepadButton::Paddle1 => "P1",
+            GamepadButton::Paddle2 => "P2",
+            GamepadButton::Paddle3 => "P3",
+            GamepadButton::Paddle4 => "P4",
+            GamepadButton::Paddle5 => "P5",
+            GamepadButton::Paddle6 => "P6",
+            GamepadButton::Paddle7 => "P7",
+            GamepadButton::Paddle8 => "P8",
+        }
+        .to_string(),
         InputSource::Axis(axis) => match axis {
-            GamepadAxis::LeftX => "LX".to_string(),
-            GamepadAxis::LeftY => "LY".to_string(),
-            GamepadAxis::RightX => "RX".to_string(),
-            GamepadAxis::RightY => "RY".to_string(),
-            GamepadAxis::LeftTrigger => "LT".to_string(),
-            GamepadAxis::RightTrigger => "RT".to_string(),
-        },
+            GamepadAxis::LeftX => "LX",
+            GamepadAxis::LeftY => "LY",
+            GamepadAxis::RightX => "RX",
+            GamepadAxis::RightY => "RY",
+            GamepadAxis::LeftTrigger => "LT",
+            GamepadAxis::RightTrigger => "RT",
+        }
+        .to_string(),
         InputSource::AxisDirection { axis, direction } => {
             let sign = match direction {
                 ira_input::AxisDirection::Negative => "-",
@@ -245,102 +168,129 @@ pub fn source_badge(source: InputSource, family: ControllerFamily) -> String {
     }
 }
 
+// TODO: Hey, let's come back to the universal glyph set later. Until the
+// missing SVGs are designed, text badges are the intentional fallback.
+
 #[cfg(test)]
 mod tests {
-    use super::{source_asset_name, source_badge};
+    use super::{GLYPH_KEYS, icon_name, source_asset_name, source_badge};
     use ira_input::{AxisDirection, ControllerFamily, GamepadAxis, GamepadButton, InputSource};
 
     #[test]
-    fn test_source_asset_name_uses_shared_standard_controls() {
+    fn test_playstation_uses_playstation_glyphs() {
+        assert_eq!(
+            source_asset_name(
+                InputSource::Button(GamepadButton::A),
+                ControllerFamily::PlayStation
+            ),
+            Some("button-cross")
+        );
+        assert_eq!(
+            source_asset_name(
+                InputSource::Button(GamepadButton::B),
+                ControllerFamily::PlayStation
+            ),
+            Some("button-circle")
+        );
+        assert_eq!(
+            source_asset_name(
+                InputSource::Button(GamepadButton::X),
+                ControllerFamily::PlayStation
+            ),
+            Some("button-square")
+        );
+        assert_eq!(
+            source_asset_name(
+                InputSource::Button(GamepadButton::Y),
+                ControllerFamily::PlayStation
+            ),
+            Some("button-triangle")
+        );
+    }
+
+    #[test]
+    fn test_available_glyphs_use_shared_keys() {
         assert_eq!(
             source_asset_name(
                 InputSource::Button(GamepadButton::A),
                 ControllerFamily::Generic
             ),
-            Some("shared_buttons_s.svg")
+            Some("button-a")
         );
         assert_eq!(
             source_asset_name(
-                InputSource::Button(GamepadButton::A),
-                ControllerFamily::PlayStation
+                InputSource::Button(GamepadButton::Guide),
+                ControllerFamily::Generic
             ),
-            Some("shared_buttons_s.svg")
+            Some("home")
         );
         assert_eq!(
             source_asset_name(
-                InputSource::Button(GamepadButton::DpadUp),
-                ControllerFamily::PlayStation
+                InputSource::Button(GamepadButton::LeftStick),
+                ControllerFamily::Generic
             ),
-            Some("shared_dpad_up.svg")
+            Some("click-l")
         );
         assert_eq!(
             source_asset_name(
-                InputSource::Button(GamepadButton::Back),
-                ControllerFamily::EightBitDo,
+                InputSource::Button(GamepadButton::RightTrigger),
+                ControllerFamily::Generic
             ),
-            Some("switchpro_button_minus.svg")
+            Some("trigger-r")
         );
-        assert_eq!(
-            source_asset_name(
-                InputSource::Button(GamepadButton::Start),
-                ControllerFamily::EightBitDo,
-            ),
-            Some("switchpro_button_plus.svg")
-        );
+        for family in [
+            ControllerFamily::Generic,
+            ControllerFamily::Xbox,
+            ControllerFamily::PlayStation,
+            ControllerFamily::Nintendo,
+            ControllerFamily::EightBitDo,
+            ControllerFamily::Steam,
+        ] {
+            assert_eq!(
+                source_asset_name(InputSource::Button(GamepadButton::Back), family),
+                Some("minus")
+            );
+            assert_eq!(
+                source_asset_name(InputSource::Button(GamepadButton::Start), family),
+                Some("plus")
+            );
+            assert_eq!(
+                source_asset_name(InputSource::Button(GamepadButton::Guide), family),
+                Some("home")
+            );
+        }
+        assert_eq!(icon_name("button-a"), "ira-button-a-symbolic");
     }
 
     #[test]
-    fn test_paddles_use_controller_specific_steam_icons() {
-        for (button, asset) in [
-            (GamepadButton::Paddle1, "shared_m1.svg"),
-            (GamepadButton::Paddle4, "shared_m4.svg"),
-            (GamepadButton::Paddle8, "shared_m8.svg"),
-        ] {
-            assert_eq!(
-                source_asset_name(InputSource::Button(button), ControllerFamily::Generic),
-                Some(asset)
-            );
-        }
-        for (button, asset) in [
-            (GamepadButton::Paddle1, "sc_r4.svg"),
-            (GamepadButton::Paddle2, "sc_l4.svg"),
-            (GamepadButton::Paddle3, "shared_pr.svg"),
-            (GamepadButton::Paddle4, "shared_pl.svg"),
-        ] {
-            assert_eq!(
-                source_asset_name(InputSource::Button(button), ControllerFamily::EightBitDo),
-                Some(asset)
-            );
-        }
-    }
-
-    #[test]
-    fn test_source_badge_covers_buttons_axes_and_directions() {
-        let badge = |source| source_badge(source, ControllerFamily::Generic);
-        assert_eq!(badge(InputSource::Button(GamepadButton::A)), "A");
+    fn test_missing_glyphs_use_text_badges() {
         assert_eq!(
-            badge(InputSource::Button(GamepadButton::LeftShoulder)),
-            "LB"
-        );
-        assert_eq!(badge(InputSource::Button(GamepadButton::Paddle5)), "P5");
-        assert_eq!(badge(InputSource::Axis(GamepadAxis::LeftX)), "LX");
-        assert_eq!(
-            badge(InputSource::Axis(GamepadAxis::RightTrigger)),
-            "RT"
-        );
-        assert_eq!(
-            badge(InputSource::AxisDirection {
-                axis: GamepadAxis::LeftX,
-                direction: AxisDirection::Negative,
-            }),
-            "LX-"
+            source_asset_name(
+                InputSource::Button(GamepadButton::Paddle1),
+                ControllerFamily::Generic
+            ),
+            None
         );
         assert_eq!(
             source_badge(
                 InputSource::Button(GamepadButton::Back),
-                ControllerFamily::EightBitDo
+                ControllerFamily::Xbox
             ),
             "-"
+        );
+        assert_eq!(
+            source_badge(
+                InputSource::Button(GamepadButton::Start),
+                ControllerFamily::Xbox
+            ),
+            "+"
+        );
+        assert_eq!(
+            source_badge(
+                InputSource::Button(GamepadButton::Guide),
+                ControllerFamily::PlayStation
+            ),
+            "Home"
         );
         assert_eq!(
             source_badge(
@@ -349,5 +299,81 @@ mod tests {
             ),
             "R4"
         );
+        assert_eq!(
+            source_badge(
+                InputSource::Button(GamepadButton::Paddle2),
+                ControllerFamily::EightBitDo
+            ),
+            "L4"
+        );
+        assert_eq!(
+            source_badge(
+                InputSource::Button(GamepadButton::Paddle3),
+                ControllerFamily::EightBitDo
+            ),
+            "PR"
+        );
+        assert_eq!(
+            source_badge(
+                InputSource::Button(GamepadButton::Paddle4),
+                ControllerFamily::EightBitDo
+            ),
+            "PL"
+        );
+        assert_eq!(
+            source_badge(
+                InputSource::AxisDirection {
+                    axis: GamepadAxis::RightTrigger,
+                    direction: AxisDirection::Positive,
+                },
+                ControllerFamily::Generic
+            ),
+            "RT+"
+        );
+    }
+
+    #[test]
+    fn test_gresources_ship_available_glyphs() {
+        const IRA_GRESOURCE: &str = include_str!("../../ira/resources/ira.gresource.xml");
+        const OVERLAY_GRESOURCE: &str =
+            include_str!("../../overlay-ui/resources/ira-overlay.gresource.xml");
+        for key in GLYPH_KEYS {
+            let alias = format!("icons/scalable/actions/ira-{key}-symbolic.svg");
+            assert!(
+                IRA_GRESOURCE.contains(&alias),
+                "missing {key} from ira resources"
+            );
+            assert!(
+                OVERLAY_GRESOURCE.contains(&alias),
+                "missing {key} from overlay resources"
+            );
+        }
+    }
+
+    #[test]
+    fn test_custom_glyphs_use_shared_symbolic_structure() {
+        let glyphs = [
+            include_str!("../resources/glyphs/bumper-l.svg"),
+            include_str!("../resources/glyphs/bumper-r.svg"),
+            include_str!("../resources/glyphs/button-home.svg"),
+            include_str!("../resources/glyphs/button-minus.svg"),
+            include_str!("../resources/glyphs/button-plus.svg"),
+            include_str!("../resources/glyphs/stick-l-click.svg"),
+            include_str!("../resources/glyphs/stick-r-click.svg"),
+            include_str!("../resources/glyphs/trigger-l.svg"),
+            include_str!("../resources/glyphs/trigger-r.svg"),
+        ];
+        for svg in glyphs {
+            assert!(svg.contains("gpa:rendering=\"symbolic\""));
+            assert!(svg.contains("xmlns:cc="));
+            assert!(svg.contains("xmlns:dc="));
+            assert!(svg.contains("xmlns:rdf="));
+            assert!(svg.contains("stroke-opacity=\"1\""));
+            assert!(svg.contains("stroke-miterlimit=\"4\""));
+            assert!(svg.contains("stroke-dasharray=\"none\""));
+            assert!(svg.contains("gpa:stroke=\"foreground\""));
+            assert!(!svg.contains("viewBox="));
+            assert!(!svg.contains("id=\"Layer_1\""));
+        }
     }
 }

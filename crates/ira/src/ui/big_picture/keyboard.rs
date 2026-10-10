@@ -503,23 +503,24 @@ impl Keyboard {
             glyph.set_pixel_size(scaled_px(24.0));
             glyph.set_halign(gtk4::Align::Center);
             glyph.set_valign(gtk4::Align::Center);
-            let fallback = gtk4::Label::new(Some(
-                &crate::ui::input_profile_assets::source_badge(
-                    ira_input::InputSource::Button(badge),
-                    self.family.get(),
-                ),
-            ));
-            fallback.add_css_class(CSS_BP_KEY_BADGE);
-            fallback.set_halign(gtk4::Align::Center);
-            fallback.set_valign(gtk4::Align::Center);
             badge_box.append(&glyph);
-            badge_box.append(&fallback);
-            crate::ui::input_profile_assets::set_source_asset(
+            let fallback = gtk4::Label::new(None);
+            fallback.set_valign(gtk4::Align::Center);
+            fallback.add_css_class(CSS_BP_PROMPT);
+            let source = ira_input::InputSource::Button(badge);
+            let has_asset = crate::ui::input_profile_assets::set_source_asset(
                 &glyph,
-                &fallback,
-                ira_input::InputSource::Button(badge),
+                source,
                 self.family.get(),
             );
+            if !has_asset {
+                fallback.set_text(&crate::ui::input_profile_assets::source_badge(
+                    source,
+                    self.family.get(),
+                ));
+            }
+            fallback.set_visible(!has_asset);
+            badge_box.append(&fallback);
             key_surface.add_overlay(&badge_box);
         }
         // The keys stretch with the panel and take the entire width.
@@ -618,24 +619,24 @@ impl Keyboard {
             let item = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(8.0));
             let glyph = gtk4::Image::new();
             glyph.set_pixel_size(scaled_px(28.0));
-            let fallback = gtk4::Label::new(Some(
-                &crate::ui::input_profile_assets::source_badge(
-                    ira_input::InputSource::Button(button),
-                    family,
-                ),
-            ));
-            fallback.add_css_class(CSS_BP_KEY_BADGE);
-            fallback.set_halign(gtk4::Align::Center);
-            fallback.set_valign(gtk4::Align::Center);
-            crate::ui::helpers::crisp_label(&fallback);
+            glyph.set_valign(gtk4::Align::Center);
             item.append(&glyph);
-            item.append(&fallback);
-            crate::ui::input_profile_assets::set_source_asset(
+            let fallback = gtk4::Label::new(None);
+            fallback.set_valign(gtk4::Align::Center);
+            fallback.add_css_class(CSS_BP_PROMPT);
+            let source = ira_input::InputSource::Button(button);
+            let has_asset = crate::ui::input_profile_assets::set_source_asset(
                 &glyph,
-                &fallback,
-                ira_input::InputSource::Button(button),
+                source,
                 family,
             );
+            if !has_asset {
+                fallback.set_text(&crate::ui::input_profile_assets::source_badge(
+                    source, family,
+                ));
+            }
+            fallback.set_visible(!has_asset);
+            item.append(&fallback);
             match hint {
                 Hint::Icon(name) => {
                     let icon = gtk4::Image::from_icon_name(name);

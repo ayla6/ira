@@ -473,6 +473,18 @@ fn fetch_ss_slot_persisted(
     persist_ss_media(&dir, &bytes, asset)
 }
 
+/// Whether any SGDB-served slot is still empty — the gate for the
+/// enrichment and background SGDB passes. Squares count: Steam games
+/// have no Steam-CDN square, so the SGDB square is their only one.
+pub(crate) fn game_needs_sgdb_assets(game: &Game) -> bool {
+    game.icon_path.is_empty()
+        || game.hero_image_path.is_empty()
+        || game.grid_path.is_empty()
+        || game.header_path.is_empty()
+        || game.logo_path.is_empty()
+        || game.square_path.is_empty()
+}
+
 /// Full SGDB asset ensure for one game. Matched games use their SGDB id;
 /// steam-enriched games without a match are served by the SGDB steam
 /// endpoints through their app id. PS4 and Switch titles never take SGDB
@@ -951,5 +963,35 @@ impl FetchIndicator {
             });
 
         indicator
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::game_needs_sgdb_assets;
+    use crate::Game;
+
+    fn full_game() -> Game {
+        Game {
+            icon_path: "icon".into(),
+            hero_image_path: "hero".into(),
+            grid_path: "grid".into(),
+            header_path: "header".into(),
+            logo_path: "logo".into(),
+            square_path: "square".into(),
+            ..Game::default()
+        }
+    }
+
+    #[test]
+    fn test_needs_sgdb_assets_flags_square_only_gap() {
+        let mut game = full_game();
+        game.square_path.clear();
+        assert!(game_needs_sgdb_assets(&game));
+    }
+
+    #[test]
+    fn test_needs_sgdb_assets_quiet_when_full() {
+        assert!(!game_needs_sgdb_assets(&full_game()));
     }
 }

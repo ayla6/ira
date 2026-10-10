@@ -111,6 +111,7 @@ pub fn build_ui(
         search_entry: gtk4::SearchEntry::new(),
         sort_label: gtk4::Label::new(Some(SortMode::Alphabetical.display_label())),
         menu_btn: gtk4::MenuButton::new(),
+        add_btn: gtk4::Button::new(),
         collapsed_collections: HashSet::new(),
         multi_selected_ids: HashSet::new(),
         playtime_links: HashMap::new(),
@@ -281,6 +282,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         s.search_entry = search_entry.clone();
         s.sort_label = sort_label;
         s.menu_btn = menu_btn.clone();
+        s.add_btn = add_btn.clone();
     }
 
     rebuild_sidebar(state);
@@ -293,6 +295,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     // the load lands. Rescans re-disable through show_loading_view and
     // re-enable through show_grid_view.
     menu_btn.set_sensitive(content_unloaded || !initial_loading);
+    add_btn.set_sensitive(content_unloaded || !initial_loading);
     if !content_unloaded && initial_loading {
         show_loading_view(state, &crate::tr!("Preparing game library…"), 0, 1);
     } else if !content_unloaded {

@@ -48,6 +48,14 @@ pub(super) fn add_game_to_db(params: AddGameToDbParams) -> Result<i64, String> {
             title: name,
         },
     )?;
+    // A Steam id from the start means the title came from Steam: mark it
+    // trusted so a later ScreenScraper match enriches around it instead
+    // of replacing it.
+    if !steam_id.is_empty() {
+        if let Err(e) = ira_db::set_title_trusted(db, game_id, true) {
+            eprintln!("Failed to mark the Steam title trusted: {e}");
+        }
+    };
     ira_db::save_game_config(db, game_id, launch_config, wine_config, profile_id)?;
     if !game_folder.is_empty() {
         if let Err(e) = ira_db::update_game_folder(db, game_id, game_folder) {

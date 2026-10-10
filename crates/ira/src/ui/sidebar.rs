@@ -547,7 +547,94 @@ pub fn build_sticky_all_games(state: &SharedState) -> gtk4::Box {
         hovered.remove_css_class(CSS_SIDEBAR_STICKY_HOVER);
     });
     row.add_controller(motion);
+    let sc = state.clone();
+    let row_weak = row.downgrade();
+    let right_click = gtk4::GestureClick::new();
+    right_click.set_button(3);
+    right_click.connect_pressed(move |_, _, x, y| {
+        let Some(r) = row_weak.upgrade() else {
+            return;
+        };
+        let menu = gio::Menu::new();
+        menu.append(
+            Some(&crate::tr!("Collapse all")),
+            Some("grp.collapse-all"),
+        );
+        menu.append(Some(&crate::tr!("Expand all")), Some("grp.expand-all"));
+
+        let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+        popover.set_halign(gtk4::Align::Start);
+        popover.set_has_arrow(false);
+
+        let actions = gio::SimpleActionGroup::new();
+        let sc2 = sc.clone();
+        let collapse_action = gio::SimpleAction::new("collapse-all", None);
+        collapse_action.connect_activate(move |_, _| {
+            collapse_all(&sc2);
+        });
+        actions.add_action(&collapse_action);
+
+        let sc2 = sc.clone();
+        let expand_action = gio::SimpleAction::new("expand-all", None);
+        expand_action.connect_activate(move |_, _| {
+            expand_all(&sc2);
+        });
+        actions.add_action(&expand_action);
+
+        super::helpers::popup_context_popover(&r, &popover, &actions, "grp", x as i32, y as i32);
+    });
+    row.add_controller(right_click);
     row
+}
+
+/// Every collapsible section id currently in the sidebar, plus the known
+/// collections and auto groups (a search hides headers, but their
+/// collapsed state survives it).
+fn header_group_ids(state: &SharedState) -> Vec<i64> {
+    let (store, groups, auto_groups) = {
+        let s = state.borrow();
+        (
+            s.sidebar_store.clone(),
+            s.groups.clone(),
+            s.auto_groups.clone(),
+        )
+    };
+    let mut ids: Vec<i64> = (0..store.n_items())
+        .filter_map(|i| {
+            store
+                .item(i)
+                .and_then(|o| o.downcast::<SidebarItem>().ok())
+        })
+        .filter(|item| {
+            matches!(
+                item.kind(),
+                SidebarItemKind::CollectionHeader
+                    | SidebarItemKind::UncategorizedHeader
+                    | SidebarItemKind::AutoGroupHeader
+            )
+        })
+        .map(|item| item.group_id())
+        .collect();
+    ids.extend(groups.iter().map(|g| g.id));
+    ids.extend(auto_groups.iter().map(|g| g.id));
+    ids.push(0);
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn collapse_all(state: &SharedState) {
+    let ids = header_group_ids(state);
+    state
+        .borrow_mut()
+        .collapsed_collections
+        .extend(ids);
+    rebuild_sidebar(state);
+}
+
+fn expand_all(state: &SharedState) {
+    state.borrow_mut().collapsed_collections.clear();
+    rebuild_sidebar(state);
 }
 
 /// Select the library root from the pinned header: mirrors the

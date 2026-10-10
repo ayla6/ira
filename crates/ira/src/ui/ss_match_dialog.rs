@@ -141,8 +141,14 @@ pub(super) fn entry_title_trusted(state: &SharedState, db_id: i64) -> Option<boo
         .ok()
         .flatten()?
         .title_trusted;
-    let platform_id = &s.games.iter().find(|g| g.db_id == db_id)?.platform_id;
-    Some(db_title_trusted || ira_models::title_from_trusted_source(platform_id.id()))
+    let game = s.games.iter().find(|g| g.db_id == db_id)?;
+    // PC titles come from Steam or the user — ScreenScraper must enrich
+    // around them, never replace them.
+    Some(ira_models::is_title_trusted(
+        game.kind,
+        db_title_trusted,
+        game.platform_id.id(),
+    ))
 }
 
 fn apply_ss_match(

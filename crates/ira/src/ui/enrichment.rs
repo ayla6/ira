@@ -188,12 +188,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
     // otherwise through SGDB's steam endpoints by the app id — so a
     // freshly added game never sits imageless. Only missing files
     // download; the manual "fetch missing images" pass reuses them.
-    if steam.has_sgdb_key()
-        && (game.icon_path.is_empty()
-            || game.hero_image_path.is_empty()
-            || game.grid_path.is_empty()
-            || game.header_path.is_empty()
-            || game.logo_path.is_empty())
+    if steam.has_sgdb_key() && super::fetch_images::game_needs_sgdb_assets(&game)
     {
         let switch_exe = cfg.console("switch").executable.clone();
         let dir = ira_parser::game_data_dir(&save_dir, &game);

@@ -8,6 +8,11 @@ use adw::prelude::*;
 /// Small window shown when the user clicks the "+" button, letting them
 /// choose how to add a game: manually or via the auto-add wizard.
 pub fn show_add_game_method(state: &SharedState) {
+    // The library is still loading: the new row would miss the progress
+    // strip and the grid refresh, so the dialog waits for the load.
+    if state.borrow().loading.is_some() && !state.borrow().content_unloaded {
+        return;
+    }
     let parent = state.borrow().window.clone();
     let win = adw::Dialog::new();
     win.set_title(&crate::tr!("Add game"));

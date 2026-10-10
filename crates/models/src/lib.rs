@@ -51,7 +51,7 @@ pub use pause::resolve_pause_game_on_overlay;
 pub use session::PlaySession;
 pub use group_order::GroupOrder;
 pub use screenscraper::{
-    company_tokens, region_from_rom_paths, screenscraper_hashes_content,
+    company_tokens, is_title_trusted, region_from_rom_paths, screenscraper_hashes_content,
     screenscraper_matches_by_serial, scraper_console_id, screenscraper_pc_system_id,
     screenscraper_system_id, title_from_trusted_source, ScraperClassification, ScraperEntity,
     ScraperMetadata,

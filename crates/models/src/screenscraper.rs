@@ -316,6 +316,18 @@ pub fn title_from_trusted_source(platform_id: &str) -> bool {
     matches!(platform_id, "ps3" | "ps4" | "psvita" | "switch" | "wiiu")
 }
 
+/// Whether a row's current title is authoritative: edited or matched
+/// before, from an official console header, or from Steam/the user on
+/// PC. ScreenScraper matches enrich around trusted titles instead of
+/// replacing them.
+pub fn is_title_trusted(
+    kind: crate::GameKind,
+    title_trusted: bool,
+    platform_id: &str,
+) -> bool {
+    title_trusted || kind.is_pc() || title_from_trusted_source(platform_id)
+}
+
 /// The console a game's ScreenScraper lookups run under. PS3 and PS4
 /// games store their native product code as the platform id — NPUB30698,
 /// CUSA12112 — which names a release, not a console; their kind is what
@@ -958,5 +970,26 @@ mod tests {
             super::region_from_rom_paths(&rom_paths(&["/roms/Final Fantasy VII.bin"])),
             None
         );
+    }
+
+    #[test]
+    fn test_is_title_trusted_treats_steam_titles_as_valid() {
+        // PC titles come from Steam or the user: trusted even unflagged.
+        for kind in [
+            crate::GameKind::Steam,
+            crate::GameKind::Wine,
+            crate::GameKind::Linux,
+        ] {
+            assert!(super::is_title_trusted(kind, false, "12345"));
+        }
+        // Console headers stay trusted; filename stems do not.
+        assert!(super::is_title_trusted(crate::GameKind::Switch, false, "switch"));
+        assert!(!super::is_title_trusted(
+            crate::GameKind::Retro,
+            false,
+            "snes"
+        ));
+        // An explicit flag trusts any row.
+        assert!(super::is_title_trusted(crate::GameKind::Retro, true, "snes"));
     }
 }

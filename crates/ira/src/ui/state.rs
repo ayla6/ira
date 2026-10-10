@@ -117,9 +117,11 @@ pub struct AppState {
     pub sort_label: gtk4::Label,
     /// The hamburger menu: settings, matching, history and rescan all read
     /// the loaded library, so the button stays insensitive until the first
-    /// load lands (and across rescans). The add-game button stays live —
-    /// mid-load adds merge into the landing snapshot.
+    /// load lands (and across rescans). The add-game button follows the
+    /// same gate — mid-load adds missed the progress strip and the grid
+    /// refresh, so the dialog waits for the library instead.
     pub menu_btn: gtk4::MenuButton,
+    pub add_btn: gtk4::Button,
     pub collapsed_collections: HashSet<i64>,
     pub multi_selected_ids: HashSet<String>,
     /// game id → every member id of its playtime link (itself included);

@@ -309,11 +309,7 @@ impl BackgroundCtx {
                 !g.sgdb_id.is_empty()
                     && g.variant_id.is_none()
                     && g.kind != ira_models::GameKind::Ps4
-                    && (g.icon_path.is_empty()
-                        || g.hero_image_path.is_empty()
-                        || g.grid_path.is_empty()
-                        || g.logo_path.is_empty()
-                        || g.header_path.is_empty())
+                    && super::fetch_images::game_needs_sgdb_assets(g)
             })
             .map(|g| {
                 (

@@ -38,7 +38,21 @@ pub fn add_game(conn: &DbConn, game: NewGame<'_>) -> Result<i64, String> {
             params![kind, trophy_source, steam_id, trophy_id, native_id, platform_id, title],
         ).map_err(err)?;
     }
-    Ok(c.last_insert_rowid())
+    if !steam_id.is_empty() {
+        c.query_row(
+            "SELECT id FROM games WHERE steam_id = ?1 AND platform_id = ?2",
+            params![steam_id, platform_id],
+            |row| row.get(0),
+        )
+        .map_err(err)
+    } else {
+        c.query_row(
+            "SELECT id FROM games WHERE native_id = ?1 AND platform_id = ?2",
+            params![native_id, platform_id],
+            |row| row.get(0),
+        )
+        .map_err(err)
+    }
 }
 
 pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), String> {
@@ -288,6 +302,54 @@ mod tests {
         assert_eq!(id1, id2);
         let game = find_by_db_id(&conn, id1).unwrap().unwrap();
         assert_eq!(game.title, "Updated Title");
+    }
+
+    #[test]
+    fn test_add_game_conflict_returns_existing_id_after_other_insert() {
+        let (conn, _tmp) = setup_db();
+        let first = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "first",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "steam",
+                title: "First",
+            },
+        )
+        .unwrap();
+        let second = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "second",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "steam",
+                title: "Second",
+            },
+        )
+        .unwrap();
+
+        let repeated = add_game(
+            &conn,
+            NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "first",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "steam",
+                title: "First Updated",
+            },
+        )
+        .unwrap();
+
+        assert_ne!(first, second);
+        assert_eq!(repeated, first);
     }
 
     #[test]

@@ -20,6 +20,15 @@ const SECTION_HEADER_H: i32 = 40;
 const STEP_COLS: &[u32] = &[5, 7, 9, 11, 13, 15];
 const STEP_SIZES: &[i32] = &[110, 150, 200, 250, 300, 350];
 const MIN_VISIBLE_ROWS: f64 = 2.5;
+const OVERSCAN_ROWS: i32 = 1;
+
+fn overscanned_viewport(view_top: i32, view_bottom: i32, row_h: i32) -> (i32, i32) {
+    let overscan = row_h.max(1).saturating_mul(OVERSCAN_ROWS);
+    (
+        view_top.saturating_sub(overscan).max(0),
+        view_bottom.saturating_add(overscan),
+    )
+}
 
 fn compute_grid_layout(
     width: i32,
@@ -513,12 +522,15 @@ mod imp {
                 .map(|adj| adj.value() as i32)
                 .unwrap_or(0);
 
-            // The plan's ys are absolute, so the viewport window is the
-            // plain scrolled range — no header offset on either side.
+            // Realize one extra row on each side so image decoding is underway
+            // before a normal scroll exposes the next tiles. The scrolled
+            // window still clips these cells to the actual viewport.
             let view_top = actual_scroll;
-            let view_bottom = actual_scroll + height;
-            let first_slot = plan.partition_point(|slot| slot.y + slot.h <= view_top);
-            let last_slot = plan.partition_point(|slot| slot.y < view_bottom).max(first_slot);
+            let view_bottom = actual_scroll.saturating_add(height);
+            let (realize_top, realize_bottom) =
+                overscanned_viewport(view_top, view_bottom, row_h);
+            let first_slot = plan.partition_point(|slot| slot.y + slot.h <= realize_top);
+            let last_slot = plan.partition_point(|slot| slot.y < realize_bottom).max(first_slot);
 
             let setup = self.setup_fn.borrow().clone();
             let bind = self.bind_fn.borrow().clone();
@@ -830,12 +842,12 @@ impl VirtualGrid {
     }
 
     /// A callback fired at the end of every allocation pass, after the
-    /// visible cells are placed.
+    /// realized cells are placed.
     pub fn set_post_layout_fn(&self, cb: Rc<dyn Fn()>) {
         *self.imp().post_layout_fn.borrow_mut() = Some(cb);
     }
 
-    /// The widget currently displaying `index`, if it is visible.
+    /// The widget currently displaying `index`, if it is realized.
     pub fn widget_for_index(&self, index: usize) -> Option<gtk4::Widget> {
         let imp = self.imp();
         let slot_idx = if imp.plan.borrow().is_empty() {
@@ -887,9 +899,9 @@ impl VirtualGrid {
             .map(|slot| (slot.x as f64, slot.y as f64))
     }
 
-    /// Re-run the bind closure on every visible cell. Cells reflect state
+    /// Re-run the bind closure on every realized cell. Cells reflect state
     /// they can't know on their own (an external selection highlight), so
-    /// after that state changes the visible range is bound again.
+    /// after that state changes the realized range is bound again.
     pub fn rebind_visible(&self) {
         self.imp().dirty.set(true);
         self.queue_allocate();
@@ -929,6 +941,12 @@ mod tests {
         assert_eq!(VirtualGrid::grid_spacing_for_item_w(300), 24);
         assert_eq!(VirtualGrid::grid_spacing_for_item_w(350), 28);
         assert_eq!(VirtualGrid::grid_spacing_for_item_w(400), 28);
+    }
+
+    #[test]
+    fn test_overscanned_viewport_adds_one_row_each_side() {
+        assert_eq!(overscanned_viewport(0, 600, 200), (0, 800));
+        assert_eq!(overscanned_viewport(400, 1000, 200), (200, 1200));
     }
 
     #[test]

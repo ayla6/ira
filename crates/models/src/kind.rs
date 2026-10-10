@@ -45,7 +45,10 @@ impl GameKind {
             "switch" => GameKind::Switch,
             "steam" => GameKind::Steam,
             "retro" => GameKind::Retro,
-            _ => GameKind::Other,
+            _ => {
+                eprintln!("Unknown GameKind {s:?}, falling back to Other");
+                GameKind::Other
+            }
         }
     }
 
@@ -150,7 +153,10 @@ impl TrophySource {
             "nge" => TrophySource::Nge,
             "steam" => TrophySource::SteamNative,
             "ra" => TrophySource::Ra,
-            _ => TrophySource::Empty,
+            _ => {
+                eprintln!("Unknown TrophySource {s:?}, falling back to Empty");
+                TrophySource::Empty
+            }
         }
     }
 

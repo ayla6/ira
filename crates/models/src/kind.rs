@@ -153,6 +153,7 @@ impl TrophySource {
             "nge" => TrophySource::Nge,
             "steam" => TrophySource::SteamNative,
             "ra" => TrophySource::Ra,
+            "" => TrophySource::Empty,
             _ => {
                 eprintln!("Unknown TrophySource {s:?}, falling back to Empty");
                 TrophySource::Empty
@@ -247,6 +248,8 @@ mod tests {
     #[test]
     fn test_trophy_source_unknown() {
         assert_eq!(TrophySource::from_string("garbage"), TrophySource::Empty);
+        // Valid encoding of the default stays silent.
+        assert_eq!(TrophySource::from_string(""), TrophySource::Empty);
     }
 
     #[test]

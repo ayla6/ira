@@ -76,7 +76,8 @@ struct DecodeInfra {
 fn decode_infra() -> &'static DecodeInfra {
     static INFRA: OnceLock<DecodeInfra> = OnceLock::new();
     INFRA.get_or_init(|| {
-        let (result_tx, result_rx) = mpsc::channel::<DecodeResult>();
+        // Backpressure bounds decoded pixels waiting while GTK paints or binds rows.
+        let (result_tx, result_rx) = mpsc::sync_channel::<DecodeResult>(DECODE_POOL_SIZE);
         let queue = Arc::new(JobQueue {
             heap: Mutex::new(BinaryHeap::new()),
             cv: Condvar::new(),
@@ -139,16 +140,20 @@ fn deliver_decode_result(path: String, result: Option<(Vec<u8>, u32, u32)>) {
                 (w * 4) as usize,
             )
             .upcast::<Texture>();
-            let pixbuf = Pixbuf::from_bytes(
-                &bytes,
-                Colorspace::Rgb,
-                true,
-                8,
-                w as i32,
-                h as i32,
-                (w * 4) as i32,
-            );
-            (Some(texture), Some(pixbuf))
+            // Only pixbuf consumers keep wrappers: retaining every texture here
+            // would keep its pixels alive after the texture budget evicts it.
+            let pixbuf = pixbuf_callbacks.as_ref().map(|_| {
+                Pixbuf::from_bytes(
+                    &bytes,
+                    Colorspace::Rgb,
+                    true,
+                    8,
+                    w as i32,
+                    h as i32,
+                    (w * 4) as i32,
+                )
+            });
+            (Some(texture), pixbuf)
         }
         None => (None, None),
     };
@@ -296,4 +301,73 @@ pub fn set_picture_contain_async(pic: &gtk4::Picture, path: &str, max_h: i32) {
         });
     }
     configure_contain_picture(pic, max_h);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::{clear_texture_cache, PIXBUF_CACHE};
+
+    #[test]
+    fn test_deliver_decode_result_texture_only_respects_texture_budget() {
+        clear_texture_cache();
+        let start = std::time::Instant::now();
+        for i in 0..40 {
+            deliver_decode_result(
+                format!("hero-{i}"),
+                Some((vec![255; 2048 * 1024 * 4], 2048, 1024)),
+            );
+        }
+        let retained = (0..40)
+            .filter(|i| {
+                let path = format!("hero-{i}");
+                cached_texture(&path).is_some()
+                    || PIXBUF_CACHE.with(|cache| cache.borrow_mut().get(&path).is_some())
+            })
+            .count();
+        eprintln!(
+            "40 decoded heroes: {} MiB retained, {:?}",
+            retained * 8,
+            start.elapsed()
+        );
+        clear_texture_cache();
+        assert_eq!(
+            retained, 8,
+            "pixbuf wrappers must not defeat the 64 MiB hero budget"
+        );
+    }
+
+    #[test]
+    fn test_deliver_decode_result_serves_texture_and_pixbuf() {
+        clear_texture_cache();
+        let texture_seen = Rc::new(Cell::new(false));
+        let pixbuf_seen = Rc::new(Cell::new(false));
+        let seen = texture_seen.clone();
+        PENDING_LOADS.with(|loads| {
+            loads.borrow_mut().insert(
+                "shared".into(),
+                vec![Box::new(move |t| {
+                    seen.set(t.is_some_and(|t| t.width() == 2 && t.height() == 1));
+                })],
+            );
+        });
+        let seen = pixbuf_seen.clone();
+        PENDING_PIXBUFS.with(|loads| {
+            loads.borrow_mut().insert(
+                "shared".into(),
+                vec![Box::new(move |p| {
+                    seen.set(p.is_some_and(|p| {
+                        p.read_pixel_bytes().as_ref() == [1, 2, 3, 4, 5, 6, 7, 8]
+                    }));
+                })],
+            );
+        });
+        deliver_decode_result("shared".into(), Some((vec![1, 2, 3, 4, 5, 6, 7, 8], 2, 1)));
+        assert!(texture_seen.get());
+        assert!(pixbuf_seen.get());
+        assert!(PIXBUF_CACHE.with(|cache| cache.borrow_mut().get("shared").is_some()));
+        clear_texture_cache();
+    }
+
+    use std::rc::Rc;
 }

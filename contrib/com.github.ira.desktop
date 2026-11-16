@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Ira
+Comment=Game library and launcher
+Exec=ira
+Icon=com.github.ira
+Terminal=false
+Categories=Game;
+StartupNotify=true
+StartupWMClass=com.github.ira
+Actions=BigPicture;
+
+[Desktop Action BigPicture]
+Name=Big Picture
+Exec=ira --big-picture

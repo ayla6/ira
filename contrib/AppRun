@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+APPDIR=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
+export IRA_LOCALEDIR="$APPDIR/usr/share/locale"
+export PATH="$APPDIR/usr/bin:$PATH"
+export XDG_DATA_DIRS="$APPDIR/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+# Glycin configs contain absolute executable paths; generate relocatable
+# copies without modifying the read-only AppImage or disabling its sandbox.
+if [[ -d $APPDIR/usr/share/glycin-loaders ]]; then
+    cache=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/ira-loaders.XXXXXXXX")
+    trap 'rm -rf -- "$cache"' EXIT
+    mkdir -p "$cache/glycin-loaders"
+    cp -r "$APPDIR/usr/share/glycin-loaders/." "$cache/glycin-loaders/"
+    escaped_appdir=$(printf '%s' "$APPDIR" | sed 's/[&|\\]/\\&/g')
+    while IFS= read -r -d '' conf; do
+        sed -i "s|/usr/libexec/glycin-loaders/|$escaped_appdir/usr/libexec/glycin-loaders/|g" "$conf"
+    done < <(find "$cache/glycin-loaders" -name '*.conf' -print0)
+    export XDG_DATA_DIRS="$cache:$XDG_DATA_DIRS"
+    "$APPDIR/usr/bin/ira" "$@"
+else
+    exec "$APPDIR/usr/bin/ira" "$@"
+fi

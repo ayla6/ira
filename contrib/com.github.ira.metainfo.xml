@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.github.ira</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Ira</name>
+  <summary>Organize and launch games across platforms</summary>
+  <url type="homepage">https://github.com/ayla6/ira</url>
+  <description>
+    <p>Ira brings PC games, console emulators, and RetroAchievements together
+    in one library and launcher, with controller support, artwork, playtime,
+    and achievement tracking.</p>
+  </description>
+  <launchable type="desktop-id">com.github.ira.desktop</launchable>
+  <provides><binary>ira</binary></provides>
+  <categories><category>Game</category></categories>
+</component>

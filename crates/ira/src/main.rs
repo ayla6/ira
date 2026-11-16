@@ -183,6 +183,11 @@ fn main() {
     ira_launcher::input_daemon::shutdown_daemon();
 
     if let Some(state) = state_holder.borrow().as_ref() {
+        if !big_picture {
+            if let Err(error) = ira_config::save_window_state(state.borrow().desktop_window) {
+                eprintln!("Failed to save window state: {error}");
+            }
+        }
         remove_source(state);
     }
     let state = state_holder.borrow_mut().take();

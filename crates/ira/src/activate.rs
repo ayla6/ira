@@ -137,6 +137,10 @@ pub fn activate(app: &adw::Application) -> SharedState {
             Vec::new(),
             cfg,
             crate::ui::AppContext {
+                desktop_window: config::load_window_state().unwrap_or_else(|error| {
+                    eprintln!("{error}");
+                    config::WindowState::default()
+                }),
                 steam: steam.clone(),
                 watcher: None,
                 db: db.clone(),

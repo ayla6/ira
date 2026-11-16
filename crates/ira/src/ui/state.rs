@@ -63,6 +63,7 @@ pub struct LoadingWidgets {
 }
 
 pub struct AppState {
+    pub desktop_window: ira_config::WindowState,
     pub source_id: Cell<Option<u32>>,
     pub window: adw::ApplicationWindow,
     pub games: Vec<Game>,

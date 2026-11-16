@@ -48,6 +48,7 @@ mod state;
 mod steam_search_dialog;
 mod virtual_grid;
 mod window;
+mod window_state;
 pub use ra_match_dialog::show_ra_search_dialog;
 mod game_logo;
 mod game_settings;

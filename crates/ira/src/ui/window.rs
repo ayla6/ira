@@ -23,6 +23,7 @@ use super::sidebar::{rebuild_sidebar, rebuild_sidebar_and_show_grid, select_row_
 use super::state::{AppState, SharedState};
 
 pub struct AppContext {
+    pub desktop_window: ira_config::WindowState,
     pub steam: Arc<SteamDataClient>,
     pub watcher: Option<AchievementWatcher>,
     pub db: DbConn,
@@ -67,6 +68,7 @@ pub fn build_ui(
         None::<gtk4::SignalListItemFactory>,
     );
     let state = Rc::new(RefCell::new(AppState {
+        desktop_window: ctx.desktop_window,
         source_id: Cell::new(None),
         window: adw::ApplicationWindow::new(app),
         games,
@@ -142,7 +144,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     let window = adw::ApplicationWindow::new(app);
     window.set_title(Some(&crate::tr!("Ira")));
-    window.set_default_size(1200, 720);
+    super::window_state::restore(&window, state);
     window.set_size_request(900, 650);
 
     super::css::init_styles(1.0);

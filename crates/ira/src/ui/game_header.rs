@@ -276,8 +276,8 @@ fn add_wine_run_exe_action(actions: &gio::SimpleActionGroup, state: &SharedState
         let dialog = gtk4::FileDialog::new();
         dialog.set_title(&crate::tr!("Select executable"));
         let filter = gtk4::FileFilter::new();
-        filter.add_pattern("*.exe");
-        filter.add_pattern("*.msi");
+        filter.add_suffix("exe");
+        filter.add_suffix("msi");
         dialog.set_default_filter(Some(&filter));
         dialog.open(
             None::<&adw::ApplicationWindow>,

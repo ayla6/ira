@@ -58,6 +58,24 @@ pub(crate) fn xdg_dir(xdg_home: Option<PathBuf>) -> PathBuf {
     })
 }
 
+pub fn data_home() -> PathBuf {
+    xdg_dir(xdg::BaseDirectories::new().get_data_home())
+}
+
+pub fn config_home() -> PathBuf {
+    config_path().parent().and_then(|path| path.parent())
+        .expect("config path has an application directory").to_path_buf()
+}
+
+/// Preferences only: no keyring access, recovery writes, or source discovery.
+pub fn read_preferences() -> Result<Config, String> {
+    match std::fs::read(config_path()) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| format!("Read preferences: {error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
+        Err(error) => Err(format!("Read preferences: {error}")),
+    }
+}
+
 pub fn load_config() -> Config {
     let _guard = config_io_lock();
     let path = config_path();

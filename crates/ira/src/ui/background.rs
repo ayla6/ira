@@ -20,38 +20,32 @@ fn app_of(state: &SharedState) -> adw::Application {
         .expect("not an adw Application")
 }
 
-pub fn show_close_choice_dialog(state: &SharedState) {
+pub fn hide_to_background(state: &SharedState) {
     let window = state.borrow().window.clone();
-    let dialog = adw::AlertDialog::new(
-        Some(&crate::tr!("Close Ira")),
-        Some(&crate::tr!(
-            "Keep the watcher running in the background, or quit completely?"
-        )),
-    );
-    dialog.add_response("cancel", &crate::tr!("Cancel"));
-    dialog.add_response("background", &crate::tr!("Hide to background"));
-    dialog.add_response("quit", &crate::tr!("Quit"));
-    dialog.set_response_appearance("background", adw::ResponseAppearance::Suggested);
-    dialog.set_response_appearance("quit", adw::ResponseAppearance::Destructive);
-    dialog.set_default_response(Some("background"));
-    dialog.set_close_response("cancel");
-
-    let state_clone = state.clone();
-    dialog.connect_response(None, move |_, resp| match resp {
-        "background" => hide_to_background(&state_clone),
-        "quit" => app_of(&state_clone).quit(),
-        _ => {}
+    window.set_visible(false);
+    let weak = std::rc::Rc::downgrade(state);
+    // Let GTK hide the window before freeing the library's widgets and textures.
+    glib::idle_add_local_once(move || {
+        let Some(state) = weak.upgrade() else { return };
+        if window.is_visible() || state.borrow().window != window {
+            return;
+        }
+        release_background_content(&state);
     });
-    dialog.present(Some(&window));
 }
 
-pub fn hide_to_background(state: &SharedState) {
+fn release_background_content(state: &SharedState) {
     teardown_content(state);
     ira_images::clear_texture_cache();
 
     let app = app_of(state);
 
-    state.borrow().window.destroy();
+    let (window, desktop_window) = {
+        let state = state.borrow();
+        (state.window.clone(), state.desktop_window)
+    };
+    window.destroy();
+    state.borrow_mut().desktop_window = desktop_window;
 
     build_window(state, &app);
     let win = state.borrow().window.clone();

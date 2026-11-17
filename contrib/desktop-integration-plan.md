@@ -20,11 +20,15 @@ desktop without requiring one application-menu entry per game.
 3. **Window state:** restore maximized state and the last normal window size,
    including after hide/restore. Fullscreen big-picture windows must not
    overwrite desktop-window state.
-4. **Tray:** provide a StatusNotifierItem with an actual menu (Show Ira,
-   Hide to background, Quit) and activation to restore the window. Preserve the
-   existing close-to-background preference and close-choice dialog. Missing
+4. **Tray:** provide a menu-only StatusNotifierItem with Show Ira or
+   Hide to background according to visibility, plus Quit. Preserve the
+   existing close-to-background preference; closing hides directly without a
+   confirmation dialog. Missing
    tray-host support must not crash Ira or prevent reopening it. GNOME Shell
    requires an AppIndicator/StatusNotifier extension to display tray icons.
+5. **Settings:** enable and disable desktop integration from General settings.
+   Disabling removes Ira-owned host registrations, preserves optional per-game
+   shortcuts, and disables the GNOME search provider for the current user.
 
 ## Packaging and host registration
 
@@ -34,6 +38,15 @@ AppImages: host registrations must point to the persistent AppImage path,
 never its temporary mount directory. Keep integration registration separate
 from optional per-game shortcuts. Document enabling the provider in GNOME's
 Search settings and the tray-host limitation.
+
+GNOME's provider discovery scans session `XDG_DATA_DIRS` with user-data scanning
+disabled. User registration adds the data home through an Ira-owned user-service
+drop-in for `org.gnome.Shell@.service`, which overrides GNOME's imported login
+environment and synchronizes D-Bus activation before Shell starts. It reloads
+user unit definitions, reports when the current session cannot discover the
+provider, and removes the drop-in on disable. No system-wide or Flatpak export
+files are changed. Provider interfaces must be exported in GApplication's `dbus_register`
+before acquiring the bus name, so the very first D-Bus-activated search succeeds.
 
 ## Implementation plan
 
@@ -45,9 +58,11 @@ Search settings and the tray-host limitation.
 4. Implement opt-in menu shortcuts and user integration registration. Test
    desktop-entry escaping, executable paths containing spaces, AppImage paths,
    and safe removal of Ira-owned files.
-5. Add a cross-desktop tray through `ksni` (proposed new dependency), routing
+5. Export a cross-desktop tray through GIO on its own GLib thread, routing
    its callbacks to GTK's main thread. Test registration, menu actions, shutdown,
    and operation without a tray watcher in a private D-Bus session.
+   Omit `Activate` from introspection so GNOME treats a primary click as a menu
+   click immediately rather than waiting to disambiguate double-click activation.
 6. Update package contents, translations, and documentation; rebuild and
    smoke-test the AppImage. Commit independent, verified slices.
 

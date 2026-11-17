@@ -60,6 +60,92 @@ use the standard prefix-relative directories. This is suitable input for a
 distribution package; GTK and other shared dependencies remain package-manager
 dependencies. Custom prefixes can set `IRA_LOCALEDIR` when launching translations.
 
+## Desktop search, shortcuts, and tray
+
+Open **Settings → General → Desktop integration** to enable or disable desktop
+search using the Ira launcher already installed by your AppImage manager or
+native package. Ira never creates, changes, or removes that launcher. The switch
+applies independently of the settings dialog's Save button. Disabling removes
+Ira's search registration and session setup; optional game shortcuts remain.
+
+Command-line equivalents:
+
+```sh
+./Ira.AppImage --install-desktop-integration
+./Ira.AppImage --uninstall-desktop-integration
+```
+
+GNOME Shell searches session `XDG_DATA_DIRS` rather than `XDG_DATA_HOME` for
+providers. User registration installs a user-service override at
+`$XDG_CONFIG_HOME/systemd/user/org.gnome.Shell@.service.d/70-ira-desktop.conf`.
+It prepends the user's data directory to the host's existing roots for GNOME
+Shell and propagates that environment to D-Bus-activated apps before Shell
+starts. A service-level environment setting takes precedence over GNOME's login
+environment import, which can overwrite environment.d settings.
+
+This setup is **user-local**: no administrator privileges, system directory
+writes, Flatpak exports, or application-launcher changes. Enabling reloads user
+unit definitions and leaves the running desktop untouched; the Shell process
+needs a new session to inherit the override. Settings reports when the running
+session still cannot discover the provider. Native packages carry the provider
+in their system data directory and keep it opt-in. Non-systemd GNOME session
+startup is outside this user-session setup's support.
+
+Discovery status reads the running GNOME Shell process's data roots rather than
+Ira's environment. A successful D-Bus search request proves the provider answers;
+it does not prove that Shell can discover the registration.
+GLib caches that root list and does not support changing it at runtime. Reloading
+provider files cannot add a directory absent from the running Shell's list.
+
+Registration uses the persistent AppImage filename, never its temporary mount.
+If you move the AppImage, disable and re-enable integration at its new location.
+No application or per-game shortcuts are created as part of enabling desktop
+search. Register an AppImage with your app manager first; search registration
+uses its desktop ID, including manager-provided filenames and `env` wrappers.
+Ira windows use that launcher's filename stem as their Wayland app ID and X11
+program class, while keeping the stable GApplication bus name for forwarding.
+Game shortcuts are launch actions: they disable startup notification and carry
+no `StartupWMClass`, so they cannot claim Ira's windows.
+
+Search is local and headless: no GUI startup, network access, source scan, or
+keyring lookup occurs until selecting a result. It searches the saved installed
+library, excludes hidden/vanished entries and missing known ROM/install paths,
+and launches with Ira's normal configuration. PC install membership is the
+cached library maintained by Ira's source scans. From a game's context menu,
+**Create app menu shortcut** or **Remove app menu shortcut** manages its optional
+desktop entry, including a separately listed variant. The context menu shows
+only the applicable action, based on the existing Ira-owned shortcut file.
+Shortcut icons are full-resolution PNG snapshots (bounded to 256 pixels) with
+content-based filenames. Artwork changes refresh existing shortcuts with a new
+icon identity, avoiding desktop texture caches keyed by the original thumbnail
+path. Refreshing artwork preserves each shortcut's launch command and never
+creates a shortcut the user has removed.
+
+Ira also accepts `--launch-game ID`, optional `--variant ID`, and `--search TEXT`.
+Requests reuse the running instance and wait for its initial library load.
+
+The StatusNotifier tray provides **Hide to background** while visible or
+**Show Ira** while hidden, plus **Quit**. GNOME needs an AppIndicator/StatusNotifier extension to display tray
+items; compatible KDE and other desktops can display them directly. Enabling
+**Close to background** hides directly without a confirmation dialog. Reopening
+Ira or choosing **Show Ira** restores its content and saved window state.
+
+The tray is menu-only: `ItemIsMenu=true` and its D-Bus interface deliberately
+omits `Activate`. Advertising activation makes GNOME distinguish a single menu
+click from a double-click window activation, delaying the menu. Ira exports the
+small notifier and menu interfaces through GIO on a dedicated GLib thread, so
+menu requests are independent of GTK rendering and library cleanup. Tests check
+the advertised interface, late watcher registration, layout updates, and actions.
+
+AppImage packaging also starts the **finished AppImage** on a private D-Bus bus
+and Xvfb display. It rejects artifacts that advertise `Activate`, report
+`ItemIsMenu=false`, or expose the wrong menu actions. Run the same check manually
+with `python3 contrib/check-desktop-protocol.py /path/to/Ira.AppImage`.
+This also checks window association against a manager-named launcher. In a
+Wayland session, build the `desktop_identity_probe` example and run
+`python3 contrib/check-wayland-identity.py` to check native identity across
+hide/show cycles without submitting visible buffers.
+
 ## Checks
 
 ```sh
@@ -72,6 +158,12 @@ The AppImage has been smoke-tested with a private D-Bus session, Xvfb, Cairo
 rendering, and isolated XDG directories. Game launches, controller hardware,
 Wayland/GPU rendering, and cross-distribution compatibility still need testing
 on their target systems.
+
+Desktop protocol integration tests use a private D-Bus daemon to test actual
+service activation without a display, search results and metadata, and dispatch
+to Ira. Session setup tests validate the GNOME user-service override with
+systemd-analyze and check its preserved host data roots. A live user-manager
+probe verifies that a service-level setting wins over imported login paths.
 
 ## Performance findings
 

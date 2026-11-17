@@ -203,6 +203,7 @@ pub fn show_game_context_menu(
     }
 
     let actions = gio::SimpleActionGroup::new();
+    super::desktop_shortcuts::add_action(&menu, &actions, state, game);
 
     setup_play_action(&actions, state.clone(), game.clone());
     setup_edit_action(&actions, state.clone(), game.db_id);
@@ -390,5 +391,5 @@ fn reset_game_image(state: &SharedState, game: &Game, base: &str) {
     }
     super::helpers::replace_grid_game(state, &updated);
     super::big_picture::refresh(state);
+    super::desktop_shortcuts::refresh_game(state, updated.db_id);
 }
-

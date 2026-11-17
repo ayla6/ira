@@ -201,6 +201,7 @@ pub(super) fn make_refresh_closure(
                         ira_images::invalidate_texture(&new_path);
                     }
                     apply_game_update(&state, updated);
+                    super::desktop_shortcuts::refresh_game(&state, db_id);
                 }
             }
         }

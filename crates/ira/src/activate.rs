@@ -204,6 +204,7 @@ pub fn activate(app: &adw::Application) -> SharedState {
     {
         attach_message_source(&state, read_fd, rx);
     }
+    crate::ui::start_tray(&state);
 
     if std::env::var("AV_BENCH").is_ok() {
         run_bench(state.clone());

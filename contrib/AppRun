@@ -3,7 +3,8 @@ set -euo pipefail
 APPDIR=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")" && pwd)
 export IRA_LOCALEDIR="$APPDIR/usr/share/locale"
 export PATH="$APPDIR/usr/bin:$PATH"
-export XDG_DATA_DIRS="$APPDIR/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export IRA_HOST_DATA_DIRS="${IRA_HOST_DATA_DIRS:-${XDG_DATA_DIRS:-/usr/local/share:/usr/share}}"
+export XDG_DATA_DIRS="$APPDIR/usr/share:$IRA_HOST_DATA_DIRS"
 
 # Glycin configs contain absolute executable paths; generate relocatable
 # copies without modifying the read-only AppImage or disabling its sandbox.

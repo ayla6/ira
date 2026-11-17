@@ -1,0 +1,10 @@
+pub const APP_ID: &str = "com.github.ira";
+pub const PROVIDER_ID: &str = "com.github.ira.SearchProvider";
+pub const PROVIDER_PATH: &str = "/com/github/ira/SearchProvider";
+pub const PROVIDER_INTERFACE: &str = "org.gnome.Shell.SearchProvider2";
+pub const LAUNCH_OPTION: &str = "launch-game";
+pub const VARIANT_OPTION: &str = "variant";
+pub const SEARCH_OPTION: &str = "search";
+pub const PROVIDER_OPTION: &str = "search-provider";
+pub const REGISTER_OPTION: &str = "install-desktop-integration";
+pub const UNREGISTER_OPTION: &str = "uninstall-desktop-integration";

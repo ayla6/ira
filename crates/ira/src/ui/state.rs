@@ -63,6 +63,8 @@ pub struct LoadingWidgets {
 }
 
 pub struct AppState {
+    pub(crate) tray: Option<crate::desktop::tray::TrayHandle>,
+    pub desktop_requests: crate::desktop::requests::PendingRequests,
     pub desktop_window: ira_config::WindowState,
     pub source_id: Cell<Option<u32>>,
     pub window: adw::ApplicationWindow,

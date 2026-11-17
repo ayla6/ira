@@ -108,7 +108,7 @@ pub(super) fn build_general_settings_page(
     let bg_row = adw::SwitchRow::new();
     bg_row.set_title(&crate::tr!("Close to background"));
     bg_row.set_subtitle(&crate::tr!(
-        "Closing the window keeps the watcher running silently in the background"
+        "Closing the window hides Ira. Reopen it from the tray or by launching Ira again."
     ));
     bg_row.set_active(cfg.close_to_background);
     notif_group.add(&bg_row);

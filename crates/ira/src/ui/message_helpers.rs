@@ -209,6 +209,8 @@ pub(super) fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
     show_grid_view(state);
 
     start_background_enrichment(state);
+    super::desktop_commands::library_ready(state);
+    super::desktop_shortcuts::refresh_existing(state.borrow().games.iter());
 }
 
 pub(super) fn reload_games(state: &SharedState) {

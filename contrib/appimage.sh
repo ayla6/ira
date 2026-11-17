@@ -4,7 +4,7 @@ root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 linuxdeploy=${LINUXDEPLOY:-linuxdeploy}
 command -v "$linuxdeploy" >/dev/null || { echo 'Set LINUXDEPLOY to a linuxdeploy executable.' >&2; exit 1; }
-for tool in file glib-compile-schemas readelf secret-tool; do
+for tool in file glib-compile-schemas readelf secret-tool python3 Xvfb dbus-run-session gdbus; do
     command -v "$tool" >/dev/null || { echo "Missing packaging tool: $tool" >&2; exit 1; }
 done
 if [[ ${SKIP_BUILD:-0} != 1 ]]; then
@@ -55,10 +55,13 @@ fi
 "$linuxdeploy" --appdir "$appdir" "${deps[@]}" \
     --desktop-file "$root/contrib/com.github.ira.desktop" \
     --icon-file "$root/contrib/com.github.ira.png" --custom-apprun "$root/contrib/AppRun"
+install -m644 "$root/contrib/com.github.ira.png" "$appdir/com.github.ira.png"
+ln -sfn com.github.ira.png "$appdir/.DirIcon"
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/ira/Cargo.toml | head -1)
-output="$root/target/appimage/Ira-$version-$(uname -m).AppImage"
+output=${LDAI_OUTPUT:-"$root/target/appimage/Ira-$version-$(uname -m).AppImage"}
 export LDAI_OUTPUT="$output"
 "$linuxdeploy" --appdir "$appdir" --output appimage
+python3 "$root/contrib/check-desktop-protocol.py" "$output"
 (
     cd -- "$(dirname -- "$output")"
     sha256sum "$(basename -- "$output")"

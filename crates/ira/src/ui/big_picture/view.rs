@@ -41,6 +41,8 @@ pub struct BigPictureUi {
 /// the shared state's window reference.
 pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let window = adw::ApplicationWindow::new(app);
+    super::super::desktop_identity::bind(&window);
+    super::super::tray::watch_window(&window, state);
     window.set_title(Some(&crate::tr!("Ira")));
     window.set_size_request(900, 650);
 
@@ -65,7 +67,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
         window.connect_close_request(move |_| {
             let close_to_background = close_state.borrow().cfg.close_to_background;
             if close_to_background {
-                crate::ui::background::show_close_choice_dialog(&close_state);
+                crate::ui::background::hide_to_background(&close_state);
                 glib::Propagation::Stop
             } else {
                 if let Some(app) = close_state.borrow().window.application() {

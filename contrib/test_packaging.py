@@ -11,7 +11,7 @@ CONTRIB = Path(__file__).resolve().parent
 
 
 class PackagingTests(unittest.TestCase):
-    def run_apprun(self, with_loaders):
+    def run_apprun(self, with_loaders, nested=False):
         with tempfile.TemporaryDirectory(prefix="ira package & ") as tmp:
             root = Path(tmp)
             (root / "usr/bin").mkdir(parents=True)
@@ -21,7 +21,7 @@ class PackagingTests(unittest.TestCase):
             binary.write_text(
                 "#!/usr/bin/env python3\n"
                 "import json, os, sys\n"
-                "keys = ['LD_LIBRARY_PATH', 'IRA_LOCALEDIR', 'XDG_DATA_DIRS']\n"
+                "keys = ['LD_LIBRARY_PATH', 'IRA_LOCALEDIR', 'IRA_HOST_DATA_DIRS', 'XDG_DATA_DIRS']\n"
                 "print(json.dumps({'args': sys.argv[1:], 'env': {k: os.environ[k] for k in keys}}))\n"
             )
             binary.chmod(0o755)
@@ -36,7 +36,8 @@ class PackagingTests(unittest.TestCase):
             result = subprocess.run(
                 [str(root / "AppRun"), "--big-picture", "argument with spaces"],
                 env={**os.environ, "XDG_RUNTIME_DIR": str(root / "runtime"),
-                     "XDG_DATA_DIRS": "/host/share", "LD_LIBRARY_PATH": "/host/lib"},
+                     "XDG_DATA_DIRS": "/parent/mount/usr/share:/host/share" if nested else "/host/share",
+                     "IRA_HOST_DATA_DIRS": "/host/share" if nested else "", "LD_LIBRARY_PATH": "/host/lib"},
                 capture_output=True, text=True, check=True,
             )
             output = json.loads(result.stdout.splitlines()[0])
@@ -44,6 +45,8 @@ class PackagingTests(unittest.TestCase):
             self.assertEqual(output["env"]["LD_LIBRARY_PATH"], "/host/lib")
             self.assertEqual(output["env"]["IRA_LOCALEDIR"], str(root / "usr/share/locale"))
             self.assertTrue(output["env"]["XDG_DATA_DIRS"].endswith("/host/share"))
+            self.assertEqual(output["env"]["IRA_HOST_DATA_DIRS"], "/host/share")
+            self.assertNotIn("/parent/mount", output["env"]["XDG_DATA_DIRS"])
             if with_loaders:
                 self.assertIn(f"Exec={root}/usr/libexec/glycin-loaders/2+/glycin-svg", result.stdout)
                 self.assertEqual(list((root / "runtime").iterdir()), [])
@@ -53,6 +56,9 @@ class PackagingTests(unittest.TestCase):
 
     def test_apprun_relocates_glycin_and_cleans_temporary_configs(self):
         self.run_apprun(True)
+
+    def test_apprun_nested_launch_preserves_host_paths_without_parent_mount(self):
+        self.run_apprun(True, nested=True)
 
     def test_install_stages_all_helpers_under_custom_prefix(self):
         with tempfile.TemporaryDirectory(prefix="ira install ") as tmp:
@@ -74,6 +80,9 @@ class PackagingTests(unittest.TestCase):
             self.assertTrue(os.access(dest / "bin/ira", os.X_OK))
             self.assertTrue((dest / "share/applications/com.github.ira.desktop").is_file())
             self.assertTrue((dest / "share/metainfo/com.github.ira.metainfo.xml").is_file())
+            self.assertTrue((dest / "share/gnome-shell/search-providers/com.github.ira.ini").is_file())
+            service = (dest / "share/dbus-1/services/com.github.ira.SearchProvider.service").read_text()
+            self.assertIn('Exec="/opt/ira/bin/ira" --search-provider', service)
             self.assertTrue((dest / "lib/udev/rules.d/70-ira-input.rules").is_file())
 
 

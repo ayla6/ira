@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=com.github.ira.SearchProvider
+Exec="@PREFIX@/bin/ira" --search-provider
+X-Ira-Managed=true

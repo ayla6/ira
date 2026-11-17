@@ -17,6 +17,11 @@ install -Dm644 "$root/contrib/com.github.ira.desktop" "$dest/share/applications/
 install -Dm644 "$root/contrib/com.github.ira.svg" "$dest/share/icons/hicolor/scalable/apps/com.github.ira.svg"
 install -Dm644 "$root/contrib/com.github.ira.png" "$dest/share/icons/hicolor/256x256/apps/com.github.ira.png"
 install -Dm644 "$root/contrib/com.github.ira.metainfo.xml" "$dest/share/metainfo/com.github.ira.metainfo.xml"
+install -Dm644 "$root/contrib/com.github.ira.search-provider.ini" "$dest/share/gnome-shell/search-providers/com.github.ira.ini"
+mkdir -p "$dest/share/dbus-1/services"
+escaped_prefix=$(printf '%s' "$prefix" | sed 's/[\\"$`]/\\&/g; s/\\/\\\\/g; s/[\\&|]/\\&/g')
+sed "s|@PREFIX@|$escaped_prefix|g" "$root/contrib/com.github.ira.SearchProvider.service.in" \
+    > "$dest/share/dbus-1/services/com.github.ira.SearchProvider.service"
 install -Dm644 "$root/LICENSE" "$dest/share/licenses/ira/LICENSE"
 for rule in "$root"/contrib/*.rules; do
     install -Dm644 "$rule" "$dest/lib/udev/rules.d/$(basename "$rule")"

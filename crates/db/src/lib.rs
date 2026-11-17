@@ -13,6 +13,7 @@ mod metadata_lookup;
 mod metadata_marks;
 mod profiles;
 mod query;
+mod read_only;
 mod rom_serials;
 mod row_mapping;
 mod sessions;
@@ -36,6 +37,7 @@ pub use metadata_local::*;
 pub use metadata_lookup::*;
 pub use metadata_marks::*;
 pub use profiles::*;
+pub use read_only::open_read_only;
 pub use rom_serials::*;
 pub(crate) use query::{
     execute, positional_placeholders, query_all, query_optional, query_optional_scalar,

@@ -16,7 +16,17 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
     use super::big_picture::refresh;
     match msg {
         AppMessage::EnrichedGame(game) | AppMessage::WatcherGameUpdated(game) => {
+            let db_id = game.db_id;
+            let shortcut_changed = state
+                .borrow()
+                .games
+                .iter()
+                .find(|old| old.db_id == db_id && old.variant_id == game.variant_id)
+                .is_some_and(|old| old.display_icon() != game.display_icon() || old.name != game.name);
             apply_game_update(state, game);
+            if shortcut_changed {
+                super::desktop_shortcuts::refresh_game(state, db_id);
+            }
             refresh(state);
         }
         AppMessage::NewGame(game) => {
@@ -105,6 +115,7 @@ fn handle_square_ready(state: &SharedState, db_id: i64) {
         }
     }
     super::big_picture::refresh(state);
+    super::desktop_shortcuts::refresh_game(state, db_id);
 }
 
 fn handle_add_game_error(state: &SharedState, e: String) {
@@ -558,6 +569,7 @@ fn handle_sgdb_assets_downloaded(
         build_image_manager_content_with_drafts(s, game, win, pc, scache).upcast()
     });
     refresh_selected_game(state, db_id);
+    super::desktop_shortcuts::refresh_game(state, db_id);
 }
 
 fn handle_variant_selected(state: &SharedState, db_id: i64, variant_id: Option<i64>) {
@@ -628,4 +640,5 @@ fn handle_variants_changed(state: &SharedState, db_id: i64) {
     rebuild_sidebar(state);
     super::grid_view::refresh_grid_store(state);
     super::big_picture::refresh(state);
+    super::desktop_shortcuts::refresh_game(state, db_id);
 }

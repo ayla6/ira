@@ -1,5 +1,6 @@
 pub mod activate;
 pub mod bench;
+pub mod desktop;
 pub mod game_list;
 pub mod game_loader;
 mod input_desktop;

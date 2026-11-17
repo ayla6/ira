@@ -91,6 +91,7 @@ pub(super) fn build_general_section(
         default_fullscreen_row,
         auto_reload_widgets,
     ) = build_general_settings_page(cfg);
+    general_page.append(&super::desktop_integration::build_group());
 
     // One-click maintenance: mass refetches of what matching skips —
     // missing art, and holes in matched games' stored metadata. Both

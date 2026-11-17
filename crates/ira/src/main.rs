@@ -120,9 +120,13 @@ fn publish_overlay_screen_size() {
     }
 }
 
-fn main() {
+fn main() -> glib::ExitCode {
     eprintln!("ira: starting build {}", env!("IRA_BUILD_HASH"));
+    if let Some(status) = ira::desktop::special_mode() {
+        return status;
+    }
     apply_gamescope_env_defaults();
+    ira::ui::init_desktop_identity();
 
     // Big-picture entry: `--big-picture` or running under Gamescope.
     // Gamescope never maximizes the window, so fullscreen explicitly.
@@ -147,7 +151,8 @@ fn main() {
     gio::resources_register_include!("ira.gresource")
         .expect("failed to register application resources");
 
-    let app = adw::Application::new(Some("com.github.ira"), gio::ApplicationFlags::empty());
+    let app = adw::Application::new(Some(ira::desktop::protocol::APP_ID), gio::ApplicationFlags::HANDLES_COMMAND_LINE);
+    app.connect_startup(|_| ira::ui::apply_desktop_program_class());
     // Register the flag so glib's option parser accepts it; main() below
     // reads it back out of argv.
     app.add_main_option(
@@ -160,6 +165,7 @@ fn main() {
     );
 
     let state_holder: Rc<RefCell<Option<SharedState>>> = Rc::new(RefCell::new(None));
+    ira::ui::connect_desktop_commands(&app, state_holder.clone());
 
     app.connect_activate({
         let state_holder = state_holder.clone();
@@ -176,13 +182,17 @@ fn main() {
         }
     });
 
-    app.run();
+    let exit_code = app.run();
 
     // Input daemon outlives callers by design; tell it Ira is done so it does
     // not linger (or forever, if wedged). A running game keeps it until it ends.
-    ira_launcher::input_daemon::shutdown_daemon();
+    // Command-line forwarding exits in a secondary process; it owns no daemon.
+    if state_holder.borrow().is_some() {
+        ira_launcher::input_daemon::shutdown_daemon();
+    }
 
     if let Some(state) = state_holder.borrow().as_ref() {
+        ira::ui::stop_tray(state);
         if !big_picture {
             if let Err(error) = ira_config::save_window_state(state.borrow().desktop_window) {
                 eprintln!("Failed to save window state: {error}");
@@ -198,4 +208,5 @@ fn main() {
             eprintln!("Failed to checkpoint database on shutdown: {}", e);
         }
     }
+    exit_code
 }

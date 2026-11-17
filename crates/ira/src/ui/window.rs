@@ -13,7 +13,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use super::add_game_method::show_add_game_method;
-use super::background::show_close_choice_dialog;
+use super::background::hide_to_background;
 use super::css::*;
 use super::grid_view::{show_grid_view, show_loading_view};
 use super::mass_match_dialog::show_mass_match_dialog;
@@ -68,6 +68,8 @@ pub fn build_ui(
         None::<gtk4::SignalListItemFactory>,
     );
     let state = Rc::new(RefCell::new(AppState {
+        tray: None,
+        desktop_requests: Default::default(),
         desktop_window: ctx.desktop_window,
         source_id: Cell::new(None),
         window: adw::ApplicationWindow::new(app),
@@ -143,6 +145,8 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     }
 
     let window = adw::ApplicationWindow::new(app);
+    super::desktop_identity::bind(&window);
+    super::tray::watch_window(&window, state);
     window.set_title(Some(&crate::tr!("Ira")));
     super::window_state::restore(&window, state);
     window.set_size_request(900, 650);
@@ -342,6 +346,7 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
         })
     };
     popover_box.append(&popup_settings_btn);
+
 
     let match_btn = {
         let popover_clone = popover.clone();
@@ -686,7 +691,7 @@ fn connect_window_signals(
     window.connect_close_request(move |_| {
         let close_to_bg = state_clone.borrow().cfg.close_to_background;
         if close_to_bg {
-            show_close_choice_dialog(&state_clone);
+            hide_to_background(&state_clone);
             glib::Propagation::Stop
         } else {
             let app = state_clone

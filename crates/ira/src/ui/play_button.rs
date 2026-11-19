@@ -544,7 +544,7 @@ fn launch_game_on_worker(request: LaunchRequest) -> Result<(), String> {
                 .find(|v| v.id == vid)
         })
         .map(|v| (v.show_as_entry, v.count_playtime));
-    let (variant_show_as_entry, variant_count_playtime) = variant_info.unwrap_or((false, true));
+    let (_, variant_count_playtime) = variant_info.unwrap_or((false, true));
     let (controller_input_mode, controller_input_profile) =
         active_controller_input(&cfg_clone, &save_dir, &controller_registry);
 
@@ -608,19 +608,6 @@ fn launch_game_on_worker(request: LaunchRequest) -> Result<(), String> {
     if kind == ira_models::GameKind::Steam {
         let _ = sender.send(crate::AppMessage::GameStarted(db_id, variant_id));
         return Ok(());
-    }
-
-    if let Some((variant_id, last_played)) = play_button_helpers::update_last_played(
-        &ctx,
-        variant_id,
-        variant_count_playtime,
-        variant_show_as_entry,
-    ) {
-        let _ = sender.send(crate::AppMessage::GameLastPlayedUpdated {
-            game_id: db_id,
-            variant_id,
-            started_at: last_played,
-        });
     }
 
     // The sidebar playing style is driven by GameStarted, and launch_game is

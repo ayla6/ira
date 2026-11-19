@@ -17,7 +17,7 @@ pub fn start(state: &SharedState) {
                     }
                 }
                 TrayAction::Hide => {
-                    let visible = state.borrow().window.is_visible();
+                    let visible = is_shown(&state.borrow().window);
                     if visible {
                         super::background::hide_to_background(&state);
                     }
@@ -36,7 +36,7 @@ pub fn start(state: &SharedState) {
         match gio::spawn_blocking(move || tray::start(sender)).await {
             Ok(Ok(handle)) => {
                 if let Some(state) = weak.upgrade() {
-                    let visible = state.borrow().window.is_visible();
+                    let visible = is_shown(&state.borrow().window);
                     handle.set_visible(visible);
                     state.borrow_mut().tray = Some(handle);
                 }
@@ -53,11 +53,37 @@ pub(super) fn watch_window(window: &adw::ApplicationWindow, state: &SharedState)
         let Some(state) = weak.upgrade() else { return };
         let state = state.borrow();
         if let Some(tray) = state.tray.as_ref() {
-            tray.set_visible(window.is_visible());
+            tray.set_visible(is_shown(window));
         }
+    });
+    let weak = Rc::downgrade(state);
+    window.connect_realize(move |window| {
+        let Some(surface) = window.surface().and_downcast::<gtk4::gdk::Toplevel>() else {
+            return;
+        };
+        let weak = weak.clone();
+        surface.connect_state_notify(move |_| {
+            let Some(state) = weak.upgrade() else { return };
+            let state = state.borrow();
+            if let Some(tray) = state.tray.as_ref() {
+                tray.set_visible(is_shown(&state.window));
+            }
+        });
     });
 }
 
 pub fn stop(state: &SharedState) {
     state.borrow_mut().tray.take();
+}
+
+fn is_shown(window: &adw::ApplicationWindow) -> bool {
+    window.is_visible()
+        && !window
+            .surface()
+            .and_downcast::<gtk4::gdk::Toplevel>()
+            .is_some_and(|surface| {
+                surface
+                    .state()
+                    .contains(gtk4::gdk::ToplevelState::MINIMIZED)
+            })
 }

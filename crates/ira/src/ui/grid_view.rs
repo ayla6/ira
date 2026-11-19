@@ -312,7 +312,7 @@ fn make_bind(
             let placeholder = ira_images::ScaledPaintable::new_empty(cover_width, cover_height);
             pic.set_paintable(Some(&placeholder));
             if let Some(ref label) = name_label {
-                label.set_text(&game.name);
+                label.set_markup(&super::game_title::markup(game, &state.borrow().games));
                 label.set_visible(true);
             }
         }
@@ -322,7 +322,12 @@ fn make_bind(
         } else {
             game.playtime
         };
-        let mut tooltip = game.name.clone();
+        let suffix = game.title_suffix(&state.borrow().games);
+        let mut tooltip = if suffix.is_empty() {
+            game.name.clone()
+        } else {
+            format!("{} ({suffix})", game.name)
+        };
         if let Some(detail) = sort_detail(game, sort_mode, playtime, &entity_names) {
             tooltip.push('\n');
             tooltip.push_str(&detail);

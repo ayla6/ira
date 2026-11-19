@@ -5,6 +5,8 @@ use std::path::Path;
 pub(crate) struct SearchItem {
     pub id: i64,
     pub name: String,
+    pub sort_title: String,
+    pub suffix: String,
     pub platform: String,
     pub icon: Option<String>,
     pub last_played: i64,
@@ -18,6 +20,7 @@ pub(crate) fn load_index() -> Result<Vec<SearchItem>, String> {
     }
     let db = ira_db::open_read_only(&path)?;
     let entries = ira_db::load_all_games_unordered(&db)?;
+    let games: Vec<_> = entries.iter().map(|entry| entry.to_game()).collect();
     Ok(entries
         .into_iter()
         .filter(|entry| installed(entry, &config))
@@ -29,6 +32,8 @@ pub(crate) fn load_index() -> Result<Vec<SearchItem>, String> {
                 .map(|path| path.to_string_lossy().into_owned());
             SearchItem {
                 id: entry.id,
+                suffix: entry.to_game().title_suffix(&games),
+                sort_title: entry.sort_title,
                 name: entry.title,
                 platform: format!(
                     "{} {}",
@@ -70,7 +75,11 @@ pub(crate) fn matching_ids(items: &[SearchItem], terms: &[String]) -> Vec<String
         .iter()
         .filter_map(|item| {
             let name = ira_models::normalize_name(&item.name);
-            let searchable = format!("{name} {}", ira_models::normalize_name(&item.platform));
+            let searchable = format!(
+                "{name} {} {}",
+                ira_models::normalize_name(&item.sort_title),
+                ira_models::normalize_name(&item.platform)
+            );
             terms.iter().all(|term| searchable.contains(term)).then(|| {
                 let rank = if name == query {
                     0
@@ -99,10 +108,19 @@ mod tests {
         SearchItem {
             id,
             name: name.into(),
+            sort_title: String::new(),
+            suffix: String::new(),
             platform: "nds".into(),
             icon: None,
             last_played: 0,
         }
+    }
+
+    #[test]
+    fn test_matching_ids_searches_sort_title() {
+        let mut game = item(1, "The Legend");
+        game.sort_title = "Zelda".into();
+        assert_eq!(matching_ids(&[game], &["zelda".into()]), vec!["1"]);
     }
 
     #[test]

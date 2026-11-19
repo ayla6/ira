@@ -132,9 +132,6 @@ pub fn build_ui(
         build_window(&state, app);
     }
 
-    let win = state.borrow().window.clone();
-    win.present();
-
     state
 }
 
@@ -312,6 +309,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
 
     connect_window_signals(state, &window, &sidebar_view, &sidebar_selection, &add_btn);
     connect_search_signals(state, &window, &search_entry);
+    super::background::connect_minimized(state, &window);
 }
 
 /// Flat popover menu row: left-aligned label on a natural-height flat
@@ -346,7 +344,6 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
         })
     };
     popover_box.append(&popup_settings_btn);
-
 
     let match_btn = {
         let popover_clone = popover.clone();
@@ -733,6 +730,32 @@ fn connect_search_signals(
     window: &adw::ApplicationWindow,
     search_entry: &gtk4::SearchEntry,
 ) {
+    let typing = gtk4::EventControllerKey::new();
+    typing.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    let weak_entry = search_entry.downgrade();
+    let weak_window = window.downgrade();
+    typing.connect_key_pressed(move |controller, key, _, modifiers| {
+        let (Some(entry), Some(window)) = (weak_entry.upgrade(), weak_window.upgrade()) else {
+            return glib::Propagation::Proceed;
+        };
+        let shortcut = modifiers.intersects(
+            gdk4::ModifierType::CONTROL_MASK | gdk4::ModifierType::ALT_MASK
+                | gdk4::ModifierType::SUPER_MASK | gdk4::ModifierType::META_MASK,
+        );
+        let editing = gtk4::prelude::GtkWindowExt::focus(&window)
+            .is_some_and(|focus| focus.is::<gtk4::Editable>());
+        if shortcut || editing || !key.to_unicode().is_some_and(|ch| !ch.is_control() && !ch.is_whitespace()) {
+            return glib::Propagation::Proceed;
+        }
+        entry.grab_focus();
+        entry.set_position(-1);
+        if let Some(focus) = gtk4::prelude::GtkWindowExt::focus(&window) {
+            controller.forward(&focus);
+        }
+        glib::Propagation::Stop
+    });
+    window.add_controller(typing);
+
     let state_clone = state.clone();
     let search_gen: Rc<Cell<u32>> = Rc::new(Cell::new(0));
     search_entry.connect_search_changed(move |entry| {

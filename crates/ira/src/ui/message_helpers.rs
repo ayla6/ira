@@ -204,9 +204,10 @@ pub(super) fn handle_games_loaded(state: &SharedState, games: Vec<Game>) {
     }
 
     super::helpers::refresh_playtime_links(state);
-    rebuild_sidebar(state);
-
-    show_grid_view(state);
+    if !state.borrow().content_unloaded {
+        rebuild_sidebar(state);
+        show_grid_view(state);
+    }
 
     start_background_enrichment(state);
     super::desktop_commands::library_ready(state);

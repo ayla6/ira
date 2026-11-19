@@ -44,8 +44,11 @@ disabled. User registration adds the data home through an Ira-owned user-service
 drop-in for `org.gnome.Shell@.service`, which overrides GNOME's imported login
 environment and synchronizes D-Bus activation before Shell starts. It reloads
 user unit definitions, reports when the current session cannot discover the
-provider, and removes the drop-in on disable. No system-wide or Flatpak export
-files are changed. Provider interfaces must be exported in GApplication's `dbus_register`
+provider, and removes the drop-in on disable. If the user Flatpak export root is
+already in the host data paths, mirror the ownership-marked provider there and
+refresh GNOME's search settings to support discovery in the running session.
+No system-wide files or Flatpak applications are changed.
+Provider interfaces must be exported in GApplication's `dbus_register`
 before acquiring the bus name, so the very first D-Bus-activated search succeeds.
 
 ## Implementation plan

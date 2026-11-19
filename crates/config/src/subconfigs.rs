@@ -19,6 +19,8 @@ pub struct ControllerInputConfig {
     /// Managed profile path to use when no per-game profile is selected.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub profile: String,
+    #[serde(default = "default_true")]
+    pub desktop_enabled: bool,
 }
 
 impl Default for ControllerInputConfig {
@@ -26,6 +28,7 @@ impl Default for ControllerInputConfig {
         Self {
             mode: ControllerInputMode::Disabled,
             profile: String::new(),
+            desktop_enabled: true,
         }
     }
 }
@@ -139,6 +142,7 @@ mod tests {
     #[test]
     fn test_controller_input_config_json_roundtrip() {
         let cfg = ControllerInputConfig {
+            desktop_enabled: true,
             mode: ControllerInputMode::Enabled,
             profile: "x".to_string(),
         };

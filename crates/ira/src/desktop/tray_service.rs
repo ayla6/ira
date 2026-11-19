@@ -17,13 +17,32 @@ pub(super) struct Handle {
 }
 
 impl Handle {
-    pub(super) fn update(&self) {
+    pub(super) fn update(&self, visible: bool) {
         let connection = self.connection.clone();
         let revision = self
             .revision
             .fetch_add(1, Ordering::Relaxed)
             .wrapping_add(1);
+        let label = if visible {
+            crate::tr!("Hide to background")
+        } else {
+            crate::tr!("Show Ira")
+        };
+        let changes = vec![(
+            1i32,
+            std::collections::HashMap::from([("label".to_string(), label.to_variant())]),
+        )];
+        let removed: Vec<(i32, Vec<String>)> = Vec::new();
         self.context.invoke(move || {
+            if let Err(error) = connection.emit_signal(
+                None,
+                protocol::MENU_PATH,
+                protocol::MENU,
+                "ItemsPropertiesUpdated",
+                Some(&(changes, removed).to_variant()),
+            ) {
+                eprintln!("Update tray label: {error}");
+            }
             if let Err(error) = connection.emit_signal(
                 None,
                 protocol::MENU_PATH,

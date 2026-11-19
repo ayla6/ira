@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use ira_config::load_config;
+use ira_config::read_preferences;
 use ira_config::Config;
 use ira_input::{discover_gamepads, DeviceInfo};
 use ira_models::ControllerInputMode;
@@ -45,8 +45,21 @@ fn run(save_dir: String) {
     let mut client: Option<ira_launcher::input_daemon::DaemonClient> = None;
     let mut sent: Option<Desired> = None;
     let mut next_tick = std::time::Instant::now();
+    let mut config = Config::default();
     loop {
+        let refresh = std::time::Instant::now() >= next_tick;
+        if refresh {
+            next_tick = std::time::Instant::now() + TICK;
+            match read_preferences() {
+                Ok(preferences) => config = preferences,
+                Err(error) => eprintln!("Failed to refresh controller preferences: {error}"),
+            }
+        }
         if client.is_none() {
+            if !desired_for(&config, &save_dir).enabled {
+                std::thread::sleep(TICK);
+                continue;
+            }
             client = ira_launcher::input_daemon::desktop_client().ok();
             if client.is_none() {
                 std::thread::sleep(TICK);
@@ -56,11 +69,8 @@ fn run(save_dir: String) {
             sent = None;
             next_tick = std::time::Instant::now();
         }
-        if std::time::Instant::now() >= next_tick {
-            next_tick = std::time::Instant::now() + TICK;
-            // A broken config falls back to defaults inside load_config,
-            // which disables the desktop behaviour.
-            let desired = desired_for(&load_config(), &save_dir);
+        if refresh || sent.is_none() {
+            let desired = desired_for(&config, &save_dir);
             if sent.as_ref() != Some(&desired) {
                 let delivered = client
                     .as_mut()
@@ -74,7 +84,14 @@ fn run(save_dir: String) {
                     })
                     .unwrap_or_else(|| Err("no daemon connection".to_string()));
                 match delivered {
-                    Ok(()) => sent = Some(desired),
+                    Ok(()) => {
+                        if !desired.enabled {
+                            client = None;
+                            sent = None;
+                            continue;
+                        }
+                        sent = Some(desired);
+                    }
                     Err(error) => {
                         eprintln!("ira-input: desktop wish failed; will reconnect: {error}");
                         client = None;
@@ -126,7 +143,7 @@ fn desired_for_device(config: &Config, save_dir: &str, device: &DeviceInfo) -> O
     let key = Config::controller_key(device.vendor, device.product);
     let entry = config.controller_defaults.get(&key);
     let enabled = entry
-        .map(|entry| entry.mode != ControllerInputMode::Disabled)
+        .map(|entry| entry.desktop_enabled && entry.mode != ControllerInputMode::Disabled)
         .unwrap_or(true);
     if !enabled {
         return None;
@@ -138,7 +155,10 @@ fn desired_for_device(config: &Config, save_dir: &str, device: &DeviceInfo) -> O
     let profile = configured
         .or_else(|| crate::ui::find_controller_default_profile(save_dir, &key))
         .map(|path| path.to_string_lossy().into_owned());
-    Some(Desired { enabled: true, profile })
+    Some(Desired {
+        enabled: true,
+        profile,
+    })
 }
 
 #[cfg(test)]
@@ -159,12 +179,41 @@ mod tests {
     }
 
     #[test]
+    fn test_desired_for_device_desktop_disabled_preserves_game_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.controller_defaults.insert(
+            "2dc8:6012".to_string(),
+            ira_config::ControllerInputConfig {
+                desktop_enabled: false,
+                mode: ControllerInputMode::Enabled,
+                profile: String::new(),
+            },
+        );
+        assert_eq!(
+            desired_for_device(
+                &config,
+                tmp.path().to_str().unwrap(),
+                &device(0x2dc8, 0x6012)
+            ),
+            None
+        );
+        assert_eq!(
+            config.controller_defaults["2dc8:6012"].mode,
+            ControllerInputMode::Enabled
+        );
+    }
+
+    #[test]
     fn test_desired_for_device_defaults_to_managed_without_an_entry() {
         let tmp = tempfile::tempdir().unwrap();
         let config = Config::default();
-        let desired =
-            desired_for_device(&config, tmp.path().to_str().unwrap(), &device(0x2dc8, 0x6012))
-                .expect("a controller with no entry is managed by default");
+        let desired = desired_for_device(
+            &config,
+            tmp.path().to_str().unwrap(),
+            &device(0x2dc8, 0x6012),
+        )
+        .expect("a controller with no entry is managed by default");
         assert!(desired.enabled);
     }
 
@@ -175,12 +224,17 @@ mod tests {
         config.controller_defaults.insert(
             "2dc8:6012".to_string(),
             ira_config::ControllerInputConfig {
+                desktop_enabled: true,
                 mode: ControllerInputMode::Disabled,
                 profile: String::new(),
             },
         );
         assert_eq!(
-            desired_for_device(&config, tmp.path().to_str().unwrap(), &device(0x2dc8, 0x6012)),
+            desired_for_device(
+                &config,
+                tmp.path().to_str().unwrap(),
+                &device(0x2dc8, 0x6012)
+            ),
             None,
             "an explicitly disabled controller keeps native desktop input"
         );
@@ -193,6 +247,7 @@ mod tests {
         config.controller_defaults.insert(
             "2dc8:6012".to_string(),
             ira_config::ControllerInputConfig {
+                desktop_enabled: true,
                 mode: ControllerInputMode::Disabled,
                 profile: String::new(),
             },
@@ -210,12 +265,7 @@ mod tests {
     fn test_desired_for_pads_enables_the_managed_pad() {
         let tmp = tempfile::tempdir().unwrap();
         let pads = [device(0x2dc8, 0x6012)];
-        assert!(desired_for_pads(
-            &Config::default(),
-            tmp.path().to_str().unwrap(),
-            &pads
-        )
-        .enabled);
+        assert!(desired_for_pads(&Config::default(), tmp.path().to_str().unwrap(), &pads).enabled);
     }
 
     #[test]

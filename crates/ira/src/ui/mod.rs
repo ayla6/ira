@@ -25,6 +25,7 @@ mod game_selection_model;
 mod grid_view;
 mod helpers;
 mod image_budget;
+mod game_title;
 mod mass_match_batch;
 mod mass_match_dialog;
 mod mass_match_ra;

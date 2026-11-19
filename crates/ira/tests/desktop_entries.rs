@@ -187,6 +187,8 @@ fn test_cli_search_registration_reuses_manager_launcher() {
     )))
     .unwrap();
     let binary = std::path::Path::new(env!("CARGO_BIN_EXE_ira"));
+    let exports = data.join("flatpak/exports/share");
+    let exported_provider = exports.join("gnome-shell/search-providers/com.github.ira.ini");
     let launcher = applications.join("ira.desktop");
     let original = format!("[Desktop Entry]\nName=Ira\nType=Application\nExec=env DESKTOPINTEGRATION=1 {}\nX-AppHerder=true\n", binary.display());
     std::fs::write(&launcher, &original).unwrap();
@@ -199,7 +201,8 @@ fn test_cli_search_registration_reuses_manager_launcher() {
             .arg(mode)
             .env("XDG_DATA_HOME", &data)
             .env("XDG_CONFIG_HOME", &config)
-            .env("XDG_DATA_DIRS", root.path().join("system"))
+            .env("XDG_DATA_DIRS", &exports)
+            .env_remove("IRA_HOST_DATA_DIRS")
             .env("GSETTINGS_BACKEND", "memory")
             .env_remove("APPIMAGE")
             .env_remove("APPDIR")
@@ -220,6 +223,25 @@ fn test_cli_search_registration_reuses_manager_launcher() {
             )
             .unwrap();
             assert!(provider.contains("DesktopId=ira.desktop\n"));
+            assert_eq!(
+                std::fs::read_to_string(&exported_provider).unwrap(),
+                provider
+            );
+            std::fs::write(
+                &exported_provider,
+                "[Shell Search Provider]\nDesktopId=other.desktop\n",
+            )
+            .unwrap();
+            assert!(integration::uninstall(&data, &config).is_err());
+            assert!(data
+                .join("dbus-1/services/com.github.ira.SearchProvider.service")
+                .exists());
+            assert!(std::fs::read_to_string(&exported_provider)
+                .unwrap()
+                .contains("other.desktop"));
+            std::fs::write(&exported_provider, provider).unwrap();
+        } else {
+            assert!(!exported_provider.exists());
         }
     }
 }

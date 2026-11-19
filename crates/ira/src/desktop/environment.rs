@@ -18,6 +18,18 @@ fn session_data_dirs() -> std::ffi::OsString {
         .unwrap_or_else(|| "/usr/local/share:/usr/share".into())
 }
 
+pub(super) fn export_root(data_home: &Path) -> PathBuf {
+    data_home.join("flatpak/exports/share")
+}
+
+pub(super) fn exports_are_discoverable(data_home: &Path) -> bool {
+    contains_root(&session_data_dirs(), &export_root(data_home))
+}
+
+fn contains_root(data_dirs: &std::ffi::OsStr, root: &Path) -> bool {
+    std::env::split_paths(data_dirs).any(|path| path == root)
+}
+
 fn entry_with_dirs(data_home: &Path, data_dirs: &std::ffi::OsStr) -> Result<String, String> {
     let root = data_home
         .to_str()
@@ -71,7 +83,13 @@ pub(super) fn requires_login(root: &Path) -> Result<bool, String> {
     })?;
     // AppImage's own data roots can differ from the running desktop's roots.
     // Discovery status belongs to the Shell process that loads the providers.
-    Ok(!root_in_environment(&environment, root))
+    let export = export_root(root);
+    let exported_provider = export.join(format!(
+        "gnome-shell/search-providers/{}.ini",
+        super::protocol::APP_ID
+    ));
+    Ok(!(root_in_environment(&environment, root)
+        || (exported_provider.is_file() && root_in_environment(&environment, &export))))
 }
 
 fn root_in_environment(environment: &[u8], root: &Path) -> bool {
@@ -81,7 +99,7 @@ fn root_in_environment(environment: &[u8], root: &Path) -> bool {
         .find_map(|entry| entry.strip_prefix(b"XDG_DATA_DIRS="))
         .filter(|value| !value.is_empty())
         .unwrap_or(b"/usr/local/share:/usr/share");
-    std::env::split_paths(std::ffi::OsStr::from_bytes(value)).any(|path| path == root)
+    contains_root(std::ffi::OsStr::from_bytes(value), root)
 }
 
 pub(super) fn reload_user_units() -> Result<(), String> {
@@ -102,6 +120,22 @@ pub(super) fn reload_user_units() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_export_root_stays_in_the_user_data_home() {
+        assert_eq!(
+            export_root(Path::new("/home/user/data")),
+            Path::new("/home/user/data/flatpak/exports/share")
+        );
+        assert!(contains_root(
+            std::ffi::OsStr::new("/home/user/data/flatpak/exports/share/:/usr/share"),
+            &export_root(Path::new("/home/user/data"))
+        ));
+        assert!(!contains_root(
+            std::ffi::OsStr::new("/var/lib/flatpak/exports/share:/usr/share"),
+            &export_root(Path::new("/home/user/data"))
+        ));
+    }
 
     #[test]
     fn test_entry_preserves_existing_session_data_paths() {

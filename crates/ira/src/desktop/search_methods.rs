@@ -97,9 +97,14 @@ pub(super) fn reply_value(reply: Reply) -> glib::Variant {
                                 .upcast()
                         }
                     };
+                    let name = if item.suffix.is_empty() {
+                        item.name
+                    } else {
+                        format!("{} ({})", item.name, item.suffix)
+                    };
                     let mut meta = HashMap::from([
                         ("id".into(), item.id.to_string().to_variant()),
-                        ("name".into(), item.name.to_variant()),
+                        ("name".into(), name.to_variant()),
                         (
                             "description".into(),
                             crate::tr!("Launch with Ira").to_variant(),
@@ -135,6 +140,8 @@ mod tests {
         let item = SearchItem {
             id: 1,
             name: "Game".into(),
+            sort_title: String::new(),
+            suffix: String::new(),
             platform: "steam".into(),
             icon: None,
             last_played: 0,

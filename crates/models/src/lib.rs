@@ -59,3 +59,5 @@ pub use screenscraper::{
 pub use sort_mode::SortMode;
 pub use steam_languages::{steam_language_name, SteamLanguage, STEAM_LANGUAGES};
 pub use variant::GameVariant;
+
+mod game_title;

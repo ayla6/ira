@@ -1275,32 +1275,6 @@ pub(super) fn launch_other(
     Ok(())
 }
 
-pub(super) fn update_last_played(
-    ctx: &LaunchCtx,
-    variant_id: Option<i64>,
-    variant_count_playtime: bool,
-    variant_show_as_entry: bool,
-) -> Option<(Option<i64>, i64)> {
-    if variant_count_playtime && variant_show_as_entry {
-        if let Some(vid) = variant_id {
-            if let Err(e) = ira_db::set_variant_last_played(ctx.db, vid, ctx.started_at) {
-                eprintln!("Failed to update variant last played: {}", e);
-                return None;
-            }
-            return Some((Some(vid), ctx.started_at));
-        }
-        return None;
-    }
-    if variant_count_playtime {
-        if let Err(e) = ira_db::set_last_played(ctx.db, ctx.db_id, ctx.started_at) {
-            eprintln!("Failed to update last played: {}", e);
-            return None;
-        }
-        return Some((None, ctx.started_at));
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::{

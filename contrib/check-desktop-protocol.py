@@ -52,6 +52,7 @@ def probe(binary):
                "GSK_RENDERER": "cairo", "NO_AT_BRIDGE": "1", "LC_ALL": "C.UTF-8"}
         for key in ("WAYLAND_DISPLAY", "APPIMAGE", "APPDIR", "IRA_HOST_DATA_DIRS"):
             env.pop(key, None)
+        env["XDG_DATA_DIRS"] = f"{root / 'data/flatpak/exports/share'}:{env['XDG_DATA_DIRS']}"
         prepare_launcher(binary, root)
         with virtual_display() as display:
             env["DISPLAY"] = display
@@ -167,6 +168,7 @@ def inspect_registration(binary, root, env):
     systemctl.chmod(0o755)
     env = {**env, "PATH": f"{tools}:{env['PATH']}"}
     dropin = root / "config/systemd/user/org.gnome.Shell@.service.d/70-ira-desktop.conf"
+    exported_provider = root / "data/flatpak/exports/share/gnome-shell/search-providers/com.github.ira.ini"
     for mode in ("--install-desktop-integration", "--uninstall-desktop-integration"):
         result = subprocess.run([str(binary), mode], env=env, capture_output=True, text=True, timeout=20)
         if result.returncode:
@@ -180,8 +182,12 @@ def inspect_registration(binary, root, env):
             provider = (root / "data/gnome-shell/search-providers/com.github.ira.ini").read_text()
             if f"DesktopId={MANAGER_DESKTOP_ID}\n" not in provider:
                 raise RuntimeError(f"Artifact registered the wrong desktop launcher: {provider}")
+            if exported_provider.read_text() != provider:
+                raise RuntimeError("Artifact did not register its discoverable user export")
         elif dropin.exists():
             raise RuntimeError("Artifact did not remove its user-session override")
+        elif exported_provider.exists():
+            raise RuntimeError("Artifact did not remove its exported provider")
     print("Artifact verified: user-only install/uninstall; existing launcher preserved; no temporary session paths")
 
 

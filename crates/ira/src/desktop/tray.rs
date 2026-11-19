@@ -24,7 +24,7 @@ pub struct TrayHandle {
 impl TrayHandle {
     pub fn set_visible(&self, visible: bool) {
         self.visible.store(visible, Ordering::Relaxed);
-        self.handle.update();
+        self.handle.update(visible);
     }
 }
 

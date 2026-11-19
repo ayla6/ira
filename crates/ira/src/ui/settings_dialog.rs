@@ -379,8 +379,10 @@ fn wire_save_button(ctx: &Rc<BulkCtx>, content_area: &gtk4::Box) {
         let old_cfg = s.cfg.clone();
         apply_saved_settings(&mut s.cfg, saved_widgets);
 
-        ctx.steam.update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
-        ctx.steam.set_sgdb_disabled_assets(&s.cfg.sgdb_disabled_assets);
+        ctx.steam
+            .update_keys(&s.cfg.steam_api_key, &s.cfg.steam_griddb_api_key);
+        ctx.steam
+            .set_sgdb_disabled_assets(&s.cfg.sgdb_disabled_assets);
         ctx.steam.set_sgdb_filtered_users(
             &s.cfg
                 .sgdb_filtered_users
@@ -388,7 +390,8 @@ fn wire_save_button(ctx: &Rc<BulkCtx>, content_area: &gtk4::Box) {
                 .map(|u| (u.name.clone(), u.steam64.clone()))
                 .collect::<Vec<_>>(),
         );
-        ctx.steam.set_sgdb_filtered_styles(&s.cfg.sgdb_filtered_styles);
+        ctx.steam
+            .set_sgdb_filtered_styles(&s.cfg.sgdb_filtered_styles);
         ctx.steam.set_sgdb_show_filtered(s.cfg.sgdb_show_filtered);
 
         let reload_games = discovery_settings_changed(&old_cfg, &s.cfg);
@@ -461,8 +464,10 @@ fn apply_general_settings(cfg: &mut Config, widgets: &SavedSettingsWidgets) {
         .map(|(name, _)| name.clone())
         .collect();
     cfg.sgdb_show_filtered = widgets.sgdb.show_filtered_row.is_active();
-    cfg.sgdb_filtered_users =
-        super::settings_pages::filtered_users(&widgets.sgdb.filter_users_list, &widgets.sgdb.filter_user_ids);
+    cfg.sgdb_filtered_users = super::settings_pages::filtered_users(
+        &widgets.sgdb.filter_users_list,
+        &widgets.sgdb.filter_user_ids,
+    );
     cfg.centralize_game_saves = widgets.saves_row.is_active();
     cfg.auto_reload_steam = widgets.auto_reload_widgets.steam.is_active();
     cfg.auto_reload_roms = widgets.auto_reload_widgets.roms.is_active();
@@ -510,11 +515,14 @@ fn apply_controller_defaults(
         } else {
             ira_models::ControllerInputMode::Disabled
         };
-        if enabled || !profile.is_empty() {
-            controller_defaults.insert(widget.key.clone(), ControllerInputConfig { mode, profile });
-        } else {
-            controller_defaults.remove(&widget.key);
-        }
+        controller_defaults.insert(
+            widget.key.clone(),
+            ControllerInputConfig {
+                mode,
+                profile,
+                desktop_enabled: widget.desktop_enabled.is_active(),
+            },
+        );
     }
     cfg.controller_defaults = controller_defaults;
 }

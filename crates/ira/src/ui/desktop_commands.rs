@@ -64,7 +64,16 @@ pub fn connect(app: &adw::Application, holder: Rc<RefCell<Option<SharedState>>>)
         })();
         match request {
             Ok(request) => {
-                app.activate();
+                let launch = matches!(request, Some(DesktopRequest::Launch { .. }));
+                if launch {
+                    if holder.borrow().is_none() {
+                        let state = crate::activate::activate(app);
+                        state.borrow_mut().content_unloaded = true;
+                        *holder.borrow_mut() = Some(state);
+                    }
+                } else {
+                    app.activate();
+                }
                 let state = holder.borrow().clone();
                 if let (Some(state), Some(request)) = (state, request) {
                     submit(&state, request);

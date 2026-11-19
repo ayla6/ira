@@ -83,6 +83,9 @@ mod tests {
 
     #[test]
     fn test_discover_vita_games_missing_root() {
-        assert!(discover_games_for_executable("/nonexistent/Vita3K").is_empty());
+        let tmp = tempfile::tempdir().unwrap();
+        let executable = tmp.path().join("Vita3K");
+        std::fs::create_dir_all(tmp.path().join("portable/fs")).unwrap();
+        assert!(discover_games_for_executable(&executable.to_string_lossy()).is_empty());
     }
 }

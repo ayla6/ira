@@ -71,6 +71,7 @@ pub(super) fn add_pc_profile_group(
 pub(super) struct ControllerDefaultWidgets {
     pub key: String,
     pub layout: adw::ComboRow,
+    pub desktop_enabled: adw::SwitchRow,
     pub profile_path: Rc<RefCell<Option<std::path::PathBuf>>>,
     row: adw::ExpanderRow,
 }
@@ -464,6 +465,7 @@ fn rebuild_controller_rows(
                 widget.key.clone(),
                 ControllerDefaultState {
                     config: ControllerInputConfig {
+                        desktop_enabled: widget.desktop_enabled.is_active(),
                         mode: if widget.layout.selected() == 0 {
                             ControllerInputMode::Disabled
                         } else {
@@ -512,6 +514,7 @@ fn rebuild_controller_rows(
                 .filter(|path| path.is_file());
                 ControllerDefaultState {
                     config: ControllerInputConfig {
+                        desktop_enabled: true,
                         mode: ControllerInputMode::Enabled,
                         profile: String::new(),
                     },
@@ -606,9 +609,18 @@ fn add_controller_row(
         registry,
     );
 
+    let desktop_enabled = adw::SwitchRow::new();
+    desktop_enabled.set_title(&crate::tr!("Use controller mapping outside games"));
+    desktop_enabled.set_subtitle(&crate::tr!(
+        "Release this controller when no game is running"
+    ));
+    desktop_enabled.set_active(state.config.desktop_enabled);
+    expander.add_row(&desktop_enabled);
+
     group.add(&expander);
     ControllerDefaultWidgets {
         key,
+        desktop_enabled,
         layout: layout.row.clone(),
         profile_path: layout.chosen.clone(),
         row: expander,
@@ -645,8 +657,7 @@ impl ControllerDefaultLayout {
     ) -> Self {
         let enabled = state.config.mode != ControllerInputMode::Disabled;
         let current = enabled.then(|| state.profile_path.clone()).flatten();
-        let (labels, paths, selected) =
-            layout_choices(profiles, current, &crate::tr!("Disabled"));
+        let (labels, paths, selected) = layout_choices(profiles, current, &crate::tr!("Disabled"));
         let row = adw::ComboRow::new();
         row.set_title(&crate::tr!("Default layout"));
         row.set_model(Some(&gtk4::StringList::new(

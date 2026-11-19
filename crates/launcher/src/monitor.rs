@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::logs::{GameLog, clear_game_log, get_game_log, log_launch_header, tail_file_to_log};
+use crate::logs::{clear_game_log, get_game_log, log_launch_header, tail_file_to_log, GameLog};
 
 pub struct MonitorContext {
     pub sender: AppSender,
@@ -128,6 +128,8 @@ pub(crate) fn finalize_game(
             ended_at,
         ) {
             eprintln!("Failed to record play session: {}", e);
+        } else if let Err(error) = update_last_played(ctx) {
+            eprintln!("Failed to update last played: {error}");
         }
         if let Err(e) = ctx.sender.send(AppMessage::SessionRecorded {
             game_id: ctx.game_id,
@@ -158,13 +160,41 @@ pub(crate) fn finalize_game(
     }
 }
 
+fn update_last_played(ctx: &MonitorContext) -> Result<(), String> {
+    let variant_id = if let Some(id) = ctx.variant_id {
+        ira_db::get_variants(&ctx.db, ctx.game_id)?
+            .iter()
+            .find(|variant| variant.id == id && variant.show_as_entry)
+            .map(|variant| variant.id)
+    } else {
+        None
+    };
+    if let Some(id) = variant_id {
+        ira_db::set_variant_last_played(&ctx.db, id, ctx.started_at)?;
+    } else {
+        ira_db::set_last_played(&ctx.db, ctx.game_id, ctx.started_at)?;
+    }
+    ctx.sender
+        .send(AppMessage::GameLastPlayedUpdated {
+            game_id: ctx.game_id,
+            variant_id,
+            started_at: ctx.started_at,
+        })
+        .map_err(|error| error.to_string())
+}
+
 /// Monitor for a game handed to the resident input daemon: no child of our own.
 /// The daemon supervises the game and reports back over the IPC socket.
 pub fn monitor_session(mut client: DaemonClient, ctx: MonitorContext) {
     let game_id = ctx.game_id;
     clear_game_log(game_id);
     let log_buf = get_game_log(game_id);
-    log_launch_header(&ctx.command, &ctx.env, &log_buf, "Started via the input daemon");
+    log_launch_header(
+        &ctx.command,
+        &ctx.env,
+        &log_buf,
+        "Started via the input daemon",
+    );
 
     // Freeze watcher once the daemon reports the real pid; no thaw_group — daemon
     // pids are not ours to signal, the watcher thaws its own scope on shutdown.
@@ -280,6 +310,69 @@ fn run_post_exit(script: &str, working_dir: Option<&str>, log: &GameLog) {
             log.lock()
                 .unwrap()
                 .push(format!("Failed to run post-exit script: {error}"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_finalize_game_short_session_preserves_last_played() {
+        for (seconds, expected) in [(1, 42), (10, 0)] {
+            let tmp = tempfile::tempdir().unwrap();
+            let db = ira_db::init_db(tmp.path().join("test.db").to_str().unwrap());
+            let game_id = ira_db::add_game(
+                &db,
+                ira_db::NewGame {
+                    kind: ira_models::GameKind::Steam,
+                    trophy_source: ira_models::TrophySource::Gse,
+                    steam_id: "1",
+                    trophy_id: "",
+                    native_id: "",
+                    platform_id: "",
+                    title: "Game",
+                },
+            )
+            .unwrap();
+            ira_db::set_last_played(&db, game_id, 42).unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let started_at = crate::procfs::unix_now() - seconds;
+            let ctx = MonitorContext {
+                sender: AppSender::new(tx, -1),
+                game_id,
+                variant_id: None,
+                count_playtime: true,
+                started_at,
+                db: db.clone(),
+                running_games: Arc::new(Mutex::new(HashMap::new())),
+                env: Vec::new(),
+                command: Vec::new(),
+                post_exit: String::new(),
+                working_dir: None,
+                log_file: String::new(),
+                pause_watch: None,
+            };
+            finalize_game(&ctx, &Arc::new(Mutex::new(Vec::new())), None, None);
+            let game = ira_db::find_by_db_id(&db, game_id).unwrap().unwrap();
+            assert_eq!(
+                game.last_played,
+                if expected == 0 { started_at } else { expected }
+            );
+            let messages: Vec<_> = rx.try_iter().collect();
+            assert_eq!(
+                messages
+                    .iter()
+                    .any(|msg| matches!(msg, AppMessage::GameLastPlayedUpdated { .. })),
+                seconds >= 5
+            );
+            assert_eq!(
+                ira_db::get_sessions_for_game(&db, game_id, None)
+                    .unwrap()
+                    .len(),
+                usize::from(seconds >= 5)
+            );
         }
     }
 }

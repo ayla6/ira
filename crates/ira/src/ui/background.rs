@@ -64,20 +64,23 @@ fn release_background_content(state: &SharedState) {
 }
 
 fn teardown_content(state: &SharedState) {
-    let (content_box, grid_header, sidebar_store) = {
+    let (content_box, grid_header, sidebar_store, grid_store) = {
         let s = state.borrow();
         (
             s.content_box.clone(),
             s.grid_header.clone(),
             s.sidebar_store.clone(),
+            s.grid_store.clone(),
         )
     };
 
     clear_children(&content_box);
     clear_children(&grid_header);
     sidebar_store.remove_all();
+    grid_store.remove_all();
 
     let mut s = state.borrow_mut();
+    s.view_generation = s.view_generation.wrapping_add(1);
     s.content_unloaded = true;
 }
 
@@ -113,4 +116,29 @@ pub fn restore_content(state: &SharedState) {
         select_row_silently(state, None);
         show_grid_view(state);
     }
+}
+
+pub(super) fn connect_minimized(state: &SharedState, window: &adw::ApplicationWindow) {
+    let weak = std::rc::Rc::downgrade(state);
+    window.connect_realize(move |window| {
+        let Some(surface) = window.surface().and_downcast::<gtk4::gdk::Toplevel>() else {
+            return;
+        };
+        let weak = weak.clone();
+        surface.connect_state_notify(move |surface| {
+            let Some(state) = weak.upgrade() else { return };
+            if surface
+                .state()
+                .contains(gtk4::gdk::ToplevelState::MINIMIZED)
+            {
+                teardown_content(&state);
+                ira_images::clear_texture_cache();
+                unsafe {
+                    malloc_trim(0);
+                }
+            } else if state.borrow().window.is_visible() {
+                restore_content(&state);
+            }
+        });
+    });
 }

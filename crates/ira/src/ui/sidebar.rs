@@ -122,6 +122,9 @@ pub fn set_sidebar_playing(state: &SharedState, db_id: i64, playing: bool) {
 }
 
 pub fn rebuild_sidebar(state: &SharedState) {
+    if state.borrow().content_unloaded {
+        return;
+    }
     let _span = tracing::info_span!("rebuild_sidebar").entered();
     // Auto-group memberships are derived, never stored: every rebuild
     // re-runs the rules over the live games, which is how a fresh match
@@ -893,6 +896,12 @@ fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
     row.append(&icon);
 
     let title_label = gtk4::Label::new(Some(&item.name()));
+    {
+        let s = state.borrow();
+        if let Some(game) = s.games.iter().find(|game| game.db_id == item.db_id() && game.variant_id == item.variant_id()) {
+            title_label.set_markup(&super::game_title::markup(game, &s.games));
+        }
+    }
     title_label.set_xalign(0.0);
     title_label.add_css_class(CSS_SIDEBAR_ROW_TITLE);
     title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);

@@ -58,8 +58,7 @@ fn init_layout_warning_filter() {
             }
             if domain == Some("Gtk")
                 && message.is_some_and(|m| {
-                    m.starts_with("Trying to measure GtkBox")
-                        && m.contains("but it needs at least")
+                    m.starts_with("Trying to measure GtkBox") && m.contains("but it needs at least")
                 })
             {
                 return LogWriterOutput::Handled;
@@ -106,8 +105,7 @@ fn publish_overlay_screen_size() {
             };
             let g = m.geometry();
             let area = i64::from(g.width()) * i64::from(g.height());
-            let best_area =
-                best.map_or(-1, |(bw, bh)| i64::from(bw) * i64::from(bh));
+            let best_area = best.map_or(-1, |(bw, bh)| i64::from(bw) * i64::from(bh));
             if area > best_area {
                 best = Some((g.width(), g.height()));
             }
@@ -151,8 +149,14 @@ fn main() -> glib::ExitCode {
     gio::resources_register_include!("ira.gresource")
         .expect("failed to register application resources");
 
-    let app = adw::Application::new(Some(ira::desktop::protocol::APP_ID), gio::ApplicationFlags::HANDLES_COMMAND_LINE);
-    app.connect_startup(|_| ira::ui::apply_desktop_program_class());
+    let app = adw::Application::new(
+        Some(ira::desktop::protocol::APP_ID),
+        gio::ApplicationFlags::HANDLES_COMMAND_LINE,
+    );
+    app.connect_startup(|_| {
+        ira::ui::apply_desktop_program_class();
+        publish_overlay_screen_size();
+    });
     // Register the flag so glib's option parser accepts it; main() below
     // reads it back out of argv.
     app.add_main_option(
@@ -176,8 +180,8 @@ fn main() -> glib::ExitCode {
                 restore_content(state);
                 return;
             }
-            publish_overlay_screen_size();
             let state = activate(app);
+            state.borrow().window.present();
             *state_holder.borrow_mut() = Some(state);
         }
     });

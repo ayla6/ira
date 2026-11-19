@@ -54,8 +54,8 @@ pub fn install_for_user() -> Result<(), String> {
     search_settings::set_enabled(&desktop_id, true)
 }
 
-fn registration_files(root: &Path) -> [(PathBuf, &'static str); 2] {
-    [
+fn registration_files(root: &Path) -> Vec<(PathBuf, &'static str)> {
+    let mut files = vec![
         (
             root.join(format!("dbus-1/services/{PROVIDER_ID}.service")),
             "D-BUS Service",
@@ -64,7 +64,15 @@ fn registration_files(root: &Path) -> [(PathBuf, &'static str); 2] {
             root.join(format!("gnome-shell/search-providers/{APP_ID}.ini")),
             "Shell Search Provider",
         ),
-    ]
+    ];
+    let export =
+        environment::export_root(root).join(format!("gnome-shell/search-providers/{APP_ID}.ini"));
+    // Shell enumerates only its system data roots. Flatpak's user export root
+    // is already in that cached list on desktops that configure Flatpak.
+    if environment::exports_are_discoverable(root) || export.exists() || export.is_symlink() {
+        files.push((export, "Shell Search Provider"));
+    }
+    files
 }
 
 #[derive(Clone, Copy)]
@@ -185,19 +193,20 @@ pub fn install(
     let session_file = environment::path(config_home);
     check_environment_owned(&session_file)?;
     let session = environment::entry(root)?;
-    for (path, group) in registration_files(root) {
-        check_owned(&path, group)?;
+    let files = registration_files(root);
+    for (path, group) in &files {
+        check_owned(path, group)?;
     }
-    write_managed(
-        &root.join(format!("dbus-1/services/{PROVIDER_ID}.service")),
-        "D-BUS Service",
-        &entries::service_entry(executable)?,
-    )?;
-    write_managed(
-        &root.join(format!("gnome-shell/search-providers/{APP_ID}.ini")),
-        "Shell Search Provider",
-        &entries::provider_entry(desktop_id),
-    )?;
+    let service = entries::service_entry(executable)?;
+    let provider = entries::provider_entry(desktop_id);
+    for (path, group) in files {
+        let contents = if group == "D-BUS Service" {
+            &service
+        } else {
+            &provider
+        };
+        write_managed(&path, group, contents)?;
+    }
     atomic_write(&session_file, session.as_bytes())
 }
 

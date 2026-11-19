@@ -26,6 +26,25 @@ pub(super) fn set_enabled(id: &str, enabled: bool) -> Result<(), String> {
     let Some(settings) = settings() else {
         return Ok(());
     };
+    // Shell reloads provider files on settings changes, rather than watching
+    // provider directories. Re-enabling must trigger a reload after a new export.
+    if enabled && settings.strv("enabled").iter().any(|value| value == id) {
+        let values: Vec<_> = settings
+            .strv("enabled")
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        settings
+            .set_strv("enabled", provider_list(&values, id, false))
+            .map_err(|error| {
+                crate::tr!("Reload GNOME search providers: {}").replacen(
+                    "{}",
+                    &error.to_string(),
+                    1,
+                )
+            })?;
+        gio::Settings::sync();
+    }
     settings.delay();
     for (key, include) in [("enabled", enabled), ("disabled", !enabled)] {
         let values: Vec<_> = settings.strv(key).iter().map(ToString::to_string).collect();

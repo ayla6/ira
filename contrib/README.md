@@ -83,11 +83,18 @@ Shell and propagates that environment to D-Bus-activated apps before Shell
 starts. A service-level environment setting takes precedence over GNOME's login
 environment import, which can overwrite environment.d settings.
 
+When the user's Flatpak export root is already in the host data paths, Ira also
+registers its provider at
+`$XDG_DATA_HOME/flatpak/exports/share/gnome-shell/search-providers/com.github.ira.ini`.
+Enabling refreshes GNOME's provider settings so the running Shell rescans that
+existing root. Only Ira's ownership-marked provider file is written there;
+Flatpak applications and launchers are untouched. Disabling removes that file.
+
 This setup is **user-local**: no administrator privileges, system directory
-writes, Flatpak exports, or application-launcher changes. Enabling reloads user
-unit definitions and leaves the running desktop untouched; the Shell process
-needs a new session to inherit the override. Settings reports when the running
-session still cannot discover the provider. Native packages carry the provider
+writes, or application-launcher changes. The service override remains a fallback
+for sessions without that export root; inheriting it requires a new session.
+Settings reports when the running session still cannot discover either provider
+location. Native packages carry the provider
 in their system data directory and keep it opt-in. Non-systemd GNOME session
 startup is outside this user-session setup's support.
 

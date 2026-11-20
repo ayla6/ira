@@ -58,7 +58,11 @@ pub fn add_game(conn: &DbConn, game: NewGame<'_>) -> Result<i64, String> {
 }
 
 pub fn update_game_title(conn: &DbConn, id: i64, title: &str) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET title = ?1 WHERE id = ?2", params![title, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET title = ?1 WHERE id = ?2",
+        params![title, id],
+    )?;
     Ok(())
 }
 
@@ -87,22 +91,38 @@ pub fn update_game_ids(
 /// Overwrite the platform-native id (title id, disc serial, emulator app
 /// id) without touching the achievement keys.
 pub fn update_native_id(conn: &DbConn, id: i64, native_id: &str) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET native_id = ?1 WHERE id = ?2", params![native_id, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET native_id = ?1 WHERE id = ?2",
+        params![native_id, id],
+    )?;
     Ok(())
 }
 
 pub fn update_sort_title(conn: &DbConn, id: i64, sort_title: &str) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET sort_title = ?1 WHERE id = ?2", params![sort_title, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET sort_title = ?1 WHERE id = ?2",
+        params![sort_title, id],
+    )?;
     Ok(())
 }
 
 pub fn update_game_folder(conn: &DbConn, id: i64, game_folder: &str) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET game_folder = ?1 WHERE id = ?2", params![game_folder, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET game_folder = ?1 WHERE id = ?2",
+        params![game_folder, id],
+    )?;
     Ok(())
 }
 
 pub fn update_game_kind(conn: &DbConn, id: i64, kind: GameKind) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET kind = ?1 WHERE id = ?2", params![kind.as_str(), id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET kind = ?1 WHERE id = ?2",
+        params![kind.as_str(), id],
+    )?;
     Ok(())
 }
 
@@ -122,7 +142,11 @@ pub fn update_achievement_counts(
 }
 
 pub fn set_manual_unmatch(conn: &DbConn, id: i64, value: bool) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET manual_unmatch = ?1 WHERE id = ?2", params![value, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET manual_unmatch = ?1 WHERE id = ?2",
+        params![value, id],
+    )?;
     Ok(())
 }
 
@@ -153,10 +177,7 @@ pub fn load_games_by_kind(conn: &DbConn, kind: GameKind) -> Result<Vec<GameEntry
 }
 
 /// Chunked so long kind lists never approach the SQLite variable limit.
-pub fn load_games_by_kinds(
-    conn: &DbConn,
-    kinds: &[GameKind],
-) -> Result<Vec<GameEntry>, String> {
+pub fn load_games_by_kinds(conn: &DbConn, kinds: &[GameKind]) -> Result<Vec<GameEntry>, String> {
     if kinds.is_empty() {
         return Ok(Vec::new());
     }
@@ -196,18 +217,30 @@ pub fn remove_game(conn: &DbConn, id: i64) -> Result<(), String> {
 /// time this has no session row behind it, so it never appears in the play
 /// history chart; it just raises the total.
 pub fn add_playtime(conn: &DbConn, id: i64, hours: f64) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET playtime = playtime + ?1 WHERE id = ?2", params![hours, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET playtime = playtime + ?1 WHERE id = ?2",
+        params![hours, id],
+    )?;
     Ok(())
 }
 
 /// Cache of the resolved API-emulator DLL folder (Steam/GOG), empty if unknown.
 pub fn set_api_dll_folder(conn: &DbConn, id: i64, folder: &str) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET api_dll_folder = ?1 WHERE id = ?2", params![folder, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET api_dll_folder = ?1 WHERE id = ?2",
+        params![folder, id],
+    )?;
     Ok(())
 }
 
 pub fn set_saves_centralized(conn: &DbConn, id: i64, centralized: bool) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET saves_centralized = ?1 WHERE id = ?2", params![centralized as i64, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET saves_centralized = ?1 WHERE id = ?2",
+        params![centralized as i64, id],
+    )?;
     Ok(())
 }
 

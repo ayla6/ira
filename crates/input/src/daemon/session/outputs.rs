@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use crate::{
-    InputEvent, MappingEngine, OutputEvent, VirtualGamepad, VirtualGamepadBackend,
-    VirtualKeyboard, VirtualMouse,
+    InputEvent, MappingEngine, OutputEvent, VirtualGamepad, VirtualGamepadBackend, VirtualKeyboard,
+    VirtualMouse,
 };
 
 use super::super::TraceState;
@@ -167,10 +167,9 @@ fn hot_apply_mappings(
     new_mapper: MappingEngine,
     trace: &mut TraceState,
 ) -> Result<(), String> {
-    let keycodes_changed = outputs.mapper.profile().keyboard_keycodes()
-        != new_mapper.profile().keyboard_keycodes();
-    let mouse_changed =
-        outputs.mapper.profile().uses_mouse() != new_mapper.profile().uses_mouse();
+    let keycodes_changed =
+        outputs.mapper.profile().keyboard_keycodes() != new_mapper.profile().keyboard_keycodes();
+    let mouse_changed = outputs.mapper.profile().uses_mouse() != new_mapper.profile().uses_mouse();
     let replacement_keyboard = if keycodes_changed {
         create_keyboard(new_mapper.profile().keyboard_keycodes())?
     } else {

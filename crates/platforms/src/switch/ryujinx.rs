@@ -17,7 +17,10 @@ use super::{SwitchInstalledGame, TitleCache};
 /// to each detected executable. Several Ryujinx-family installs can sit
 /// side by side, each with its own `portable/games` library.
 fn base_dirs_for(executable: &str) -> Vec<PathBuf> {
-    base_dirs_in(executable, &crate::switch_detect::detected_launch_commands())
+    base_dirs_in(
+        executable,
+        &crate::switch_detect::detected_launch_commands(),
+    )
 }
 
 fn base_dirs_in(executable: &str, detected: &[String]) -> Vec<PathBuf> {
@@ -61,7 +64,10 @@ pub(super) fn title_caches(executable: &str) -> Vec<TitleCache> {
 /// scans are reproducible. Only titles a metadata dir names are reported:
 /// an unnamed file has no identity beyond its file name, which the ROM
 /// library scan handles better.
-pub(super) fn library_games(executable: &str, compressed_switch_roms: bool) -> Vec<SwitchInstalledGame> {
+pub(super) fn library_games(
+    executable: &str,
+    compressed_switch_roms: bool,
+) -> Vec<SwitchInstalledGame> {
     library_games_in(
         &base_dirs_for(executable),
         &title_caches(executable),
@@ -146,15 +152,12 @@ fn rom_files(dir: &Path, compressed_switch_roms: bool) -> Vec<PathBuf> {
         let path = entry.path();
         if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             out.extend(rom_files(&path, compressed_switch_roms));
-        } else if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| {
-                ROM_EXTENSIONS.iter().any(|known| e.eq_ignore_ascii_case(known))
-                    && (compressed_switch_roms
-                        || !ira_models::is_compressed_switch_extension(e))
-            })
-        {
+        } else if path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+            ROM_EXTENSIONS
+                .iter()
+                .any(|known| e.eq_ignore_ascii_case(known))
+                && (compressed_switch_roms || !ira_models::is_compressed_switch_extension(e))
+        }) {
             out.push(path);
         }
     }
@@ -179,19 +182,14 @@ fn title_caches_in(base_dirs: &[PathBuf]) -> Vec<TitleCache> {
         };
         let mut cache = TitleCache::empty();
         for entry in entries.flatten() {
-            if !entry
-                .file_type()
-                .map(|t| t.is_dir())
-                .unwrap_or(false)
-            {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 continue;
             }
             let id = entry.file_name().to_string_lossy().into_owned();
             if !super::is_title_id(&id) {
                 continue;
             }
-            let Ok(text) =
-                std::fs::read_to_string(entry.path().join("gui").join("metadata.json"))
+            let Ok(text) = std::fs::read_to_string(entry.path().join("gui").join("metadata.json"))
             else {
                 continue;
             };
@@ -226,11 +224,13 @@ mod tests {
     #[test]
     fn test_title_caches_reads_portable_metadata() {
         let tmp = tempfile::tempdir().unwrap();
-        let gui = tmp
-            .path()
-            .join("portable/games/0100000000010000/gui");
+        let gui = tmp.path().join("portable/games/0100000000010000/gui");
         std::fs::create_dir_all(&gui).unwrap();
-        std::fs::write(gui.join("metadata.json"), r#"{"title": "Super Mario Odyssey"}"#).unwrap();
+        std::fs::write(
+            gui.join("metadata.json"),
+            r#"{"title": "Super Mario Odyssey"}"#,
+        )
+        .unwrap();
 
         // A game directory without metadata and a non-title directory are
         // ignored.
@@ -280,10 +280,18 @@ mod tests {
         .unwrap();
 
         let base_nsp = games.join("Tomodachi Life [010051F0207B2000][v0][Base].nsp");
-        std::fs::write(&base_nsp, nsp_fixture(&["010051f0207b20000000000000000003.tik"])).unwrap();
+        std::fs::write(
+            &base_nsp,
+            nsp_fixture(&["010051f0207b20000000000000000003.tik"]),
+        )
+        .unwrap();
         // An update file normalizes onto the base title id.
         let update = games.join("Tomodachi Life [010051F0207B2800][v65536].nsp");
-        std::fs::write(&update, nsp_fixture(&["010051f0207b28000000000000000003.tik"])).unwrap();
+        std::fs::write(
+            &update,
+            nsp_fixture(&["010051f0207b28000000000000000003.tik"]),
+        )
+        .unwrap();
         // No title id anywhere, no metadata: never reported.
         std::fs::write(games.join("Unknown Game.nsp"), b"not an nsp").unwrap();
         // A file with an id but no metadata name: never reported.
@@ -328,8 +336,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let base = library_fixture(tmp.path());
 
-        let games =
-            library_games_in(&[base], &title_caches_in(&[tmp.path().join("Ryubing")]), false);
+        let games = library_games_in(
+            &[base],
+            &title_caches_in(&[tmp.path().join("Ryubing")]),
+            false,
+        );
 
         // The base and the update file collapse into one entry, named by
         // the metadata dir; the unnamed file, the nameless id and the

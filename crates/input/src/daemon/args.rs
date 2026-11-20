@@ -75,10 +75,8 @@ pub fn parse_arguments() -> Result<Arguments, String> {
                 )?));
             }
             "--steam-app-id" => {
-                arguments.steam_app_id = Some(take_arg(
-                    &mut values,
-                    "--steam-app-id requires an ID",
-                )?);
+                arguments.steam_app_id =
+                    Some(take_arg(&mut values, "--steam-app-id requires an ID")?);
             }
             "--pause-unfocused" => arguments.pause_unfocused = true,
             "--motion-port" => {
@@ -131,6 +129,9 @@ mod tests {
     fn test_take_arg_reads_the_next_value() {
         let mut values = vec!["path".to_string()].into_iter();
         assert_eq!(take_arg(&mut values, "missing").unwrap(), "path");
-        assert_eq!(take_arg(&mut values, "needs a path"), Err("needs a path".to_string()));
+        assert_eq!(
+            take_arg(&mut values, "needs a path"),
+            Err("needs a path".to_string())
+        );
     }
 }

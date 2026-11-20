@@ -39,9 +39,7 @@ fn build_ra_section(
     let ra_group = adw::PreferencesGroup::new();
     // Platforms without RA support (Nintendo Switch) get no match UI at
     // all; already-linked games keep their Unmatch row wherever they run.
-    if game.trophy_source == ira_models::TrophySource::Empty
-        && !game.platform_id.has_ra()
-    {
+    if game.trophy_source == ira_models::TrophySource::Empty && !game.platform_id.has_ra() {
         return ra_group;
     }
 
@@ -385,76 +383,76 @@ fn build_service_ids_section(
         return (true, None, Some(steam_id_entry));
     }
 
-/// The editable Steam id row for console games: the app id a title
-/// match (or the user) tied this game to for metadata garnish. Editing
-/// it here re-points the id; clearing it unlinks. Like every other row
-/// in this dialog, typing only fills the entry — the dialog's Save owns
-/// the write, so a typed id is never lost to a missed Enter press.
-fn add_steam_id_row(
-    parent: &adw::PreferencesGroup,
-    state: &SharedState,
-    win: &adw::Window,
-    game: &Game,
-) -> adw::EntryRow {
-    let row = adw::EntryRow::new();
-    row.set_title(&crate::tr!("Steam"));
-    row.set_text(&game.steam_id);
-    row.set_tooltip_text(Some(&crate::tr!(
-        "Links this game to a Steam entry for metadata only"
-    )));
+    /// The editable Steam id row for console games: the app id a title
+    /// match (or the user) tied this game to for metadata garnish. Editing
+    /// it here re-points the id; clearing it unlinks. Like every other row
+    /// in this dialog, typing only fills the entry — the dialog's Save owns
+    /// the write, so a typed id is never lost to a missed Enter press.
+    fn add_steam_id_row(
+        parent: &adw::PreferencesGroup,
+        state: &SharedState,
+        win: &adw::Window,
+        game: &Game,
+    ) -> adw::EntryRow {
+        let row = adw::EntryRow::new();
+        row.set_title(&crate::tr!("Steam"));
+        row.set_text(&game.steam_id);
+        row.set_tooltip_text(Some(&crate::tr!(
+            "Links this game to a Steam entry for metadata only"
+        )));
 
-    let fill_link: Rc<dyn Fn(&str)> = {
-        let row = row.clone();
-        Rc::new(move |link: &str| {
-            let link = link.trim().to_string();
-            if !link.is_empty() && link.parse::<u32>().is_err() {
-                row.add_css_class(CSS_ERROR);
-                return;
-            }
-            row.remove_css_class(CSS_ERROR);
-            if row.text() != link {
-                row.set_text(&link);
-            }
-        })
-    };
-    {
-        let fill_link = fill_link.clone();
-        row.connect_apply(move |row| fill_link(&row.text()));
-    }
+        let fill_link: Rc<dyn Fn(&str)> = {
+            let row = row.clone();
+            Rc::new(move |link: &str| {
+                let link = link.trim().to_string();
+                if !link.is_empty() && link.parse::<u32>().is_err() {
+                    row.add_css_class(CSS_ERROR);
+                    return;
+                }
+                row.remove_css_class(CSS_ERROR);
+                if row.text() != link {
+                    row.set_text(&link);
+                }
+            })
+        };
+        {
+            let fill_link = fill_link.clone();
+            row.connect_apply(move |row| fill_link(&row.text()));
+        }
 
-    // The store search that fills the id without leaving the page.
-    let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
-    search_btn.set_valign(gtk4::Align::Center);
-    search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
-    search_btn.add_css_class(CSS_FLAT);
-    {
-        let row = row.clone();
-        let win = win.clone();
-        let game_name = game.name.clone();
-        let fill_link = fill_link.clone();
-        let state = std::rc::Rc::clone(state);
-        search_btn.connect_clicked(move |_| {
+        // The store search that fills the id without leaving the page.
+        let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
+        search_btn.set_valign(gtk4::Align::Center);
+        search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
+        search_btn.add_css_class(CSS_FLAT);
+        {
             let row = row.clone();
             let win = win.clone();
-            let game_name = game_name.clone();
+            let game_name = game.name.clone();
             let fill_link = fill_link.clone();
-            let state = std::rc::Rc::clone(&state);
-            super::steam_search::show_steam_id_search_popup(
-                &state,
-                &game_name,
-                &win,
-                &row,
-                &crate::tr!("Link"),
-                Rc::new(move |app_id: &str, _name: &str| {
-                    fill_link(app_id);
-                }),
-            );
-        });
+            let state = std::rc::Rc::clone(state);
+            search_btn.connect_clicked(move |_| {
+                let row = row.clone();
+                let win = win.clone();
+                let game_name = game_name.clone();
+                let fill_link = fill_link.clone();
+                let state = std::rc::Rc::clone(&state);
+                super::steam_search::show_steam_id_search_popup(
+                    &state,
+                    &game_name,
+                    &win,
+                    &row,
+                    &crate::tr!("Link"),
+                    Rc::new(move |app_id: &str, _name: &str| {
+                        fill_link(app_id);
+                    }),
+                );
+            });
+        }
+        row.add_suffix(&search_btn);
+        parent.add(&row);
+        row
     }
-    row.add_suffix(&search_btn);
-    parent.add(&row);
-    row
-}
 
     // Every remaining kind is a PC game: its store id is always shown. It is
     // editable so a plain PC game can be pointed at its Steam entry — that
@@ -502,7 +500,9 @@ fn build_steam_app_id_row(
     let row = adw::EntryRow::new();
     row.set_title(&crate::tr!("Steam"));
     row.set_text(&game.app_id);
-    row.set_tooltip_text(Some(&crate::tr!("The Steam app id this game matches against")));
+    row.set_tooltip_text(Some(&crate::tr!(
+        "The Steam app id this game matches against"
+    )));
     let search_btn = gtk4::Button::from_icon_name("system-search-symbolic");
     search_btn.set_valign(gtk4::Align::Center);
     search_btn.set_tooltip_text(Some(&crate::tr!("Search Steam store")));
@@ -588,11 +588,7 @@ fn build_language_section(
             .flatten()
             .map(|(l, _, _)| l.exe)
             .unwrap_or_default();
-        (
-            s.save_dir.clone(),
-            exe,
-            s.cfg.language_preferences.clone(),
-        )
+        (s.save_dir.clone(), exe, s.cfg.language_preferences.clone())
     };
     let current_lang = ira_platforms::api_emulators::read_current_language(
         game.trophy_source,

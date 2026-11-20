@@ -22,7 +22,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
                 .games
                 .iter()
                 .find(|old| old.db_id == db_id && old.variant_id == game.variant_id)
-                .is_some_and(|old| old.display_icon() != game.display_icon() || old.name != game.name);
+                .is_some_and(|old| {
+                    old.display_icon() != game.display_icon() || old.name != game.name
+                });
             apply_game_update(state, game);
             if shortcut_changed {
                 super::desktop_shortcuts::refresh_game(state, db_id);
@@ -91,9 +93,9 @@ pub fn handle_app_message(state: &SharedState, msg: AppMessage) {
             sgdb_id,
             paths,
         } => {
-                handle_sgdb_assets_downloaded(state, db_id, sgdb_id, paths);
-                refresh(state);
-            }
+            handle_sgdb_assets_downloaded(state, db_id, sgdb_id, paths);
+            refresh(state);
+        }
         AppMessage::SquareReady(db_id) => handle_square_ready(state, db_id),
         AppMessage::VariantSelected(db_id, variant_id) => {
             handle_variant_selected(state, db_id, variant_id);

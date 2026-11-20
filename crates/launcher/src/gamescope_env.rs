@@ -45,8 +45,7 @@ pub(crate) fn flatpak_run_insert_pos(command: &[String]) -> Option<usize> {
     command
         .windows(2)
         .position(|w| {
-            (w[0] == "flatpak" || w[0] == "flatpak-spawn" || w[0] == "--host")
-                && w[1] == "run"
+            (w[0] == "flatpak" || w[0] == "flatpak-spawn" || w[0] == "--host") && w[1] == "run"
         })
         .map(|pos| pos + 2)
 }
@@ -340,7 +339,10 @@ mod tests {
         ];
         let game_env = vec![
             ("DRI_PRIME".to_string(), "1".to_string()),
-            ("VK_DRIVER_FILES".to_string(), "/icd/nvidia.json".to_string()),
+            (
+                "VK_DRIVER_FILES".to_string(),
+                "/icd/nvidia.json".to_string(),
+            ),
         ];
 
         apply_game_env_inside_gamescope(&mut command, &game_env, &[]);
@@ -388,7 +390,11 @@ mod tests {
 
     #[test]
     fn test_apply_game_env_inside_gamescope_without_separator_is_noop() {
-        let mut command = vec!["gamescope".to_string(), "-W".to_string(), "1920".to_string()];
+        let mut command = vec![
+            "gamescope".to_string(),
+            "-W".to_string(),
+            "1920".to_string(),
+        ];
         let game_env = vec![("DRI_PRIME".to_string(), "1".to_string())];
 
         apply_game_env_inside_gamescope(&mut command, &game_env, &[]);
@@ -411,7 +417,12 @@ mod tests {
         let mut cmd = command();
         let mut env = vec![("DRI_PRIME".to_string(), "1".to_string())];
 
-        assert!(!apply_performance(&mut cmd, &mut env, &launch, &WineConfig::default()));
+        assert!(!apply_performance(
+            &mut cmd,
+            &mut env,
+            &launch,
+            &WineConfig::default()
+        ));
 
         assert_eq!(cmd, ["game", "--fullscreen"]);
         assert_eq!(env, [("DRI_PRIME".to_string(), "1".to_string())]);
@@ -537,10 +548,7 @@ mod tests {
                 .count(),
             1
         );
-        assert!(game_env.contains(&(
-            "WAYLAND_DISPLAY".to_string(),
-            "gamescope-0".to_string()
-        )));
+        assert!(game_env.contains(&("WAYLAND_DISPLAY".to_string(), "gamescope-0".to_string())));
         assert!(game_env.contains(&("DRI_PRIME".to_string(), "1".to_string())));
     }
 
@@ -674,7 +682,11 @@ mod tests {
 
     #[test]
     fn test_pin_flatpak_for_gamescope_ignores_native_commands() {
-        let mut command = vec!["retroarch".to_string(), "-L".to_string(), "core.so".to_string()];
+        let mut command = vec![
+            "retroarch".to_string(),
+            "-L".to_string(),
+            "core.so".to_string(),
+        ];
 
         pin_flatpak_for_gamescope(&mut command);
 

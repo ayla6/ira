@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use crate::sony::{parse_psf, psf_get_title, psf_get_title_id};
 use crate::emu_dirs::home_dir;
+use crate::sony::{parse_psf, psf_get_title, psf_get_title_id};
 
 pub fn vita_fs_path_for(executable: &str) -> PathBuf {
     if !executable.is_empty() && !executable.starts_with("flatpak:") {

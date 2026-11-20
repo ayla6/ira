@@ -92,14 +92,19 @@ impl RaClient {
 
     fn get_web(&self, url: reqwest::Url) -> Result<String, String> {
         self.rate_limit();
-        let resp = self
-            .http
-            .get(url.clone())
-            .send()
-            .map_err(|e| format!("RA web api request: {}", e.to_string().replace(url.as_str(), &redact_url(&url))))?;
+        let resp = self.http.get(url.clone()).send().map_err(|e| {
+            format!(
+                "RA web api request: {}",
+                e.to_string().replace(url.as_str(), &redact_url(&url))
+            )
+        })?;
         let status = resp.status();
         if !status.is_success() {
-            return Err(format!("RA web api HTTP {} for {}", status, redact_url(&url)));
+            return Err(format!(
+                "RA web api HTTP {} for {}",
+                status,
+                redact_url(&url)
+            ));
         }
         resp.text().map_err(|e| format!("RA web api body: {}", e))
     }
@@ -460,7 +465,10 @@ mod redact_tests {
             "https://retroachievements.org/API/API_GetGameList.php?i=7&y=sekrit&h=1",
         )
         .unwrap();
-        assert_eq!(redact_url(&url), "https://retroachievements.org/API/API_GetGameList.php");
+        assert_eq!(
+            redact_url(&url),
+            "https://retroachievements.org/API/API_GetGameList.php"
+        );
     }
 }
 
@@ -511,8 +519,7 @@ mod cache_tests {
             3,
             r#"[{"ID":1,"Title":"Game","ImageIcon":"","ImageUrl":"","NumAchievements":0,"Points":0,"Hashes":["abc123","def456"]}]"#,
         );
-        let games =
-            super::read_console_games_cache(tmp.path().to_str().unwrap(), 3).unwrap();
+        let games = super::read_console_games_cache(tmp.path().to_str().unwrap(), 3).unwrap();
         assert_eq!(games.len(), 1);
         assert_eq!(games[0].hashes, vec!["abc123", "def456"]);
     }
@@ -605,10 +612,7 @@ mod cache_tests {
         // No title contains the whole file-name text ("USA" is outside any
         // bracket group), so the part before " - " decides.
         let result = search_games(&games, "Castlevania - Dawn of Sorrow USA");
-        assert_eq!(
-            result.iter().map(|g| g.id).collect::<Vec<_>>(),
-            [1, 2, 3]
-        );
+        assert_eq!(result.iter().map(|g| g.id).collect::<Vec<_>>(), [1, 2, 3]);
     }
 
     #[test]
@@ -670,7 +674,10 @@ mod cache_tests {
         let hit = client.find_game_by_hash(dir, 3, "abc123").unwrap();
         assert_eq!(hit.id, 24933);
         // Case-insensitive on the ROM side; RA hashes are lowercase.
-        assert_eq!(client.find_game_by_hash(dir, 3, "ABC123").unwrap().id, 24933);
+        assert_eq!(
+            client.find_game_by_hash(dir, 3, "ABC123").unwrap().id,
+            24933
+        );
         assert!(client.find_game_by_hash(dir, 3, "nomatch").is_none());
         assert!(client.find_game_by_hash(dir, 3, "").is_none());
     }
@@ -695,7 +702,8 @@ mod cache_tests {
                 {"ID":4,"Title":"The Legend of Zelda: Phantom Hourglass","ImageIcon":"","ImageUrl":"","NumAchievements":1,"Points":1}
             ]"#,
         );
-        let matched = |hash: &str, names: &[&str]| client.match_ra_game(dir, 3, hash, names).map(|g| g.id);
+        let matched =
+            |hash: &str, names: &[&str]| client.match_ra_game(dir, 3, hash, names).map(|g| g.id);
         // The hash wins outright, even over a same-titled entry with a set.
         assert_eq!(matched("AAA", &["Pokemon - Emerald Version"]), Some(1));
         // Title equality ignores accents and " - " vs ":"; the entry with
@@ -704,7 +712,13 @@ mod cache_tests {
         // Later names are tried when earlier ones miss; the No-Intro
         // article-before-subtitle form matches the store spelling.
         assert_eq!(
-            matched("", &["Custom Title", "Legend of Zelda, The - Phantom Hourglass (USA)"]),
+            matched(
+                "",
+                &[
+                    "Custom Title",
+                    "Legend of Zelda, The - Phantom Hourglass (USA)"
+                ]
+            ),
             Some(4)
         );
         // Containment is not a match for an automatic matcher, and hacks

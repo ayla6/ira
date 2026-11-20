@@ -183,12 +183,7 @@ pub(super) fn register_console_pages(
         if def.id == "psp" {
             register_lazy_console_page(sidebar, stack, &crate::tr!("PlayStation 3"), "ps3");
             register_lazy_console_page(sidebar, stack, &crate::tr!("PlayStation 4"), "ps4");
-            register_lazy_console_page(
-                sidebar,
-                stack,
-                &crate::tr!("PlayStation Vita"),
-                "psvita",
-            );
+            register_lazy_console_page(sidebar, stack, &crate::tr!("PlayStation Vita"), "psvita");
         }
         if def.id == "wii" {
             register_lazy_console_page(sidebar, stack, &crate::tr!("Wii U"), "wiiu");
@@ -558,7 +553,9 @@ fn add_console_page_overrides(
     result
         .fullscreen_states
         .push((console_id.to_string(), fullscreen_state));
-    result.pause_states.push((console_id.to_string(), pause_state));
+    result
+        .pause_states
+        .push((console_id.to_string(), pause_state));
     result
         .source_overlay_states
         .push((console_id.to_string(), overlay_state));

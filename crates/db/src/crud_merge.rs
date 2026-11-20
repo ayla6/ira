@@ -98,7 +98,9 @@ pub fn merge_duplicate_games(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{add_disc, add_game, add_game_to_group, create_group, get_discs, get_sessions_for_game};
+    use super::super::{
+        add_disc, add_game, add_game_to_group, create_group, get_discs, get_sessions_for_game,
+    };
     use super::super::{find_by_db_id, init_db, record_session, update_field};
     use super::*;
     use ira_models::{GameDisc, GameKind, TrophySource};

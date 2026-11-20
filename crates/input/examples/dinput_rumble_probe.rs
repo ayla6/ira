@@ -66,9 +66,15 @@ fn main() {
         eprintln!("no 2dc8:6012 hidraw node found; connect the pad first");
         return;
     };
-    println!("rumbling {} — both motors, then the weak one alone\n", pad.display());
+    println!(
+        "rumbling {} — both motors, then the weak one alone\n",
+        pad.display()
+    );
     let Ok(mut file) = OpenOptions::new().write(true).open(pad) else {
-        eprintln!("cannot open {} for writing; check the hidraw uaccess rule", pad.display());
+        eprintln!(
+            "cannot open {} for writing; check the hidraw uaccess rule",
+            pad.display()
+        );
         return;
     };
     for (strong, weak) in [(u16::MAX, u16::MAX), (0, u16::MAX)] {

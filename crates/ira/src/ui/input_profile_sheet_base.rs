@@ -4,7 +4,7 @@
 
 use adw::prelude::*;
 use ira_input::{GamepadAxis, InputMapping, InputSource};
-use std::cell::{RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub(crate) type ProfileRc = Rc<RefCell<ira_input::InputProfile>>;
@@ -61,7 +61,10 @@ impl EditingTarget {
         profile: &mut ira_input::InputProfile,
     ) -> Option<&mut Vec<InputMapping>> {
         match self {
-            Self::Set(index) => profile.action_sets.get_mut(index).map(|set| &mut set.inputs),
+            Self::Set(index) => profile
+                .action_sets
+                .get_mut(index)
+                .map(|set| &mut set.inputs),
             Self::Layer(index) => profile
                 .action_layers
                 .get_mut(index)
@@ -89,8 +92,8 @@ impl EditingTarget {
         apply: impl FnOnce(&mut InputMapping),
     ) {
         let inputs = self.inputs_mut(profile);
-        if let Some(input) = inputs
-            .and_then(|inputs| inputs.iter_mut().find(|input| input.source == source))
+        if let Some(input) =
+            inputs.and_then(|inputs| inputs.iter_mut().find(|input| input.source == source))
         {
             apply(input);
         }
@@ -131,7 +134,8 @@ pub(crate) fn find_mapping(base: &SheetBase) -> Option<InputMapping> {
 
 pub(crate) fn with_mapping(base: &SheetBase, apply: impl FnOnce(&mut InputMapping)) {
     let mut borrow = base.profile.borrow_mut();
-    base.active_target.with_mapping(&mut borrow, base.source, apply);
+    base.active_target
+        .with_mapping(&mut borrow, base.source, apply);
 }
 
 /// Trigger axes are the one analog source with dual-stage activators.

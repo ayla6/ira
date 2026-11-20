@@ -21,7 +21,12 @@ pub(crate) fn open_fd(path: &str, flags: i32, what: &str) -> Result<RawFd, Strin
     Ok(fd)
 }
 
-pub(crate) fn map_fd(fd: RawFd, size: usize, writable: bool, what: &str) -> Result<*mut u8, String> {
+pub(crate) fn map_fd(
+    fd: RawFd,
+    size: usize,
+    writable: bool,
+    what: &str,
+) -> Result<*mut u8, String> {
     if writable && unsafe { libc::ftruncate(fd, size as libc::off_t) } < 0 {
         unsafe { libc::close(fd) };
         return Err(format!(
@@ -34,16 +39,7 @@ pub(crate) fn map_fd(fd: RawFd, size: usize, writable: bool, what: &str) -> Resu
     } else {
         libc::PROT_READ
     };
-    let ptr = unsafe {
-        libc::mmap(
-            std::ptr::null_mut(),
-            size,
-            prot,
-            libc::MAP_SHARED,
-            fd,
-            0,
-        )
-    };
+    let ptr = unsafe { libc::mmap(std::ptr::null_mut(), size, prot, libc::MAP_SHARED, fd, 0) };
     unsafe { libc::close(fd) };
     if ptr == libc::MAP_FAILED {
         return Err(format!(

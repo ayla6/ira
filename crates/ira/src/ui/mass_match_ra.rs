@@ -30,7 +30,14 @@ pub(super) fn attach_ra_actions(
         ra_box.append(&status_label(&crate::tr!("Searching…"), CSS_DIM_LABEL));
     } else {
         // Nothing will run for this row: terminal from the start.
-        show_unmatched(ra_box, state, game.db_id, &game.name, game.platform_id.id(), dialog);
+        show_unmatched(
+            ra_box,
+            state,
+            game.db_id,
+            &game.name,
+            game.platform_id.id(),
+            dialog,
+        );
     }
 }
 
@@ -245,7 +252,9 @@ fn apply_hit(
     match hit.matched {
         Some((id, title)) => {
             match id.parse::<u32>() {
-                Ok(trophy_id) => persist_ra_match(state, hit.db_id, &platform_id, trophy_id, &title),
+                Ok(trophy_id) => {
+                    persist_ra_match(state, hit.db_id, &platform_id, trophy_id, &title)
+                }
                 Err(e) => eprintln!("RA batch: bad game id {id:?}: {e}"),
             }
             paint_ra_link(&ra_box, &id, &title);

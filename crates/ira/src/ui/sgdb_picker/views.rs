@@ -26,14 +26,7 @@ pub(super) fn build_picker_views(asset: &str, zoom_initial: i32) -> (gtk4::Box, 
     toggle_btn.set_tooltip_text(Some(&crate::tr!("Switch to list view")));
     toggle_btn.add_css_class(CSS_FLAT);
 
-    let zoom_adj = gtk4::Adjustment::new(
-        zoom_initial as f64,
-        100.0,
-        500.0,
-        50.0,
-        100.0,
-        0.0,
-    );
+    let zoom_adj = gtk4::Adjustment::new(zoom_initial as f64, 100.0, 500.0, 50.0, 100.0, 0.0);
     let zoom_scale = gtk4::Scale::new(gtk4::Orientation::Horizontal, Some(&zoom_adj));
     zoom_scale.set_tooltip_text(Some(&crate::tr!("Zoom")));
     zoom_scale.set_width_request(120);

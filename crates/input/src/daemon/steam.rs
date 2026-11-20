@@ -161,11 +161,7 @@ impl SteamSession {
             return false;
         }
         if self.seen {
-            return self
-                .empty_since
-                .get_or_insert_with(Instant::now)
-                .elapsed()
-                >= STEAM_EXIT_GRACE;
+            return self.empty_since.get_or_insert_with(Instant::now).elapsed() >= STEAM_EXIT_GRACE;
         }
         self.stop_sent || (launcher_exited && self.started_at.elapsed() >= STEAM_START_TIMEOUT)
     }

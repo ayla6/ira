@@ -169,13 +169,15 @@ fn steam_refetch_queue(state: &SharedState, force: bool) -> Vec<i64> {
     let garnished: std::collections::HashSet<i64> = if force {
         std::collections::HashSet::new()
     } else {
-        ira_db::steam_garnished_ids(&s.db).unwrap_or_default().into_iter().collect()
+        ira_db::steam_garnished_ids(&s.db)
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
     };
     s.games
         .iter()
         .filter(|g| {
-            !g.steam_id.is_empty()
-                || (g.kind.is_pc() && g.native_id.parse::<u32>().is_ok())
+            !g.steam_id.is_empty() || (g.kind.is_pc() && g.native_id.parse::<u32>().is_ok())
         })
         .filter(|g| force || !garnished.contains(&g.db_id))
         .map(|g| g.db_id)
@@ -192,15 +194,11 @@ pub(crate) fn fetch_and_warm_genres(
     db: &ira_db::DbConn,
     creds: &ira_api::ScraperCreds,
 ) -> Result<usize, String> {
-    let entries: Vec<(i64, String)> = steam
-        .genres_list(creds)
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| {
-                    row.id.parse::<i64>().ok().map(|id| (id, row.name.clone()))
-                })
-                .collect()
-        })?;
+    let entries: Vec<(i64, String)> = steam.genres_list(creds).map(|rows| {
+        rows.iter()
+            .filter_map(|row| row.id.parse::<i64>().ok().map(|id| (id, row.name.clone())))
+            .collect()
+    })?;
     ira_db::warm_entity_cache(db, ira_db::KIND_GENRE, &entries)?;
     ira_db::set_entity_fetched(db, ira_db::KIND_GENRE, chrono::Utc::now().timestamp())?;
     Ok(entries.len())
@@ -329,11 +327,7 @@ pub(crate) fn steam_refetch_one(
     let app_id = if !entry.steam_id.is_empty() {
         Some(entry.steam_id.clone())
     } else {
-        entry
-            .native_id
-            .parse::<u32>()
-            .ok()
-            .map(|id| id.to_string())
+        entry.native_id.parse::<u32>().ok().map(|id| id.to_string())
     };
     let Some(app_id) = app_id else {
         return RefetchOutcome::Unchanged;
@@ -391,7 +385,8 @@ pub(crate) fn steam_refetch_one(
     }
     if let Some(extras) = &extras {
         if meta.synopses.is_empty() && !extras.synopsis.is_empty() {
-            meta.synopses.push(("en".to_string(), extras.synopsis.clone()));
+            meta.synopses
+                .push(("en".to_string(), extras.synopsis.clone()));
             changed = true;
         }
         // Age boards and genres merge additively beside ScreenScraper's
@@ -419,8 +414,8 @@ pub(crate) fn steam_refetch_one(
                 ..ira_models::ScraperMetadata::default()
             };
             meta.merge_match(&fresh);
-            changed |= meta.genres != before.genres
-                || meta.classifications != before.classifications;
+            changed |=
+                meta.genres != before.genres || meta.classifications != before.classifications;
         }
     }
     if !changed {
@@ -447,8 +442,10 @@ pub fn start_full_refetch(state: &SharedState, force: bool) -> bool {
     // The genre table rides along when never fetched: "everything"
     // includes the index the genre pickers search. Families stay
     // harvest-only — their table is library-dependent.
-    let genres_wanted =
-        matches!(ira_db::entity_fetched_at(&state.borrow().db, ira_db::KIND_GENRE), Ok(None));
+    let genres_wanted = matches!(
+        ira_db::entity_fetched_at(&state.borrow().db, ira_db::KIND_GENRE),
+        Ok(None)
+    );
     if ss_queue.is_empty() && steam_queue.is_empty() && !genres_wanted {
         return false;
     }
@@ -590,9 +587,11 @@ fn poll_refetch(
                     on_finish(&state);
                     job.finish(
                         &state,
-                        &short_done
-                            .replacen("{}", &filled.to_string(), 1)
-                            .replacen("{}", &processed.to_string(), 1),
+                        &short_done.replacen("{}", &filled.to_string(), 1).replacen(
+                            "{}",
+                            &processed.to_string(),
+                            1,
+                        ),
                         &status_done,
                     );
                     return;

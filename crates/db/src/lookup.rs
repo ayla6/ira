@@ -9,7 +9,11 @@ fn find_all_games_by(
 ) -> Result<Vec<GameEntry>, String> {
     crate::query_all(
         conn,
-        &format!("SELECT {} FROM games WHERE {}", crate::GAME_COLUMNS, where_clause),
+        &format!(
+            "SELECT {} FROM games WHERE {}",
+            crate::GAME_COLUMNS,
+            where_clause
+        ),
         params,
         crate::game_entry_from_row,
     )
@@ -22,7 +26,11 @@ fn find_game_by(
 ) -> Result<Option<GameEntry>, String> {
     crate::query_optional(
         conn,
-        &format!("SELECT {} FROM games WHERE {}", crate::GAME_COLUMNS, where_clause),
+        &format!(
+            "SELECT {} FROM games WHERE {}",
+            crate::GAME_COLUMNS,
+            where_clause
+        ),
         params,
         crate::game_entry_from_row,
     )
@@ -266,7 +274,8 @@ mod tests {
     }
 
     #[test]
-    fn test_find_by_steam_id_returns_correct_game() {        let (conn, _tmp) = setup_db();
+    fn test_find_by_steam_id_returns_correct_game() {
+        let (conn, _tmp) = setup_db();
         add_game(
             &conn,
             crate::NewGame {
@@ -322,7 +331,9 @@ mod tests {
         assert_eq!(psx.platform_id, "psx");
         let nds = find_by_steam_id(&conn, "398850", "nds").unwrap().unwrap();
         assert_eq!(nds.platform_id, "nds");
-        assert!(find_by_steam_id(&conn, "398850", "steam").unwrap().is_none());
+        assert!(find_by_steam_id(&conn, "398850", "steam")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

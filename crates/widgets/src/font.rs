@@ -47,7 +47,10 @@ pub fn install() {
         return;
     };
     if std::fs::create_dir_all(&dir).is_err() {
-        eprintln!("ira-widgets: could not create the font cache dir {}", dir.display());
+        eprintln!(
+            "ira-widgets: could not create the font cache dir {}",
+            dir.display()
+        );
         return;
     }
     unsafe {
@@ -58,7 +61,10 @@ pub fn install() {
             if (!path.exists() || stale)
                 && let Err(e) = std::fs::write(&path, bytes)
             {
-                eprintln!("ira-widgets: could not write the font to {}: {e}", path.display());
+                eprintln!(
+                    "ira-widgets: could not write the font to {}: {e}",
+                    path.display()
+                );
                 continue;
             }
             let Ok(cpath) = std::ffi::CString::new(path.as_os_str().to_string_lossy().as_bytes())

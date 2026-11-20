@@ -128,11 +128,7 @@ pub fn build_ra_games(
 /// identity, the best id the entry carries (steam id, then RA id, then
 /// the native product code), and the title — or the ROM path when the
 /// entry has no title yet.
-fn fallback_game(
-    entry: &ira_models::GameEntry,
-    console: &ActiveConsole,
-    name: String,
-) -> Game {
+fn fallback_game(entry: &ira_models::GameEntry, console: &ActiveConsole, name: String) -> Game {
     let app_id = if !entry.steam_id.is_empty() {
         entry.steam_id.clone()
     } else if !entry.trophy_id.is_empty() {
@@ -162,9 +158,7 @@ fn build_ra_games_for_console(
 ) -> Vec<Game> {
     let mut games = Vec::new();
 
-    let extensions = console
-        .def
-        .scan_extensions(options.compressed_switch_roms);
+    let extensions = console.def.scan_extensions(options.compressed_switch_roms);
     let scan_results = {
         let _s = tracing::info_span!("scan_roms").entered();
         progress(&format!("Scanning {} ROMs…", console.def.display_name));
@@ -210,8 +204,8 @@ fn build_ra_games_for_console(
             HashSet::new()
         })
     };
-    let disc_owners = ira_db::get_disc_owners_for_platform(db, console.def.id)
-        .unwrap_or_else(|e| {
+    let disc_owners =
+        ira_db::get_disc_owners_for_platform(db, console.def.id).unwrap_or_else(|e| {
             eprintln!("Failed to list disc owners for {}: {}", console.def.id, e);
             HashMap::new()
         });
@@ -315,7 +309,14 @@ fn build_ra_games_for_console(
                 continue;
             }
             let mut entry = entry.clone();
-            rehash_archived_rom(db, console, rom_path_str, &mut entry, &ra_index, options.unpack_roms);
+            rehash_archived_rom(
+                db,
+                console,
+                rom_path_str,
+                &mut entry,
+                &ra_index,
+                options.unpack_roms,
+            );
 
             if entry.trophy_source == ira_models::TrophySource::Empty
                 && !entry.manual_unmatch
@@ -329,13 +330,12 @@ fn build_ra_games_for_console(
                 if let Some(trophy_id) = ra_index.find(entry.hashes.ra_key(), &rom_norm) {
                     let new_game_id = trophy_id.to_string();
                     let already_matched =
-                        ira_db::find_by_trophy_id(db, &new_game_id, console.def.id)
-                            .unwrap_or_else(|e| {
-                                eprintln!(
-                                    "Failed to look up game_id {new_game_id}: {e}"
-                                );
+                        ira_db::find_by_trophy_id(db, &new_game_id, console.def.id).unwrap_or_else(
+                            |e| {
+                                eprintln!("Failed to look up game_id {new_game_id}: {e}");
                                 None
-                            });
+                            },
+                        );
                     if already_matched.is_none() {
                         let ra_title = ra_index
                             .title_of(trophy_id)
@@ -410,8 +410,7 @@ fn build_ra_games_for_console(
 
             let rom_norm = normalize_name(rom_name);
             let rom_hash = rom_hashes.get(&rom_path_str).map(|h| h.ra_key());
-            let matched_id = rom_hash
-                .and_then(|hash| ra_index.find(hash, &rom_norm));
+            let matched_id = rom_hash.and_then(|hash| ra_index.find(hash, &rom_norm));
 
             let serial = if matched_id.is_some() {
                 group.serial.clone()
@@ -436,12 +435,14 @@ fn build_ra_games_for_console(
                     // ROM's own control NACP; the cleaned file name stays
                     // the final fallback.
                     let meta = switch_metas.get(&rom_path_str);
-                    let native_id = meta
-                        .and_then(|m| (!m.title_id.is_empty()).then(|| m.title_id.clone()));
+                    let native_id =
+                        meta.and_then(|m| (!m.title_id.is_empty()).then(|| m.title_id.clone()));
                     let native_title =
                         meta.and_then(|m| (!m.title.is_empty()).then(|| m.title.clone()));
                     (
-                        native_id.or(serial.clone()).unwrap_or_else(|| rom_name.clone()),
+                        native_id
+                            .or(serial.clone())
+                            .unwrap_or_else(|| rom_name.clone()),
                         native_title.unwrap_or_else(|| rom_display_title(rom_name)),
                         TrophySource::Empty,
                     )
@@ -526,8 +527,8 @@ fn build_ra_games_for_console(
                     } else {
                         e.title.clone()
                     };
-                    let mut g =
-                        load_game(&e, save_dir).unwrap_or_else(|_| fallback_game(&e, console, name));
+                    let mut g = load_game(&e, save_dir)
+                        .unwrap_or_else(|_| fallback_game(&e, console, name));
                     if g.name_lower.is_empty() {
                         g.name_lower = g.name.to_lowercase();
                     }
@@ -711,10 +712,13 @@ fn compute_rom_hashes(
     let mut hashes: HashMap<String, ira_models::RomHashes> = nds_infos
         .iter()
         .map(|(path, info)| {
-            (path.clone(), ira_models::RomHashes {
-                ra_md5: info.rom_hash.clone(),
-                ..Default::default()
-            })
+            (
+                path.clone(),
+                ira_models::RomHashes {
+                    ra_md5: info.rom_hash.clone(),
+                    ..Default::default()
+                },
+            )
         })
         .collect();
     let targets: Vec<(String, PathBuf)> = groups
@@ -770,11 +774,7 @@ fn is_archive_path(path: &std::path::Path) -> bool {
 /// one, so the pass costs nothing after its first full sweep. Which
 /// consoles hash at all is the per-console policy's call — image-heavy
 /// consoles match by serial or title instead.
-fn fill_content_hashes(
-    db: &ira_db::DbConn,
-    console: &ActiveConsole,
-    unpack_roms: bool,
-) {
+fn fill_content_hashes(db: &ira_db::DbConn, console: &ActiveConsole, unpack_roms: bool) {
     let rows = match ira_db::find_all_rom_by_platform(db, console.def.id) {
         Ok(rows) => rows,
         Err(e) => {
@@ -783,8 +783,7 @@ fn fill_content_hashes(
         }
     };
     for entry in rows {
-        if !ira_models::screenscraper_hashes_content(console.def.id)
-            || !entry.hashes.md5.is_empty()
+        if !ira_models::screenscraper_hashes_content(console.def.id) || !entry.hashes.md5.is_empty()
         {
             continue;
         }
@@ -893,10 +892,7 @@ fn enrich_nds_roms(
 /// exists, so downloaded or user-chosen icons always win.
 fn write_nds_icon(save_dir: &str, db_id: i64, icon_rgba: &[u8]) {
     let data_dir = ira_parser::retro_data_dir(save_dir, db_id);
-    if ira_parser::find_image_file(
-            &data_dir,
-            ira_models::AssetType::Icon.file_base(),
-        ).is_some() {
+    if ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
         return;
     }
     if std::fs::create_dir_all(&data_dir).is_err() {
@@ -945,10 +941,7 @@ fn precompute_switch_metas(
 /// exists, so downloaded or user-chosen icons always win.
 fn write_switch_icon(save_dir: &str, db_id: i64, icon: &crate::switch::SwitchIcon) {
     let data_dir = ira_parser::switch_data_dir(save_dir, db_id);
-    if ira_parser::find_image_file(
-            &data_dir,
-            ira_models::AssetType::Icon.file_base(),
-        ).is_some() {
+    if ira_parser::find_image_file(&data_dir, ira_models::AssetType::Icon.file_base()).is_some() {
         return;
     }
     match icon {
@@ -961,7 +954,9 @@ fn write_switch_icon(save_dir: &str, db_id: i64, icon: &crate::switch::SwitchIco
                 cached,
                 &data_dir,
                 ira_models::AssetType::Icon.file_base(),
-            ).is_none() {
+            )
+            .is_none()
+            {
                 eprintln!("Failed to import Switch icon for game {db_id}");
             }
         }
@@ -1075,7 +1070,10 @@ mod tests {
             rom_display_title("Tokyo Mirage Sessions #FE Encore [0100A9400C9C2000][v0][Base]"),
             "Tokyo Mirage Sessions #FE Encore"
         );
-        assert_eq!(rom_display_title("Chrono Trigger [T-En_v1.1] (Rev 2)"), "Chrono Trigger");
+        assert_eq!(
+            rom_display_title("Chrono Trigger [T-En_v1.1] (Rev 2)"),
+            "Chrono Trigger"
+        );
     }
 
     #[test]
@@ -1233,10 +1231,7 @@ mod tests {
         let entry = ira_db::find_by_db_id(&db, db_id).unwrap().unwrap();
         // Even an RA-matched row gets the plain content hash: it is
         // ScreenScraper's key, independent of the trophy match.
-        assert_eq!(
-            entry.hashes.md5,
-            crate::rom_hash::file_md5(&rom).unwrap()
-        );
+        assert_eq!(entry.hashes.md5, crate::rom_hash::file_md5(&rom).unwrap());
     }
 
     #[test]
@@ -1423,8 +1418,12 @@ mod tests {
 
     /// A portable Eden cache with one title, and a `Game` row whose id and
     /// title still come from the ROM file name (pre-integration shape).
-    fn switch_backfill_fixture()
-    -> (tempfile::TempDir, ira_db::DbConn, ira_models::Game, std::path::PathBuf) {
+    fn switch_backfill_fixture() -> (
+        tempfile::TempDir,
+        ira_db::DbConn,
+        ira_models::Game,
+        std::path::PathBuf,
+    ) {
         let tmp = tempfile::tempdir().unwrap();
         let exe = tmp.path().join("eden.AppImage");
         std::fs::write(&exe, b"").unwrap();
@@ -1476,7 +1475,8 @@ mod tests {
     }
 
     #[test]
-    fn test_enrich_switch_roms_keeps_title_ids_and_custom_titles() {        let (tmp, db, mut game, exe) = switch_backfill_fixture();
+    fn test_enrich_switch_roms_keeps_title_ids_and_custom_titles() {
+        let (tmp, db, mut game, exe) = switch_backfill_fixture();
         let save_dir = tmp.path().join("save").to_str().unwrap().to_string();
 
         // A game already carrying a title id and a custom title is untouched.
@@ -1490,7 +1490,13 @@ mod tests {
             executable: exe.to_string_lossy().into_owned(),
         };
         let cache = crate::switch::SwitchCaches::load(&console.executable);
-        super::enrich_switch_roms(&db, &save_dir, &console, Some(&cache), std::slice::from_mut(&mut game));
+        super::enrich_switch_roms(
+            &db,
+            &save_dir,
+            &console,
+            Some(&cache),
+            std::slice::from_mut(&mut game),
+        );
 
         assert_eq!(game.name, "My own name");
         let entry = ira_db::find_by_db_id(&db, game.db_id).unwrap().unwrap();

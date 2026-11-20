@@ -61,8 +61,7 @@ fn collect_companies(
     developers: &[ira_models::ScraperEntity],
     publishers: &[ira_models::ScraperEntity],
 ) -> std::collections::BTreeMap<i64, (String, bool, bool)> {
-    let mut companies: std::collections::BTreeMap<i64, (String, bool, bool)> =
-        Default::default();
+    let mut companies: std::collections::BTreeMap<i64, (String, bool, bool)> = Default::default();
     for entity in developers {
         if let Ok(id) = entity.id.parse::<i64>() {
             companies
@@ -292,7 +291,9 @@ fn reconcile_local_companies(
             .prepare("SELECT id, name FROM scraper_companies WHERE id < 0")
             .map_err(err)?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(err)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(err)?
     };
@@ -446,25 +447,31 @@ mod tests {
                      FROM scraper_game_companies WHERE game_id = ?1",
                 )
                 .unwrap();
-            stmt.query_map(params![id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
-            .unwrap()
-            .filter_map(Result::ok)
-            .collect()
+            stmt.query_map(params![id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .filter_map(Result::ok)
+                .collect()
         };
         assert_eq!(roles, vec![(1299, 0, 1), (2911, 1, 0)]);
         assert_eq!(entry.players, "1-4");
         assert_eq!(entry.screenscraper_rating, 18.0);
-        assert_eq!(crate::scraper_company_name(&conn, 2911).unwrap().as_deref(), Some("Chunsoft"));
-        assert_eq!(crate::scraper_company_name(&conn, 1299).unwrap().as_deref(), Some("Enix"));
+        assert_eq!(
+            crate::scraper_company_name(&conn, 2911).unwrap().as_deref(),
+            Some("Chunsoft")
+        );
+        assert_eq!(
+            crate::scraper_company_name(&conn, 1299).unwrap().as_deref(),
+            Some("Enix")
+        );
         assert_eq!(
             crate::scraper_genre_name(&conn, 2620).unwrap().as_deref(),
             Some("Role Playing Game")
         );
         // Unknown ids resolve to nothing.
         assert_eq!(crate::scraper_company_name(&conn, 1).unwrap(), None);
-        let metadata = crate::scraper_metadata_for_game(&conn, id).unwrap().unwrap();
+        let metadata = crate::scraper_metadata_for_game(&conn, id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             metadata.families,
             vec![ira_models::ScraperEntity {
@@ -474,7 +481,10 @@ mod tests {
         );
         assert_eq!(crate::search_families(&conn, "quest").unwrap().len(), 1);
         let synopses: Vec<(String, String)> = serde_json::from_str(&entry.synopsis).unwrap();
-        assert_eq!(synopses, vec![("en".to_string(), "The first two quests.".to_string())]);
+        assert_eq!(
+            synopses,
+            vec![("en".to_string(), "The first two quests.".to_string())]
+        );
         let dates: std::collections::HashMap<String, String> =
             serde_json::from_str(&entry.release_dates).unwrap();
         assert_eq!(dates.get("us").map(String::as_str), Some("1993-12-18"));
@@ -512,7 +522,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(crate::scraper_company_name(&conn, 2911).unwrap().as_deref(), Some("ChunSoft"));
+        assert_eq!(
+            crate::scraper_company_name(&conn, 2911).unwrap().as_deref(),
+            Some("ChunSoft")
+        );
     }
 
     #[test]
@@ -607,7 +620,9 @@ mod tests {
             ..Default::default()
         };
         store_scraper_metadata(&conn, game_id, &meta).unwrap();
-        let metadata = crate::scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        let metadata = crate::scraper_metadata_for_game(&conn, game_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             metadata
                 .classifications
@@ -636,7 +651,9 @@ mod tests {
             ..Default::default()
         };
         assert!(merge_missing_scraper_metadata(&conn, game_id, &fresh).unwrap());
-        let metadata = crate::scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        let metadata = crate::scraper_metadata_for_game(&conn, game_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(metadata.release_date, "2015-09-15");
         assert_eq!(metadata.release_timestamp, 1_442_275_200);
 
@@ -648,7 +665,9 @@ mod tests {
             ..Default::default()
         };
         assert!(!merge_missing_scraper_metadata(&conn, game_id, &newer).unwrap());
-        let metadata = crate::scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        let metadata = crate::scraper_metadata_for_game(&conn, game_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(metadata.release_date, "2015-09-15");
     }
 
@@ -665,7 +684,9 @@ mod tests {
             ..Default::default()
         };
         store_scraper_metadata(&conn, game_id, &meta).unwrap();
-        let metadata = crate::scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        let metadata = crate::scraper_metadata_for_game(&conn, game_id)
+            .unwrap()
+            .unwrap();
         assert!(metadata.developers.iter().any(|d| d.id == local.id));
 
         // A later match credits the same studio under its real
@@ -680,7 +701,9 @@ mod tests {
             ..Default::default()
         };
         store_scraper_metadata(&conn, game_id, &real_meta).unwrap();
-        let metadata = crate::scraper_metadata_for_game(&conn, game_id).unwrap().unwrap();
+        let metadata = crate::scraper_metadata_for_game(&conn, game_id)
+            .unwrap()
+            .unwrap();
         assert!(
             metadata.developers.iter().any(|d| d.id == "123"),
             "local {local_id} must migrate to 123"

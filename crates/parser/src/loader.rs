@@ -87,8 +87,7 @@ pub fn set_achievement_earned(
     ach_name: &str,
     earned: bool,
 ) -> Result<(), String> {
-    let status_path =
-        super::paths::unlock_status_path(save_dir, trophy_source, app_id, native_id);
+    let status_path = super::paths::unlock_status_path(save_dir, trophy_source, app_id, native_id);
     // A failed read or a corrupt file must refuse the write — otherwise
     // the map starts empty and the write below erases every recorded
     // unlock the moment one new achievement is recorded.

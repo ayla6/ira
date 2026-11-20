@@ -335,7 +335,9 @@ fn spawn_and_monitor(
 /// its input through the daemon must not be remapped underneath by the
 /// daemon's idle desktop session, or "remapping: disabled" looks ignored
 /// and the virtual pad stays visible. `None` when the broker owns the pad.
-fn bypass_desktop_hold(mode: ControllerInputMode) -> Option<ira_launcher::input_daemon::DaemonClient> {
+fn bypass_desktop_hold(
+    mode: ControllerInputMode,
+) -> Option<ira_launcher::input_daemon::DaemonClient> {
     (mode != ControllerInputMode::Enabled)
         .then(ira_launcher::input_daemon::hold_desktop_for_game)
         .flatten()
@@ -346,9 +348,7 @@ fn bypass_desktop_hold(mode: ControllerInputMode) -> Option<ira_launcher::input_
 /// emulator has no desktop to sit on there — it would composite small
 /// and get blur-upscaled to the output.
 fn emulator_fullscreen(ctx: &LaunchCtx, configured: bool) -> bool {
-    configured
-        || super::big_picture::running_in_gamescope()
-        || gamescope_wrap_ahead(ctx)
+    configured || super::big_picture::running_in_gamescope() || gamescope_wrap_ahead(ctx)
 }
 
 /// True when this launch is about to wrap in its own gamescope.
@@ -376,8 +376,7 @@ fn build_emulator_env_and_wrap(
 ) -> Result<(Vec<(String, String)>, EmulatorInput), String> {
     let mut env = ira_launcher::env_builder::clean_parent_env();
 
-    let (launch, wine, _profile_id) =
-        logged_game_config(ctx.db, ctx.db_id).unwrap_or_default();
+    let (launch, wine, _profile_id) = logged_game_config(ctx.db, ctx.db_id).unwrap_or_default();
 
     let mut launch = launch;
     apply_system_defaults(&mut launch, &ctx.system_defaults);
@@ -434,11 +433,7 @@ fn build_emulator_env_and_wrap(
     inject_flatpak_overlay_env(cmd, &mut env);
 
     ira_launcher::env_builder::apply_performance(cmd, &mut env, &launch, &wine);
-    ira_launcher::env_builder::apply_gamescope_display_policy(
-        cmd,
-        &mut env,
-        in_gamescope_session,
-    );
+    ira_launcher::env_builder::apply_gamescope_display_policy(cmd, &mut env, in_gamescope_session);
 
     if overlay_enabled && (ira_launcher::env_builder::uses_gamescope(cmd) || in_gamescope_session) {
         ira_launcher::env_builder::wrap_with_host_overlay(cmd, &capture_env);
@@ -1278,8 +1273,8 @@ pub(super) fn launch_other(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_emulator_gpu_policy, apply_system_defaults, console_input_mode,
-        needs_disc_picker, ordered_disc_paths, resolved_input_mode, single_boot_path, EmulatorExes,
+        apply_emulator_gpu_policy, apply_system_defaults, console_input_mode, needs_disc_picker,
+        ordered_disc_paths, resolved_input_mode, single_boot_path, EmulatorExes,
     };
     use ira_config::{Config, SystemDefaults};
     use ira_models::{ControllerInputMode, GameDisc, GameKind};
@@ -1345,7 +1340,8 @@ mod tests {
     }
 
     #[test]
-    fn test_single_boot_path_prefers_the_override_over_the_default() {        let discs = vec![
+    fn test_single_boot_path_prefers_the_override_over_the_default() {
+        let discs = vec![
             disc(1, 1, "/games/psx/disc1.bin"),
             disc(2, 2, "/games/psx/disc2.bin"),
         ];
@@ -1405,7 +1401,10 @@ mod tests {
             Some("saturn")
         );
         cfg.console_mut("saturn").executable = "/usr/bin/yabause".to_string();
-        assert_eq!(super::missing_emulator_page(&cfg, &exes(""), GameKind::Retro), None);
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes(""), GameKind::Retro),
+            None
+        );
         assert_eq!(
             super::missing_emulator_page(&cfg, &exes("/opt/mednafen"), GameKind::Retro),
             None
@@ -1444,8 +1443,14 @@ mod tests {
             cemu: "",
             azahar: "",
         };
-        assert_eq!(super::missing_emulator_page(&cfg, &exes, GameKind::Wine), None);
-        assert_eq!(super::missing_emulator_page(&cfg, &exes, GameKind::Steam), None);
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes, GameKind::Wine),
+            None
+        );
+        assert_eq!(
+            super::missing_emulator_page(&cfg, &exes, GameKind::Steam),
+            None
+        );
     }
 
     #[test]

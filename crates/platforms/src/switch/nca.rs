@@ -148,10 +148,9 @@ fn decrypted_control_header(
 
     let header_key = keys.header_key()?;
     // Switch tweaks the sector number big-endian, opposite IEEE 1619.
-    let sector_tweak =
-        |sector: u128| -> xts_mode::Array<u8, aes::cipher::consts::U16> {
-            xts_mode::Array(sector.to_be_bytes())
-        };
+    let sector_tweak = |sector: u128| -> xts_mode::Array<u8, aes::cipher::consts::U16> {
+        xts_mode::Array(sector.to_be_bytes())
+    };
     Xts128::<aes::Aes128>::new(
         aes::Aes128::new_from_slice(&header_key[..16]).ok()?,
         aes::Aes128::new_from_slice(&header_key[16..]).ok()?,
@@ -220,7 +219,10 @@ fn control_meta_from_entry(
     let key_generation_new = *raw.get(0x220)?;
     let key_generation_old = *raw.get(0x206)?;
     let rights_id: [u8; 16] = raw.get(0x230..0x240)?.try_into().ok()?;
-    let title_id = format!("{:016x}", u64::from_le_bytes(raw.get(0x210..0x218)?.try_into().ok()?));
+    let title_id = format!(
+        "{:016x}",
+        u64::from_le_bytes(raw.get(0x210..0x218)?.try_into().ok()?)
+    );
 
     // Firmware 3.0.0+ keeps the master key revision at 0x220; older NCAs
     // zero it and store the value at 0x206. Both are one-based.
@@ -258,13 +260,8 @@ fn control_meta_from_entry(
         // decompress to plaintext first — the compressor reads through
         // the section crypto, so unlike the plain path there is nothing
         // left to decrypt. Plain NCAs read straight from the file.
-        let ncz_body = super::ncz::read_range(
-            path,
-            nca.offset,
-            section_offset,
-            size,
-            MAX_CONTROL_SECTION,
-        );
+        let ncz_body =
+            super::ncz::read_range(path, nca.offset, section_offset, size, MAX_CONTROL_SECTION);
         let from_ncz = ncz_body.is_some();
         let mut body = match ncz_body {
             Some(decompressed) => decompressed,
@@ -356,8 +353,7 @@ fn walk_romfs_files(section: &[u8], romfs_at: usize) -> Option<ControlMeta> {
     // next_hash(4) name_len(4) name…; the name is inline and padded to 4.
     let mut offset = 0usize;
     while offset + 0x20 <= meta.len() && (found.icon.is_none() || found.title.is_none()) {
-        let name_len =
-            u32::from_le_bytes(meta[offset + 28..offset + 32].try_into().ok()?) as usize;
+        let name_len = u32::from_le_bytes(meta[offset + 28..offset + 32].try_into().ok()?) as usize;
         let data_offset = u64::from_le_bytes(meta[offset + 8..offset + 16].try_into().ok()?);
         let data_size = u64::from_le_bytes(meta[offset + 16..offset + 24].try_into().ok()?);
         let name_at = offset + 0x20;
@@ -402,8 +398,8 @@ fn walk_romfs_files(section: &[u8], romfs_at: usize) -> Option<ControlMeta> {
 
 #[cfg(test)]
 mod tests {
-    use crate::switch::synth::*;
     use super::*;
+    use crate::switch::synth::*;
 
     /// Builds a full NSP around `synthetic_control_nca`.
     #[test]
@@ -467,8 +463,7 @@ mod tests {
             entry.extend_from_slice(&compressed);
         }
         for (i, size) in sizes.iter().enumerate() {
-            entry[sizes_at + i * 4..sizes_at + i * 4 + 4]
-                .copy_from_slice(&size.to_le_bytes());
+            entry[sizes_at + i * 4..sizes_at + i * 4 + 4].copy_from_slice(&size.to_le_bytes());
         }
         let nsz = nsp_of(&[("9c4f2b099c79dedff9426c2722d09b18.nca", &entry)]);
 
@@ -566,10 +561,9 @@ mod tests {
     fn test_xts_tweak_reaches_second_sector() {
         let key = [0u8; 32];
         let mut unit = [0u8; SECTOR_SIZE];
-        let sector_tweak =
-            |sector: u128| -> xts_mode::Array<u8, aes::cipher::consts::U16> {
-                xts_mode::Array(sector.to_be_bytes())
-            };
+        let sector_tweak = |sector: u128| -> xts_mode::Array<u8, aes::cipher::consts::U16> {
+            xts_mode::Array(sector.to_be_bytes())
+        };
         let xts = Xts128::<aes::Aes128>::new(
             aes::Aes128::new_from_slice(&key[..16]).unwrap(),
             aes::Aes128::new_from_slice(&key[16..]).unwrap(),
@@ -650,10 +644,7 @@ mod tests {
     #[test]
     fn test_control_meta_from_romfs_captures_nacp_before_icon() {
         let nacp_bytes = crate::switch::nacp::test_table(&[(0, "Table Order")]);
-        let romfs = two_file_romfs(
-            (b"control.nacp", &nacp_bytes),
-            (b"icon_en.dat", b"PNG!"),
-        );
+        let romfs = two_file_romfs((b"control.nacp", &nacp_bytes), (b"icon_en.dat", b"PNG!"));
 
         let meta = control_meta_from_romfs(&section_with_romfs(&romfs));
         assert_eq!(meta.title.as_deref(), Some("Table Order"));
@@ -665,10 +656,7 @@ mod tests {
     #[test]
     fn test_control_meta_from_romfs_retries_decoy_header() {
         let nacp_bytes = crate::switch::nacp::test_table(&[(0, "After Decoy")]);
-        let romfs = two_file_romfs(
-            (b"control.nacp", &nacp_bytes),
-            (b"icon_en.dat", b"PNG!"),
-        );
+        let romfs = two_file_romfs((b"control.nacp", &nacp_bytes), (b"icon_en.dat", b"PNG!"));
         let mut section = section_with_romfs(&romfs);
         // A plain 0x50 u64 sitting at an aligned offset inside the data
         // ahead of the image — exactly what romfs_image_candidates matches.
@@ -686,7 +674,7 @@ mod tests {
         let base = synthetic_control_nca(0x0100a9400c9c2000);
         let update = synthetic_control_nca(0x0100a9400c9c2800);
         let nsp = nsp_of(&[
-            ("update.nca", &update),  // listed first on purpose
+            ("update.nca", &update), // listed first on purpose
             ("base.nca", &base),
         ]);
 

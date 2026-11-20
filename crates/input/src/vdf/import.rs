@@ -797,9 +797,14 @@ mod tests {
     fn test_switches_group_imports_bumpers_and_menu_cluster() {
         let (profile, report) = import_vdf(VDF).unwrap();
         let found = sources(&profile);
-        assert!(found.contains(&"button:LeftShoulder".to_string()), "{found:?}");
+        assert!(
+            found.contains(&"button:LeftShoulder".to_string()),
+            "{found:?}"
+        );
         assert!(found.contains(&"button:Start".to_string()), "{found:?}");
-        assert!(report.warnings.is_empty() || !report.warnings.iter().any(|w| w.contains("switches")));
+        assert!(
+            report.warnings.is_empty() || !report.warnings.iter().any(|w| w.contains("switches"))
+        );
     }
 
     #[test]
@@ -807,7 +812,10 @@ mod tests {
         let (profile, _) = import_vdf(VDF).unwrap();
         // The digital full-pull side rides the trigger button source.
         let found = sources(&profile);
-        assert!(found.contains(&"button:LeftTrigger".to_string()), "{found:?}");
+        assert!(
+            found.contains(&"button:LeftTrigger".to_string()),
+            "{found:?}"
+        );
     }
 
     #[test]
@@ -816,7 +824,10 @@ mod tests {
         let stick_click = profile.action_sets[0]
             .inputs
             .iter()
-            .find(|input| input.source == crate::profile::InputSource::Button(crate::profile::GamepadButton::LeftStick))
+            .find(|input| {
+                input.source
+                    == crate::profile::InputSource::Button(crate::profile::GamepadButton::LeftStick)
+            })
             .expect("stick click mapping");
         assert!(!stick_click.activators.is_empty());
     }
@@ -830,10 +841,17 @@ mod tests {
     #[test]
     fn test_gyro_calibration_settings_import() {
         let (profile, _) = import_vdf(VDF).unwrap();
-        assert!((profile.gyro.sensitivity - 5.5).abs() < 0.01, "{:?}", profile.gyro.sensitivity);
+        assert!(
+            (profile.gyro.sensitivity - 5.5).abs() < 0.01,
+            "{:?}",
+            profile.gyro.sensitivity
+        );
         assert!((profile.gyro.dots_per_360 - 9800.0).abs() < 0.1);
         // Passthrough never survives an import.
-        assert_ne!(profile.gyro.orientation, crate::profile::GyroOrientation::Local);
+        assert_ne!(
+            profile.gyro.orientation,
+            crate::profile::GyroOrientation::Local
+        );
     }
 
     #[test]
@@ -842,13 +860,19 @@ mod tests {
         let stick = profile.action_sets[0]
             .inputs
             .iter()
-            .find(|input| input.source == crate::profile::InputSource::Axis(crate::profile::GamepadAxis::LeftX))
+            .find(|input| {
+                input.source
+                    == crate::profile::InputSource::Axis(crate::profile::GamepadAxis::LeftX)
+            })
             .expect("left stick mapping");
         let Some(crate::profile::SourceMode::Joystick(settings)) = &stick.mode else {
             panic!("joystick mode expected");
         };
         assert!((settings.processing.deadzone_inner - 7199.0 / 32767.0).abs() < 0.001);
-        assert_eq!(settings.processing.deadzone, crate::profile::StickDeadzone::Custom);
+        assert_eq!(
+            settings.processing.deadzone,
+            crate::profile::StickDeadzone::Custom
+        );
     }
 
     #[test]

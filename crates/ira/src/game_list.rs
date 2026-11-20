@@ -528,7 +528,11 @@ fn drain_pending_sources(games: &mut Vec<Game>, sources: [PendingSource<'_>; 8])
 fn sort_games(games: &mut [Game], sort_mode: SortMode, sort_descending: bool) {
     games.sort_by(|a, b| {
         let ord = sort_mode.compare(a, b);
-        if sort_descending { ord.reverse() } else { ord }
+        if sort_descending {
+            ord.reverse()
+        } else {
+            ord
+        }
     });
 }
 
@@ -929,7 +933,7 @@ fn find_or_create_console_entry_cached(
                 native_id: native_id.to_string(),
                 platform_id: platform.clone(),
                 title: title.to_string(),
-            logo_position: ira_models::LogoPosition::BottomLeft,
+                logo_position: ira_models::LogoPosition::BottomLeft,
                 logo_size: 50,
                 ..Default::default()
             });
@@ -1141,7 +1145,12 @@ fn default_wiiu_icon(
         return std::path::PathBuf::new();
     }
     let icon_tga = game_path.join("meta").join("iconTex.tga");
-    ira_parser::import_image_as_webp(&icon_tga, &data_dir, ira_models::AssetType::Icon.file_base()).unwrap_or_default()
+    ira_parser::import_image_as_webp(
+        &icon_tga,
+        &data_dir,
+        ira_models::AssetType::Icon.file_base(),
+    )
+    .unwrap_or_default()
 }
 
 fn build_azahar_games(db: &db::DbConn, save_dir: &str, executable: &str) -> Vec<Game> {
@@ -1245,10 +1254,7 @@ fn build_switch_installed_games(
                 }
             };
             if let Some(native) = &native_title {
-                if rename
-                    || game.name.is_empty()
-                    || game_loader::is_placeholder_name(&game.name)
-                {
+                if rename || game.name.is_empty() || game_loader::is_placeholder_name(&game.name) {
                     game.set_name(native);
                 }
             }
@@ -1315,7 +1321,9 @@ fn default_switch_icon(
     let Some(cached) = cached else {
         return;
     };
-    if ira_parser::import_image_as_webp(cached, &data_dir, ira_models::AssetType::Icon.file_base()).is_none() {
+    if ira_parser::import_image_as_webp(cached, &data_dir, ira_models::AssetType::Icon.file_base())
+        .is_none()
+    {
         eprintln!("Failed to import Switch icon for game {db_id}");
     }
 }
@@ -1864,7 +1872,10 @@ mod tests {
         db::set_rom_path(
             &db,
             missing_path,
-            tmp.path().join("deleted/bayonetta").to_string_lossy().as_ref(),
+            tmp.path()
+                .join("deleted/bayonetta")
+                .to_string_lossy()
+                .as_ref(),
         )
         .unwrap();
         // A live install keeps showing even when marked hidden by the user.
@@ -1925,13 +1936,7 @@ mod tests {
         cfg.console_mut("switch").enabled = false;
         let options = GameListOptions::for_startup(&cfg);
 
-        let games = build_game_list(
-            &db,
-            &cfg.save_dir,
-            &cfg,
-            &options,
-            progress,
-        );
+        let games = build_game_list(&db, &cfg.save_dir, &cfg, &options, progress);
 
         assert_eq!(games.len(), 1);
         assert_eq!(games[0].name, "Saved game");

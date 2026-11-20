@@ -43,9 +43,9 @@ fn manifest_candidate_dirs(folder: &Path) -> Vec<PathBuf> {
 /// Whether `dir` holds at least one `appmanifest_*.acf`.
 fn dir_has_acf(dir: &Path) -> bool {
     std::fs::read_dir(dir).is_ok_and(|entries| {
-        entries.flatten().any(|e| {
-            vdf::is_app_manifest_file_name(&e.file_name().to_string_lossy())
-        })
+        entries
+            .flatten()
+            .any(|e| vdf::is_app_manifest_file_name(&e.file_name().to_string_lossy()))
     })
 }
 
@@ -84,9 +84,7 @@ fn acfs_in_dir(dir: &Path) -> Vec<(String, String, String)> {
     };
     entries
         .flatten()
-        .filter(|entry| {
-            vdf::is_app_manifest_file_name(&entry.file_name().to_string_lossy())
-        })
+        .filter(|entry| vdf::is_app_manifest_file_name(&entry.file_name().to_string_lossy()))
         .filter_map(|entry| parse_acf_entry(&entry.path()))
         .collect()
 }
@@ -112,10 +110,9 @@ pub fn find_appid_in_game_folder(folder: &Path) -> Option<(String, String)> {
             .to_string();
         let acfs = acfs_in_dir(&dir);
         // Exact installdir match against the owning folder first.
-        if let Some((appid, name, _)) =
-            acfs.iter().find(|(_, _, installdir)| {
-                installdir.to_lowercase() == owner.to_lowercase()
-            })
+        if let Some((appid, name, _)) = acfs
+            .iter()
+            .find(|(_, _, installdir)| installdir.to_lowercase() == owner.to_lowercase())
         {
             return Some((appid.clone(), name.clone()));
         }
@@ -248,7 +245,12 @@ mod tests {
         // installdir): the normalized comparison still identifies it.
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path();
-        write_acf(dir, "413410", "Danganronpa", "Danganronpa.Trigger.Happy.Havoc");
+        write_acf(
+            dir,
+            "413410",
+            "Danganronpa",
+            "Danganronpa.Trigger.Happy.Havoc",
+        );
         write_acf(dir, "1687950", "Persona 5 Royal", "P5R");
 
         let result = find_appid_for_installdir(dir, "Danganronpa Trigger Happy Havoc");
@@ -270,7 +272,10 @@ mod tests {
         let result = find_appid_for_installdir(dir, "Danganronpa Trigger Happy Havoc");
         assert_eq!(
             result,
-            Some(("413410".to_string(), "Danganronpa: Trigger Happy Havoc".to_string()))
+            Some((
+                "413410".to_string(),
+                "Danganronpa: Trigger Happy Havoc".to_string()
+            ))
         );
     }
 
@@ -302,42 +307,42 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         assert!(find_appid_for_installdir(tmp.path(), "Anything").is_none());
     }
-#[test]
-fn test_steam_manifest_dirs_find_bracketed_steam() {
-    let tmp = TempDir::new().unwrap();
-    let game = tmp.path().join("Cave Story+");
-    let steam_dir = game.join("[Steam]");
-    std::fs::create_dir_all(&steam_dir).unwrap();
-    // The depotcache variant: depot manifests + the acf sit directly
-    // in [Steam], with no steamapps level.
-    std::fs::write(steam_dir.join("200903_1420789391075080371.manifest"), "").unwrap();
-    write_acf(&steam_dir, "200900", "Cave Story+", "Cave Story+");
+    #[test]
+    fn test_steam_manifest_dirs_find_bracketed_steam() {
+        let tmp = TempDir::new().unwrap();
+        let game = tmp.path().join("Cave Story+");
+        let steam_dir = game.join("[Steam]");
+        std::fs::create_dir_all(&steam_dir).unwrap();
+        // The depotcache variant: depot manifests + the acf sit directly
+        // in [Steam], with no steamapps level.
+        std::fs::write(steam_dir.join("200903_1420789391075080371.manifest"), "").unwrap();
+        write_acf(&steam_dir, "200900", "Cave Story+", "Cave Story+");
 
-    assert_eq!(
-        steam_manifest_dirs_in_game_folder(tmp.path()),
-        vec![steam_dir.clone()]
-    );
-}
+        assert_eq!(
+            steam_manifest_dirs_in_game_folder(tmp.path()),
+            vec![steam_dir.clone()]
+        );
+    }
 
-#[test]
-fn test_find_appid_in_game_folder_matches_owner_name() {
-    let tmp = TempDir::new().unwrap();
-    let game = tmp.path().join("Cave Story+");
-    let steam_dir = game.join("[Steam]");
-    std::fs::create_dir_all(&steam_dir).unwrap();
-    write_acf(&steam_dir, "200900", "Cave Story+", "Cave Story+");
+    #[test]
+    fn test_find_appid_in_game_folder_matches_owner_name() {
+        let tmp = TempDir::new().unwrap();
+        let game = tmp.path().join("Cave Story+");
+        let steam_dir = game.join("[Steam]");
+        std::fs::create_dir_all(&steam_dir).unwrap();
+        write_acf(&steam_dir, "200900", "Cave Story+", "Cave Story+");
 
-    assert_eq!(
-        find_appid_in_game_folder(tmp.path()),
-        Some(("200900".to_string(), "Cave Story+".to_string()))
-    );
-}
+        assert_eq!(
+            find_appid_in_game_folder(tmp.path()),
+            Some(("200900".to_string(), "Cave Story+".to_string()))
+        );
+    }
 
-#[test]
-fn test_find_appid_in_game_folder_none_without_steam_dir() {
-    let tmp = TempDir::new().unwrap();
-    std::fs::create_dir_all(tmp.path().join("plain game")).unwrap();
-    assert!(steam_manifest_dirs_in_game_folder(tmp.path()).is_empty());
-    assert_eq!(find_appid_in_game_folder(tmp.path()), None);
-}
+    #[test]
+    fn test_find_appid_in_game_folder_none_without_steam_dir() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("plain game")).unwrap();
+        assert!(steam_manifest_dirs_in_game_folder(tmp.path()).is_empty());
+        assert_eq!(find_appid_in_game_folder(tmp.path()), None);
+    }
 }

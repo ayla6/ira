@@ -9,7 +9,9 @@ use super::input_profile_sheet_base::{
 };
 use super::input_profile_widgets::{slider_row, slider_row_with_scale, OptionChoice, SliderSpec};
 use adw::prelude::*;
-use ira_input::{GamepadAxis, InputSource, JoystickSettings, SourceMode, StickOutput, StickProcessing};
+use ira_input::{
+    GamepadAxis, InputSource, JoystickSettings, SourceMode, StickOutput, StickProcessing,
+};
 
 /// Which `SourceMode` an edit targets: the mapping's own behavior or the
 /// shifted behavior of one of its mode shifts.
@@ -28,7 +30,9 @@ pub(crate) fn modes_for(source: InputSource) -> Vec<Option<SourceMode>> {
             Some(SourceMode::Dpad { threshold: 0.5 }),
             None,
             Some(SourceMode::ButtonPad),
-            Some(SourceMode::Joystick(JoystickSettings::new(StickOutput::Left))),
+            Some(SourceMode::Joystick(JoystickSettings::new(
+                StickOutput::Left,
+            ))),
         ];
     }
     if is_trigger_axis(source) {
@@ -353,7 +357,8 @@ pub(crate) fn curve_slider_row(
                 }
             });
             (base_for_change.on_adjusted)();
-        })
+        },
+    )
 }
 
 /// Returns a closure that mutates the targeted mode in place, if any.

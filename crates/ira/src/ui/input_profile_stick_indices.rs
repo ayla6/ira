@@ -106,5 +106,4 @@ mod tests {
             assert_eq!(axis_style_from_index(axis_style_index(style)), style);
         }
     }
-
 }

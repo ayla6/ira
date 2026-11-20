@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use crate::emu_dirs::home_dir;
+use std::path::PathBuf;
 
 pub const SHADPS4_FLATPAK_ID: &str = "net.shadps4.shadPS4";
 
@@ -9,7 +9,10 @@ fn xdg_data_subdir(subdir: &str) -> PathBuf {
         .map(|p| p.join(subdir))
         .unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            PathBuf::from(home).join(".local").join("share").join(subdir)
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join(subdir)
         })
 }
 

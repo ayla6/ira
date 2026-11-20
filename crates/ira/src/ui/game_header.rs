@@ -5,9 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::css::*;
-use super::game_display::{
-    format_last_played, format_playtime, logo_position_align, logo_rect,
-};
+use super::game_display::{format_last_played, format_playtime, logo_position_align, logo_rect};
 use super::play_button::play_button;
 use super::state::SharedState;
 
@@ -348,9 +346,7 @@ fn build_settings_button(state: &SharedState, db_id: i64) -> gtk4::Widget {
         let st_open = state.clone();
         let open_action = gio::SimpleAction::new("open_emulator", None);
         open_action.connect_activate(move |_, _| {
-            if let Err(e) =
-                super::play_button::open_emulator_no_game(&st_open, db_id)
-            {
+            if let Err(e) = super::play_button::open_emulator_no_game(&st_open, db_id) {
                 eprintln!("Failed to open emulator: {}", e);
                 let _ = st_open
                     .borrow()

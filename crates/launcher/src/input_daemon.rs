@@ -6,10 +6,10 @@
 
 use std::time::{Duration, Instant};
 
+pub use ira_input_ipc::DaemonClient;
 use ira_input_ipc::{
     socket_path, DaemonStatus, LaunchRequest, Request, Response, PROTOCOL_VERSION,
 };
-pub use ira_input_ipc::DaemonClient;
 use ira_models::ControllerInputMode;
 
 /// The input-related slice of a launch config, resolved for the daemon.
@@ -174,7 +174,9 @@ pub fn shutdown_daemon() {
     let Ok(mut client) = DaemonClient::connect(&ira_input_ipc::socket_path()) else {
         return;
     };
-    match client.request(Request::Shutdown { stop_running: false }) {
+    match client.request(Request::Shutdown {
+        stop_running: false,
+    }) {
         Ok(Response::Bye) => {}
         Ok(Response::Error { message }) => {
             eprintln!("ira-input: daemon stays up: {message}");

@@ -247,14 +247,7 @@ struct BackgroundCtx {
     ra_username: String,
     ra_web_api_key: String,
     cfg: Config,
-    enrich_targets: Vec<(
-        String,
-        ira_models::TrophySource,
-        String,
-        i64,
-        String,
-        Game,
-    )>,
+    enrich_targets: Vec<(String, ira_models::TrophySource, String, i64, String, Game)>,
     ra_games: Vec<(i64, String, String)>,
     sgdb_games: Vec<(
         i64,
@@ -375,8 +368,7 @@ fn spawn_enrich_workers(ctx: &BackgroundCtx) {
         .max(1);
     let chunk_size = enrich_targets.len().div_ceil(n_threads).max(1);
     std::thread::spawn(move || {
-        let _s =
-            tracing::info_span!("background_enrich", count = enrich_targets.len()).entered();
+        let _s = tracing::info_span!("background_enrich", count = enrich_targets.len()).entered();
         std::thread::scope(|s| {
             let handles: Vec<_> = enrich_targets
                 .chunks(chunk_size)
@@ -390,27 +382,26 @@ fn spawn_enrich_workers(ctx: &BackgroundCtx) {
                     let cfg = &cfg;
                     s.spawn(move || {
                         for (app_id, trophy_source, platform_id, db_id, title, game) in chunk {
-                            let _ =
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    crate::ui::enrichment::enrich_game_blocking(
-                                        crate::ui::enrichment::EnrichGameParams {
-                                            app_id: app_id.clone(),
-                                            trophy_source: *trophy_source,
-                                            platform_id: platform_id.clone(),
-                                            db_id: *db_id,
-                                            title: title.clone(),
-                                            steam: steam.clone(),
-                                            sender: sender.clone(),
-                                            save_dir: save_dir.clone(),
-                                            db: db.clone(),
-                                            ra_username: ra_username.clone(),
-                                            ra_web_api_key: ra_web_api_key.clone(),
-                                            cfg: cfg.clone(),
-                                            game: Some(game.clone()),
-                                            progress: None,
-                                        },
-                                    );
-                                }));
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                crate::ui::enrichment::enrich_game_blocking(
+                                    crate::ui::enrichment::EnrichGameParams {
+                                        app_id: app_id.clone(),
+                                        trophy_source: *trophy_source,
+                                        platform_id: platform_id.clone(),
+                                        db_id: *db_id,
+                                        title: title.clone(),
+                                        steam: steam.clone(),
+                                        sender: sender.clone(),
+                                        save_dir: save_dir.clone(),
+                                        db: db.clone(),
+                                        ra_username: ra_username.clone(),
+                                        ra_web_api_key: ra_web_api_key.clone(),
+                                        cfg: cfg.clone(),
+                                        game: Some(game.clone()),
+                                        progress: None,
+                                    },
+                                );
+                            }));
                         }
                     })
                 })
@@ -433,8 +424,7 @@ fn spawn_square_workers(ctx: &BackgroundCtx) {
     let save_dir = ctx.save_dir.clone();
     let cfg = ctx.cfg.clone();
     std::thread::spawn(move || {
-        let _s =
-            tracing::info_span!("background_squares", count = square_targets.len()).entered();
+        let _s = tracing::info_span!("background_squares", count = square_targets.len()).entered();
         for game in square_targets {
             let square =
                 super::fetch_images::ensure_game_square(&steam, &save_dir, &db, &cfg, &game);
@@ -476,13 +466,11 @@ fn spawn_ra_workers(ctx: &BackgroundCtx) {
                             };
                             let current_mtime =
                                 crate::game_loader::ra_achievement_mtime(save_dir, app_id);
-                            if current_mtime > 0
-                                && current_mtime == entry.cached_achievement_mtime
+                            if current_mtime > 0 && current_mtime == entry.cached_achievement_mtime
                             {
                                 continue;
                             }
-                            if let Ok(updated) = crate::game_loader::load_game(&entry, save_dir)
-                            {
+                            if let Ok(updated) = crate::game_loader::load_game(&entry, save_dir) {
                                 if let Err(e) = ira_db::update_achievement_counts(
                                     db,
                                     updated.db_id,
@@ -514,33 +502,33 @@ fn spawn_sgdb_workers(ctx: &BackgroundCtx) {
     let sender = ctx.sender.clone();
     let save_dir = ctx.save_dir.clone();
     std::thread::spawn(move || {
-        let _s = tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len())
-            .entered();
+        let _s =
+            tracing::info_span!("background_sgdb_redownload", count = sgdb_games.len()).entered();
         for (db_id, sgdb_id, kind, app_id, trophy_source) in sgdb_games {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let dir = if kind == ira_models::GameKind::Ps3 {
-                ira_parser::ps3_data_dir(&save_dir, &app_id)
-            } else if kind == ira_models::GameKind::Retro {
-                ira_parser::retro_data_dir(&save_dir, db_id)
-            } else if kind == ira_models::GameKind::Switch {
-                ira_parser::switch_data_dir(&save_dir, db_id)
-            } else if trophy_source.has_steam_enrichment() {
-                ira_parser::data_dir(&save_dir, &app_id)
-            } else {
-                ira_parser::local_data_dir(&save_dir, db_id)
-            };
-            // Console games keep their square native: SGDB must never
-            // write that slot, and an empty path preserves whatever the
-            // handler already shows.
-            let skip: &[ira_models::AssetType] = if matches!(
-                kind,
-                ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
-            ) {
-                &[ira_models::AssetType::Square]
-            } else {
-                &[]
-            };
-            steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), skip)
+                let dir = if kind == ira_models::GameKind::Ps3 {
+                    ira_parser::ps3_data_dir(&save_dir, &app_id)
+                } else if kind == ira_models::GameKind::Retro {
+                    ira_parser::retro_data_dir(&save_dir, db_id)
+                } else if kind == ira_models::GameKind::Switch {
+                    ira_parser::switch_data_dir(&save_dir, db_id)
+                } else if trophy_source.has_steam_enrichment() {
+                    ira_parser::data_dir(&save_dir, &app_id)
+                } else {
+                    ira_parser::local_data_dir(&save_dir, db_id)
+                };
+                // Console games keep their square native: SGDB must never
+                // write that slot, and an empty path preserves whatever the
+                // handler already shows.
+                let skip: &[ira_models::AssetType] = if matches!(
+                    kind,
+                    ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
+                ) {
+                    &[ira_models::AssetType::Square]
+                } else {
+                    &[]
+                };
+                steam.ensure_sgdb_assets_in_dir(&dir, ira_api::types::SgdbId::Game(&sgdb_id), skip)
             }));
             if let Ok(paths) = result {
                 let _ = sender.send(crate::AppMessage::SgdbAssetsDownloaded {

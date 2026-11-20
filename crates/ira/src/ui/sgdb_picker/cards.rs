@@ -10,10 +10,7 @@ use std::rc::Rc;
 /// growing with the viewport instead of fixed squares.
 pub(super) fn tile_size(ctx: &SgdbPickerCtx) -> (i32, i32) {
     let w = ctx.zoom_level.get().clamp(100, 500);
-    (
-        w,
-        (w as f64 / ctx.tile_aspect).round().max(1.0) as i32,
-    )
+    (w, (w as f64 / ctx.tile_aspect).round().max(1.0) as i32)
 }
 
 /// List-row thumbnail for a tile width: a third of the tile, floored so
@@ -281,10 +278,7 @@ fn all_buttons_push(ctx: &SgdbPickerCtx, btn: &gtk4::Button) {
 /// Reveal `target` while the pointer is anywhere over `area` (the whole
 /// card or row), not just over the button itself — CSS :hover on ancestor
 /// boxes is not dependable, so track motion explicitly.
-fn attach_hover_reveal<T: IsA<gtk4::Widget>, U: IsA<gtk4::Widget>>(
-    area: &T,
-    target: &U,
-) {
+fn attach_hover_reveal<T: IsA<gtk4::Widget>, U: IsA<gtk4::Widget>>(area: &T, target: &U) {
     let target = target.downgrade();
     let ctrl = gtk4::EventControllerMotion::new();
     ctrl.connect_enter({

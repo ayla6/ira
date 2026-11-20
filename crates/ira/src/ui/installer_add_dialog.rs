@@ -15,8 +15,8 @@ use ira_platforms::installer::{
 };
 
 use super::auto_add_dialog::{
-    resolve_wine_config, set_status, show_error, show_identified_form,
-    spawn_identify_thread, IdentifiedGame, Wizard, WizardEvent,
+    resolve_wine_config, set_status, show_error, show_identified_form, spawn_identify_thread,
+    IdentifiedGame, Wizard, WizardEvent,
 };
 use super::css::*;
 use super::helpers::{clear_children, esc};
@@ -86,7 +86,6 @@ pub fn show_installer_add_dialog(state: &SharedState) {
     }));
 
     show_config_page(&wizard, &ist);
-
 }
 
 fn show_config_page(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerState>>) {
@@ -626,14 +625,12 @@ fn on_installer_complete(
     clear_children(&content);
     let status = adw::StatusPage::new();
     status.set_title(&title);
-    status.set_description(
-        Some(
-            &crate::tr!("{} ({} of {})")
-                .replacen("{}", &installer_name, 1)
-                .replacen("{}", &(index + 1).to_string(), 1)
-                .replacen("{}", &total.to_string(), 1),
-        ),
-    );
+    status.set_description(Some(
+        &crate::tr!("{} ({} of {})")
+            .replacen("{}", &installer_name, 1)
+            .replacen("{}", &(index + 1).to_string(), 1)
+            .replacen("{}", &total.to_string(), 1),
+    ));
     status.set_icon_name(Some("system-software-install-symbolic"));
 
     let btn_row = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -667,8 +664,9 @@ fn on_installer_complete(
         {
             let wizard_c = wizard.clone();
             let ist_c = ist.clone();
-            skip_btn
-                .connect_clicked(move |_| advance_after_complete(&wizard_c, &ist_c, index, is_last));
+            skip_btn.connect_clicked(move |_| {
+                advance_after_complete(&wizard_c, &ist_c, index, is_last)
+            });
         }
         btn_row.append(&skip_btn);
     }
@@ -829,14 +827,18 @@ fn pick_install_folder(wizard: &Rc<RefCell<Wizard>>, ist: &Rc<RefCell<InstallerS
     let Some(host) = super::helpers::hosting_window(win.as_widget()) else {
         return;
     };
-    dialog.select_folder(Some(&host), None::<&gtk4::gio::Cancellable>, move |result| {
-        if let Ok(file) = result {
-            if let Some(path) = file.path() {
-                ist_c.borrow_mut().detected_folder = Some(path.clone());
-                start_identify_from_install(&wizard_c, &ist_c, path);
+    dialog.select_folder(
+        Some(&host),
+        None::<&gtk4::gio::Cancellable>,
+        move |result| {
+            if let Ok(file) = result {
+                if let Some(path) = file.path() {
+                    ist_c.borrow_mut().detected_folder = Some(path.clone());
+                    start_identify_from_install(&wizard_c, &ist_c, path);
+                }
             }
-        }
-    });
+        },
+    );
 }
 
 fn pick_from_multiple(

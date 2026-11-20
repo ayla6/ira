@@ -739,12 +739,19 @@ fn connect_search_signals(
             return glib::Propagation::Proceed;
         };
         let shortcut = modifiers.intersects(
-            gdk4::ModifierType::CONTROL_MASK | gdk4::ModifierType::ALT_MASK
-                | gdk4::ModifierType::SUPER_MASK | gdk4::ModifierType::META_MASK,
+            gdk4::ModifierType::CONTROL_MASK
+                | gdk4::ModifierType::ALT_MASK
+                | gdk4::ModifierType::SUPER_MASK
+                | gdk4::ModifierType::META_MASK,
         );
         let editing = gtk4::prelude::GtkWindowExt::focus(&window)
             .is_some_and(|focus| focus.is::<gtk4::Editable>());
-        if shortcut || editing || !key.to_unicode().is_some_and(|ch| !ch.is_control() && !ch.is_whitespace()) {
+        if shortcut
+            || editing
+            || !key
+                .to_unicode()
+                .is_some_and(|ch| !ch.is_control() && !ch.is_whitespace())
+        {
             return glib::Propagation::Proceed;
         }
         entry.grab_focus();

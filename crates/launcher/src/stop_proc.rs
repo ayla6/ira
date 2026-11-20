@@ -105,7 +105,13 @@ pub fn stop_game(
     let wine_prefix = wine_prefix.map(|s| s.to_string());
     let env: Vec<(String, String)> = env.to_vec();
     std::thread::spawn(move || {
-        stop_wine_process_group(pid, wine_exe.as_deref(), wine_prefix.as_deref(), &env, &descendants);
+        stop_wine_process_group(
+            pid,
+            wine_exe.as_deref(),
+            wine_prefix.as_deref(),
+            &env,
+            &descendants,
+        );
     });
 }
 
@@ -171,7 +177,6 @@ fn stop_wine_process_group(
     wait_all_gone(descendants, Duration::from_secs(2));
 
     sigkill_leftovers(pid, descendants);
-
 }
 
 /// Step 7: final fallback SIGKILL.

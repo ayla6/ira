@@ -7,8 +7,8 @@
 
 use crate::screenscraper_creds::{ScraperCreds, SOFT_NAME};
 use crate::SteamDataClient;
-use ira_models::screenscraper_system_id;
 use ira_models::region_from_rom_paths;
+use ira_models::screenscraper_system_id;
 use serde::Deserialize;
 use std::collections::HashSet;
 use unicode_normalization::UnicodeNormalization;
@@ -207,11 +207,7 @@ pub fn game_info_by_id_url(creds: &ScraperCreds, ss_id: &str) -> String {
 /// match dialog. An explicit `system` narrows the answer to one
 /// ScreenScraper system; `None` searches every system at once — the
 /// cross-platform lookup PC games fall back to.
-pub fn search_url_scoped(
-    creds: &ScraperCreds,
-    term: &str,
-    system: Option<u32>,
-) -> String {
+pub fn search_url_scoped(creds: &ScraperCreds, term: &str, system: Option<u32>) -> String {
     let mut url = format!(
         "{API_URL_BASE}/jeuRecherche.php?{}&softname={}&output=xml&recherche={}",
         creds.auth_params(),
@@ -307,7 +303,10 @@ fn pick<'a>(preference: &[&str], items: &'a [(String, String)]) -> Option<&'a st
     }
     // Nothing preferred: take whatever exists, so regionless or
     // other-language entries still surface.
-    items.iter().map(|(_, text)| text.as_str()).find(|t| !t.is_empty())
+    items
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .find(|t| !t.is_empty())
 }
 
 // The API answers in XML whose shape ES-DE documents by example:
@@ -522,11 +521,7 @@ pub fn parse_games_with(
     let mut games: Vec<ScrapedGame> = source_games
         .iter()
         .map(|jeu| scraped_game_with(jeu, &ordered_regions(preferred_region)))
-        .filter(|g| {
-            !g.name
-                .to_uppercase()
-                .starts_with("ZZZ(NOTGAME)")
-        })
+        .filter(|g| !g.name.to_uppercase().starts_with("ZZZ(NOTGAME)"))
         .collect();
     let mut seen = std::collections::HashSet::new();
     games.retain(|g| seen.insert(g.ss_id.clone()));
@@ -554,7 +549,11 @@ fn scraped_game_with(jeu: &SsJeu, regions: &[&str]) -> ScrapedGame {
         .noms
         .as_ref()
         .and_then(|n| {
-            let items: Vec<_> = n.nom.iter().map(|n| (n.region.clone(), n.text.clone())).collect();
+            let items: Vec<_> = n
+                .nom
+                .iter()
+                .map(|n| (n.region.clone(), n.text.clone()))
+                .collect();
             pick(regions, &items).map(str::to_string)
         })
         .unwrap_or_default()
@@ -696,7 +695,12 @@ fn scraped_game_with(jeu: &SsJeu, regions: &[&str]) -> ScrapedGame {
         publishers: entity_list(&jeu.publishers),
         genres,
         families,
-        players: jeu.joueurs.as_deref().unwrap_or_default().trim().to_string(),
+        players: jeu
+            .joueurs
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
         rating,
         classifications,
         synopses,
@@ -755,36 +759,36 @@ pub struct DiscMedia {
     pub png: Vec<u8>,
 }
 
-    /// The region-picked `support-2D` URL for every disc the answer carries.
-    /// Multi-disc games tag each media node with a `support` attribute
-    /// (`<media type="support-2D" region="eu" support="2">`); nodes without
-    /// one are disc 1. URLs get the same space-escaping as `media_url`.
-    /// A multi-region list is a preference order (the ROM's own region
-    /// first); a single region pins exactly that region or nothing.
-    pub(crate) fn parse_disc_images(
-        xml: &str,
-        regions: &[String],
-    ) -> Result<Vec<(i32, String)>, String> {
-        let data: SsData = quick_xml::de::from_str(xml)
-            .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
-        let jeux: Vec<SsJeu> = match data.jeux {
-            Some(jeux) => jeux.games,
-            None => data.jeu.into_iter().collect(),
-        };
-        let Some(jeu) = jeux.into_iter().next() else {
-            return Ok(Vec::new());
-        };
-        let fallback = region_preference();
-        let strict = regions.len() == 1;
-        let regions: Vec<&str> = if regions.is_empty() {
-            fallback
-        } else {
-            regions.iter().map(String::as_str).collect()
-        };
-        let Some(medias) = jeu.medias.as_ref() else {
-            return Ok(Vec::new());
-        };
-        Ok(disc_media_urls(&medias.media, &regions, strict))
+/// The region-picked `support-2D` URL for every disc the answer carries.
+/// Multi-disc games tag each media node with a `support` attribute
+/// (`<media type="support-2D" region="eu" support="2">`); nodes without
+/// one are disc 1. URLs get the same space-escaping as `media_url`.
+/// A multi-region list is a preference order (the ROM's own region
+/// first); a single region pins exactly that region or nothing.
+pub(crate) fn parse_disc_images(
+    xml: &str,
+    regions: &[String],
+) -> Result<Vec<(i32, String)>, String> {
+    let data: SsData = quick_xml::de::from_str(xml)
+        .map_err(|e| format!("ScreenScraper returned unreadable XML: {e}"))?;
+    let jeux: Vec<SsJeu> = match data.jeux {
+        Some(jeux) => jeux.games,
+        None => data.jeu.into_iter().collect(),
+    };
+    let Some(jeu) = jeux.into_iter().next() else {
+        return Ok(Vec::new());
+    };
+    let fallback = region_preference();
+    let strict = regions.len() == 1;
+    let regions: Vec<&str> = if regions.is_empty() {
+        fallback
+    } else {
+        regions.iter().map(String::as_str).collect()
+    };
+    let Some(medias) = jeu.medias.as_ref() else {
+        return Ok(Vec::new());
+    };
+    Ok(disc_media_urls(&medias.media, &regions, strict))
 }
 
 /// The region-picked `support-2D` URL for every disc the answer carries.
@@ -805,14 +809,13 @@ fn disc_media_urls(medias: &[SsMedia], regions: &[&str], strict: bool) -> Vec<(i
     let mut out: Vec<(i32, String)> = per_disc
         .into_iter()
         .filter_map(|(disc, urls)| {
-                let url = if strict {
-                    urls.iter().find_map(|(region, url)| {
-                        (regions.contains(&region.as_str()) && !url.is_empty())
-                            .then_some(url.as_str())
-                    })
-                } else {
-                    pick(regions, &urls)
-                };
+            let url = if strict {
+                urls.iter().find_map(|(region, url)| {
+                    (regions.contains(&region.as_str()) && !url.is_empty()).then_some(url.as_str())
+                })
+            } else {
+                pick(regions, &urls)
+            };
             url.map(|url| (disc, url.replace(' ', "%20")))
         })
         .collect();
@@ -912,18 +915,12 @@ impl SteamDataClient {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
-        self.screenscraper_get(
-            &search_url_scoped(creds, term, system),
-            preferred_region,
-        )
+        self.screenscraper_get(&search_url_scoped(creds, term, system), preferred_region)
     }
 
     /// Fetch the whole genre table. The service has no per-name genre
     /// search, so the fetched copy is the search index.
-    pub fn genres_list(
-        &self,
-        creds: &ScraperCreds,
-    ) -> Result<Vec<GenreListEntry>, String> {
+    pub fn genres_list(&self, creds: &ScraperCreds) -> Result<Vec<GenreListEntry>, String> {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
@@ -951,10 +948,7 @@ impl SteamDataClient {
             return Err("ScreenScraper credentials not configured".to_string());
         }
         let preferred = region_from_rom_paths(&[rom_nom.to_string()]);
-        self.screenscraper_get(
-            &game_info_url(creds, rom_nom, platform_id, md5),
-            preferred,
-        )
+        self.screenscraper_get(&game_info_url(creds, rom_nom, platform_id, md5), preferred)
     }
 
     /// Exact lookup by disc serial — the identity that survives chd/rvz
@@ -970,10 +964,7 @@ impl SteamDataClient {
             return Err("ScreenScraper credentials not configured".to_string());
         }
         let preferred = region_from_rom_paths(&[serial.to_string()]);
-        self.screenscraper_get(
-            &serial_lookup_url(creds, serial, platform_id),
-            preferred,
-        )
+        self.screenscraper_get(&serial_lookup_url(creds, serial, platform_id), preferred)
     }
 
     /// The account's quota counters. Best-effort: callers log failures.
@@ -1004,7 +995,10 @@ impl SteamDataClient {
             .send()
             .map_err(|e| format!("ScreenScraper media download failed: {e}"))?;
         if !resp.status().is_success() {
-            return Err(format!("ScreenScraper media download failed: {}", resp.status()));
+            return Err(format!(
+                "ScreenScraper media download failed: {}",
+                resp.status()
+            ));
         }
         resp.bytes()
             .map(|b| b.to_vec())
@@ -1047,7 +1041,10 @@ impl SteamDataClient {
 
     /// The genre table, from the disk cache when present, fetched and
     /// cached otherwise — one request, ever, until the file is deleted.
-    pub fn screenscraper_genres(&self, creds: &ScraperCreds) -> Result<Vec<GenreListEntry>, String> {
+    pub fn screenscraper_genres(
+        &self,
+        creds: &ScraperCreds,
+    ) -> Result<Vec<GenreListEntry>, String> {
         if !creds.is_configured() {
             return Err("ScreenScraper credentials not configured".to_string());
         }
@@ -1058,7 +1055,12 @@ impl SteamDataClient {
 
     /// The file's content when it exists, otherwise a fresh fetch written
     /// into it first. A failed cache write only costs the next fetch.
-    fn cached_or_fetch(&self, dir: &std::path::Path, file: &str, url: &str) -> Result<String, String> {
+    fn cached_or_fetch(
+        &self,
+        dir: &std::path::Path,
+        file: &str,
+        url: &str,
+    ) -> Result<String, String> {
         let path = dir.join(file);
         if let Ok(body) = std::fs::read_to_string(&path) {
             return Ok(body);
@@ -1194,7 +1196,12 @@ mod tests {
             user: "aya 7".into(),
             password: "s3cret&".into(),
         };
-        let url = game_info_url(&creds, "Final Fantasy VII (USA)", "psx", Some(("ABCDEF", 711_000)));
+        let url = game_info_url(
+            &creds,
+            "Final Fantasy VII (USA)",
+            "psx",
+            Some(("ABCDEF", 711_000)),
+        );
         assert!(url.starts_with("https://www.screenscraper.fr/api2/jeuInfos.php?"));
         assert!(url.contains("devid=ira"));
         assert!(url.contains("devpassword=devkey"));
@@ -1295,8 +1302,14 @@ mod tests {
         assert_eq!(game.name, "Dragon Quest I & II");
         // Every region's name is kept for matching, with its region.
         assert!(game.names.len() >= 3);
-        assert!(game.names.iter().any(|(r, n)| r == "us" && n == "Dragon Quest I & II"));
-        assert!(game.names.iter().any(|(r, n)| r == "jp" && n.contains("ドラゴンクエスト")));
+        assert!(game
+            .names
+            .iter()
+            .any(|(r, n)| r == "us" && n == "Dragon Quest I & II"));
+        assert!(game
+            .names
+            .iter()
+            .any(|(r, n)| r == "jp" && n.contains("ドラゴンクエスト")));
         assert_eq!(game.release_date, "1993-12-18");
         // The console the entry belongs to, named as the source spells it.
         assert_eq!(game.system_name, "Super Nintendo");
@@ -1350,18 +1363,27 @@ mod tests {
         // Every language's synopsis is kept, entities cleaned up.
         assert_eq!(game.synopses.len(), 2);
         assert_eq!(
-            game.synopses.iter().find(|(l, _)| l == "en").map(|(_, t)| t.as_str()),
+            game.synopses
+                .iter()
+                .find(|(l, _)| l == "en")
+                .map(|(_, t)| t.as_str()),
             Some("The first two Dragon Quest \"quests\", together.")
         );
         // Stored preferred-language first: English sorts ahead of French.
-        assert_eq!(
-            game.synopses.first().map(|(l, _)| l.as_str()),
-            Some("en")
-        );
+        assert_eq!(game.synopses.first().map(|(l, _)| l.as_str()), Some("en"));
         // Region preference for media: us is preferred over wor.
-        assert_eq!(game.screenshot.as_deref(), Some("https://ss.example/dq2_us.png"));
-        assert_eq!(game.box2d.as_deref(), Some("https://ss.example/dq2_box.png"));
-        assert_eq!(game.wheel.as_deref(), Some("https://ss.example/dq2_wheel.png"));
+        assert_eq!(
+            game.screenshot.as_deref(),
+            Some("https://ss.example/dq2_us.png")
+        );
+        assert_eq!(
+            game.box2d.as_deref(),
+            Some("https://ss.example/dq2_box.png")
+        );
+        assert_eq!(
+            game.wheel.as_deref(),
+            Some("https://ss.example/dq2_wheel.png")
+        );
         assert_eq!(
             game.steamgrid.as_deref(),
             Some("https://ss.example/dq2_grid.png")
@@ -1411,10 +1433,7 @@ mod tests {
         let xml = r#"<Data><jeux><jeu id="1">
             <noms><nom region="us">Cool Game</nom><nom region="eu">Cool Game: European Title</nom></noms>
         </jeu></jeux></Data>"#;
-        assert_eq!(
-            parse_games(xml).unwrap().remove(0).name,
-            "Cool Game"
-        );
+        assert_eq!(parse_games(xml).unwrap().remove(0).name, "Cool Game");
         assert_eq!(
             parse_games_with(xml, Some("eu")).unwrap().remove(0).name,
             "Cool Game: European Title"
@@ -1515,7 +1534,10 @@ mod tests {
         assert_eq!(infos.requests_today, 42);
         assert_eq!(infos.max_requests_per_day, 15000);
         assert!(!infos.exhausted());
-        let spent = SsUserInfos { requests_today: 15000, ..infos.clone() };
+        let spent = SsUserInfos {
+            requests_today: 15000,
+            ..infos.clone()
+        };
         assert!(spent.exhausted());
     }
 
@@ -1583,10 +1605,8 @@ mod tests {
 
     #[test]
     fn test_parse_games_reports_rejected_credentials() {
-        let err = parse_games(
-            "Erreur de login : Vérifier vos identifiants développeur !",
-        )
-        .unwrap_err();
+        let err =
+            parse_games("Erreur de login : Vérifier vos identifiants développeur !").unwrap_err();
         assert!(err.contains("rejected the developer credentials"), "{err}");
         // Other API errors surface their text instead of parsing garbage.
         let err = parse_games("Erreur : le service est indisponible").unwrap_err();

@@ -19,9 +19,8 @@ pub(super) fn disc_file_base(disc_number: i32) -> String {
 /// a positive disc number, so the Save pipeline can tell them apart
 /// from asset-type keys.
 pub(super) fn is_disc_draft_key(key: &str) -> bool {
-    key.strip_prefix("disc").is_some_and(|rest| {
-        !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit())
-    })
+    key.strip_prefix("disc")
+        .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// The ScreenScraper region the game's own ROMs point at, for ordering
@@ -136,7 +135,13 @@ pub(crate) fn ensure_game_discs(
         cfg.screenscraper_id.clone(),
         cfg.screenscraper_password.clone(),
     );
-    let downloaded = download_disc_media(steam, &creds, &ss_id, &region_order(db, game.db_id), &missing);
+    let downloaded = download_disc_media(
+        steam,
+        &creds,
+        &ss_id,
+        &region_order(db, game.db_id),
+        &missing,
+    );
     if downloaded.is_empty() {
         return false;
     }
@@ -254,9 +259,7 @@ where
         }
         let mut pixels = HashMap::new();
         for (disc, bytes) in map {
-            if let Some((width, height, rgba)) =
-                ira_parser::decode_rgba_preview(&bytes, max_px)
-            {
+            if let Some((width, height, rgba)) = ira_parser::decode_rgba_preview(&bytes, max_px) {
                 pixels.insert(disc, (width, height, rgba));
             }
         }

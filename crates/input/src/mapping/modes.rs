@@ -296,7 +296,11 @@ impl MappingEngine {
             .is_some_and(|mapping| !mapping.activators.is_empty())
     }
 
-    pub(crate) fn stick_pair(&self, x_axis: GamepadAxis, y_axis: GamepadAxis) -> Option<(f32, f32)> {
+    pub(crate) fn stick_pair(
+        &self,
+        x_axis: GamepadAxis,
+        y_axis: GamepadAxis,
+    ) -> Option<(f32, f32)> {
         // A stick that has only reported one axis so far still has a
         // well-defined position; the other reads as centered.
         let x = self
@@ -540,7 +544,9 @@ mod tests {
         // A full pull must come out exactly 1.0 even when rounding anywhere
         // in the chain pushes the vector magnitude a hair past the outer
         // radius; the direction renormalization must not shave it.
-        let profile = mode_profile(SourceMode::Joystick(JoystickSettings::new(StickOutput::Left)));
+        let profile = mode_profile(SourceMode::Joystick(JoystickSettings::new(
+            StickOutput::Left,
+        )));
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(stick(InputSource::Axis(GamepadAxis::LeftX), 0.0));
         engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 1.0));
@@ -559,7 +565,9 @@ mod tests {
         // Sub-percent jitter on the idle axis must not shave the pulled
         // axis either: magnitude lands just past 1.0, and the pulled axis
         // stays exactly 1.0 while the jitter passes through honestly.
-        let profile = mode_profile(SourceMode::Joystick(JoystickSettings::new(StickOutput::Left)));
+        let profile = mode_profile(SourceMode::Joystick(JoystickSettings::new(
+            StickOutput::Left,
+        )));
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(stick(InputSource::Axis(GamepadAxis::LeftX), -0.0118));
         engine.process(stick(InputSource::Axis(GamepadAxis::LeftY), 1.0));
@@ -722,10 +730,9 @@ mod tests {
                 value: -1.0
             }
         )));
-        assert!(!events.iter().any(|event| matches!(
-            event,
-            OutputEvent::GamepadButton { .. }
-        )));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, OutputEvent::GamepadButton { .. })));
         // Left alone composes onto the horizontal axis.
         engine.process(stick(InputSource::Button(GamepadButton::DpadUp), 0.0));
         engine.process(stick(InputSource::Button(GamepadButton::DpadLeft), 1.0));
@@ -863,9 +870,13 @@ mod tests {
                 value: 1.0
             }
         )));
-        assert!(events
-            .iter()
-            .all(|event| !matches!(event, OutputEvent::GamepadAxis { axis: GamepadAxis::LeftY, .. })));
+        assert!(events.iter().all(|event| !matches!(
+            event,
+            OutputEvent::GamepadAxis {
+                axis: GamepadAxis::LeftY,
+                ..
+            }
+        )));
     }
 
     #[test]

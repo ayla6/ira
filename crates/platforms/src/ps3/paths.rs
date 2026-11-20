@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use crate::emu_dirs::home_dir;
+use std::path::{Path, PathBuf};
 
 pub const RPCS3_FLATPAK_ID: &str = "net.rpcs3.RPCS3";
 

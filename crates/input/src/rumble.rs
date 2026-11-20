@@ -138,12 +138,14 @@ impl PhysicalRumble {
                         enable_8bitdo_reports(&mut file);
                     }
                     return Ok(Self {
-                        backend: Backend::Hidraw { file, stop_at: None },
+                        backend: Backend::Hidraw {
+                            file,
+                            stop_at: None,
+                        },
                     });
                 }
                 Err(error) => {
-                    last_error =
-                        format!("rumble: cannot open {}: {error}", node.display());
+                    last_error = format!("rumble: cannot open {}: {error}", node.display());
                 }
             }
         }
@@ -251,8 +253,7 @@ pub(crate) fn sibling_hidraw_nodes(event_path: &Path) -> Vec<PathBuf> {
     let Some(stem) = event_path.file_name() else {
         return Vec::new();
     };
-    let Ok(device) =
-        std::fs::canonicalize(Path::new("/sys/class/input").join(stem).join("device"))
+    let Ok(device) = std::fs::canonicalize(Path::new("/sys/class/input").join(stem).join("device"))
     else {
         return Vec::new();
     };
@@ -296,8 +297,8 @@ impl std::fmt::Debug for PhysicalRumble {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_stop_command, rumble_command_from_effect, stop_command, RumbleCommand,
-        MAX_DURATION_MS, MIN_DURATION_MS,
+        is_stop_command, rumble_command_from_effect, stop_command, RumbleCommand, MAX_DURATION_MS,
+        MIN_DURATION_MS,
     };
     use evdev::{FFEffectData, FFEffectKind, FFReplay, FFTrigger};
 

@@ -69,8 +69,9 @@ pub fn get_most_recent_user_id() -> Option<String> {
                 let mut best: Option<(i64, String)> = None;
                 for (id, value) in &users {
                     if matches!(value, VdfValue::Obj(_)) {
-                        let most_recent =
-                            get_str(value, "MostRecent").map(|s| s == "1").unwrap_or(false);
+                        let most_recent = get_str(value, "MostRecent")
+                            .map(|s| s == "1")
+                            .unwrap_or(false);
                         let timestamp = get_str(value, "Timestamp")
                             .and_then(|s: &str| s.parse::<i64>().ok())
                             .unwrap_or(0);

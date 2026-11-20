@@ -324,11 +324,7 @@ fn build_launch_config_and_wine(
         params.saved_profile_id
     };
 
-    super::helpers::apply_game_wine_profile(
-        &mut wine,
-        &params.state.borrow().db,
-        new_profile_id,
-    );
+    super::helpers::apply_game_wine_profile(&mut wine, &params.state.borrow().db, new_profile_id);
 
     (launch, wine, new_profile_id)
 }
@@ -642,9 +638,7 @@ fn spawn_image_copy_thread(
             // pipeline, tile-sized bounds.
             let (base_name, (max_w, max_h)) = match AssetType::from_string(asset) {
                 Some(at) => (at.file_base().to_string(), at.thumb_dims()),
-                None if super::disc_art::is_disc_draft_key(asset) => {
-                    (asset.clone(), (192, 192))
-                }
+                None if super::disc_art::is_disc_draft_key(asset) => (asset.clone(), (192, 192)),
                 None => continue,
             };
             ira_parser::remove_image_variants(&cloud_dir, &base_name);
@@ -756,8 +750,10 @@ fn process_pending_images_background(params: &SaveGameSettingsParams, db: &ira_d
 
     // The strip rides the sidebar while the dialog is already closing:
     // the save itself is done, only the images are still in flight.
-    let progress =
-        super::fetch_images::begin_image_save(&params.state, &game.map(|g| g.name).unwrap_or_default());
+    let progress = super::fetch_images::begin_image_save(
+        &params.state,
+        &game.map(|g| g.name).unwrap_or_default(),
+    );
 
     let (tx, rx) = mpsc::channel::<Vec<String>>();
     let state_cb = params.state.clone();

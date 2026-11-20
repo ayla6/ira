@@ -51,9 +51,18 @@ pub fn create_auto_group(conn: &DbConn, name: &str, root: &AutoNode) -> Result<i
 
 /// The whole rule set is rewritten on every save — the editor hands back
 /// the full list, so a diff would only re-encode it.
-pub fn update_auto_group(conn: &DbConn, id: i64, name: &str, root: &AutoNode) -> Result<(), String> {
+pub fn update_auto_group(
+    conn: &DbConn,
+    id: i64,
+    name: &str,
+    root: &AutoNode,
+) -> Result<(), String> {
     let json = serde_json::to_string(root).map_err(err)?;
-    crate::execute(conn, "UPDATE auto_groups SET name = ?1, criteria = ?2 WHERE id = ?3", params![name, json, id])?;
+    crate::execute(
+        conn,
+        "UPDATE auto_groups SET name = ?1, criteria = ?2 WHERE id = ?3",
+        params![name, json, id],
+    )?;
     Ok(())
 }
 

@@ -35,9 +35,7 @@ pub const ULTIMATE_3: u16 = 0x202f;
 /// a pad that only *claims* the Ultimate 2's identity keeps the positional
 /// standard instead of inheriting its paddle table.
 pub fn is_ultimate_2(vendor: u16, product: u16, name: &str) -> bool {
-    vendor == VENDOR_8BITDO
-        && product == ULTIMATE_2_WIRELESS
-        && matches_ultimate_2_name(name)
+    vendor == VENDOR_8BITDO && product == ULTIMATE_2_WIRELESS && matches_ultimate_2_name(name)
 }
 
 /// The name gate for [`is_ultimate_2`]: "Ultimate 2" is the paddle-equipped
@@ -127,7 +125,10 @@ impl EightBitDoBatteryReader {
             else {
                 continue;
             };
-            return Some(Self { file, powerstate_supported: false });
+            return Some(Self {
+                file,
+                powerstate_supported: false,
+            });
         }
         None
     }
@@ -191,8 +192,14 @@ mod tests {
             0x6012,
             "8BitDo 8BitDo Ultimate 2 Wireless Controller for PC"
         ));
-        assert!(!is_ultimate_2(0x2dc8, 0x310b, "Ultimate 2 Wireless Controller"), "XInput mode is a different product");
-        assert!(!is_ultimate_2(0x057e, 0x2009, "8BitDo Ultimate 2 Wireless Controller"), "Switch-mode twins are not this protocol");
+        assert!(
+            !is_ultimate_2(0x2dc8, 0x310b, "Ultimate 2 Wireless Controller"),
+            "XInput mode is a different product"
+        );
+        assert!(
+            !is_ultimate_2(0x057e, 0x2009, "8BitDo Ultimate 2 Wireless Controller"),
+            "Switch-mode twins are not this protocol"
+        );
     }
 
     #[test]
@@ -200,9 +207,15 @@ mod tests {
         // The C and 2C lines are cheaper pads without the paddle hardware,
         // and the "Ultimate Wireless / Pro 2 Wired" name belongs to xpad's
         // positional table — none of them may inherit this layout.
-        assert!(!matches_ultimate_2_name("8BitDo Ultimate C Wireless Controller"));
-        assert!(!matches_ultimate_2_name("8BitDo Ultimate 2C Wireless Controller"));
-        assert!(!matches_ultimate_2_name("8BitDo Ultimate Wireless / Pro 2 Wired Controller"));
+        assert!(!matches_ultimate_2_name(
+            "8BitDo Ultimate C Wireless Controller"
+        ));
+        assert!(!matches_ultimate_2_name(
+            "8BitDo Ultimate 2C Wireless Controller"
+        ));
+        assert!(!matches_ultimate_2_name(
+            "8BitDo Ultimate Wireless / Pro 2 Wired Controller"
+        ));
         assert!(matches_ultimate_2_name("Ultimate 2 Wireless Controller"));
     }
 
@@ -214,10 +227,7 @@ mod tests {
             rumble_report_8bitdo(u16::MAX, u16::MAX),
             [0x05, 0xFF, 0xFF, 0x00, 0x00]
         );
-        assert_eq!(
-            rumble_report_8bitdo(0, 0),
-            [0x05, 0x00, 0x00, 0x00, 0x00]
-        );
+        assert_eq!(rumble_report_8bitdo(0, 0), [0x05, 0x00, 0x00, 0x00, 0x00]);
         assert_eq!(
             rumble_report_8bitdo(0x1234, 0xABCD),
             [0x05, 0x12, 0xAB, 0x00, 0x00]
@@ -274,7 +284,10 @@ mod tests {
         report[14] = 0x32; // 50%, on battery
         assert_eq!(
             parse_state_report(&report, &mut supported),
-            Some(PadBattery { percent: 50, charging: false })
+            Some(PadBattery {
+                percent: 50,
+                charging: false
+            })
         );
         assert!(supported);
     }
@@ -287,7 +300,10 @@ mod tests {
         report[14] = 0x80 | 37;
         assert_eq!(
             parse_state_report(&report, &mut supported),
-            Some(PadBattery { percent: 37, charging: true })
+            Some(PadBattery {
+                percent: 37,
+                charging: true
+            })
         );
     }
 
@@ -299,7 +315,10 @@ mod tests {
         report[14] = 0x80 | 100;
         assert_eq!(
             parse_state_report(&report, &mut supported),
-            Some(PadBattery { percent: 100, charging: false })
+            Some(PadBattery {
+                percent: 100,
+                charging: false
+            })
         );
     }
 
@@ -311,7 +330,10 @@ mod tests {
         report[14] = 0x7f;
         assert_eq!(
             parse_state_report(&report, &mut supported),
-            Some(PadBattery { percent: 100, charging: false })
+            Some(PadBattery {
+                percent: 100,
+                charging: false
+            })
         );
     }
 }

@@ -15,9 +15,9 @@ use std::sync::{Mutex, OnceLock};
 use ira_overlay::capture;
 use ira_overlay_ipc::{
     canvas_shm_path, command_from_raw, CanvasCommand, CanvasShm, InputEventRaw, MappedShm,
-    ShmHeader, ACT_EXIT_GAME, ACT_HIDE_OVERLAY, ACT_SCREENSHOT, ACT_TOGGLE_RECORD,
-    EVT_KEY_PRESS, EVT_KEY_RELEASE, EVT_MOUSE_DOWN, EVT_MOUSE_MOVE, EVT_MOUSE_UP, EVT_SCROLL,
-    EVT_SCREENSHOT, EVT_TOGGLE_RECORD,
+    ShmHeader, ACT_EXIT_GAME, ACT_HIDE_OVERLAY, ACT_SCREENSHOT, ACT_TOGGLE_RECORD, EVT_KEY_PRESS,
+    EVT_KEY_RELEASE, EVT_MOUSE_DOWN, EVT_MOUSE_MOVE, EVT_MOUSE_UP, EVT_SCREENSHOT, EVT_SCROLL,
+    EVT_TOGGLE_RECORD,
 };
 
 type PollEventsFn = unsafe extern "C" fn(*mut InputEventRaw, usize) -> usize;

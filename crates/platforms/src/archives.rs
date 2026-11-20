@@ -211,7 +211,8 @@ mod tests {
     }
 
     #[test]
-    fn test_with_entry_reader_plain_file_passes_through() {        let file = temp_file(b"plain rom bytes");
+    fn test_with_entry_reader_plain_file_passes_through() {
+        let file = temp_file(b"plain rom bytes");
         let read = with_entry_reader(file.path(), &|_| true, |reader| {
             let mut buf = String::new();
             reader.read_to_string(&mut buf).ok()?;
@@ -338,9 +339,7 @@ mod tests {
             std::io::Write::write_all(&mut zip, b"data").unwrap();
         }
         zip.finish().unwrap();
-        let read = with_entry_reader(&path, &|name| name.ends_with(".gba"), |_| {
-            Some(true)
-        });
+        let read = with_entry_reader(&path, &|name| name.ends_with(".gba"), |_| Some(true));
         assert_eq!(read, None);
     }
 }

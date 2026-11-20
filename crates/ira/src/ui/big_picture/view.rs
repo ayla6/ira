@@ -416,7 +416,7 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
             NavCommand::Down => big.all.groups_move(state, 0, 1, engage),
             NavCommand::Confirm => big.all.groups_open_selected(state),
             _ => {}
-        }
+        },
         NavCommand::Options => {
             // Options on a focused game opens its group menu; with
             // nothing focused it opens the sort picker.

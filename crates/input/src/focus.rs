@@ -106,12 +106,12 @@ impl FocusWatcher {
         // GNOME Wayland the property holds a stale XWayland id that is not a
         // managed client (or nothing at all). Such an active window carries
         // no focus information — same degrade as the desktop being active.
-        let desktop_like =
-            active == 0 || active == self.root || !client_windows.contains(&active);
+        let desktop_like = active == 0 || active == self.root || !client_windows.contains(&active);
         let active_in_tree = !desktop_like && self.window_pid_in_tree(active, &game_pids, 0);
         let game_has_windows = desktop_like
             && client_windows.iter().any(|window| {
-                self.window_pid(*window).is_some_and(|pid| game_pids.contains(&pid))
+                self.window_pid(*window)
+                    .is_some_and(|pid| game_pids.contains(&pid))
                     && self.window_is_managed(*window)
             });
         is_focused(active_in_tree, desktop_like, game_has_windows)
@@ -136,14 +136,7 @@ impl FocusWatcher {
 
     fn active_window(&self) -> Option<Window> {
         self.conn
-            .get_property(
-                false,
-                self.root,
-                self.active_atom,
-                AtomEnum::WINDOW,
-                0,
-                1,
-            )
+            .get_property(false, self.root, self.active_atom, AtomEnum::WINDOW, 0, 1)
             .ok()?
             .reply()
             .ok()?
@@ -159,7 +152,10 @@ impl FocusWatcher {
         if depth > MAX_PARENT_HOPS {
             return false;
         }
-        if self.window_pid(window).is_some_and(|pid| pids.contains(&pid)) {
+        if self
+            .window_pid(window)
+            .is_some_and(|pid| pids.contains(&pid))
+        {
             return true;
         }
         if self.window_comm_matches_exe(window) {
@@ -187,12 +183,15 @@ impl FocusWatcher {
         comm_matches_exe(comm.as_deref(), self.exe_name.as_deref())
     }
 
-
     fn client_windows(&self) -> Vec<Window> {
-        let Ok(cookie) = self
-            .conn
-            .get_property(false, self.root, self.client_list_atom, AtomEnum::WINDOW, 0, 1024)
-        else {
+        let Ok(cookie) = self.conn.get_property(
+            false,
+            self.root,
+            self.client_list_atom,
+            AtomEnum::WINDOW,
+            0,
+            1024,
+        ) else {
             return Vec::new();
         };
         let Ok(reply) = cookie.reply() else {
@@ -243,13 +242,7 @@ impl FocusWatcher {
         if !self.xres {
             return None;
         }
-        let clients = self
-            .conn
-            .res_query_clients()
-            .ok()?
-            .reply()
-            .ok()?
-            .clients;
+        let clients = self.conn.res_query_clients().ok()?.reply().ok()?.clients;
         let owner = clients.into_iter().find(|client| {
             client_owns_window(window, client.resource_base, client.resource_mask)
         })?;
@@ -262,7 +255,10 @@ impl FocusWatcher {
             .ok()?
             .reply()
             .ok()?;
-        reply.ids.first().and_then(|value| value.value.first().copied())
+        reply
+            .ids
+            .first()
+            .and_then(|value| value.value.first().copied())
     }
 
     fn transient_parent(&self, window: Window) -> Option<Window> {
@@ -309,8 +305,7 @@ fn is_focused(active_in_game_tree: bool, desktop_active: bool, game_has_x11_wind
 /// Every pid below `root` reachable through the parent links in `pairs`
 /// (from /proc); the root itself is not included.
 fn descendant_set(root: u32, pairs: &[(u32, u32)]) -> HashSet<u32> {
-    let mut children: std::collections::HashMap<u32, Vec<u32>> =
-        std::collections::HashMap::new();
+    let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
     for (pid, parent) in pairs {
         children.entry(*parent).or_default().push(*pid);
     }
@@ -361,7 +356,9 @@ fn parse_stat_ppid(stat: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{client_owns_window, comm_matches_exe, descendant_set, is_focused, parse_stat_ppid};
+    use super::{
+        client_owns_window, comm_matches_exe, descendant_set, is_focused, parse_stat_ppid,
+    };
 
     #[test]
     fn test_client_owns_window_matches_resource_ranges() {
@@ -389,11 +386,11 @@ mod tests {
 
     #[test]
     fn test_parse_stat_ppid_skips_comm_with_parentheses() {
-        assert_eq!(parse_stat_ppid("123 (wine64-preloader) S 45 46 46"), Some(45));
         assert_eq!(
-            parse_stat_ppid("124 (weird (name) here) R 7 8 8"),
-            Some(7)
+            parse_stat_ppid("123 (wine64-preloader) S 45 46 46"),
+            Some(45)
         );
+        assert_eq!(parse_stat_ppid("124 (weird (name) here) R 7 8 8"), Some(7));
         assert_eq!(parse_stat_ppid("125 (x) Z"), None);
         assert_eq!(parse_stat_ppid("garbage"), None);
     }

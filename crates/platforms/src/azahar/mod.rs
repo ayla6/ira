@@ -84,7 +84,11 @@ fn installed_title_roots(root: &Path) -> Vec<PathBuf> {
         roots.push(direct);
     }
     let n3ds = root.join("Nintendo 3DS");
-    let base = if n3ds.is_dir() { n3ds } else { root.to_path_buf() };
+    let base = if n3ds.is_dir() {
+        n3ds
+    } else {
+        root.to_path_buf()
+    };
     let Ok(ids) = std::fs::read_dir(base) else {
         return roots;
     };
@@ -98,8 +102,7 @@ fn installed_title_roots(root: &Path) -> Vec<PathBuf> {
             continue;
         };
         roots.extend(
-            id1s
-                .flatten()
+            id1s.flatten()
                 .filter(is_dir_entry)
                 .map(|id1| id1.path().join("title"))
                 .filter(|p| p.is_dir()),
@@ -214,7 +217,9 @@ fn find_dump_by_name(dir: &Path, title_id: &str, depth_left: u32) -> Option<Path
             continue;
         }
         let name_matches = path.file_name().is_some_and(|name| {
-            name.to_string_lossy().to_ascii_lowercase().contains(&needle)
+            name.to_string_lossy()
+                .to_ascii_lowercase()
+                .contains(&needle)
         });
         if is_rom_path(&path)
             && name_matches

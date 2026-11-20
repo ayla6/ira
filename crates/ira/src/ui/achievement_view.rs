@@ -220,14 +220,14 @@ pub(super) fn build_achievements_view(game: &Game, state: &SharedState, gen: u32
                     let mclick = gtk4::GestureClick::new();
                     mclick.set_button(3);
                     mclick.connect_pressed(move |_, _, _, _| {
-                            super::matching::confirm_mark_unlocked(
-                                &state_inner,
-                                trophy_source_inner,
-                                &app_id_inner,
-                                platform_id_inner.id(),
-                                &ach_clone,
-                                reload_inner.clone(),
-                            );
+                        super::matching::confirm_mark_unlocked(
+                            &state_inner,
+                            trophy_source_inner,
+                            &app_id_inner,
+                            platform_id_inner.id(),
+                            &ach_clone,
+                            reload_inner.clone(),
+                        );
                     });
                     ach_row.add_controller(mclick);
                 }

@@ -349,4 +349,3 @@ fn apply_sgdb_match(state: &SharedState, db_id: i64, sgdb_id: &str) {
         });
     });
 }
-

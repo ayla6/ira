@@ -6,9 +6,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{
-    Ds4UhidDevice, DualsenseUhidDevice, ImuUhidDevice, InputProfile, MotionServer, SwitchProUhidDevice,
-    VirtualGamepad, VirtualGamepadBackend, VirtualKeyboard, VirtualMotionSensor, VirtualMouse,
-    MOTION_PORT,
+    Ds4UhidDevice, DualsenseUhidDevice, ImuUhidDevice, InputProfile, MotionServer,
+    SwitchProUhidDevice, VirtualGamepad, VirtualGamepadBackend, VirtualKeyboard,
+    VirtualMotionSensor, VirtualMouse, MOTION_PORT,
 };
 
 use super::devices::{create_keyboard, create_mouse};
@@ -20,10 +20,7 @@ static TWIN_SERIAL: AtomicU64 = AtomicU64::new(0);
 
 /// Whether the built stack lacks motion outputs the profile wants while motion
 /// is available (built before the controller appeared).
-pub(crate) fn motion_outputs_missing(
-    pipeline: &SensorPipeline,
-    profile: &InputProfile,
-) -> bool {
+pub(crate) fn motion_outputs_missing(pipeline: &SensorPipeline, profile: &InputProfile) -> bool {
     if profile.native_motion && pipeline.motion_device.is_none() {
         return true;
     }
@@ -72,8 +69,7 @@ pub(crate) struct VirtualStack {
 /// instead of hot-applying mappings: the controller kind changed, or the
 /// native uhid transport toggled.
 pub(crate) fn reload_needs_full_rebuild(old: &InputProfile, new: &InputProfile) -> bool {
-    old.backend != new.backend
-        || old.wants_native_controller() != new.wants_native_controller()
+    old.backend != new.backend || old.wants_native_controller() != new.wants_native_controller()
 }
 
 fn twin_uniq() -> String {
@@ -138,28 +134,24 @@ pub(crate) fn build_virtual_stack(
     // The cemuhook stream is the DSU backend itself, or a motion-only companion next
     // to a real virtual pad (XInput/DirectInput carry no motion of their own).
     let motion_enabled = motion_allowed
-        && (backend == VirtualGamepadBackend::Dsu
-            || (motion_available && profile.native_motion));
+        && (backend == VirtualGamepadBackend::Dsu || (motion_available && profile.native_motion));
     let motion = if motion_enabled {
         MotionServer::bind()
     } else {
         None
     };
     match (&motion, motion_available) {
-        (Some(_), true) => eprintln!(
-            "ira-input: motion passthrough on udp/{MOTION_PORT} for emulators (cemuhook)"
-        ),
+        (Some(_), true) => {
+            eprintln!("ira-input: motion passthrough on udp/{MOTION_PORT} for emulators (cemuhook)")
+        }
         (None, true) => {
-            eprintln!(
-                "ira-input: udp/{MOTION_PORT} busy; motion passthrough disabled"
-            )
+            eprintln!("ira-input: udp/{MOTION_PORT} busy; motion passthrough disabled")
         }
         _ => {}
     }
     // The motion node must exist before the game opens the virtual pad: SDL pairs
     // sensor nodes with a pad at open time only.
-    let motion_device = if wants_uinput_motion_node(motion_available, profile, native_passthrough)
-    {
+    let motion_device = if wants_uinput_motion_node(motion_available, profile, native_passthrough) {
         open_motion_node(backend)
     } else {
         None
@@ -275,7 +267,8 @@ mod tests {
         // Mapping-only edits stay on the cheap reload path.
         assert!(!reload_needs_full_rebuild(&base, &base));
         // A different controller kind rebuilds the output stack.
-        let direct_input = InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
+        let direct_input =
+            InputProfile::default_gamepad_for_backend(VirtualGamepadBackend::DirectInput);
         assert!(reload_needs_full_rebuild(&base, &direct_input));
         assert!(reload_needs_full_rebuild(&direct_input, &base));
     }

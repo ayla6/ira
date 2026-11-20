@@ -47,9 +47,8 @@ pub fn injected_ui_disabled() -> bool {
 /// keyboards.
 pub fn daemon_owns_toggle() -> bool {
     static DAEMON_TOGGLE: OnceLock<bool> = OnceLock::new();
-    *DAEMON_TOGGLE.get_or_init(|| {
-        std::env::var_os("IRA_OVERLAY_DAEMON_TOGGLE").is_some_and(|v| v == "1")
-    })
+    *DAEMON_TOGGLE
+        .get_or_init(|| std::env::var_os("IRA_OVERLAY_DAEMON_TOGGLE").is_some_and(|v| v == "1"))
 }
 
 pub fn push_event(event: InputEventRaw) {
@@ -203,7 +202,9 @@ pub fn hotkeys() -> (u32, u32, u32, u32, u32, u32) {
 /// Reads gamepad hotkey masks from SHM via the canonical decoder, falling
 /// back to the default table when SHM is unavailable.
 pub fn gamepad_hotkeys() -> (u32, u32, u32) {
-    with_shm(ShmHeader::default_gamepad_hotkeys(), |h| h.gamepad_hotkeys())
+    with_shm(ShmHeader::default_gamepad_hotkeys(), |h| {
+        h.gamepad_hotkeys()
+    })
 }
 
 /// Shared keyboard-hotkey match for the X11 and XCB backends (identical

@@ -347,8 +347,7 @@ fn ensure_gamepad_fds() {
             if !name.to_string_lossy().starts_with("event") {
                 continue;
             }
-            if let Ok(path) = std::ffi::CString::new(entry.path().to_string_lossy().as_bytes())
-            {
+            if let Ok(path) = std::ffi::CString::new(entry.path().to_string_lossy().as_bytes()) {
                 EVENT_FDS.with(|cache| {
                     let mut fds = cache.borrow_mut();
                     if !fds.iter().any(|(known, _)| *known == path) {

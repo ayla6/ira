@@ -42,7 +42,11 @@ pub fn save_game_config(
 }
 
 pub fn delete_game_config(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    crate::execute(conn, "DELETE FROM game_configs WHERE game_id = ?1", params![game_id])?;
+    crate::execute(
+        conn,
+        "DELETE FROM game_configs WHERE game_id = ?1",
+        params![game_id],
+    )?;
     Ok(())
 }
 

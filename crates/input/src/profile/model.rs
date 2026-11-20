@@ -1148,15 +1148,8 @@ impl InputProfile {
         Ok(())
     }
 
-    fn validate_input_mapping(
-        &self,
-        context: &str,
-        input: &InputMapping,
-    ) -> Result<(), String> {
-        let label = format!(
-            "{context}: {source}",
-            source = input.source.display_name()
-        );
+    fn validate_input_mapping(&self, context: &str, input: &InputMapping) -> Result<(), String> {
+        let label = format!("{context}: {source}", source = input.source.display_name());
         if let Some(mode) = &input.mode {
             mode.validate()
                 .map_err(|error| format!("{label}: {error}"))?;
@@ -1275,7 +1268,11 @@ impl InputProfile {
         self.action_sets
             .iter()
             .flat_map(|set| set.inputs.iter())
-            .chain(self.action_layers.iter().flat_map(|layer| layer.inputs.iter()))
+            .chain(
+                self.action_layers
+                    .iter()
+                    .flat_map(|layer| layer.inputs.iter()),
+            )
             .filter_map(|input| input.mode.as_ref())
             .filter_map(|mode| match mode {
                 SourceMode::Joystick(settings) => settings.processing.outer_ring.as_ref(),
@@ -1362,7 +1359,10 @@ fn default_action_set_inputs(
         .filter(|button| {
             supported_buttons.contains(button)
                 || (backend == VirtualGamepadBackend::SwitchPro
-                    && matches!(button, GamepadButton::LeftTrigger | GamepadButton::RightTrigger))
+                    && matches!(
+                        button,
+                        GamepadButton::LeftTrigger | GamepadButton::RightTrigger
+                    ))
         })
         .map(|button| {
             InputMapping::simple(
@@ -1623,14 +1623,11 @@ mod tests {
             assert!(
                 inputs.iter().any(|input| {
                     input.source == InputSource::Button(button)
-                        && input
-                            .activators
-                            .iter()
-                            .any(|activator| {
-                                activator
-                                    .outputs
-                                    .contains(&OutputAction::GamepadButton(button))
-                            })
+                        && input.activators.iter().any(|activator| {
+                            activator
+                                .outputs
+                                .contains(&OutputAction::GamepadButton(button))
+                        })
                 }),
                 "trigger button {button:?} unmapped by default"
             );
@@ -1956,9 +1953,7 @@ mod tests {
         let unbound_button = InputProfile {
             action_sets: vec![ActionSet {
                 name: "Default".to_string(),
-                inputs: vec![InputMapping::new(InputSource::Button(
-                    GamepadButton::A,
-                ))],
+                inputs: vec![InputMapping::new(InputSource::Button(GamepadButton::A))],
             }],
             ..InputProfile::default()
         };
@@ -1983,14 +1978,8 @@ mod tests {
 
     #[test]
     fn test_source_display_names_are_plain_language() {
-        assert_eq!(
-            GamepadButton::LeftTrigger.display_name(),
-            "left trigger"
-        );
-        assert_eq!(
-            GamepadAxis::RightY.display_name(),
-            "right stick vertical"
-        );
+        assert_eq!(GamepadButton::LeftTrigger.display_name(), "left trigger");
+        assert_eq!(GamepadAxis::RightY.display_name(), "right stick vertical");
         assert_eq!(
             InputSource::AxisDirection {
                 axis: GamepadAxis::LeftX,

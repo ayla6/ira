@@ -165,7 +165,13 @@ pub(crate) fn fetch_and_report_sgdb_assets(request: SgdAssetsRequest<'_>) {
         Some(g) => {
             let switch_exe = cfg.console("switch").executable.clone();
             let assets = super::fetch_images::ensure_game_assets(
-                steam, &dir, save_dir, db, cfg, g, &switch_exe,
+                steam,
+                &dir,
+                save_dir,
+                db,
+                cfg,
+                g,
+                &switch_exe,
             );
             // A fresh SGDB match can also unlock the disc art.
             super::disc_art::ensure_game_discs(steam, db, cfg, save_dir, g);

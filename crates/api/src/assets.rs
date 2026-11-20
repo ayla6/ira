@@ -165,7 +165,12 @@ impl SteamDataClient {
         }
     }
 
-    pub fn force_download_sgdb(&self, dir: &Path, id: crate::types::SgdbId, asset: AssetType) -> String {
+    pub fn force_download_sgdb(
+        &self,
+        dir: &Path,
+        id: crate::types::SgdbId,
+        asset: AssetType,
+    ) -> String {
         let _s = tracing::info_span!("force_download_sgdb", sgdb_id = id.as_str(), asset = %asset)
             .entered();
         let _ = std::fs::create_dir_all(dir);

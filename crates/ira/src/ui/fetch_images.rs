@@ -170,8 +170,7 @@ pub fn start_missing_images_fetch(state: &SharedState) -> Result<(), String> {
                 game.kind,
                 ira_models::GameKind::Ps4 | ira_models::GameKind::Switch
             ) {
-                changed = !import_rom_square(&save_dir, &db, game, &cfg, &switch_exe)
-                    .is_empty();
+                changed = !import_rom_square(&save_dir, &db, game, &cfg, &switch_exe).is_empty();
             }
             if changed {
                 fetched += 1;
@@ -269,7 +268,9 @@ impl StripJob {
         let fraction = done as f64 / total.max(1) as f64;
         indicator.bar.set_fraction(fraction);
         indicator.ring.set_fraction(fraction);
-        indicator.details.set_markup(&details_markup(done, total, current));
+        indicator
+            .details
+            .set_markup(&details_markup(done, total, current));
     }
 
     /// The job ended: a summary on the strip and the strip scheduled to
@@ -285,7 +286,9 @@ impl StripJob {
             return;
         }
         indicator.ring.set_fraction(1.0);
-        indicator.ring.animate_done("file-operation-finished-symbolic");
+        indicator
+            .ring
+            .animate_done("file-operation-finished-symbolic");
         indicator.short.set_text(short);
         indicator.status.set_text(status);
         indicator.bar.set_fraction(1.0);
@@ -299,7 +302,6 @@ impl StripJob {
         });
     }
 }
-
 
 /// Which ScreenScraper media feeds an Ira slot.
 #[derive(Clone, Copy)]
@@ -363,11 +365,7 @@ fn fetch_ss_media_bytes(
 /// asset's own file base, next to whatever the other sources landed.
 /// The bytes arrive already normalized by `fetch_ss_media_bytes` — no
 /// second conversion. Returns the path when a file landed on disk.
-fn persist_ss_media(
-    dir: &std::path::Path,
-    bytes: &[u8],
-    asset: ira_models::AssetType,
-) -> String {
+fn persist_ss_media(dir: &std::path::Path, bytes: &[u8], asset: ira_models::AssetType) -> String {
     let _ = std::fs::create_dir_all(dir);
     ira_parser::remove_image_variants(dir, asset.file_base());
     let dest = dir.join(format!("{}.webp", asset.file_base()));
@@ -532,11 +530,7 @@ pub(super) fn ensure_game_assets(
             // ROM icon extraction is not bulletproof (some NSP dumps yield
             // nothing) — SGDB square art beats a missing capsule.
             match sgdb_id {
-                Some(id) => {
-                    steam
-                        .ensure_sgdb_assets_in_dir(dir, id, &[])
-                        .square
-                }
+                Some(id) => steam.ensure_sgdb_assets_in_dir(dir, id, &[]).square,
                 None => String::new(),
             }
         } else {
@@ -631,7 +625,10 @@ fn native_square(
     if let Some(bytes) = bytes {
         let _ = std::fs::create_dir_all(dir);
         ira_parser::remove_image_variants(dir, ira_models::AssetType::Square.file_base());
-        let dest = dir.join(format!("{}.webp", ira_models::AssetType::Square.file_base()));
+        let dest = dir.join(format!(
+            "{}.webp",
+            ira_models::AssetType::Square.file_base()
+        ));
         if std::fs::write(&dest, &bytes).is_ok() {
             return dest.to_string_lossy().into_owned();
         }
@@ -669,19 +666,18 @@ fn drain_updates(indicator: &FetchIndicator, rx: async_channel::Receiver<FetchUp
                 indicator
                     .ring
                     .animate_done("file-operation-finished-symbolic");
-                indicator.short.set_text(
-                    &crate::tr!("{} games needed new art")
-                        .replacen("{}", &update.fetched.to_string(), 1),
-                );
                 indicator
-                    .status
-                    .set_text(&crate::tr!("Images fetched"));
+                    .short
+                    .set_text(&crate::tr!("{} games needed new art").replacen(
+                        "{}",
+                        &update.fetched.to_string(),
+                        1,
+                    ));
+                indicator.status.set_text(&crate::tr!("Images fetched"));
                 indicator.details.set_markup(&details_text(&update));
                 indicator.bar.set_fraction(1.0);
                 indicator.close_btn.set_sensitive(false);
-                indicator
-                    .close_btn
-                    .set_icon_name("object-select-symbolic");
+                indicator.close_btn.set_icon_name("object-select-symbolic");
             }
             indicator.running.set(false);
             let indicator = indicator.clone();
@@ -922,29 +918,27 @@ impl FetchIndicator {
         let details_c = indicator.details.clone();
         let close_c = indicator.close_btn.clone();
         let strip_c = indicator.clone();
-        indicator
-            .close_btn
-            .connect_clicked(move |_| {
-                cancel_flag.store(true, Ordering::Relaxed);
-                // Nautilus freezes the widget and swaps the strip's ring
-                // for the stop icon right away; only the details line
-                // reads "Cancelled" — the operation text stays put.
-                details_c.set_markup(&format!(
-                    "<span size='small'>{}</span>",
-                    crate::tr!("Cancelled")
-                ));
-                close_c.set_sensitive(false);
-                // The ring crossfades into Nautilus's cancelled icon.
-                strip_c
-                    .ring
-                    .animate_done("file-operation-cancelled-symbolic");
-                let strip = strip_c.clone();
-                glib::timeout_add_local_once(Duration::from_millis(HIDE_AFTER_MS), move || {
-                    strip.popover.popdown();
-                    strip.reveal(false);
-                    strip.close_btn.set_sensitive(true);
-                });
+        indicator.close_btn.connect_clicked(move |_| {
+            cancel_flag.store(true, Ordering::Relaxed);
+            // Nautilus freezes the widget and swaps the strip's ring
+            // for the stop icon right away; only the details line
+            // reads "Cancelled" — the operation text stays put.
+            details_c.set_markup(&format!(
+                "<span size='small'>{}</span>",
+                crate::tr!("Cancelled")
+            ));
+            close_c.set_sensitive(false);
+            // The ring crossfades into Nautilus's cancelled icon.
+            strip_c
+                .ring
+                .animate_done("file-operation-cancelled-symbolic");
+            let strip = strip_c.clone();
+            glib::timeout_add_local_once(Duration::from_millis(HIDE_AFTER_MS), move || {
+                strip.popover.popdown();
+                strip.reveal(false);
+                strip.close_btn.set_sensitive(true);
             });
+        });
 
         indicator
     }

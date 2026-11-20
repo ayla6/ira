@@ -63,7 +63,9 @@ fn main() -> std::io::Result<()> {
         match line.trim().split_once(' ') {
             Some(("lt", value)) => emit_axis(&mut device, AbsoluteAxisCode::ABS_Z, parse(value)),
             Some(("rt", value)) => emit_axis(&mut device, AbsoluteAxisCode::ABS_RZ, parse(value)),
-            Some(("hatx", value)) => emit_axis(&mut device, AbsoluteAxisCode::ABS_HAT0X, parse(value)),
+            Some(("hatx", value)) => {
+                emit_axis(&mut device, AbsoluteAxisCode::ABS_HAT0X, parse(value))
+            }
             Some(("sticks", rest)) => {
                 let values: Vec<i32> = rest.split_whitespace().map(parse).collect();
                 if values.len() == 4 {

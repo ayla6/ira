@@ -285,15 +285,14 @@ pub(super) fn build_entity_editor(
             alias_entry.connect_changed(move |entry| {
                 let text = entry.text().trim().to_string();
                 let usable = !text.is_empty()
-                    && !edits.borrow().aliases.iter().any(|draft| {
-                        draft.text.eq_ignore_ascii_case(&text)
-                    });
+                    && !edits
+                        .borrow()
+                        .aliases
+                        .iter()
+                        .any(|draft| draft.text.eq_ignore_ascii_case(&text));
                 alias_add.set_sensitive(usable);
             });
-            if let Some(text) = alias_entry
-                .delegate()
-                .and_downcast::<gtk4::Text>()
-            {
+            if let Some(text) = alias_entry.delegate().and_downcast::<gtk4::Text>() {
                 text.connect_activate(move |_| stage_alias());
             }
         }
@@ -419,8 +418,10 @@ pub(super) fn build_entity_editor(
             }
             if !failed {
                 for rowid in &staged.original_rowids {
-                    let still_staged =
-                        staged.aliases.iter().any(|draft| draft.rowid == Some(*rowid));
+                    let still_staged = staged
+                        .aliases
+                        .iter()
+                        .any(|draft| draft.rowid == Some(*rowid));
                     if !still_staged {
                         if let Err(e) = ira_db::remove_entity_alias(&db, *rowid) {
                             eprintln!("Failed to remove the alias: {e}");
@@ -516,7 +517,9 @@ pub(super) fn show_entity_editor(
             },
             cancelled: {
                 let dialog = dialog.clone();
-                Rc::new(move || { dialog.close(); })
+                Rc::new(move || {
+                    dialog.close();
+                })
             },
             merge_open: {
                 let nav = nav.clone();
@@ -529,7 +532,9 @@ pub(super) fn show_entity_editor(
             },
             merge_picked: {
                 let dialog = dialog.clone();
-                Rc::new(move || { dialog.close(); })
+                Rc::new(move || {
+                    dialog.close();
+                })
             },
         },
     );
@@ -630,8 +635,7 @@ pub(super) fn show_entity_dialog(
     let search_page = adw::NavigationPage::new(&search_toolbar, "search");
 
     // ——— Manage list page: every cached entity, with its usage. ———
-    let manage_title_text =
-        crate::tr!("Manage {}").replacen("{}", &field.label, 1);
+    let manage_title_text = crate::tr!("Manage {}").replacen("{}", &field.label, 1);
     let manage_toolbar = adw::ToolbarView::new();
     let manage_header = adw::HeaderBar::new();
     let manage_heading = gtk4::Label::new(Some(&manage_title_text));
@@ -695,7 +699,6 @@ pub(super) fn show_entity_dialog(
             }
         }
     };
-
 
     let state = Rc::new(state.clone());
     // The genre and family caches fill from the source's whole table on
@@ -833,8 +836,7 @@ pub(super) fn show_entity_dialog(
                 if let Ok(id) = entity.id.parse::<i64>() {
                     let open_entity = open_entity.clone();
                     let row_name = name.clone();
-                    let pen =
-                        gtk4::Button::from_icon_name("document-edit-symbolic");
+                    let pen = gtk4::Button::from_icon_name("document-edit-symbolic");
                     pen.add_css_class(CSS_FLAT);
                     pen.set_valign(gtk4::Align::Center);
                     pen.set_tooltip_text(Some(&crate::tr!("Manage")));
@@ -916,8 +918,7 @@ pub(super) fn show_entity_dialog(
             }
             let rows = match field.kind {
                 EntityKind::Developer | EntityKind::Publisher => {
-                    ira_db::scraper_companies_search(&state.borrow().db, term)
-                        .unwrap_or_default()
+                    ira_db::scraper_companies_search(&state.borrow().db, term).unwrap_or_default()
                 }
                 EntityKind::Genre => {
                     ira_db::search_genres(&state.borrow().db, term).unwrap_or_default()
@@ -952,9 +953,7 @@ pub(super) fn show_entity_dialog(
                         EntityKind::Developer | EntityKind::Publisher => {
                             ira_db::steam_company_entity(&state.borrow().db, &term)
                         }
-                        EntityKind::Genre => {
-                            ira_db::local_genre_entity(&state.borrow().db, &term)
-                        }
+                        EntityKind::Genre => ira_db::local_genre_entity(&state.borrow().db, &term),
                         EntityKind::Family => {
                             ira_db::local_family_entity(&state.borrow().db, &term)
                         }
@@ -1012,7 +1011,6 @@ pub(super) fn show_entity_dialog(
         }
     };
 
-
     // Fetch the whole table when never fetched: pickers search the local cache,
     // so a new library would show three rows where the source has hundreds.
     // The fetched-at marker makes "never" explicit for future refetches.
@@ -1053,8 +1051,7 @@ pub(super) fn show_entity_dialog(
                 cfg.screenscraper_password.clone(),
             );
             let cancel = job.cancel_flag();
-            let (tx, rx) =
-                std::sync::mpsc::channel::<Result<usize, String>>();
+            let (tx, rx) = std::sync::mpsc::channel::<Result<usize, String>>();
             std::thread::spawn(move || {
                 if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                     let _ = tx.send(Ok(0));
@@ -1079,8 +1076,7 @@ pub(super) fn show_entity_dialog(
                         refresh_manage(&manage_search.text());
                         job.finish(
                             &state,
-                            &crate::tr!("{} entries cached")
-                                .replacen("{}", &count.to_string(), 1),
+                            &crate::tr!("{} entries cached").replacen("{}", &count.to_string(), 1),
                             &done_status,
                         );
                     }

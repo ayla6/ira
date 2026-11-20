@@ -1,5 +1,5 @@
-pub mod daemon;
 mod calibration;
+pub mod daemon;
 mod gyro;
 mod hid_ds4;
 mod hid_dualsense;
@@ -29,10 +29,10 @@ pub use profile::{
     ActionSet, ActionSetLayer, Activation, Activator, ActivatorKind, ActivatorSettings,
     AnalogCondition, AxisDirection, ChordMode, ControllerCalibration, GamepadAxis, GamepadButton,
     GyroActivation, GyroConfig, GyroMomentum, GyroOrientation, GyroOutput, GyroStickResponseStyle,
-    GyroStickSettings, InputCategory,
-    InputMapping, InputProfile, InputSource, JoystickSettings, ModeShift, MouseAxis, MouseButton,
-    OuterRingCommand, OutputAction, ResponseAxisStyle, SourceMode, StickDeadzone, StickOutput,
-    StickOutputAxis, StickProcessing, TriggerDampening, VirtualGamepadBackend, PROFILE_VERSION,
+    GyroStickSettings, InputCategory, InputMapping, InputProfile, InputSource, JoystickSettings,
+    ModeShift, MouseAxis, MouseButton, OuterRingCommand, OutputAction, ResponseAxisStyle,
+    SourceMode, StickDeadzone, StickOutput, StickOutputAxis, StickProcessing, TriggerDampening,
+    VirtualGamepadBackend, PROFILE_VERSION,
 };
 pub use registry::ControllerRegistry;
 mod rumble;

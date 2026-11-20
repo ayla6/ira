@@ -54,10 +54,7 @@ pub(crate) fn game_entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<GameE
             } else {
                 serde_json::from_str(&raw).unwrap_or_else(|e| {
                     let id: rusqlite::Result<i64> = row.get("id");
-                    eprintln!(
-                        "Corrupt hashes JSON for game {:?}: {e}",
-                        id.unwrap_or(-1)
-                    );
+                    eprintln!("Corrupt hashes JSON for game {:?}: {e}", id.unwrap_or(-1));
                     Default::default()
                 })
             }

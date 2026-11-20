@@ -6,7 +6,6 @@ pub(crate) const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(20);
 pub(crate) const FOCUS_POLL_INTERVAL: Duration = Duration::from_millis(250);
 pub(crate) const PROFILE_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-
 pub(crate) struct LoopActivity {
     pub(crate) tick: bool,
     pub(crate) tick_interval: Duration,
@@ -38,11 +37,21 @@ impl LoopSchedule {
 
     pub(crate) fn timeout(&self, activity: LoopActivity) -> Option<Duration> {
         [
-            activity.tick.then(|| remaining(self.sensor, activity.tick_interval)),
-            activity.child.then(|| remaining(self.process, PROCESS_POLL_INTERVAL)),
-            activity.profile.then(|| remaining(self.profile, PROFILE_POLL_INTERVAL)),
-            activity.cursor.then(|| remaining(self.cursor, FOCUS_POLL_INTERVAL)),
-            activity.focus.then(|| remaining(self.focus, FOCUS_POLL_INTERVAL)),
+            activity
+                .tick
+                .then(|| remaining(self.sensor, activity.tick_interval)),
+            activity
+                .child
+                .then(|| remaining(self.process, PROCESS_POLL_INTERVAL)),
+            activity
+                .profile
+                .then(|| remaining(self.profile, PROFILE_POLL_INTERVAL)),
+            activity
+                .cursor
+                .then(|| remaining(self.cursor, FOCUS_POLL_INTERVAL)),
+            activity
+                .focus
+                .then(|| remaining(self.focus, FOCUS_POLL_INTERVAL)),
         ]
         .into_iter()
         .flatten()
@@ -61,7 +70,6 @@ const POLL_FLOOR: Duration = Duration::from_millis(1);
 pub(crate) fn floor_poll_timeout(timeout: Option<Duration>) -> Option<Duration> {
     timeout.map(|timeout| timeout.max(POLL_FLOOR))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -88,10 +96,7 @@ mod tests {
     fn test_floor_poll_timeout_bumps_due_deadline_to_one_quantum() {
         // A due deadline must still park the loop for one poll quantum, or a
         // pass that outlasts its tick interval busy-spins the core.
-        assert_eq!(
-            floor_poll_timeout(Some(Duration::ZERO)),
-            Some(POLL_FLOOR)
-        );
+        assert_eq!(floor_poll_timeout(Some(Duration::ZERO)), Some(POLL_FLOOR));
         assert_eq!(
             floor_poll_timeout(Some(Duration::from_nanos(500))),
             Some(POLL_FLOOR)

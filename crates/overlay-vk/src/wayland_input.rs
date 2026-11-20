@@ -222,7 +222,13 @@ pub(crate) extern "C" fn pointer_button(
     }
 }
 
-pub(crate) extern "C" fn pointer_axis(_: *mut c_void, _: *mut c_void, _: u32, axis: u32, value: i32) {
+pub(crate) extern "C" fn pointer_axis(
+    _: *mut c_void,
+    _: *mut c_void,
+    _: u32,
+    axis: u32,
+    value: i32,
+) {
     if !crate::shim_bridge::is_visible() {
         return;
     }

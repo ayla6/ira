@@ -85,7 +85,8 @@ mod imp {
         ) {
             let fraction = self.fraction.get().clamp(0.0, 1.0);
             let check = self.check_progress.get();
-            let rect = gtk4::graphene::Rect::new(-2.0, -2.0, (width + 4.0) as f32, (height + 4.0) as f32);
+            let rect =
+                gtk4::graphene::Rect::new(-2.0, -2.0, (width + 4.0) as f32, (height + 4.0) as f32);
             let cr = snapshot.append_cairo(&rect);
             cr.translate(width / 2.0, height / 2.0);
             // Nautilus strokes the ring at a 2px overscan so the stroke
@@ -96,7 +97,13 @@ mod imp {
                 fg.blue() as f64,
                 fg.alpha() as f64,
             );
-            cr.arc(0.0, 0.0, width / 2.0 + 1.0, -FRAC_PI_2, fraction * TAU - FRAC_PI_2);
+            cr.arc(
+                0.0,
+                0.0,
+                width / 2.0 + 1.0,
+                -FRAC_PI_2,
+                fraction * TAU - FRAC_PI_2,
+            );
             let _ = cr.stroke();
             cr.set_source_rgba(
                 fg.red() as f64,
@@ -104,7 +111,13 @@ mod imp {
                 fg.blue() as f64,
                 fg.alpha() as f64 * 0.25,
             );
-            cr.arc(0.0, 0.0, width / 2.0 + 1.0, fraction * TAU - FRAC_PI_2, 3.0 * FRAC_PI_2);
+            cr.arc(
+                0.0,
+                0.0,
+                width / 2.0 + 1.0,
+                fraction * TAU - FRAC_PI_2,
+                3.0 * FRAC_PI_2,
+            );
             let _ = cr.stroke();
             drop(cr);
 
@@ -123,12 +136,7 @@ mod imp {
                 ));
                 if let Some(icon) = self.check_paintable.borrow().as_ref() {
                     match colors {
-                        Some(colors) => icon.snapshot_symbolic(
-                            snapshot,
-                            width,
-                            height,
-                            colors,
-                        ),
+                        Some(colors) => icon.snapshot_symbolic(snapshot, width, height, colors),
                         None => icon.snapshot(snapshot, width, height),
                     }
                 }
@@ -166,11 +174,7 @@ impl ProgressRing {
         {
             let imp = self.imp();
             imp.icon_name.replace(icon_name.to_string());
-            let display = imp
-                .widget
-                .borrow()
-                .as_ref()
-                .map(|widget| widget.display());
+            let display = imp.widget.borrow().as_ref().map(|widget| widget.display());
             if let Some(display) = display {
                 let theme = gtk4::IconTheme::for_display(&display);
                 let widget = imp.widget.borrow().as_ref().cloned();
@@ -192,7 +196,9 @@ impl ProgressRing {
         let steps = 10u32;
         glib::timeout_add_local(Duration::from_millis(50), move || {
             step += 1;
-            ring.imp().check_progress.set(f64::from(step) / f64::from(steps));
+            ring.imp()
+                .check_progress
+                .set(f64::from(step) / f64::from(steps));
             ring.invalidate_contents();
             if step >= steps {
                 glib::ControlFlow::Break

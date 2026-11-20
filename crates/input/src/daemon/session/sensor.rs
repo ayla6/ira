@@ -2,8 +2,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{GyroProcessor, InputProfile, MappingEngine, SensorSample};
 
-use super::outputs::{emit_outputs, OutputTargets};
 use super::super::TraceState;
+use super::outputs::{emit_outputs, OutputTargets};
 
 pub(crate) struct SensorPipeline {
     /// Whether the pad currently has any motion source (kernel IMU, SDL,
@@ -158,7 +158,9 @@ fn forward_one_sample(
         sample.accel.unwrap_or([0.0; 3]),
         sample.timestamp_us,
     );
-    let rates = pipeline.gyro_processor.process(sample.gyro, sample.accel, dt);
+    let rates = pipeline
+        .gyro_processor
+        .process(sample.gyro, sample.accel, dt);
     let bias = pipeline.gyro_processor.bias();
     trace.record_sample(
         dt,
@@ -245,7 +247,11 @@ fn send_twins(
     }
     const GRAVITY: f32 = 9.80665;
     let accel_g = [accel[0] / GRAVITY, accel[1] / GRAVITY, accel[2] / GRAVITY];
-    let gyro_dps = shaped([gyro[0].to_degrees(), gyro[1].to_degrees(), gyro[2].to_degrees()]);
+    let gyro_dps = shaped([
+        gyro[0].to_degrees(),
+        gyro[1].to_degrees(),
+        gyro[2].to_degrees(),
+    ]);
     if let Some(switch_pro) = pipeline.switch_pro_hid.as_mut() {
         if let Err(error) = switch_pro.tick(targets.pad, accel_g, gyro_dps) {
             eprintln!("ira-input: virtual Switch Pro stopped: {error}");

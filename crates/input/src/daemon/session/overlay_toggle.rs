@@ -16,9 +16,9 @@ use std::sync::atomic::Ordering;
 
 use ira_overlay_ipc::{
     canvas_shm_path, CanvasAction, CanvasShm, MappedShm, ACT_SCREENSHOT, ACT_TOGGLE_RECORD,
-    GAMEPAD_A, GAMEPAD_B, GAMEPAD_DPAD_DOWN, GAMEPAD_DPAD_LEFT,
-    GAMEPAD_DPAD_RIGHT, GAMEPAD_DPAD_UP, GAMEPAD_GUIDE, GAMEPAD_L1, GAMEPAD_L2, GAMEPAD_L3,
-    GAMEPAD_R1, GAMEPAD_R2, GAMEPAD_R3, GAMEPAD_SELECT, GAMEPAD_START, GAMEPAD_X, GAMEPAD_Y,
+    GAMEPAD_A, GAMEPAD_B, GAMEPAD_DPAD_DOWN, GAMEPAD_DPAD_LEFT, GAMEPAD_DPAD_RIGHT,
+    GAMEPAD_DPAD_UP, GAMEPAD_GUIDE, GAMEPAD_L1, GAMEPAD_L2, GAMEPAD_L3, GAMEPAD_R1, GAMEPAD_R2,
+    GAMEPAD_R3, GAMEPAD_SELECT, GAMEPAD_START, GAMEPAD_X, GAMEPAD_Y,
 };
 
 use crate::mapping::InputEvent;
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_screenshot_chord_queues_canvas_action() {
-        use ira_overlay_ipc::{ACT_SCREENSHOT, CanvasShm};
+        use ira_overlay_ipc::{CanvasShm, ACT_SCREENSHOT};
         // Arrange: game SHM plus the host canvas it points at. Built
         // directly (no process env): a second env-mutating test running in
         // parallel would race `std::env::vars()` into UB.
@@ -534,8 +534,7 @@ mod tests {
         // Cleanup: tmpfs files removed (Drop only unmaps).
         let c_name = std::ffi::CString::new(ira_overlay_ipc::shm_path(db_id)).unwrap();
         unsafe { libc::shm_unlink(c_name.as_ptr()) };
-        let c_canvas =
-            std::ffi::CString::new(ira_overlay_ipc::canvas_shm_path(db_id)).unwrap();
+        let c_canvas = std::ffi::CString::new(ira_overlay_ipc::canvas_shm_path(db_id)).unwrap();
         unsafe { libc::shm_unlink(c_canvas.as_ptr()) };
     }
 
@@ -548,12 +547,10 @@ mod tests {
         assert!(
             OverlayToggle::arm(Some(&[(DAEMON_TOGGLE_ENV.to_string(), "1".to_string())])).is_none()
         );
-        assert!(
-            OverlayToggle::arm(Some(&[
-                (DAEMON_TOGGLE_ENV.to_string(), "0".to_string()),
-                ("IRA_OVERLAY_SHM".to_string(), "/ira_overlay_1".to_string()),
-            ]))
-            .is_none()
-        );
+        assert!(OverlayToggle::arm(Some(&[
+            (DAEMON_TOGGLE_ENV.to_string(), "0".to_string()),
+            ("IRA_OVERLAY_SHM".to_string(), "/ira_overlay_1".to_string()),
+        ]))
+        .is_none());
     }
 }

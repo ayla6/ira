@@ -404,7 +404,11 @@ impl<'a> ActivatorRunner<'a> {
                     | OutputAction::Keyboard { .. }
                     | OutputAction::MouseButton(_)
             );
-            push_press_of(output, &mut self.outcome.outputs, &mut self.outcome.internal);
+            push_press_of(
+                output,
+                &mut self.outcome.outputs,
+                &mut self.outcome.internal,
+            );
             if holdable {
                 state.held.push((index, output.clone()));
             }

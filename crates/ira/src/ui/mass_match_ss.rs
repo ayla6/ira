@@ -19,7 +19,6 @@ use super::rom_name::{
     alt_search_term, clean_rom_name, digit_tail_alt, looks_like_title_id, pick_search_name,
     region_hints, search_term, DigitTail,
 };
-use unicode_normalization::UnicodeNormalization;
 use super::ss_match_dialog::{
     persist_ss_match, show_background_match, show_matched, show_unmatched,
 };
@@ -30,6 +29,7 @@ use ira_api::screenscraper::ScrapedGame;
 use ira_api::types::SteamCmdInfo;
 use ira_api::{ScraperCreds, SteamDataClient};
 use ira_models::screenscraper_system_id;
+use unicode_normalization::UnicodeNormalization;
 
 /// The per-game outcome of the pass. The distinction decides the
 /// tombstone: only `Miss` records one — `Failed` leaves the game untombed
@@ -182,19 +182,9 @@ pub(super) fn attach_ss_actions(
     let console = ira_models::scraper_console_id(game.kind, game.platform_id.id());
     if missed {
         // Already tombstoned by an earlier pass: terminal from the start.
-        show_unmatched(
-            ss_box,
-            state,
-            game.db_id,
-            &game.name,
-            &console,
-            dialog,
-        );
+        show_unmatched(ss_box, state, game.db_id, &game.name, &console, dialog);
     } else {
-        ss_box.append(&status_label(
-            &crate::tr!("Searching…"),
-            CSS_DIM_LABEL,
-        ));
+        ss_box.append(&status_label(&crate::tr!("Searching…"), CSS_DIM_LABEL));
     }
 }
 
@@ -211,20 +201,19 @@ pub(super) fn start_ss_batch_matching(
     dialog: &gtk4::Widget,
     vis: super::mass_match_dialog::RowVis,
 ) {
-    let missed: HashSet<i64> = match ira_db::match_missed_ids(&state.borrow().db, ira_db::miss_source::SS) {
-        Ok(ids) => ids.into_iter().collect(),
-        Err(e) => {
-            eprintln!("ScreenScraper batch: could not read misses: {e}");
-            HashSet::new()
-        }
-    };
+    let missed: HashSet<i64> =
+        match ira_db::match_missed_ids(&state.borrow().db, ira_db::miss_source::SS) {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => {
+                eprintln!("ScreenScraper batch: could not read misses: {e}");
+                HashSet::new()
+            }
+        };
     // The master switch: a disabled ScreenScraper starts no pass at all.
     // Its rows never get an answer from anywhere, so they go straight to
     // the manual search button — which says as much when used.
     if !state.borrow().cfg.screenscraper_enabled {
-        eprintln!(
-            "ScreenScraper batch: disabled in the settings, no pass runs"
-        );
+        eprintln!("ScreenScraper batch: disabled in the settings, no pass runs");
         for (i, g) in needs_matching.iter().enumerate() {
             let Some(ss_box) = rows.get(i).and_then(|r| r.ss.clone()) else {
                 continue;
@@ -339,79 +328,89 @@ pub(super) fn start_ss_batch_matching(
             batch_rows,
             batch_dialog,
         );
-            if allowed {
-                state.borrow().ss_job_busy.set(true);
-                // The strip shows the pass and carries its cancel
-                // button; when another job owns the strip the pass
-                // simply runs without visible progress.
-                let (job, cancel) =
-                    match super::fetch_images::begin_strip_job(
-                        &state,
-                        &crate::tr!("Matching games…"),
-                        &crate::tr!("Matching unmatched games…"),
-                    ) {
-                        Some(job) => {
-                            let cancel = job.cancel_flag();
-                            (Some(job), Some(cancel))
-                        }
-                        None => (None, None),
-                    };
-                let total = queue.len();
-                let done = Cell::new(0usize);
-                let matched = Cell::new(0usize);
-                run_batch(
-                    queue,
-                    0,
-                    cancel,
-                    {
-                        let steam = Arc::clone(&steam);
-                        move |item| resolve(&steam, &creds, &db, &cfg, item)
-                    },
-                    move |hit| {
-                        if hit.row_idx == BATCH_FINISHED {
-                            state.borrow().ss_job_busy.set(false);
-                            if let Some(job) = &job {
-                                job.finish(
-                                    &state,
-                                    &crate::tr!("{} games matched")
-                                        .replacen("{}", &matched.get().to_string(), 1),
-                                    &crate::tr!("Matching finished"),
-                                );
-                            }
-                            return;
-                        }
-                        let name = hit.name.clone();
-                        apply_hit(&state, &rows, &dialog, hit, &matched, &vis);
-                        let finished = done.get() + 1;
-                        done.set(finished);
-                        if let Some(job) = &job {
-                            job.progress(&state, finished, total, &name);
-                        }
-                    },
-                );
-            } else {
-                // Quota spent: the queued rows never get an answer, so
-                // they go straight to the manual search button — and
-                // count as done for the hide toggle, since nothing will
-                // ask for them again today.
-                for item in &queue {
-                    let Some(ss_box) = rows.get(item.row_idx).and_then(|r| r.ss.clone()) else {
-                        continue;
-                    };
-                    let platform_id = state
-                        .borrow()
-                        .games
-                        .iter()
-                        .find(|g| g.db_id == item.db_id)
-                        .map(|g| g.platform_id.id().to_string())
-                        .unwrap_or_default();
-                    show_unmatched(
-                        &ss_box, &state, item.db_id, &item.name, &platform_id, &dialog,
-                    );
-                    vis.source_done(item.row_idx, super::mass_match_dialog::MatchSource::ScreenScraper);
+        if allowed {
+            state.borrow().ss_job_busy.set(true);
+            // The strip shows the pass and carries its cancel
+            // button; when another job owns the strip the pass
+            // simply runs without visible progress.
+            let (job, cancel) = match super::fetch_images::begin_strip_job(
+                &state,
+                &crate::tr!("Matching games…"),
+                &crate::tr!("Matching unmatched games…"),
+            ) {
+                Some(job) => {
+                    let cancel = job.cancel_flag();
+                    (Some(job), Some(cancel))
                 }
-                eprintln!("ScreenScraper batch: quota exhausted, standing down for today");
+                None => (None, None),
+            };
+            let total = queue.len();
+            let done = Cell::new(0usize);
+            let matched = Cell::new(0usize);
+            run_batch(
+                queue,
+                0,
+                cancel,
+                {
+                    let steam = Arc::clone(&steam);
+                    move |item| resolve(&steam, &creds, &db, &cfg, item)
+                },
+                move |hit| {
+                    if hit.row_idx == BATCH_FINISHED {
+                        state.borrow().ss_job_busy.set(false);
+                        if let Some(job) = &job {
+                            job.finish(
+                                &state,
+                                &crate::tr!("{} games matched").replacen(
+                                    "{}",
+                                    &matched.get().to_string(),
+                                    1,
+                                ),
+                                &crate::tr!("Matching finished"),
+                            );
+                        }
+                        return;
+                    }
+                    let name = hit.name.clone();
+                    apply_hit(&state, &rows, &dialog, hit, &matched, &vis);
+                    let finished = done.get() + 1;
+                    done.set(finished);
+                    if let Some(job) = &job {
+                        job.progress(&state, finished, total, &name);
+                    }
+                },
+            );
+        } else {
+            // Quota spent: the queued rows never get an answer, so
+            // they go straight to the manual search button — and
+            // count as done for the hide toggle, since nothing will
+            // ask for them again today.
+            for item in &queue {
+                let Some(ss_box) = rows.get(item.row_idx).and_then(|r| r.ss.clone()) else {
+                    continue;
+                };
+                let platform_id = state
+                    .borrow()
+                    .games
+                    .iter()
+                    .find(|g| g.db_id == item.db_id)
+                    .map(|g| g.platform_id.id().to_string())
+                    .unwrap_or_default();
+                show_unmatched(
+                    &ss_box,
+                    &state,
+                    item.db_id,
+                    &item.name,
+                    &platform_id,
+                    &dialog,
+                );
+                vis.source_done(
+                    item.row_idx,
+                    super::mass_match_dialog::MatchSource::ScreenScraper,
+                );
             }
+            eprintln!("ScreenScraper batch: quota exhausted, standing down for today");
+        }
     });
 }
 
@@ -664,8 +663,7 @@ fn title_search(
     // (switch); every other console searches from the ROM file name,
     // with the title only taking over when the file's separators were
     // deleted outright, not swapped for filesystem-safe stand-ins.
-    let trusted =
-        ira_models::is_title_trusted(entry.kind, entry.title_trusted, platform_id);
+    let trusted = ira_models::is_title_trusted(entry.kind, entry.title_trusted, platform_id);
     let Some(full) = pick_search_name(trusted, &stem, &entry.title, &item.name) else {
         eprintln!("SS batch: [{platform_id}] no usable name to search");
         return SsOutcome::Failed("no usable name".to_string());
@@ -853,7 +851,10 @@ pub(super) fn run_pc_matching(
         Ok(candidates) => {
             if let Some(game) = pick_candidate(&candidates, &normalized, &[]) {
                 if verbose {
-                    eprintln!("SS batch: '{term}' [pc] matched ss id {} '{}'", game.ss_id, game.name);
+                    eprintln!(
+                        "SS batch: '{term}' [pc] matched ss id {} '{}'",
+                        game.ss_id, game.name
+                    );
                 }
                 return finish(game.clone());
             }
@@ -891,7 +892,10 @@ pub(super) fn run_pc_matching(
         // every system is the answer.
         if let Some(game) = pick_candidate(&candidates, &normalized, &[]) {
             if verbose {
-                eprintln!("SS batch: '{term}' [pc] matched ss id {} '{}'", game.ss_id, game.name);
+                eprintln!(
+                    "SS batch: '{term}' [pc] matched ss id {} '{}'",
+                    game.ss_id, game.name
+                );
             }
             return finish(game.clone());
         }
@@ -924,7 +928,10 @@ pub(super) fn run_pc_matching(
                     }
                 } else if let Some(game) = pick_candidate(&widened, &normalized, &[]) {
                     if verbose {
-                        eprintln!("SS batch: '{full}' [pc] matched ss id {} '{}'", game.ss_id, game.name);
+                        eprintln!(
+                            "SS batch: '{full}' [pc] matched ss id {} '{}'",
+                            game.ss_id, game.name
+                        );
                     }
                     return finish(game.clone());
                 }
@@ -976,7 +983,8 @@ fn finish_pc_pick(
     if game.synopses.is_empty() {
         if let Some(extras) = extras {
             if !extras.synopsis.is_empty() {
-                game.synopses.push(("en".to_string(), extras.synopsis.clone()));
+                game.synopses
+                    .push(("en".to_string(), extras.synopsis.clone()));
             }
         }
     }
@@ -1023,8 +1031,7 @@ fn verified_pick(
         .iter()
         .filter(|game| match info {
             Some(info) => {
-                companies_overlap(info, game)
-                    || (!has_companies(game) && title_fits(target, game))
+                companies_overlap(info, game) || (!has_companies(game) && title_fits(target, game))
             }
             None => false,
         })
@@ -1279,10 +1286,7 @@ fn prefix_extension_ok(short: &str, long: &str) -> bool {
 /// direction: their number sits at the end, so the base title is never
 /// their suffix.
 fn suffix_extension_ok(short: &str, long: &str) -> bool {
-    if !long.ends_with(short)
-        || long.len() <= short.len()
-        || !short.as_bytes().contains(&b' ')
-    {
+    if !long.ends_with(short) || long.len() <= short.len() || !short.as_bytes().contains(&b' ') {
         return false;
     }
     long.as_bytes()[long.len() - short.len() - 1] == b' '
@@ -1388,10 +1392,15 @@ fn apply_hit(
                 show_matched(&ss_box, &game.ss_id, &game.name);
                 append_ss_veto(state, &ss_box, hit.db_id, &platform_id, &hit.name, dialog);
             }
-            vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::ScreenScraper);
+            vis.source_done(
+                hit.row_idx,
+                super::mass_match_dialog::MatchSource::ScreenScraper,
+            );
         }
         Some(SsOutcome::Miss) => {
-            if let Err(e) = ira_db::tombstone_match_miss(&state.borrow().db, hit.db_id, ira_db::miss_source::SS) {
+            if let Err(e) =
+                ira_db::tombstone_match_miss(&state.borrow().db, hit.db_id, ira_db::miss_source::SS)
+            {
                 eprintln!("ScreenScraper batch: failed to record the miss: {e}");
             }
             if let Some(ss_box) = rows.get(hit.row_idx).and_then(|r| r.ss.clone()) {
@@ -1399,7 +1408,10 @@ fn apply_hit(
                     show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
                 });
             }
-            vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::ScreenScraper);
+            vis.source_done(
+                hit.row_idx,
+                super::mass_match_dialog::MatchSource::ScreenScraper,
+            );
         }
         Some(SsOutcome::Failed(e)) => {
             eprintln!(
@@ -1411,7 +1423,10 @@ fn apply_hit(
                     show_unmatched(ab, state, hit.db_id, &hit.name, &platform_id, dialog);
                 });
             }
-            vis.source_done(hit.row_idx, super::mass_match_dialog::MatchSource::ScreenScraper);
+            vis.source_done(
+                hit.row_idx,
+                super::mass_match_dialog::MatchSource::ScreenScraper,
+            );
         }
         None => {}
     }
@@ -1443,7 +1458,9 @@ mod tests {
         let steam = ira_api::SteamDataClient::new(
             cfg.steam_api_key.clone(),
             cfg.steam_griddb_api_key.clone(),
-            &std::env::temp_dir().join("ira-diagnostic").to_string_lossy(),
+            &std::env::temp_dir()
+                .join("ira-diagnostic")
+                .to_string_lossy(),
         );
         let creds = ira_api::ScraperCreds::from_account(
             cfg.screenscraper_id.clone(),
@@ -1509,7 +1526,10 @@ mod tests {
                 .unwrap_or_default();
             let base = super::clean_rom_name(&stem);
             let term = super::search_term(&base);
-            eprintln!("== [db {id}] '{}' title_trusted {}", entry.title, entry.title_trusted);
+            eprintln!(
+                "== [db {id}] '{}' title_trusted {}",
+                entry.title, entry.title_trusted
+            );
             eprintln!(
                 "     console '{console}' system {system:?} rom {} exists {}",
                 abs.display(),
@@ -1524,8 +1544,8 @@ mod tests {
                 name: entry.title.clone(),
                 ..Default::default()
             };
-            let covered = console == "3ds"
-                || ira_models::screenscraper_system_id(&console).is_some();
+            let covered =
+                console == "3ds" || ira_models::screenscraper_system_id(&console).is_some();
             if resolved >= 3 || !covered || term.is_empty() {
                 eprintln!("     (resolve not run: covered {covered}, term '{}')", term);
                 continue;
@@ -1763,7 +1783,10 @@ mod tests {
         // Reorder is weaker than exact, stronger than prefix decoration.
         let target = normalized_for_match("Dragon Quest I & II");
         assert_eq!(
-            match_rank(&target, &normalized_for_match("Dragon Quest I & II (Japan)")),
+            match_rank(
+                &target,
+                &normalized_for_match("Dragon Quest I & II (Japan)")
+            ),
             Some(2)
         );
     }
@@ -1791,8 +1814,16 @@ mod tests {
         // carried them in.
         let target = normalized_for_match("Super Whatever");
         let candidates = [
-            scraped_dated("1", &[("us", "Super Whatever: Mystical Awesome")], "2003-05-01"),
-            scraped_dated("2", &[("us", "Super Whatever: Making Dreams")], "2001-11-11"),
+            scraped_dated(
+                "1",
+                &[("us", "Super Whatever: Mystical Awesome")],
+                "2003-05-01",
+            ),
+            scraped_dated(
+                "2",
+                &[("us", "Super Whatever: Making Dreams")],
+                "2001-11-11",
+            ),
             scraped_dated("3", &[("us", "Super Whatever: Great Danger")], "2004-01-01"),
         ];
         let picked = pick_candidate(&candidates, &target, &[]);
@@ -1900,12 +1931,8 @@ mod tests {
             ..scraped("359001", &[("us", "Metaphor: ReFantazio")])
         };
         assert!(
-            super::verified_pick(
-                std::slice::from_ref(&contradicting),
-                &target,
-                Some(&info)
-            )
-            .is_none()
+            super::verified_pick(std::slice::from_ref(&contradicting), &target, Some(&info))
+                .is_none()
         );
         // No Steam info verifies nothing.
         assert!(super::verified_pick(&candidates, &target, None).is_none());
@@ -1921,8 +1948,7 @@ mod tests {
             publisher: "MangaGamer".into(),
             ..Default::default()
         };
-        let target =
-            normalized_for_match("Higurashi When They Cry Hou - Ch.3 Tatarigoroshi");
+        let target = normalized_for_match("Higurashi When They Cry Hou - Ch.3 Tatarigoroshi");
         let candidates = [scraped(
             "306342",
             &[("ss", "Higurashi - When They Cry - Ch.3 - Tatarigoroshi")],
@@ -1934,21 +1960,16 @@ mod tests {
             "306346",
             &[("ss", "Higurashi - When They Cry - Ch.5 - Meakashi")],
         );
-        assert!(super::verified_pick(
-            std::slice::from_ref(&wrong_chapter),
-            &target,
-            Some(&info)
-        )
-        .is_none());
+        assert!(
+            super::verified_pick(std::slice::from_ref(&wrong_chapter), &target, Some(&info))
+                .is_none()
+        );
         // A company-less candidate whose title fits by nothing at all
         // does not verify either.
         let unrelated = scraped("1", &[("us", "Totally Different Thing")]);
-        assert!(super::verified_pick(
-            std::slice::from_ref(&unrelated),
-            &target,
-            Some(&info)
-        )
-        .is_none());
+        assert!(
+            super::verified_pick(std::slice::from_ref(&unrelated), &target, Some(&info)).is_none()
+        );
     }
 
     #[test]
@@ -1993,7 +2014,10 @@ mod tests {
             vec![("54774", "Team Salvato")]
         );
         assert_eq!(
-            finished.synopses.first().map(|(l, t)| (l.as_str(), t.as_str())),
+            finished
+                .synopses
+                .first()
+                .map(|(l, t)| (l.as_str(), t.as_str())),
             Some(("en", "A poetry horror."))
         );
         // A company the cache does not know becomes a local under a
@@ -2022,7 +2046,10 @@ mod tests {
             rating: -1.0,
             ..Default::default()
         };
-        assert_eq!(super::finish_pc_pick(&conn, bare, None, None).ss_id, "70001");
+        assert_eq!(
+            super::finish_pc_pick(&conn, bare, None, None).ss_id,
+            "70001"
+        );
     }
 
     #[test]
@@ -2115,7 +2142,9 @@ mod tests {
         let steam = ira_api::SteamDataClient::new(
             cfg.steam_api_key.clone(),
             cfg.steam_griddb_api_key.clone(),
-            &std::env::temp_dir().join("ira-diagnostic").to_string_lossy(),
+            &std::env::temp_dir()
+                .join("ira-diagnostic")
+                .to_string_lossy(),
         );
         let creds = ira_api::ScraperCreds::from_account(
             cfg.screenscraper_id.clone(),
@@ -2157,10 +2186,7 @@ mod tests {
             match steam.screenscraper_serial_lookup(&creds, &serial, "dc") {
                 Err(e) => eprintln!("     lookup failed: {e}"),
                 Ok(games) => match games.first() {
-                    Some(game) => eprintln!(
-                        "     HIT -> ss id {} '{}'",
-                        game.ss_id, game.name
-                    ),
+                    Some(game) => eprintln!("     HIT -> ss id {} '{}'", game.ss_id, game.name),
                     None => eprintln!("     unknown to the source"),
                 },
             }

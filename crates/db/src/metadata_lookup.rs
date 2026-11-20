@@ -7,17 +7,12 @@ fn query_entities(
     sql: &str,
     params: impl rusqlite::Params,
 ) -> Result<Vec<ira_models::ScraperEntity>, String> {
-    crate::query_all(
-        conn,
-        sql,
-        params,
-        |row| {
-            Ok(ira_models::ScraperEntity {
-                id: row.get::<_, i64>(0)?.to_string(),
-                name: row.get(1)?,
-            })
-        },
-    )
+    crate::query_all(conn, sql, params, |row| {
+        Ok(ira_models::ScraperEntity {
+            id: row.get::<_, i64>(0)?.to_string(),
+            name: row.get(1)?,
+        })
+    })
 }
 
 /// Both company credits in one query: a studio that is both developer
@@ -152,15 +147,8 @@ pub fn scraper_metadata_for_game(
             ))
         },
     )?;
-    let Some((
-        ss_id,
-        release_date,
-        release_timestamp,
-        release_dates,
-        players,
-        rating,
-        synopsis,
-    )) = row
+    let Some((ss_id, release_date, release_timestamp, release_dates, players, rating, synopsis)) =
+        row
     else {
         return Ok(None);
     };
@@ -168,7 +156,9 @@ pub fn scraper_metadata_for_game(
         Default::default()
     } else {
         serde_json::from_str(&release_dates).unwrap_or_else(|e| {
-            eprintln!("scraper_metadata_for_game: corrupt release_dates JSON for game {game_id}: {e}");
+            eprintln!(
+                "scraper_metadata_for_game: corrupt release_dates JSON for game {game_id}: {e}"
+            );
             Default::default()
         })
     };
@@ -207,7 +197,10 @@ pub fn scraper_companies_search(
 }
 
 /// Genres whose name contains the filter, for the picker's search.
-pub fn search_genres(conn: &DbConn, filter: &str) -> Result<Vec<ira_models::ScraperEntity>, String> {
+pub fn search_genres(
+    conn: &DbConn,
+    filter: &str,
+) -> Result<Vec<ira_models::ScraperEntity>, String> {
     entity_search(conn, "scraper_genres", filter)
 }
 
@@ -285,8 +278,14 @@ mod tests {
                 release_date: "1993-12-18".into(),
                 release_timestamp: 1,
                 developers: vec![
-                    ira_models::ScraperEntity { id: "2911".into(), name: "Chunsoft".into() },
-                    ira_models::ScraperEntity { id: "2912".into(), name: "Nintendo".into() },
+                    ira_models::ScraperEntity {
+                        id: "2911".into(),
+                        name: "Chunsoft".into(),
+                    },
+                    ira_models::ScraperEntity {
+                        id: "2912".into(),
+                        name: "Nintendo".into(),
+                    },
                 ],
                 genres: vec![ira_models::ScraperEntity {
                     id: "2620".into(),
@@ -316,9 +315,6 @@ mod tests {
             vec![("en".to_string(), "Two quests.".to_string())]
         );
         // The lookup names survive the round trip through the id columns.
-        assert_eq!(
-            scraper_companies_search(&conn, "chun").unwrap().len(),
-            1
-        );
+        assert_eq!(scraper_companies_search(&conn, "chun").unwrap().len(), 1);
     }
 }

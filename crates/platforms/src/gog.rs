@@ -256,12 +256,10 @@ mod tests {
 
     #[test]
     fn test_parse_gog_info_json_variants() {
-        let (id, name) =
-            parse_gog_info_json(r#"{"gameId":"42","name":"Game"}"#).unwrap();
+        let (id, name) = parse_gog_info_json(r#"{"gameId":"42","name":"Game"}"#).unwrap();
         assert_eq!(id, "42");
         assert_eq!(name, "Game");
-        let (id, name) =
-            parse_gog_info_json(r#"{"rootGameId":99,"title":"Other"}"#).unwrap();
+        let (id, name) = parse_gog_info_json(r#"{"rootGameId":99,"title":"Other"}"#).unwrap();
         assert_eq!(id, "99");
         assert_eq!(name, "Other");
         assert!(parse_gog_info_json(r#"{"name":"No id"}"#).is_none());

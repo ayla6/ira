@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::physical::{ButtonLayout, button_layout};
+use crate::physical::{button_layout, ButtonLayout};
 use crate::{DeviceInfo, PhysicalGamepad, PhysicalRumble, SwitchHidrawPad};
 
 use super::super::session::{
@@ -166,11 +166,10 @@ impl PhysicalPad {
             .and_then(|gamepad| SwitchHidrawPad::open(gamepad.info()));
         if let Some(mut driver) = switch {
             if let Some(gamepad) = self.gamepad.as_ref() {
-                driver
-                    .set_nintendo_layout(resolved_layout_for(
-                        gamepad.info(),
-                        self.calibration.as_deref(),
-                    ));
+                driver.set_nintendo_layout(resolved_layout_for(
+                    gamepad.info(),
+                    self.calibration.as_deref(),
+                ));
             }
             self.switch_hidraw = Some(driver);
             self.rumble = None;

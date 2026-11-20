@@ -113,7 +113,9 @@ pub fn show_steam_layout_search(
         steam: steam.clone(),
         save_dir: save_dir.to_string(),
         attach_game_id: context.as_ref().map(|context| context.game_id),
-        platform_id: context.as_ref().and_then(|context| context.platform_id.clone()),
+        platform_id: context
+            .as_ref()
+            .and_then(|context| context.platform_id.clone()),
         on_imported,
         steam_app_id: app_id,
         nav,

@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::Arc;
 
 use adw::prelude::*;
 
@@ -15,9 +15,7 @@ use super::css::*;
 use super::helpers::clear_children;
 use super::ss_match_dialog::persist_ss_match;
 use super::state::SharedState;
-use super::steam_search_dialog::{
-    show_search_results_dialog, SearchResultsDialogParams,
-};
+use super::steam_search_dialog::{show_search_results_dialog, SearchResultsDialogParams};
 use super::wine_profile_picker::{build_wine_profile_picker, selected_profile_id};
 use super::wizard_window::WizardWindow;
 use crate::{AppMessage, AppSender, Game};
@@ -352,7 +350,9 @@ fn show_move_target_chooser(
     list.set_selection_mode(gtk4::SelectionMode::None);
     list.add_css_class(CSS_BOXED_LIST);
     for folder in folders {
-        list.append(&move_destination_row(folder, basename, &picked, &dialog, wizard));
+        list.append(&move_destination_row(
+            folder, basename, &picked, &dialog, wizard,
+        ));
     }
     dialog.set_extra_child(Some(&list));
 
@@ -783,9 +783,9 @@ fn show_steam_search_page(wizard: &Rc<RefCell<Wizard>>, folder: PathBuf, name: S
             state: &state_c,
             steam: steam_c.clone(),
             source_name: &crate::tr!("Steam"),
-                game_name: &name_c,
-                db_id: 0,
-                on_match: {
+            game_name: &name_c,
+            db_id: 0,
+            on_match: {
                 let wizard_c = wizard_c.clone();
                 let folder_c = folder_c.clone();
                 Rc::new(move |app_id: &str, _matched_name: &str| {
@@ -920,8 +920,13 @@ pub(super) fn show_identified_form(
     exe_entry.add_suffix(&exe_browse);
     group.add(&exe_entry);
 
-    let profile_row =
-        build_wine_profile_picker(&profiles, preselected_profile_id, None, &state, win.as_widget());
+    let profile_row = build_wine_profile_picker(
+        &profiles,
+        preselected_profile_id,
+        None,
+        &state,
+        win.as_widget(),
+    );
     profile_row.set_visible(is_windows);
     group.add(&profile_row);
     let profile_row_c = profile_row.clone();
@@ -1034,8 +1039,7 @@ pub(super) fn start_add(
     // closed. The strip is claimed on the first report — an add
     // that fails before enriching never flashes it — and, when another
     // job holds it, the reports are dropped.
-    let (progress_tx, progress_rx) =
-        super::helpers::ui_channel::<(usize, usize, String)>();
+    let (progress_tx, progress_rx) = super::helpers::ui_channel::<(usize, usize, String)>();
     let strip_name = name.clone();
     let strip_state = wizard.borrow().state.clone();
     glib::spawn_future_local(async move {
@@ -1359,7 +1363,7 @@ fn enrich_added_game(
     game: &Game,
     progress: crate::ui::enrichment::EnrichProgress,
 ) {
-        crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
+    crate::ui::enrichment::enrich_game_blocking(crate::ui::enrichment::EnrichGameParams {
         app_id: game.app_id.clone(),
         trophy_source: game.trophy_source,
         platform_id: game.platform_id.id().to_string(),
@@ -1781,8 +1785,8 @@ fn start_install(
             glib::ControlFlow::Break
         }
         Ok(Err(error)) => {
-            let message = crate::tr!("Failed to install API emulator: {}")
-                .replacen("{}", &error, 1);
+            let message =
+                crate::tr!("Failed to install API emulator: {}").replacen("{}", &error, 1);
             show_add_error(&wizard_c, &message);
             glib::ControlFlow::Break
         }
@@ -2333,11 +2337,20 @@ mod tests {
     #[test]
     fn test_needs_move_choice_asks_for_outside_paths_with_one_root() {
         let folders = vec![PathBuf::from("/games/pc")];
-        assert!(!needs_move_choice(&folders, Path::new("/games/pc/Cool Game")));
+        assert!(!needs_move_choice(
+            &folders,
+            Path::new("/games/pc/Cool Game")
+        ));
         // Outside the single root still asks: the chooser is the move yes/no.
-        assert!(needs_move_choice(&folders, Path::new("/downloads/Cool Game")));
+        assert!(needs_move_choice(
+            &folders,
+            Path::new("/downloads/Cool Game")
+        ));
         // Component-wise prefix: a sibling named /games/pc-games is outside.
-        assert!(needs_move_choice(&folders, Path::new("/games/pc-games/Cool Game")));
+        assert!(needs_move_choice(
+            &folders,
+            Path::new("/games/pc-games/Cool Game")
+        ));
         // No roots configured: nothing to move into, keep it where it is.
         assert!(!needs_move_choice(&[], Path::new("/downloads/Cool Game")));
     }
@@ -2345,9 +2358,18 @@ mod tests {
     #[test]
     fn test_needs_move_choice_asks_only_for_outside_paths() {
         let folders = vec![PathBuf::from("/games/pc"), PathBuf::from("/mnt/hdd/games")];
-        assert!(needs_move_choice(&folders, Path::new("/downloads/Cool Game")));
-        assert!(!needs_move_choice(&folders, Path::new("/mnt/hdd/games/Cool Game")));
+        assert!(needs_move_choice(
+            &folders,
+            Path::new("/downloads/Cool Game")
+        ));
+        assert!(!needs_move_choice(
+            &folders,
+            Path::new("/mnt/hdd/games/Cool Game")
+        ));
         // Component-wise prefix: a sibling named /games/pc-games is outside.
-        assert!(needs_move_choice(&folders, Path::new("/games/pc-games/Cool Game")));
+        assert!(needs_move_choice(
+            &folders,
+            Path::new("/games/pc-games/Cool Game")
+        ));
     }
 }

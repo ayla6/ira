@@ -84,8 +84,8 @@ fn main() {
     let samples = 3;
     for i in 0..samples {
         std::thread::sleep(Duration::from_secs(2));
-        let stat = std::fs::read_to_string(format!("/proc/{daemon_pid}/stat"))
-            .expect("daemon died");
+        let stat =
+            std::fs::read_to_string(format!("/proc/{daemon_pid}/stat")).expect("daemon died");
         let utime: u64 = stat.split_whitespace().nth(13).unwrap().parse().unwrap();
         let stime: u64 = stat.split_whitespace().nth(14).unwrap().parse().unwrap();
         eprintln!("sample {}: utime+stime ticks = {}/{}", i + 1, utime, stime);

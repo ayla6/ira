@@ -280,7 +280,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("hero.jpg");
         let img = image::DynamicImage::new_rgb8(4, 4);
-        img.save_with_format(&dest, image::ImageFormat::Jpeg).unwrap();
+        img.save_with_format(&dest, image::ImageFormat::Jpeg)
+            .unwrap();
         finalize_stored_image(&tmp.path().join("hero.jpg"), 240, 78);
         // Assert: the JPEG stays; only the small copy is added.
         assert!(tmp.path().join("hero.jpg").is_file());

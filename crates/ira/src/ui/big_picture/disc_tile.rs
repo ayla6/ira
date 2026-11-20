@@ -37,11 +37,7 @@ mod imp {
     impl WidgetImpl for DiscArtTile {
         // Fixed both ways: the tile never measures its texture, so art
         // swaps and resolution changes cannot move the row.
-        fn measure(
-            &self,
-            _orientation: gtk4::Orientation,
-            _for_size: i32,
-        ) -> (i32, i32, i32, i32) {
+        fn measure(&self, _orientation: gtk4::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             let size = self.size.get().max(1);
             (size, size, -1, -1)
         }
@@ -57,10 +53,7 @@ mod imp {
                 texture.width() as f32,
                 texture.height() as f32,
             );
-            snapshot.append_texture(
-                &texture,
-                &gtk4::graphene::Rect::new(x, y, w, h),
-            );
+            snapshot.append_texture(&texture, &gtk4::graphene::Rect::new(x, y, w, h));
         }
     }
 }
@@ -91,16 +84,25 @@ mod tests {
 
     #[test]
     fn test_contain_rect_fits_wide_texture() {
-        assert_eq!(contain_rect(300.0, 300.0, 600.0, 300.0), (0.0, 75.0, 300.0, 150.0));
+        assert_eq!(
+            contain_rect(300.0, 300.0, 600.0, 300.0),
+            (0.0, 75.0, 300.0, 150.0)
+        );
     }
 
     #[test]
     fn test_contain_rect_centers_square_texture() {
-        assert_eq!(contain_rect(300.0, 300.0, 100.0, 100.0), (0.0, 0.0, 300.0, 300.0));
+        assert_eq!(
+            contain_rect(300.0, 300.0, 100.0, 100.0),
+            (0.0, 0.0, 300.0, 300.0)
+        );
     }
 
     #[test]
     fn test_contain_rect_fits_tall_texture() {
-        assert_eq!(contain_rect(300.0, 300.0, 150.0, 600.0), (112.5, 0.0, 75.0, 300.0));
+        assert_eq!(
+            contain_rect(300.0, 300.0, 150.0, 600.0),
+            (112.5, 0.0, 75.0, 300.0)
+        );
     }
 }

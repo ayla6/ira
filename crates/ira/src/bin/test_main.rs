@@ -130,7 +130,10 @@ fn bench_scan() {
     std::fs::copy(&src, &db_copy).expect("copy database");
     let db = ira_db::init_db(&db_copy.to_string_lossy());
 
-    let runs: usize = std::env::var("SCAN_RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(2);
+    let runs: usize = std::env::var("SCAN_RUNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2);
     for run in 1..=runs {
         let start = std::time::Instant::now();
         let load_ns = std::sync::atomic::AtomicU64::new(0);
@@ -142,7 +145,10 @@ fn bench_scan() {
             |entry, save_dir| {
                 let t = std::time::Instant::now();
                 let r = ira::game_loader::load_game(entry, save_dir);
-                load_ns.fetch_add(t.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+                load_ns.fetch_add(
+                    t.elapsed().as_nanos() as u64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 load_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 r
             },

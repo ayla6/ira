@@ -54,7 +54,10 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
 
     let Some(path) = profile_path else {
         // The console's own layout is what the game inherits at launch.
-        let parent_profile = cfg.console(game.platform_id.id()).controller_profile.clone();
+        let parent_profile = cfg
+            .console(game.platform_id.id())
+            .controller_profile
+            .clone();
         let parent = if parent_profile.is_empty() {
             None
         } else {
@@ -62,17 +65,23 @@ pub(super) fn open_controller_settings(state: &SharedState, game: &Game) {
             path.is_file().then_some(path)
         };
         match parent {
-            Some(parent) => {
-                show_layout_choice(
-                    game.clone(),
-                    window,
-                    save_dir,
-                    registry,
-                    parent,
-                    enable_on_save,
-                )
-            }
-            None => show_editor(&window, &save_dir, None, None, game, &registry, enable_on_save),
+            Some(parent) => show_layout_choice(
+                game.clone(),
+                window,
+                save_dir,
+                registry,
+                parent,
+                enable_on_save,
+            ),
+            None => show_editor(
+                &window,
+                &save_dir,
+                None,
+                None,
+                game,
+                &registry,
+                enable_on_save,
+            ),
         }
         return;
     };
@@ -158,8 +167,11 @@ fn show_layout_choice(
     // Copy: seed a new layout from the parent, bound to this game only.
     let copy_row = choice_row(
         &crate::tr!("Create a copy for this game"),
-        &crate::tr!("Start from \"{}\"; changes only affect this game")
-            .replacen("{}", &parent_label, 1),
+        &crate::tr!("Start from \"{}\"; changes only affect this game").replacen(
+            "{}",
+            &parent_label,
+            1,
+        ),
         "edit-copy-symbolic",
     );
     {
@@ -388,8 +400,7 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         profile_game.platform_id.id().to_string()
     };
     let current_path = params.launch.input_profile.as_deref().map(PathBuf::from);
-    let (labels, paths, selected) =
-        profile_choices(params.save_dir, &profile_game, current_path);
+    let (labels, paths, selected) = profile_choices(params.save_dir, &profile_game, current_path);
     let input_profile_row = adw::ComboRow::new();
     input_profile_row.set_title(&crate::tr!("Current layout"));
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
@@ -435,44 +446,51 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
         delete_button_for_click.connect_clicked({
             let delete_button_for_click = delete_button_for_click.clone();
             move |_| {
-            let Some(row) = row.upgrade() else {
-                return;
-            };
-            let Some(path) = selected_path(&row, &paths) else {
-                return;
-            };
-            let Some(window) = row.root().and_then(|root| root.downcast::<gtk4::Window>().ok())
-            else {
-                return;
-            };
-            let name = path_label(&path);
-            let row_c = row.clone();
-            let paths_c = paths.clone();
-            let save_dir_c = save_dir.clone();
-            let delete_game_c = delete_game.clone();
-            let last_real_c = last_real.clone();
-            let edit_button_c = edit_button_for_click.clone();
-            let delete_button_c = delete_button_for_click.clone();
-            super::helpers::confirm_dialog(
-                &window,
-                &crate::tr!("Delete profile"),
-                &crate::tr!(
-                    "Delete \"{}\"? Every game using it falls back to no profile."
-                )
-                .replacen("{}", &name, 1),
-                &crate::tr!("Delete"),
-                adw::ResponseAppearance::Destructive,
-                move || {
-                    if let Err(error) = delete_profile(&path) {
-                        eprintln!("ira: {error}");
-                        return;
-                    }
-                    refresh_profile_choices(&row_c, &paths_c, &save_dir_c, &delete_game_c, None, &last_real_c);
-                    let has_profile = selected_path(&row_c, &paths_c).is_some();
-                    edit_button_c.set_sensitive(has_profile);
-                    delete_button_c.set_sensitive(has_profile);
-                },
-            );
+                let Some(row) = row.upgrade() else {
+                    return;
+                };
+                let Some(path) = selected_path(&row, &paths) else {
+                    return;
+                };
+                let Some(window) = row
+                    .root()
+                    .and_then(|root| root.downcast::<gtk4::Window>().ok())
+                else {
+                    return;
+                };
+                let name = path_label(&path);
+                let row_c = row.clone();
+                let paths_c = paths.clone();
+                let save_dir_c = save_dir.clone();
+                let delete_game_c = delete_game.clone();
+                let last_real_c = last_real.clone();
+                let edit_button_c = edit_button_for_click.clone();
+                let delete_button_c = delete_button_for_click.clone();
+                super::helpers::confirm_dialog(
+                    &window,
+                    &crate::tr!("Delete profile"),
+                    &crate::tr!("Delete \"{}\"? Every game using it falls back to no profile.")
+                        .replacen("{}", &name, 1),
+                    &crate::tr!("Delete"),
+                    adw::ResponseAppearance::Destructive,
+                    move || {
+                        if let Err(error) = delete_profile(&path) {
+                            eprintln!("ira: {error}");
+                            return;
+                        }
+                        refresh_profile_choices(
+                            &row_c,
+                            &paths_c,
+                            &save_dir_c,
+                            &delete_game_c,
+                            None,
+                            &last_real_c,
+                        );
+                        let has_profile = selected_path(&row_c, &paths_c).is_some();
+                        edit_button_c.set_sensitive(has_profile);
+                        delete_button_c.set_sensitive(has_profile);
+                    },
+                );
             }
         });
     }
@@ -703,13 +721,11 @@ pub(super) fn build_controller_page(params: ControllerPageParams) -> ControllerW
     scroll.set_child(Some(&page));
     scroll.set_vexpand(true);
     scroll.set_hexpand(true);
-    params
-        .sidebar
-        .append(&settings_pages::settings_sidebar_row(
-            "input-gaming-symbolic",
-            "Controller",
-            "controller",
-        ));
+    params.sidebar.append(&settings_pages::settings_sidebar_row(
+        "input-gaming-symbolic",
+        "Controller",
+        "controller",
+    ));
     params.stack.add_named(&scroll, Some("controller"));
 
     ControllerWidgets {
@@ -783,11 +799,8 @@ fn refresh_profile_choices(
     selected_path: Option<&Path>,
     last_real: &Rc<RefCell<u32>>,
 ) {
-    let (labels, profile_paths, selected) = profile_choices(
-        save_dir,
-        game,
-        selected_path.map(Path::to_path_buf),
-    );
+    let (labels, profile_paths, selected) =
+        profile_choices(save_dir, game, selected_path.map(Path::to_path_buf));
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
     *paths.borrow_mut() = profile_paths;
     row.set_model(Some(&gtk4::StringList::new(&refs)));

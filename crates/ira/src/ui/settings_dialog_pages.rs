@@ -76,10 +76,7 @@ pub(super) struct GeneralSection {
 
 /// The landing page, built synchronously at open: the dialog paints with
 /// real content while the remaining pages build in bulk just after.
-pub(super) fn build_general_section(
-    cfg: &Config,
-    state: &SharedState,
-) -> GeneralSection {
+pub(super) fn build_general_section(cfg: &Config, state: &SharedState) -> GeneralSection {
     let (
         general_page,
         notif_row,
@@ -123,7 +120,10 @@ pub(super) fn build_general_section(
     let all_state = state.clone();
     all_btn.connect_clicked(move |btn| {
         if !super::fetch_metadata::start_full_refetch(&all_state, false) {
-            super::helpers::toast_on_root(btn, &crate::tr!("Nothing to fetch right now").to_string());
+            super::helpers::toast_on_root(
+                btn,
+                &crate::tr!("Nothing to fetch right now").to_string(),
+            );
         }
     });
     all_row.add_suffix(&all_btn);
@@ -166,7 +166,10 @@ pub(super) fn build_general_section(
     let meta_state = state.clone();
     meta_btn.connect_clicked(move |btn| {
         if !super::fetch_metadata::start_steam_refetch(&meta_state, false) {
-            super::helpers::toast_on_root(btn, &crate::tr!("Nothing to fetch right now").to_string());
+            super::helpers::toast_on_root(
+                btn,
+                &crate::tr!("Nothing to fetch right now").to_string(),
+            );
         }
     });
     meta_row.add_suffix(&meta_btn);
@@ -181,7 +184,10 @@ pub(super) fn build_general_section(
     let ss_state = state.clone();
     ss_btn.connect_clicked(move |btn| {
         if !super::fetch_metadata::start_metadata_refetch(&ss_state, false) {
-            super::helpers::toast_on_root(btn, &crate::tr!("Nothing to fetch right now").to_string());
+            super::helpers::toast_on_root(
+                btn,
+                &crate::tr!("Nothing to fetch right now").to_string(),
+            );
         }
     });
     ss_row.add_suffix(&ss_btn);
@@ -399,11 +405,7 @@ pub(super) fn register_settings_rows(sidebar: &gtk4::ListBox, stack: &gtk4::Stac
         Row::Section(crate::tr!("PC games")),
         Row::Page("games-symbolic", crate::tr!("PC games"), "computer_games"),
         Row::Page("steam-train-symbolic", crate::tr!("Steam"), "steam"),
-        Row::Page(
-            "api-symbolic",
-            crate::tr!("API emulators"),
-            "api_emulators",
-        ),
+        Row::Page("api-symbolic", crate::tr!("API emulators"), "api_emulators"),
         Row::Page(
             "system-software-install-symbolic",
             crate::tr!("Lutris migration"),
@@ -416,22 +418,14 @@ pub(super) fn register_settings_rows(sidebar: &gtk4::ListBox, stack: &gtk4::Stac
             crate::tr!("Performance"),
             "performance",
         ),
-        Row::Page(
-            "video-display-symbolic",
-            crate::tr!("Graphics"),
-            "graphics",
-        ),
+        Row::Page("video-display-symbolic", crate::tr!("Graphics"), "graphics"),
         Row::Page(
             "preferences-other-symbolic",
             crate::tr!("Advanced"),
             "advanced",
         ),
         Row::Section(crate::tr!("Emulation")),
-        Row::Page(
-            "trophy-symbolic",
-            crate::tr!("RetroAchievements"),
-            "ra",
-        ),
+        Row::Page("trophy-symbolic", crate::tr!("RetroAchievements"), "ra"),
         Row::Page("library-symbolic", crate::tr!("ROM library"), "roms"),
     ];
     for row in rows {
@@ -464,11 +458,7 @@ pub(super) fn fill_page(stack: &gtk4::Stack, page_id: &str, page: &impl IsA<gtk4
 }
 
 /// Swap a placeholder for an already-scrolled page.
-pub(super) fn fill_scrolled_page(
-    stack: &gtk4::Stack,
-    page_id: &str,
-    page: &gtk4::ScrolledWindow,
-) {
+pub(super) fn fill_scrolled_page(stack: &gtk4::Stack, page_id: &str, page: &gtk4::ScrolledWindow) {
     if let Some(placeholder) = stack.child_by_name(page_id) {
         stack.remove(&placeholder);
     }

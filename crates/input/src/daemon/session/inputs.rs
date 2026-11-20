@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use crate::{InputEvent, InputSource, MappingEngine, ReportRateEstimator};
 
-use super::outputs::{emit_mapped, emit_outputs, OutputTargets};
 use super::super::TraceState;
+use super::outputs::{emit_mapped, emit_outputs, OutputTargets};
 
 /// Maps hub-forwarded input events and stashes motion samples for the tick.
 /// The overlay toggle chord never reaches here; the session loop filters it first.
@@ -120,9 +120,7 @@ pub(crate) fn presses_for_held(
     let held_set: HashSet<InputSource> = held.into_iter().collect();
     pressed
         .iter()
-        .filter(|source| {
-            matches!(source, InputSource::Button(_)) && !held_set.contains(source)
-        })
+        .filter(|source| matches!(source, InputSource::Button(_)) && !held_set.contains(source))
         .map(|source| InputEvent {
             source: *source,
             value: 1.0,
@@ -140,14 +138,8 @@ mod tests {
     fn test_is_release_follows_source_thresholds() {
         use crate::{AxisDirection, GamepadAxis, GamepadButton};
         // Buttons release at or below the press threshold.
-        assert!(is_release(
-            &InputSource::Button(GamepadButton::A),
-            0.0
-        ));
-        assert!(!is_release(
-            &InputSource::Button(GamepadButton::A),
-            1.0
-        ));
+        assert!(is_release(&InputSource::Button(GamepadButton::A), 0.0));
+        assert!(!is_release(&InputSource::Button(GamepadButton::A), 1.0));
         // Sticks release near center only.
         assert!(is_release(&InputSource::Axis(GamepadAxis::LeftX), 0.1));
         assert!(!is_release(&InputSource::Axis(GamepadAxis::LeftX), 0.8));
@@ -168,8 +160,9 @@ mod tests {
             InputSource::Button(GamepadButton::A),
             InputSource::Button(GamepadButton::B),
         ];
-        let pressed: HashSet<InputSource> =
-            [InputSource::Button(GamepadButton::B)].into_iter().collect();
+        let pressed: HashSet<InputSource> = [InputSource::Button(GamepadButton::B)]
+            .into_iter()
+            .collect();
         let releases = releases_for_missing(held, &pressed, 7);
         // Assert: A gets a real release event, B untouched.
         assert_eq!(
@@ -186,8 +179,9 @@ mod tests {
     fn test_releases_for_missing_empty_when_nothing_stuck() {
         // Mapper and pad agree: no synthetic traffic.
         let held = vec![InputSource::Button(GamepadButton::A)];
-        let pressed: HashSet<InputSource> =
-            [InputSource::Button(GamepadButton::A)].into_iter().collect();
+        let pressed: HashSet<InputSource> = [InputSource::Button(GamepadButton::A)]
+            .into_iter()
+            .collect();
         assert!(releases_for_missing(held, &pressed, 0).is_empty());
         assert!(releases_for_missing(Vec::new(), &pressed, 0).is_empty());
     }
@@ -195,8 +189,9 @@ mod tests {
     #[test]
     fn test_presses_for_held_represses_gripped_buttons() {
         // Arrange: mapper clean (open-edge release), pad reports A held.
-        let pressed: HashSet<InputSource> =
-            [InputSource::Button(GamepadButton::A)].into_iter().collect();
+        let pressed: HashSet<InputSource> = [InputSource::Button(GamepadButton::A)]
+            .into_iter()
+            .collect();
         let presses = presses_for_held(Vec::new(), &pressed, 9);
         // Assert: one synthetic press restoring the held button.
         assert_eq!(

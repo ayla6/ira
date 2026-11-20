@@ -113,7 +113,10 @@ mod tests {
     fn test_content_md5_zip_hashes_entry_not_container() {
         let tmp = tempfile::tempdir().unwrap();
         let archive = tmp.path().join("rom.zip");
-        write_zip(&archive, &[("readme.txt", b"not a rom"), ("rom.gba", b"rom inside")]);
+        write_zip(
+            &archive,
+            &[("readme.txt", b"not a rom"), ("rom.gba", b"rom inside")],
+        );
         let plain = tmp.path().join("rom.gba");
         std::fs::write(&plain, b"rom inside").unwrap();
 

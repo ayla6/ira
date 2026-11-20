@@ -102,18 +102,10 @@ fn append_recent_covers(
         };
         let db_id = game.db_id;
         let variant_id = game.variant_id;
-        let item = build_cover(
-            state,
-            game,
-            &path,
-            w,
-            h,
-            false,
-            move |state| {
-                switch_to_game(state, db_id, variant_id);
-                super::sidebar::scroll_to_row(state, db_id, variant_id);
-            },
-        );
+        let item = build_cover(state, game, &path, w, h, false, move |state| {
+            switch_to_game(state, db_id, variant_id);
+            super::sidebar::scroll_to_row(state, db_id, variant_id);
+        });
         row.append_cover(&item);
     }
     game_widths
@@ -378,11 +370,7 @@ fn set_cover_art(
     };
     match ira_images::cached_texture(path) {
         Some(texture) => set(Some(texture)),
-        None => ira_images::load_texture_async_with_priority(
-            path,
-            glib::Priority::DEFAULT,
-            set,
-        ),
+        None => ira_images::load_texture_async_with_priority(path, glib::Priority::DEFAULT, set),
     }
 }
 

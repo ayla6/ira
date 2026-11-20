@@ -251,7 +251,10 @@ fn device_info(path: PathBuf, device: &Device, skip_virtual: bool) -> Option<Dev
 
 /// The evdev UNIQ serial from sysfs, empty when the node carries none.
 fn evdev_uniq(path: &Path) -> String {
-    let node = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    let node = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
     std::fs::read_to_string(format!("/sys/class/input/{node}/device/uniq"))
         .map(|serial| serial.trim().to_string())
         .unwrap_or_default()
@@ -318,11 +321,7 @@ impl PhysicalGamepad {
             })?;
         }
         let id = device.input_id();
-        let layout = button_layout(
-            id.vendor(),
-            id.product(),
-            device.name().unwrap_or_default(),
-        );
+        let layout = button_layout(id.vendor(), id.product(), device.name().unwrap_or_default());
         Ok(Self {
             info,
             device: Some(device),
@@ -681,8 +680,7 @@ fn poll_timeout_ms(timeout: Option<Duration>) -> libc::c_int {
 /// signal interrupted the read): the device stays open. Anything else —
 /// unplug, I/O failure, stale descriptor — is a disconnect.
 fn is_transient_read_error(error: &std::io::Error) -> bool {
-    error.kind() == std::io::ErrorKind::WouldBlock
-        || error.raw_os_error() == Some(libc::EINTR)
+    error.kind() == std::io::ErrorKind::WouldBlock || error.raw_os_error() == Some(libc::EINTR)
 }
 
 fn same_device(left: &DeviceInfo, right: &DeviceInfo) -> bool {
@@ -920,10 +918,7 @@ pub fn is_virtual_gamepad(info: &DeviceInfo) -> bool {
 /// builds no virtual devices at all). With no physical pad visible the
 /// virtuals still count, so an unplugged-but-held pad reads as present.
 pub fn pad_status_summary(pads: &[DeviceInfo]) -> (usize, Option<ControllerFamily>) {
-    let physical: Vec<&DeviceInfo> = pads
-        .iter()
-        .filter(|pad| !is_virtual_gamepad(pad))
-        .collect();
+    let physical: Vec<&DeviceInfo> = pads.iter().filter(|pad| !is_virtual_gamepad(pad)).collect();
     let shown: Vec<&DeviceInfo> = if physical.is_empty() {
         pads.iter().collect()
     } else {
@@ -949,13 +944,13 @@ pub(crate) fn is_dualsense_identity(vendor: u16, product: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        button_layout, is_dualsense_identity, is_dualshock4_identity,
-        is_ira_virtual_device, is_transient_read_error, is_virtual_gamepad, map_button,
-        map_button_for_device, normalize_signed, normalize_trigger, pad_status_summary,
-        poll_timeout_ms, same_device, swap_face_buttons, synthesized_trigger_click, ButtonLayout,
-        ControllerFamily, DeviceInfo, ReportedInputMode,
+        button_layout, is_dualsense_identity, is_dualshock4_identity, is_ira_virtual_device,
+        is_transient_read_error, is_virtual_gamepad, map_button, map_button_for_device,
+        normalize_signed, normalize_trigger, pad_status_summary, poll_timeout_ms, same_device,
+        swap_face_buttons, synthesized_trigger_click, ButtonLayout, ControllerFamily, DeviceInfo,
+        ReportedInputMode,
     };
-    use crate::hid_8bitdo::{is_ultimate_2, VENDOR_8BITDO, ULTIMATE_2_WIRELESS};
+    use crate::hid_8bitdo::{is_ultimate_2, ULTIMATE_2_WIRELESS, VENDOR_8BITDO};
     use crate::GamepadButton;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -1112,11 +1107,10 @@ mod tests {
             0x6012,
             "8BitDo Ultimate 2 Wireless Controller"
         ));
-        assert!(!is_ultimate_2(
-            0x2dc8,
-            0x6012,
-            "8BitDo Ultimate C"
-        ), "a shared id without the Ultimate 2 name keeps the standard layout");
+        assert!(
+            !is_ultimate_2(0x2dc8, 0x6012, "8BitDo Ultimate C"),
+            "a shared id without the Ultimate 2 name keeps the standard layout"
+        );
         assert_eq!(
             map_button_for_device(evdev::KeyCode::BTN_NORTH, ButtonLayout::Ultimate2DInput),
             Some(GamepadButton::X)
@@ -1150,11 +1144,7 @@ mod tests {
             ButtonLayout::VirtualXbox
         );
         assert_eq!(
-            button_layout(
-                0x057e,
-                0x2009,
-                "Ira Virtual Nintendo Switch Pro Controller"
-            ),
+            button_layout(0x057e, 0x2009, "Ira Virtual Nintendo Switch Pro Controller"),
             ButtonLayout::VirtualXbox
         );
         assert_eq!(
@@ -1203,7 +1193,11 @@ mod tests {
             ),
             None
         );
-        assert!(!is_ultimate_2(0x2dc8, 0x310b, "Ultimate 2 Wireless Controller"));
+        assert!(!is_ultimate_2(
+            0x2dc8,
+            0x310b,
+            "Ultimate 2 Wireless Controller"
+        ));
     }
 
     #[test]
@@ -1252,7 +1246,10 @@ mod tests {
         assert_eq!(swap_face_buttons(GamepadButton::B), GamepadButton::A);
         assert_eq!(swap_face_buttons(GamepadButton::X), GamepadButton::Y);
         assert_eq!(swap_face_buttons(GamepadButton::Y), GamepadButton::X);
-        assert_eq!(swap_face_buttons(GamepadButton::Start), GamepadButton::Start);
+        assert_eq!(
+            swap_face_buttons(GamepadButton::Start),
+            GamepadButton::Start
+        );
         assert_eq!(
             swap_face_buttons(GamepadButton::Paddle3),
             GamepadButton::Paddle3
@@ -1338,7 +1335,11 @@ mod tests {
 
     #[test]
     fn test_reported_input_mode_prefers_explicit_direct_input_name() {
-        let device = fake_device("8BitDo Controller (DInput)", VENDOR_8BITDO, ULTIMATE_2_WIRELESS);
+        let device = fake_device(
+            "8BitDo Controller (DInput)",
+            VENDOR_8BITDO,
+            ULTIMATE_2_WIRELESS,
+        );
         assert_eq!(device.reported_input_mode(), ReportedInputMode::DirectInput);
     }
 
@@ -1383,9 +1384,9 @@ mod tests {
         assert!(!is_transient_read_error(
             &std::io::Error::from_raw_os_error(libc::ENODEV)
         ));
-        assert!(!is_transient_read_error(&std::io::Error::from_raw_os_error(
-            libc::EIO
-        )));
+        assert!(!is_transient_read_error(
+            &std::io::Error::from_raw_os_error(libc::EIO)
+        ));
     }
 
     #[test]

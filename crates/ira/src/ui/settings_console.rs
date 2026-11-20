@@ -216,12 +216,10 @@ pub(super) fn build_vita3k_settings_page(
                 "Vita3K stores installed applications below ux0/app"
             )));
             let dir_row = adw::ActionRow::new();
-            dir_row.set_title(&esc(
-                &ira_platforms::vita3k::vita_fs_path_for(initial_exe)
-                    .join("ux0/app")
-                    .display()
-                    .to_string(),
-            ));
+            dir_row.set_title(&esc(&ira_platforms::vita3k::vita_fs_path_for(initial_exe)
+                .join("ux0/app")
+                .display()
+                .to_string()));
             dir_row.set_sensitive(false);
             dirs_group.add(&dir_row);
         },
@@ -251,11 +249,9 @@ pub(super) fn build_cemu_settings_page(
             dirs_group.set_title(&crate::tr!("Install directories"));
             dirs_group.set_description(Some(&crate::tr!("Managed by Cemu")));
             let mlc_row = adw::ActionRow::new();
-            mlc_row.set_title(&esc(
-                &ira_platforms::cemu::mlc_path_for(initial_exe)
-                    .display()
-                    .to_string(),
-            ));
+            mlc_row.set_title(&esc(&ira_platforms::cemu::mlc_path_for(initial_exe)
+                .display()
+                .to_string()));
             mlc_row.set_subtitle(&crate::tr!("MLC path"));
             mlc_row.set_sensitive(false);
             dirs_group.add(&mlc_row);
@@ -415,9 +411,9 @@ fn add_executable_actions(
         });
         row.add_suffix(&auto_detect);
     }
-        let browse = make_browse_button(
-            Some(parent),
-            browse_title,
+    let browse = make_browse_button(
+        Some(parent),
+        browse_title,
         false,
         Some(("Executable", &["application/x-executable"])),
         entry_path_closure(row),

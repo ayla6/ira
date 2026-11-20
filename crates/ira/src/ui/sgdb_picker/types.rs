@@ -89,14 +89,9 @@ impl ThumbPool {
             let rx = rx.clone();
             let steam = steam.clone();
             std::thread::spawn(move || {
-                while let Ok((url, reply)) =
-                    rx.lock().unwrap_or_else(|e| e.into_inner()).recv()
-                {
+                while let Ok((url, reply)) = rx.lock().unwrap_or_else(|e| e.into_inner()).recv() {
                     let _s = tracing::info_span!("thumbnail_download", url = %url).entered();
-                    let bytes = steam
-                        .download_bytes(&url)
-                        .ok()
-                        .filter(|b| !b.is_empty());
+                    let bytes = steam.download_bytes(&url).ok().filter(|b| !b.is_empty());
                     let _ = reply.send(bytes);
                 }
             });

@@ -12,8 +12,8 @@ use adw::prelude::*;
 
 use super::css::CSS_DIM_LABEL;
 use super::input_profile_assets::{set_source_asset, source_badge};
-use super::input_profile_options::output_display_label;
 use super::input_profile_editor_regions::source_label;
+use super::input_profile_options::output_display_label;
 use super::input_profile_region_pages::rebind_hook;
 use super::input_profile_region_pages::PagesCtx;
 use super::input_profile_sheet_base::{
@@ -65,14 +65,15 @@ fn child_rows(ctx: &PagesCtx, base: &SheetBase, reopen: &Reopen) -> Vec<gtk4::Wi
     let mapping = find_mapping(base);
     let mut rows: Vec<gtk4::Widget> = Vec::new();
 
-    if matches!(base.source, InputSource::Axis(_) | InputSource::AxisDirection { .. }) {
+    if matches!(
+        base.source,
+        InputSource::Axis(_) | InputSource::AxisDirection { .. }
+    ) {
         rows.push(behavior_row(ctx, base, reopen).upcast());
         if let Some(mode) = mapping.as_ref().and_then(|mapping| mapping.mode.as_ref()) {
             if matches!(mode, SourceMode::Joystick(_) | SourceMode::Mouse { .. }) {
                 for (title, section) in
-                    super::input_profile_stick_settings::stick_setting_sections(
-                        base, mode, reopen,
-                    )
+                    super::input_profile_stick_settings::stick_setting_sections(base, mode, reopen)
                 {
                     rows.push(section_title_row(&title).upcast());
                     for child in section {
@@ -117,12 +118,11 @@ fn child_rows(ctx: &PagesCtx, base: &SheetBase, reopen: &Reopen) -> Vec<gtk4::Wi
 fn is_trigger_axis(source: InputSource) -> bool {
     matches!(
         source,
-        InputSource::Axis(
-            GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger
-        ) | InputSource::AxisDirection {
-            axis: GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger,
-            ..
-        }
+        InputSource::Axis(GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger)
+            | InputSource::AxisDirection {
+                axis: GamepadAxis::LeftTrigger | GamepadAxis::RightTrigger,
+                ..
+            }
     )
 }
 
@@ -140,7 +140,11 @@ fn behavior_row(ctx: &PagesCtx, base: &SheetBase, reopen: &Reopen) -> adw::Combo
     let current = find_mapping(base).and_then(|mapping| mapping.mode);
     let selected = current
         .as_ref()
-        .and_then(|mode| modes.iter().position(|candidate| same_mode(candidate, mode)))
+        .and_then(|mode| {
+            modes
+                .iter()
+                .position(|candidate| same_mode(candidate, mode))
+        })
         .unwrap_or(0);
     picker.set_selected(selected as u32);
 
@@ -189,11 +193,11 @@ pub(crate) fn sync_stick_dpad_directions(
     let seeding = matches!(mode, Some(SourceMode::Dpad { .. }));
     for (button, axis, direction) in directions {
         let source = InputSource::AxisDirection { axis, direction };
-        let seed = InputMapping::simple(
-            source,
-            ira_input::OutputAction::GamepadButton(button),
-        );
-        match (seeding, inputs.iter().position(|input| input.source == source)) {
+        let seed = InputMapping::simple(source, ira_input::OutputAction::GamepadButton(button));
+        match (
+            seeding,
+            inputs.iter().position(|input| input.source == source),
+        ) {
             (true, None) => inputs.push(seed),
             (true, Some(index)) => {
                 if inputs[index].activators.is_empty() {
@@ -265,7 +269,8 @@ fn direction_command_rows(ctx: &PagesCtx, base: &SheetBase) -> Vec<gtk4::Widget>
         (GamepadButton::DpadLeft, x_axis, AxisDirection::Negative),
         (GamepadButton::DpadRight, x_axis, AxisDirection::Positive),
     ];
-    let mut rows: Vec<gtk4::Widget> = vec![section_title_row(&crate::tr!("Direction Commands")).upcast()];
+    let mut rows: Vec<gtk4::Widget> =
+        vec![section_title_row(&crate::tr!("Direction Commands")).upcast()];
     for (button, axis, direction) in directions {
         let source = InputSource::AxisDirection { axis, direction };
         let row = command_row(ctx, source);
@@ -503,10 +508,9 @@ pub(crate) fn default_mapping(source: InputSource) -> InputMapping {
         },
         InputSource::Axis(_) => InputMapping::new(source),
         InputSource::AxisDirection { .. } => InputMapping::new(source),
-        InputSource::Button(button) => InputMapping::simple(
-            source,
-            ira_input::OutputAction::GamepadButton(button),
-        ),
+        InputSource::Button(button) => {
+            InputMapping::simple(source, ira_input::OutputAction::GamepadButton(button))
+        }
     }
 }
 
@@ -542,10 +546,26 @@ mod tests {
             Some(&SourceMode::Dpad { threshold: 0.5 }),
         );
         let expected = [
-            (GamepadAxis::LeftY, AxisDirection::Negative, GamepadButton::DpadUp),
-            (GamepadAxis::LeftY, AxisDirection::Positive, GamepadButton::DpadDown),
-            (GamepadAxis::LeftX, AxisDirection::Negative, GamepadButton::DpadLeft),
-            (GamepadAxis::LeftX, AxisDirection::Positive, GamepadButton::DpadRight),
+            (
+                GamepadAxis::LeftY,
+                AxisDirection::Negative,
+                GamepadButton::DpadUp,
+            ),
+            (
+                GamepadAxis::LeftY,
+                AxisDirection::Positive,
+                GamepadButton::DpadDown,
+            ),
+            (
+                GamepadAxis::LeftX,
+                AxisDirection::Negative,
+                GamepadButton::DpadLeft,
+            ),
+            (
+                GamepadAxis::LeftX,
+                AxisDirection::Positive,
+                GamepadButton::DpadRight,
+            ),
         ];
         for (axis, direction, button) in expected {
             let mapping = direction_of(&inputs, axis, direction)

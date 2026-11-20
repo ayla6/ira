@@ -41,7 +41,12 @@ impl ScrollGlide {
     /// already running the new goal wins immediately: holding a
     /// direction tracks the selection row by row instead of scrolling
     /// blind behind a chase camera.
-    pub(super) fn animate_to(&self, scrolled: &gtk4::ScrolledWindow, adj: &gtk4::Adjustment, target: f64) {
+    pub(super) fn animate_to(
+        &self,
+        scrolled: &gtk4::ScrolledWindow,
+        adj: &gtk4::Adjustment,
+        target: f64,
+    ) {
         self.goal.set(target);
         if self.anim.borrow().is_some() {
             self.finish();
@@ -59,8 +64,7 @@ impl ScrollGlide {
         let goal = Rc::clone(&self.goal);
         let anim = Rc::clone(&self.anim);
         let id = scrolled.add_tick_callback(move |_, _| {
-            let t = (started.borrow().elapsed().as_millis() as f64 / SCROLL_MILLIS as f64)
-                .min(1.0);
+            let t = (started.borrow().elapsed().as_millis() as f64 / SCROLL_MILLIS as f64).min(1.0);
             let eased = 1.0 - (1.0 - t) * (1.0 - t);
             let g = goal.get();
             let s = start.get();

@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use super::defaults::{
-    DEFAULT_GRID_COVER_WIDTH, default_grid_cover_width, default_language_preferences,
-    default_save_dir, default_true,
+    default_grid_cover_width, default_language_preferences, default_save_dir, default_true,
+    DEFAULT_GRID_COVER_WIDTH,
 };
 use super::subconfigs::{ConsoleConfig, ControllerInputConfig, SgdbFilteredUser, SystemDefaults};
 use crate::load::config_path;
@@ -540,7 +540,8 @@ mod tests {
     }
 
     #[test]
-    fn test_console_fullscreen_resolution() {        // Inherit on desktop follows the global default.
+    fn test_console_fullscreen_resolution() {
+        // Inherit on desktop follows the global default.
         let cfg = Config {
             default_fullscreen: true,
             ..Default::default()

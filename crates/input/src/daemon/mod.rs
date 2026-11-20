@@ -31,7 +31,9 @@ pub enum SessionEvent {
         name: String,
         path: String,
     },
-    ProfileReloaded { path: String },
+    ProfileReloaded {
+        path: String,
+    },
 }
 
 pub(crate) use profile_monitor::ProfileMonitor;

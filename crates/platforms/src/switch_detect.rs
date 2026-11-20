@@ -24,7 +24,10 @@ const SWITCH_VARIANTS: &[(&[&str], &str)] = &[
         "Ryujinx",
     ),
     (&["Kenji-NX", "kenji-nx", "KenjiNX", "kenjinx"], "Kenji-NX"),
-    (&["eden_nightly", "Eden-Nightly", "eden-nightly"], "Eden Nightly"),
+    (
+        &["eden_nightly", "Eden-Nightly", "eden-nightly"],
+        "Eden Nightly",
+    ),
     (&["eden", "Eden"], "Eden"),
     (&["yuzu", "Yuzu"], "Yuzu"),
     (&["suyu", "Suyu"], "Suyu"),
@@ -74,10 +77,7 @@ fn choices_in(search_dirs: &[PathBuf]) -> Vec<DetectedEmulator> {
             let Some(file_name) = file.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if names
-                .iter()
-                .any(|name| name_matches_file(name, file_name))
-            {
+            if names.iter().any(|name| name_matches_file(name, file_name)) {
                 push(file.to_string_lossy().into_owned(), label);
             }
         }

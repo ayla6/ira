@@ -96,7 +96,11 @@ pub fn add_disc(conn: &DbConn, disc: &GameDisc) -> Result<i64, String> {
 }
 
 pub fn delete_discs(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    crate::execute(conn, "DELETE FROM game_discs WHERE game_id = ?1", params![game_id])?;
+    crate::execute(
+        conn,
+        "DELETE FROM game_discs WHERE game_id = ?1",
+        params![game_id],
+    )?;
     Ok(())
 }
 
@@ -117,7 +121,11 @@ pub fn set_default_disc(conn: &DbConn, game_id: i64, disc_id: Option<i64>) -> Re
             params![game_id, did],
         )?;
     } else {
-        crate::execute(conn, "DELETE FROM game_default_disc WHERE game_id = ?1", params![game_id])?;
+        crate::execute(
+            conn,
+            "DELETE FROM game_default_disc WHERE game_id = ?1",
+            params![game_id],
+        )?;
     }
     Ok(())
 }

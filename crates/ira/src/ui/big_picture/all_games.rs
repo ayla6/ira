@@ -3,8 +3,8 @@
 //! and keyboard drive an external selection highlight (the grid itself only
 //! recycles cells); A launches, B returns home.
 
-use crate::ui::css::*;
 use super::marquee::Marquee;
+use crate::ui::css::*;
 use crate::ui::selection_ring::SelectionRing;
 use crate::ui::state::SharedState;
 use crate::ui::virtual_grid::VirtualGrid;
@@ -143,26 +143,34 @@ impl ShoulderBadge {
         fallback.set_valign(gtk4::Align::Center);
         fallback.add_css_class(CSS_BP_PROMPT);
         slot.append(&fallback);
-        Self { slot, glyph, fallback }
+        Self {
+            slot,
+            glyph,
+            fallback,
+        }
     }
 
-    fn refresh(&self, button: ira_input::GamepadButton, family: ira_input::ControllerFamily, scale: f64) {
+    fn refresh(
+        &self,
+        button: ira_input::GamepadButton,
+        family: ira_input::ControllerFamily,
+        scale: f64,
+    ) {
         // The slot hugs its content: a GtkBox lays children out one after
         // another on its main axis, so a slot wider than the art would not
         // center it — the leftover width would sit between only one badge
         // and the tab picker, and the two shoulders would hang at different
         // distances from it.
-        self.glyph.set_pixel_size((34.0 * scale).round().max(8.0) as i32);
+        self.glyph
+            .set_pixel_size((34.0 * scale).round().max(8.0) as i32);
         let source = ira_input::InputSource::Button(button);
-        let has_asset = crate::ui::input_profile_assets::set_source_asset(
-            &self.glyph,
-            source,
-            family,
-        );
+        let has_asset =
+            crate::ui::input_profile_assets::set_source_asset(&self.glyph, source, family);
         if !has_asset {
-            self.fallback.set_text(&crate::ui::input_profile_assets::source_badge(
-                source, family,
-            ));
+            self.fallback
+                .set_text(&crate::ui::input_profile_assets::source_badge(
+                    source, family,
+                ));
         }
         self.fallback.set_visible(!has_asset);
     }
@@ -662,7 +670,8 @@ impl AllSoftwareUi {
     /// Run a surface change with the tab fade suppressed — a group view
     /// swap is not a category change.
     fn without_slide(&self, f: impl FnOnce(&Self)) {
-        self.surfaces.set_transition_type(gtk4::StackTransitionType::None);
+        self.surfaces
+            .set_transition_type(gtk4::StackTransitionType::None);
         f(self);
         self.surfaces
             .set_transition_type(gtk4::StackTransitionType::Crossfade);
@@ -743,10 +752,8 @@ impl AllSoftwareUi {
     /// Pull the shared groups list back from the database.
     fn sync_groups(&self, state: &SharedState) {
         let db = state.borrow().db.clone();
-        let groups = crate::ui::helpers::logged_db_vec(
-            "Failed to read groups",
-            ira_db::get_all_groups(&db),
-        );
+        let groups =
+            crate::ui::helpers::logged_db_vec("Failed to read groups", ira_db::get_all_groups(&db));
         state.borrow_mut().groups = groups;
     }
 
@@ -871,11 +878,7 @@ impl AllSoftwareUi {
             let sort_mode = s.cfg.sort_mode;
             let entity_names = super::super::filter::entity_names_for_sort(&s.db, sort_mode);
             let playtimes = if sort_mode == ira_models::SortMode::HoursPlayed {
-                super::super::filter::playtimes_for_sort(
-                    &s.db,
-                    &s.playtime_links,
-                    &s.games,
-                )
+                super::super::filter::playtimes_for_sort(&s.db, &s.playtime_links, &s.games)
             } else {
                 super::super::filter::PlaytimeValues::new()
             };
@@ -927,9 +930,10 @@ impl AllSoftwareUi {
                     .position(|g| (g.db_id, g.variant_id.unwrap_or(0)) == key)
             });
             self.selected.set(kept);
-            self.selected_key.set(kept
-                .and_then(|index| games.get(index).map(game_key))
-                .unwrap_or((0, 0)));
+            self.selected_key.set(
+                kept.and_then(|index| games.get(index).map(game_key))
+                    .unwrap_or((0, 0)),
+            );
         }
         self.sync_store(state, &games);
         // The library landed with nothing selected: park on the first
@@ -942,8 +946,10 @@ impl AllSoftwareUi {
     }
 
     fn sync_store(&self, state: &SharedState, games: &[Game]) {
-        let items: Vec<crate::ui::game_item::GameItem> =
-            games.iter().map(crate::ui::game_item::GameItem::new).collect();
+        let items: Vec<crate::ui::game_item::GameItem> = games
+            .iter()
+            .map(crate::ui::game_item::GameItem::new)
+            .collect();
         // Same-size reorderings keep the visible cells alive: ListStore emits
         // items_changed with equal removed/added counts, so VirtualGrid marks
         // them dirty instead of tearing down the whole visible row.
@@ -980,13 +986,7 @@ impl AllSoftwareUi {
     /// moves wrap within the row on fresh presses only, like the home
     /// carousel: held repeats hit the row's wall instead of cycling
     /// forever.
-    pub(super) fn move_selection(
-        &self,
-        state: &SharedState,
-        dx: i32,
-        dy: i32,
-        engage: bool,
-    ) {
+    pub(super) fn move_selection(&self, state: &SharedState, dx: i32, dy: i32, engage: bool) {
         let (cols, _, item_h, sp) = self.grid.current_layout();
         let count = self.games.borrow().len();
         if count == 0 {
@@ -1145,7 +1145,8 @@ impl AllSoftwareUi {
         if fits_above || !fits_below {
             self.tooltip.set_position(center, viewport, top_tip, false);
         } else {
-            self.tooltip.set_position(center, viewport, bottom_tip, true);
+            self.tooltip
+                .set_position(center, viewport, bottom_tip, true);
         }
     }
 
@@ -1154,11 +1155,7 @@ impl AllSoftwareUi {
     /// the camera only moves if the tile was out of view). Returns
     /// whether the game was found.
     pub(super) fn focus_key(&self, state: &SharedState, key: GameKey) -> bool {
-        let index = self
-            .games
-            .borrow()
-            .iter()
-            .position(|g| game_key(g) == key);
+        let index = self.games.borrow().iter().position(|g| game_key(g) == key);
         index.is_some_and(|index| {
             self.select(state, index);
             true
@@ -1230,9 +1227,7 @@ fn cell_factories(
     crate::ui::virtual_grid::UnbindFn,
 ) {
     let setup_state = state.clone();
-    let setup: crate::ui::virtual_grid::SetupFn = Rc::new(move || {
-        build_cell(&setup_state)
-    });
+    let setup: crate::ui::virtual_grid::SetupFn = Rc::new(move || build_cell(&setup_state));
     let bind: crate::ui::virtual_grid::BindFn = Rc::new(move |widget, game| {
         bind_cell(widget, game, &item_size, &selected_key);
     });
@@ -1378,11 +1373,7 @@ fn bind_cell(
     };
     match ira_images::cached_texture(art) {
         Some(texture) => set(Some(texture)),
-        None => ira_images::load_texture_async_with_priority(
-            &path,
-            glib::Priority::DEFAULT,
-            set,
-        ),
+        None => ira_images::load_texture_async_with_priority(&path, glib::Priority::DEFAULT, set),
     }
 }
 
@@ -1456,9 +1447,7 @@ fn launch(state: &SharedState, game: &Game) {
     if super::launch_locked(state) {
         return;
     }
-    if let Err(error) =
-        crate::ui::play_button::launch_game(state, game.db_id, game.variant_id)
-    {
+    if let Err(error) = crate::ui::play_button::launch_game(state, game.db_id, game.variant_id) {
         eprintln!("Failed to launch game: {error}");
         let _ = state
             .borrow()
@@ -1566,24 +1555,48 @@ mod tests {
     #[test]
     fn test_grid_move_wraps_within_the_row() {
         assert_eq!(grid_move(0, 10, COLS, 1, 0, true), Some(1));
-        assert_eq!(grid_move(4, 10, COLS, 1, 0, true), Some(0), "row edge wraps left");
-        assert_eq!(grid_move(5, 10, COLS, -1, 0, true), Some(9), "row start wraps right");
+        assert_eq!(
+            grid_move(4, 10, COLS, 1, 0, true),
+            Some(0),
+            "row edge wraps left"
+        );
+        assert_eq!(
+            grid_move(5, 10, COLS, -1, 0, true),
+            Some(9),
+            "row start wraps right"
+        );
         assert_eq!(grid_move(5, 10, COLS, 1, 0, true), Some(6));
     }
 
     #[test]
     fn test_grid_move_repeats_stop_at_row_edges() {
         assert_eq!(grid_move(0, 10, COLS, 1, 0, false), Some(1));
-        assert_eq!(grid_move(4, 10, COLS, 1, 0, false), None, "held repeat hits the wall");
-        assert_eq!(grid_move(5, 10, COLS, -1, 0, false), None, "held repeat hits the wall");
-        assert_eq!(grid_move(2, 12, COLS, 0, 1, false), Some(7), "vertical moves ignore wrap");
+        assert_eq!(
+            grid_move(4, 10, COLS, 1, 0, false),
+            None,
+            "held repeat hits the wall"
+        );
+        assert_eq!(
+            grid_move(5, 10, COLS, -1, 0, false),
+            None,
+            "held repeat hits the wall"
+        );
+        assert_eq!(
+            grid_move(2, 12, COLS, 0, 1, false),
+            Some(7),
+            "vertical moves ignore wrap"
+        );
     }
 
     #[test]
     fn test_grid_move_keeps_column() {
         assert_eq!(grid_move(2, 12, COLS, 0, 1, true), Some(7));
         assert_eq!(grid_move(7, 12, COLS, 0, -1, true), Some(2));
-        assert_eq!(grid_move(2, 12, COLS, 0, -1, true), None, "top edge stays put");
+        assert_eq!(
+            grid_move(2, 12, COLS, 0, -1, true),
+            None,
+            "top edge stays put"
+        );
     }
 
     #[test]

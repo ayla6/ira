@@ -40,11 +40,7 @@ impl SteamDataClient {
     /// auto-pick is simply the first entry left after filtered users are
     /// removed; icons keep the narrowest-at-most-128px rule instead. Empty
     /// when the request fails or nothing is left.
-    pub(super) fn fetch_sgdb_candidates(
-        &self,
-        endpoint: &str,
-        dimensions: &[&str],
-    ) -> Vec<String> {
+    pub(super) fn fetch_sgdb_candidates(&self, endpoint: &str, dimensions: &[&str]) -> Vec<String> {
         let url = sgdb_url(endpoint, dimensions, 0);
         let Some(json) = self.sgdb_get_json(&url) else {
             return Vec::new();
@@ -98,9 +94,9 @@ impl SteamDataClient {
         // Filtered authors and styles stay visible in the manual picker but
         // sink to the bottom, so they are only reached when nothing else
         // fits.
-        let (visible, sunk): (Vec<SgdbAsset>, Vec<SgdbAsset>) = items.into_iter().partition(|a| {
-            !self.user_filtered(&a.author) && !self.style_filtered(&a.style)
-        });
+        let (visible, sunk): (Vec<SgdbAsset>, Vec<SgdbAsset>) = items
+            .into_iter()
+            .partition(|a| !self.user_filtered(&a.author) && !self.style_filtered(&a.style));
         let items = visible.into_iter().chain(sunk).collect();
         let has_more = (page as u64 + 1) * 30 < total;
         (items, has_more)
@@ -239,12 +235,12 @@ pub(super) fn sgdb_endpoint(asset: AssetType, is_steam_id: bool, id: &str) -> St
         (AssetType::Icon, false) => format!("icons/game/{}", id),
         (AssetType::Hero, true) => format!("heroes/steam/{}", id),
         (AssetType::Hero, false) => format!("heroes/game/{}", id),
-        (AssetType::Grid, true)
-        | (AssetType::Header, true)
-        | (AssetType::Square, true) => format!("grids/steam/{}", id),
-        (AssetType::Grid, false)
-        | (AssetType::Header, false)
-        | (AssetType::Square, false) => format!("grids/game/{}", id),
+        (AssetType::Grid, true) | (AssetType::Header, true) | (AssetType::Square, true) => {
+            format!("grids/steam/{}", id)
+        }
+        (AssetType::Grid, false) | (AssetType::Header, false) | (AssetType::Square, false) => {
+            format!("grids/game/{}", id)
+        }
         (AssetType::Logo, true) => format!("logos/steam/{}", id),
         (AssetType::Logo, false) => format!("logos/game/{}", id),
     }
@@ -291,7 +287,10 @@ mod tests {
         let data = [grid(1, "a", 600), grid(2, "bad", 600), grid(3, "b", 1024)];
         let refs: Vec<&serde_json::Value> = data.iter().collect();
         let items = not_filtered(&refs, &["bad".to_string()]);
-        let ids: Vec<i64> = items.iter().map(|item| item["id"].as_i64().unwrap()).collect();
+        let ids: Vec<i64> = items
+            .iter()
+            .map(|item| item["id"].as_i64().unwrap())
+            .collect();
         assert_eq!(ids, vec![1, 3]);
     }
 
@@ -304,7 +303,10 @@ mod tests {
         ];
         let refs: Vec<&serde_json::Value> = data.iter().collect();
         let items = not_style_filtered(&refs, &["blurred".to_string()]);
-        let ids: Vec<i64> = items.iter().map(|item| item["id"].as_i64().unwrap()).collect();
+        let ids: Vec<i64> = items
+            .iter()
+            .map(|item| item["id"].as_i64().unwrap())
+            .collect();
         assert_eq!(ids, vec![1, 3]);
     }
 

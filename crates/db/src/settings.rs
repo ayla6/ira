@@ -13,7 +13,11 @@ pub fn set_game_vanished(conn: &DbConn, id: i64, vanished: bool) -> Result<(), S
 }
 
 pub fn set_logo_settings(conn: &DbConn, id: i64, position: &str, size: i32) -> Result<(), String> {
-    crate::execute(conn, "UPDATE games SET logo_position = ?1, logo_size = ?2 WHERE id = ?3", params![position, size, id])?;
+    crate::execute(
+        conn,
+        "UPDATE games SET logo_position = ?1, logo_size = ?2 WHERE id = ?3",
+        params![position, size, id],
+    )?;
     Ok(())
 }
 
@@ -98,8 +102,11 @@ pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<()
         other => return Err(format!("unknown hash key {other}")),
     }
     let json = serde_json::to_string(&hashes).map_err(err)?;
-    tx.execute("UPDATE games SET hashes = ?1 WHERE id = ?2", params![json, id])
-        .map_err(err)?;
+    tx.execute(
+        "UPDATE games SET hashes = ?1 WHERE id = ?2",
+        params![json, id],
+    )
+    .map_err(err)?;
     tx.commit().map_err(err)
 }
 
@@ -110,8 +117,11 @@ pub fn set_hash_key(conn: &DbConn, id: i64, key: &str, value: &str) -> Result<()
 pub fn set_steam_id(conn: &DbConn, id: i64, steam_id: &str) -> Result<(), String> {
     let c = crate::lock_db(conn)?;
     let tx = c.unchecked_transaction().map_err(err)?;
-    tx.execute("UPDATE games SET steam_id = ?1 WHERE id = ?2", params![steam_id, id])
-        .map_err(err)?;
+    tx.execute(
+        "UPDATE games SET steam_id = ?1 WHERE id = ?2",
+        params![steam_id, id],
+    )
+    .map_err(err)?;
     // Same invalidation as `update_game_ids`: the consult answered for
     // whatever id was there before.
     tx.execute("DELETE FROM steam_garnish WHERE game_id = ?1", params![id])

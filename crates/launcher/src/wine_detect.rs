@@ -216,7 +216,11 @@ fn scan_proton_versions() -> Vec<(String, String)> {
 
     for dir in steam_data_dirs().iter().chain(extra_paths.iter()) {
         for sub in &["compatibilitytools.d", "steamapps/common"] {
-            scan_compat_dir(&std::path::Path::new(dir).join(sub), &mut seen, &mut versions);
+            scan_compat_dir(
+                &std::path::Path::new(dir).join(sub),
+                &mut seen,
+                &mut versions,
+            );
         }
     }
 

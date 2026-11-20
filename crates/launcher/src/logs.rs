@@ -99,7 +99,11 @@ fn push_lines(log: &GameLog, pending: &mut String, chunk: &[u8]) {
 /// pipes SIGPIPE the game when Ira exits, files don't). Stops after `done`
 /// is set and the file goes quiet for ~1s so exit-flushes still land.
 /// Reopens per poll, so truncation/rotation just restarts the offset.
-pub(crate) fn tail_file_to_log(path: String, log: GameLog, done: Arc<std::sync::atomic::AtomicBool>) {
+pub(crate) fn tail_file_to_log(
+    path: String,
+    log: GameLog,
+    done: Arc<std::sync::atomic::AtomicBool>,
+) {
     use std::io::{Seek, SeekFrom};
     std::thread::spawn(move || {
         let mut offset = 0u64;
@@ -151,7 +155,10 @@ pub(crate) fn tail_file_to_log(path: String, log: GameLog, done: Arc<std::sync::
 /// Drains one piped output stream of a spawned process into the shared game
 /// log buffer, one line at a time. Runs on its own thread so both pipes can
 /// be read live without deadlocking on a full pipe buffer.
-pub(crate) fn pipe_lines_to_log<R: Read + std::marker::Send + 'static>(pipe: Option<R>, log: GameLog) {
+pub(crate) fn pipe_lines_to_log<R: Read + std::marker::Send + 'static>(
+    pipe: Option<R>,
+    log: GameLog,
+) {
     std::thread::spawn(move || {
         let Some(mut reader) = pipe else { return };
         let mut buf = [0u8; 4096];
@@ -227,7 +234,10 @@ mod tests {
         // Append after the tail starts: it must pick up growth.
         std::thread::sleep(std::time::Duration::from_millis(400));
         {
-            let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .unwrap();
             writeln!(f, "second").unwrap();
         }
         std::thread::sleep(std::time::Duration::from_millis(400));

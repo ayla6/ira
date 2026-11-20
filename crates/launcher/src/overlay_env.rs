@@ -121,7 +121,11 @@ pub fn add_overlay_env(
     }
 
     // Resolve font family: user config → system default via fontconfig → fallback.
-    env_set(env, "IRA_OVERLAY_FONT_FAMILY", &overlay_font_family(font_family));
+    env_set(
+        env,
+        "IRA_OVERLAY_FONT_FAMILY",
+        &overlay_font_family(font_family),
+    );
 }
 
 /// Injects overlay components into a game running inside Gamescope while
@@ -153,7 +157,11 @@ pub fn add_overlay_env_external(
         env_set(env, "IRA_OVERLAY_SHM", shm);
     }
 
-    env_set(env, "IRA_OVERLAY_FONT_FAMILY", &overlay_font_family(font_family));
+    env_set(
+        env,
+        "IRA_OVERLAY_FONT_FAMILY",
+        &overlay_font_family(font_family),
+    );
 }
 
 /// Splits off the game command so the host can re-wrap it: gamescope carries
@@ -177,10 +185,7 @@ fn split_game_command(command: &mut Vec<String>) -> Vec<String> {
 /// The host is forced onto the X11 backend: gamescope's external-overlay
 /// atom is X11-only, and on Wayland the window would appear as a regular
 /// (main-plane) window instead of an overlay.
-pub fn wrap_with_host_overlay(
-    command: &mut Vec<String>,
-    capture_env: &[(String, String)],
-) -> bool {
+pub fn wrap_with_host_overlay(command: &mut Vec<String>, capture_env: &[(String, String)]) -> bool {
     let Some(bin) = super::overlay_host::host_binary_path() else {
         eprintln!("ira-overlay: host binary not found, skipping");
         return false;
@@ -310,26 +315,20 @@ mod tests {
         // Act + Assert: armed for gamescope+overlay regardless of packaging…
         let mut env = Vec::new();
         maybe_add_daemon_toggle_env(&mut env, &wrapped, true);
-        assert!(
-            env.iter()
-                .any(|(k, v)| k == "IRA_OVERLAY_DAEMON_TOGGLE" && v == "1")
-        );
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "IRA_OVERLAY_DAEMON_TOGGLE" && v == "1"));
         let mut env = Vec::new();
         maybe_add_daemon_toggle_env(&mut env, &native_wrapped, true);
-        assert!(
-            env.iter()
-                .any(|(k, v)| k == "IRA_OVERLAY_DAEMON_TOGGLE" && v == "1")
-        );
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "IRA_OVERLAY_DAEMON_TOGGLE" && v == "1"));
         // …but not without the overlay or without gamescope.
         let mut env = Vec::new();
         maybe_add_daemon_toggle_env(&mut env, &wrapped, false);
         assert!(env.is_empty());
         let mut env = Vec::new();
-        maybe_add_daemon_toggle_env(
-            &mut env,
-            &["flatpak".to_string(), "run".to_string()],
-            true,
-        );
+        maybe_add_daemon_toggle_env(&mut env, &["flatpak".to_string(), "run".to_string()], true);
         assert!(env.is_empty());
         let mut env = Vec::new();
         maybe_add_daemon_toggle_env(&mut env, &["game".to_string()], true);

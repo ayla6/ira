@@ -134,8 +134,7 @@ pub(super) fn start_thumbnail_ticker(ctx: &SgdbPickerCtx) {
             let Some(rx) = rx else { continue };
             match rx.try_recv() {
                 Ok(Some(bytes)) => {
-                    if let Ok(texture) =
-                        gdk4::Texture::from_bytes(&glib::Bytes::from_owned(bytes))
+                    if let Ok(texture) = gdk4::Texture::from_bytes(&glib::Bytes::from_owned(bytes))
                     {
                         paint_card(entry, &texture, w, aspect);
                     }

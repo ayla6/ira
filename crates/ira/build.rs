@@ -19,7 +19,10 @@ fn main() {
         .ok()
         .map(|o| !o.stdout.is_empty())
         .unwrap_or(false);
-    println!("cargo:rustc-env=IRA_BUILD_HASH={hash}{}", if dirty { "-dirty" } else { "" });
+    println!(
+        "cargo:rustc-env=IRA_BUILD_HASH={hash}{}",
+        if dirty { "-dirty" } else { "" }
+    );
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/index");
 }

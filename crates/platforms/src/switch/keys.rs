@@ -138,7 +138,6 @@ impl SwitchKeys {
     pub fn key_area_key(&self, kind: u8, rev: u8) -> Option<&[u8; 16]> {
         self.key_area_keys.get(&(kind, rev))
     }
-
 }
 
 fn key_area_kind(name: &str) -> Option<u8> {

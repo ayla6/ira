@@ -70,8 +70,8 @@ pub fn parse_tropusr_bytes(data: &[u8]) -> Result<HashMap<u32, (bool, i64)>, Str
         return Err(format!("bad TROPUSR magic: 0x{:08X}", magic));
     }
 
-    let tables_count = read_u32_be(data, 8)
-        .ok_or_else(|| "TROPUSR: truncated header".to_string())? as usize;
+    let tables_count =
+        read_u32_be(data, 8).ok_or_else(|| "TROPUSR: truncated header".to_string())? as usize;
 
     let mut result = HashMap::new();
 

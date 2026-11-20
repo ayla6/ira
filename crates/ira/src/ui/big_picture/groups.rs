@@ -146,10 +146,7 @@ impl GroupsGrid {
         }
         let desired = ((width - 2 * margin - (COLS as i32 - 1) * spacing) as f64 / COLS as f64)
             .round() as i32;
-        let desired = desired.clamp(
-            (MIN_TILE * s).round() as i32,
-            (MAX_TILE * s).round() as i32,
-        );
+        let desired = desired.clamp((MIN_TILE * s).round() as i32, (MAX_TILE * s).round() as i32);
         if self.tile.get() == desired {
             return false;
         }
@@ -442,8 +439,7 @@ impl GroupsGrid {
         if !slot.is_mapped() || slot.width() < MIN_RING_TILE || slot.height() < MIN_RING_TILE {
             return false;
         }
-        let Some(point) = slot.compute_point(&self.overlay, &gtk4::graphene::Point::zero())
-        else {
+        let Some(point) = slot.compute_point(&self.overlay, &gtk4::graphene::Point::zero()) else {
             return false;
         };
         self.ring.set_rect(
@@ -551,8 +547,8 @@ mod tests {
         // The production layout-warning filter must swallow REAL measure
         // warnings: classic log handlers never see them (proven by the
         // absence of any interception), only the structured writer does.
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
         let swallowed = Arc::new(AtomicBool::new(false));
         let swallowed_clone = Arc::clone(&swallowed);
         gtk4::glib::log_set_writer_func(move |level, fields| {

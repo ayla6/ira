@@ -232,7 +232,11 @@ impl crate::protocol::ShmHeader {
 
 /// Single-slot fallback: 0 means "use the built-in default".
 fn or_default(value: u32, default: u32) -> u32 {
-    if value == 0 { default } else { value }
+    if value == 0 {
+        default
+    } else {
+        value
+    }
 }
 
 /// Key name → evdev keycode. Aliases get their own row so lookup is a scan.
@@ -353,7 +357,15 @@ mod tests {
 
     #[test]
     fn test_parse_hotkey_rejects_empty_segments() {
-        for bad in ["", " ", "+", "+Tab", "Shift+", "Shift++Tab", "Shift+Unknown"] {
+        for bad in [
+            "",
+            " ",
+            "+",
+            "+Tab",
+            "Shift+",
+            "Shift++Tab",
+            "Shift+Unknown",
+        ] {
             assert_eq!(parse_hotkey(bad), (0, 0), "input {bad:?}");
         }
     }

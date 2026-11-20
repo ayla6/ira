@@ -244,9 +244,7 @@ impl SteamDataClient {
     pub fn fetch_steam_layout_vdf(&self, published_file_id: &str) -> Result<String, String> {
         // Workshop file ids are numeric; the POST body is hand-encoded
         // because our reqwest build has no form-encoding feature.
-        if published_file_id.is_empty()
-            || !published_file_id.bytes().all(|b| b.is_ascii_digit())
-        {
+        if published_file_id.is_empty() || !published_file_id.bytes().all(|b| b.is_ascii_digit()) {
             return Err(format!("invalid layout id {published_file_id}"));
         }
         let body = format!("itemcount=1&publishedfileids%5B0%5D={}", published_file_id);
@@ -295,7 +293,11 @@ mod tests {
 
     #[test]
     fn test_clean_tags_trims_and_drops_blanks() {
-        let tags = vec![" controller_ps5 ".to_string(), "   ".to_string(), String::new()];
+        let tags = vec![
+            " controller_ps5 ".to_string(),
+            "   ".to_string(),
+            String::new(),
+        ];
         assert_eq!(clean_tags(&tags), vec!["controller_ps5"]);
         assert!(clean_tags(&[]).is_empty());
     }

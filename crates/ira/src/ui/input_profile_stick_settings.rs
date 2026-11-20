@@ -62,8 +62,14 @@ pub(crate) fn stick_setting_sections(
                 crate::tr!("General"),
                 mouse_general_rows(base, ModeTarget::Base, reopen, *sensitivity, stick),
             ),
-            (crate::tr!("Output"), output_rows(base, ModeTarget::Base, stick, None)),
-            (crate::tr!("Deadzones"), deadzone_rows(base, ModeTarget::Base, reopen, stick)),
+            (
+                crate::tr!("Output"),
+                output_rows(base, ModeTarget::Base, stick, None),
+            ),
+            (
+                crate::tr!("Deadzones"),
+                deadzone_rows(base, ModeTarget::Base, reopen, stick),
+            ),
             (
                 crate::tr!("Outer Ring"),
                 super::input_profile_stick_ring::outer_ring_rows(

@@ -2,8 +2,8 @@ use crate::AppMessage;
 use crate::AppSender;
 use crate::Game;
 use crate::GameEntry;
-use ira_api::SteamDataClient;
 use ira_api::types::SteamCmdInfo;
+use ira_api::SteamDataClient;
 use ira_db::DbConn;
 
 use crate::game_loader::load_game;
@@ -153,9 +153,7 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
                 let _s =
                     tracing::info_span!("enrich_redownload_icons", app_id = %store_id).entered();
                 if let Err(e) = steam.generate_steam_settings(&store_id) {
-                    eprintln!(
-                        "Could not re-download achievement icons for {store_id}: {e}"
-                    );
+                    eprintln!("Could not re-download achievement icons for {store_id}: {e}");
                 } else if let Ok(reloaded) = load_game(&entry, &save_dir) {
                     game.achievements = reloaded.achievements;
                 }
@@ -188,12 +186,18 @@ pub fn enrich_game_blocking(params: EnrichGameParams) {
     // otherwise through SGDB's steam endpoints by the app id — so a
     // freshly added game never sits imageless. Only missing files
     // download; the manual "fetch missing images" pass reuses them.
-    if steam.has_sgdb_key() && super::fetch_images::game_needs_sgdb_assets(&game)
-    {
+    if steam.has_sgdb_key() && super::fetch_images::game_needs_sgdb_assets(&game) {
         let switch_exe = cfg.console("switch").executable.clone();
         let dir = ira_parser::game_data_dir(&save_dir, &game);
-        let paths =
-            super::fetch_images::ensure_game_assets(&steam, &dir, &save_dir, &db, &cfg, &game, &switch_exe);
+        let paths = super::fetch_images::ensure_game_assets(
+            &steam,
+            &dir,
+            &save_dir,
+            &db,
+            &cfg,
+            &game,
+            &switch_exe,
+        );
         if game.icon_path.is_empty() {
             game.icon_path = paths.icon;
         }
@@ -236,7 +240,11 @@ fn enrich_steam_assets(game: &mut Game, steam: &Arc<SteamDataClient>, save_dir: 
     let app_id = game.steam_api_id().to_string();
     let app_id = app_id.as_str();
     let _s = tracing::info_span!("enrich_steam_assets", app_id = %app_id).entered();
-    if game.name.starts_with("App ID:") || !ira_parser::data_dir(save_dir, app_id).join("appdetails.json").exists() {
+    if game.name.starts_with("App ID:")
+        || !ira_parser::data_dir(save_dir, app_id)
+            .join("appdetails.json")
+            .exists()
+    {
         if let Some(details) = steam.fetch_app_details(app_id) {
             if !details.name.is_empty() && game.name.starts_with("App ID:") {
                 game.set_name(&details.name);
@@ -274,8 +282,7 @@ fn enrich_steam_assets(game: &mut Game, steam: &Arc<SteamDataClient>, save_dir: 
         }
     }
 
-    if !game.achievements.is_empty() && game.achievements.iter().any(|a| a.global_percent == 0.0)
-    {
+    if !game.achievements.is_empty() && game.achievements.iter().any(|a| a.global_percent == 0.0) {
         if let Some(pcts) = steam.fetch_global_achievements(app_id) {
             for a in &mut game.achievements {
                 if let Some(&pct) = pcts.get(&a.name) {
@@ -329,7 +336,11 @@ fn ensure_default_icon(
         cfg.console("switch").executable.clone(),
     );
     if let Some(bytes) = super::image_manager_helpers::native_icon_bytes(
-        game, cfg, &azahar_exe, &cemu_exe, &switch_exe,
+        game,
+        cfg,
+        &azahar_exe,
+        &cemu_exe,
+        &switch_exe,
     ) {
         if super::image_manager_helpers::write_native_icon_to_disk(
             save_dir,
@@ -337,9 +348,10 @@ fn ensure_default_icon(
             &bytes,
             ira_models::AssetType::Icon,
         ) {
-            if let Some(path) =
-                ira_parser::find_image_file(&ira_parser::game_data_dir(save_dir, game), ira_models::AssetType::Icon.file_base())
-            {
+            if let Some(path) = ira_parser::find_image_file(
+                &ira_parser::game_data_dir(save_dir, game),
+                ira_models::AssetType::Icon.file_base(),
+            ) {
                 game.icon_path = path.to_string_lossy().into_owned();
             }
         }
@@ -360,7 +372,11 @@ fn ensure_default_icon(
         return;
     };
     let dir = ira_parser::game_data_dir(save_dir, game);
-    let icon = steam.force_download_sgdb(&dir, ira_api::types::SgdbId::Game(&sgdb_id), ira_models::AssetType::Icon);
+    let icon = steam.force_download_sgdb(
+        &dir,
+        ira_api::types::SgdbId::Game(&sgdb_id),
+        ira_models::AssetType::Icon,
+    );
     if !icon.is_empty() {
         game.icon_path = icon;
     }
@@ -377,12 +393,10 @@ fn fetch_steam_game_icon(
     steam: &std::sync::Arc<ira_api::SteamDataClient>,
 ) -> Option<String> {
     let _s = tracing::info_span!("fetch_steam_game_icon", app_id = %app_id).entered();
-    let clienticon = steam
-        .clienticon_hash(app_id)
-        .or_else(|| {
-            let app_id_num: u32 = app_id.parse().ok()?;
-            ira_platforms::steam::get_clienticon(app_id_num)
-        })?;
+    let clienticon = steam.clienticon_hash(app_id).or_else(|| {
+        let app_id_num: u32 = app_id.parse().ok()?;
+        ira_platforms::steam::get_clienticon(app_id_num)
+    })?;
     if clienticon.is_empty() {
         return None;
     }
@@ -529,8 +543,12 @@ pub(super) fn garnish_pc_ss_metadata(
     let needs_companies = existing
         .as_ref()
         .is_none_or(|meta| meta.developers.is_empty() && meta.publishers.is_empty());
-    let needs_synopsis = existing.as_ref().is_none_or(|meta| meta.synopses.is_empty());
-    let needs_ratings = existing.as_ref().is_none_or(|meta| meta.classifications.is_empty());
+    let needs_synopsis = existing
+        .as_ref()
+        .is_none_or(|meta| meta.synopses.is_empty());
+    let needs_ratings = existing
+        .as_ref()
+        .is_none_or(|meta| meta.classifications.is_empty());
     if !needs_companies && !needs_synopsis && !needs_ratings {
         return;
     }

@@ -207,18 +207,14 @@ pub fn rebuild_sidebar(state: &SharedState) {
         // the group-by dimension, replacing the collections view. The
         // members map feeds the grid filter when a section is selected.
         let entity_names = match group_by {
-            ira_models::GroupBy::Developer => ira_db::game_entity_names(
-                &db,
-                ira_db::KIND_COMPANY,
-                Some("is_developer"),
-            )
-            .unwrap_or_default(),
-            ira_models::GroupBy::Publisher => ira_db::game_entity_names(
-                &db,
-                ira_db::KIND_COMPANY,
-                Some("is_publisher"),
-            )
-            .unwrap_or_default(),
+            ira_models::GroupBy::Developer => {
+                ira_db::game_entity_names(&db, ira_db::KIND_COMPANY, Some("is_developer"))
+                    .unwrap_or_default()
+            }
+            ira_models::GroupBy::Publisher => {
+                ira_db::game_entity_names(&db, ira_db::KIND_COMPANY, Some("is_publisher"))
+                    .unwrap_or_default()
+            }
             ira_models::GroupBy::Genre => {
                 ira_db::game_entity_names(&db, ira_db::KIND_GENRE, None).unwrap_or_default()
             }
@@ -228,8 +224,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
             _ => Default::default(),
         };
 
-        let categories =
-            super::filter::group_categories(group_by, &visible_games, &entity_names);
+        let categories = super::filter::group_categories(group_by, &visible_games, &entity_names);
 
         let mut derived: HashMap<String, HashSet<i64>> = HashMap::new();
         for (name, members) in &categories {
@@ -303,10 +298,7 @@ pub fn rebuild_sidebar(state: &SharedState) {
         // and the uncategorized tail. Their memberships were folded into
         // group_members under negated ids by the refresh above. ──
         for group in &auto_groups {
-            let member_ids = group_members
-                .get(&group.id)
-                .cloned()
-                .unwrap_or_default();
+            let member_ids = group_members.get(&group.id).cloned().unwrap_or_default();
             let mut collection_games: Vec<&Game> = visible_games
                 .iter()
                 .filter(|game| member_ids.contains(&game.db_id))
@@ -405,14 +397,7 @@ fn sort_grid_order(
     playtimes: &super::filter::PlaytimeValues,
 ) {
     games.sort_by(|a, b| {
-        super::filter::game_compare(
-            a,
-            b,
-            sort_mode,
-            descending,
-            entity_names,
-            playtimes,
-        )
+        super::filter::game_compare(a, b, sort_mode, descending, entity_names, playtimes)
     });
 }
 
@@ -591,10 +576,7 @@ pub fn build_sticky_all_games(state: &SharedState) -> gtk4::Box {
             return;
         };
         let menu = gio::Menu::new();
-        menu.append(
-            Some(&crate::tr!("Collapse all")),
-            Some("grp.collapse-all"),
-        );
+        menu.append(Some(&crate::tr!("Collapse all")), Some("grp.collapse-all"));
         menu.append(Some(&crate::tr!("Expand all")), Some("grp.expand-all"));
 
         let popover = gtk4::PopoverMenu::from_model(Some(&menu));
@@ -635,11 +617,7 @@ fn header_group_ids(state: &SharedState) -> Vec<i64> {
         )
     };
     let mut ids: Vec<i64> = (0..store.n_items())
-        .filter_map(|i| {
-            store
-                .item(i)
-                .and_then(|o| o.downcast::<SidebarItem>().ok())
-        })
+        .filter_map(|i| store.item(i).and_then(|o| o.downcast::<SidebarItem>().ok()))
         .filter(|item| {
             matches!(
                 item.kind(),
@@ -660,10 +638,7 @@ fn header_group_ids(state: &SharedState) -> Vec<i64> {
 
 fn collapse_all(state: &SharedState) {
     let ids = header_group_ids(state);
-    state
-        .borrow_mut()
-        .collapsed_collections
-        .extend(ids);
+    state.borrow_mut().collapsed_collections.extend(ids);
     rebuild_sidebar(state);
 }
 
@@ -785,11 +760,8 @@ fn confirm_delete_auto_group(state: &SharedState, group_id: i64, name: &str) {
     super::helpers::confirm_dialog(
         &window,
         &crate::tr!("Delete auto group"),
-        &crate::tr!("The rules of \"{}\" go away. The games themselves stay.").replacen(
-            "{}",
-            name,
-            1,
-        ),
+        &crate::tr!("The rules of \"{}\" go away. The games themselves stay.")
+            .replacen("{}", name, 1),
         &crate::tr!("Delete"),
         adw::ResponseAppearance::Destructive,
         move || {
@@ -879,7 +851,9 @@ fn sidebar_bind_collection_header(state: &SharedState, row: &gtk4::Box, item: &S
                 });
                 actions.add_action(&delete_action);
 
-                super::helpers::popup_context_popover(&r, &popover, &actions, "grp", x as i32, y as i32);
+                super::helpers::popup_context_popover(
+                    &r, &popover, &actions, "grp", x as i32, y as i32,
+                );
             }
         });
         row.add_controller(right_click);
@@ -898,7 +872,11 @@ fn sidebar_bind_game(state: &SharedState, row: &gtk4::Box, item: &SidebarItem) {
     let title_label = gtk4::Label::new(Some(&item.name()));
     {
         let s = state.borrow();
-        if let Some(game) = s.games.iter().find(|game| game.db_id == item.db_id() && game.variant_id == item.variant_id()) {
+        if let Some(game) = s
+            .games
+            .iter()
+            .find(|game| game.db_id == item.db_id() && game.variant_id == item.variant_id())
+        {
             title_label.set_markup(&super::game_title::markup(game, &s.games));
         }
     }

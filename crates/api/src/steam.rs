@@ -272,7 +272,8 @@ impl SteamDataClient {
     /// The store answers with the boards for the requester's region
     /// plus whatever else it holds.
     pub fn fetch_store_extras(&self, app_id: &str) -> Option<StoreExtras> {
-        let url = format!("https://store.steampowered.com/api/appdetails?appids={app_id}&l=english");
+        let url =
+            format!("https://store.steampowered.com/api/appdetails?appids={app_id}&l=english");
         let raw: std::collections::HashMap<String, StoreAppDetailsAnswer> =
             self.http_get_json(&url)?;
         let entry = raw.get(app_id)?;
@@ -282,48 +283,48 @@ impl SteamDataClient {
         entry.data.as_ref().map(Self::store_extras_from)
     }
 
-/// The pure half of [`SteamDataClient::fetch_store_extras`]: shape one
-/// appdetails answer into extras without touching the network.
-fn store_extras_from(data: &StoreAppShortInfo) -> StoreExtras {
-    let synopsis = data.short_description.trim();
-    let mut ratings: Vec<(String, String)> = data
-        .ratings
-        .as_ref()
-        .map(|boards| {
-            boards
-                .iter()
-                .filter(|(_, board)| !board.rating.trim().is_empty())
-                .map(|(board, info)| {
-                    // The stored kind is the canonical board id from
-                    // the ratings table, so Steam's `class_ind` lands
-                    // as CLASSIND beside ScreenScraper's own spelling.
-                    let board = ira_models::ratings::find_board(board)
-                        .map(|known| known.id)
-                        .unwrap_or(board);
-                    (board.to_string(), info.rating.trim().to_string())
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    ratings.sort();
-    let release_date = data
-        .release_date
-        .as_ref()
-        .map(|release| parse_store_release_date(&release.date))
-        .unwrap_or_default();
-    let genres: Vec<String> = data
-        .genres
-        .iter()
-        .map(|genre| genre.description.trim().to_string())
-        .filter(|genre| !genre.is_empty())
-        .collect();
-    StoreExtras {
-        synopsis: synopsis.to_string(),
-        ratings,
-        release_date,
-        genres,
+    /// The pure half of [`SteamDataClient::fetch_store_extras`]: shape one
+    /// appdetails answer into extras without touching the network.
+    fn store_extras_from(data: &StoreAppShortInfo) -> StoreExtras {
+        let synopsis = data.short_description.trim();
+        let mut ratings: Vec<(String, String)> = data
+            .ratings
+            .as_ref()
+            .map(|boards| {
+                boards
+                    .iter()
+                    .filter(|(_, board)| !board.rating.trim().is_empty())
+                    .map(|(board, info)| {
+                        // The stored kind is the canonical board id from
+                        // the ratings table, so Steam's `class_ind` lands
+                        // as CLASSIND beside ScreenScraper's own spelling.
+                        let board = ira_models::ratings::find_board(board)
+                            .map(|known| known.id)
+                            .unwrap_or(board);
+                        (board.to_string(), info.rating.trim().to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        ratings.sort();
+        let release_date = data
+            .release_date
+            .as_ref()
+            .map(|release| parse_store_release_date(&release.date))
+            .unwrap_or_default();
+        let genres: Vec<String> = data
+            .genres
+            .iter()
+            .map(|genre| genre.description.trim().to_string())
+            .filter(|genre| !genre.is_empty())
+            .collect();
+        StoreExtras {
+            synopsis: synopsis.to_string(),
+            ratings,
+            release_date,
+            genres,
+        }
     }
-}
 
     pub fn search_steam_store(&self, term: &str) -> Vec<(String, String)> {
         self.search_steam_store_result(term).unwrap_or_default()
@@ -333,10 +334,7 @@ fn store_extras_from(data: &StoreAppShortInfo) -> StoreExtras {
     /// the request itself failed (quota, network) and must be retried,
     /// while `Ok` with no exact hit downstream means the store answered
     /// and the game is simply not there.
-    pub fn search_steam_store_result(
-        &self,
-        term: &str,
-    ) -> Result<Vec<(String, String)>, String> {
+    pub fn search_steam_store_result(&self, term: &str) -> Result<Vec<(String, String)>, String> {
         let url = format!(
             "https://store.steampowered.com/api/storesearch/?term={}&l=en&cc=US",
             urlencode(&sanitize_store_term(term))
@@ -359,7 +357,8 @@ fn store_extras_from(data: &StoreAppShortInfo) -> StoreExtras {
             .unwrap_or_default())
     }
 
-    pub fn generate_steam_settings(&self, app_id: &str) -> Result<(), String> {        let _s = tracing::info_span!("generate_steam_settings", app_id).entered();
+    pub fn generate_steam_settings(&self, app_id: &str) -> Result<(), String> {
+        let _s = tracing::info_span!("generate_steam_settings", app_id).entered();
 
         let settings_dir = self.game_dir(app_id).join("achievements");
         let img_dir = settings_dir.join("achievement_images");
@@ -511,11 +510,10 @@ fn store_extras_from(data: &StoreAppShortInfo) -> StoreExtras {
     /// use: callers reach this before anything else populated the cache,
     /// and the hash only exists there.
     pub fn clienticon_hash(&self, app_id: &str) -> Option<String> {
-        self.cached_clienticon(app_id)
-            .or_else(|| {
-                self.ensure_steamcmd_raw(app_id)?;
-                self.cached_clienticon(app_id)
-            })
+        self.cached_clienticon(app_id).or_else(|| {
+            self.ensure_steamcmd_raw(app_id)?;
+            self.cached_clienticon(app_id)
+        })
     }
 
     /// Returns `None` if no valid cached data is available.
@@ -748,8 +746,12 @@ pub fn read_app_details_from_cache(path: &Path) -> Option<AppDetails> {
 fn modernize_community_image_url(url: &str) -> Option<String> {
     let rest = url
         .strip_prefix("https://steamcdn-a.akamaihd.net/steamcommunity/public/")
-        .or_else(|| url.strip_prefix("https://cdn.akamai.steamstatic.com/steamcommunity/public/"))?;
-    Some(format!("https://shared.akamai.steamstatic.com/community_assets/{rest}"))
+        .or_else(|| {
+            url.strip_prefix("https://cdn.akamai.steamstatic.com/steamcommunity/public/")
+        })?;
+    Some(format!(
+        "https://shared.akamai.steamstatic.com/community_assets/{rest}"
+    ))
 }
 
 /// The shared Steam CDNs are mirrors of one path: akamai, fastly and
@@ -770,7 +772,10 @@ pub(crate) fn mirror_variants(url: &str) -> Vec<String> {
     else {
         return vec![url.to_string()];
     };
-    MIRRORS.iter().map(|mirror| format!("{mirror}{rest}")).collect()
+    MIRRORS
+        .iter()
+        .map(|mirror| format!("{mirror}{rest}"))
+        .collect()
 }
 
 /// Picks the library art relative path for `key` out of the appinfo's
@@ -792,7 +797,12 @@ fn library_image_relative<'a>(
         .get("english")
         .filter(|relative| usable(relative))
         .map(String::as_str)
-        .or_else(|| image.values().find(|relative| usable(relative)).map(String::as_str))
+        .or_else(|| {
+            image
+                .values()
+                .find(|relative| usable(relative))
+                .map(String::as_str)
+        })
 }
 
 /// `library_capsule.jpg` → `library_capsule_2x.jpg` — Steam serves the
@@ -838,7 +848,10 @@ mod tests {
         // Empty board ratings drop out; genres trim and drop blanks.
         assert_eq!(extras.ratings, vec![("ESRB".to_string(), "M".to_string())]);
         assert_eq!(extras.release_date, "2019-04-09");
-        assert_eq!(extras.genres, vec!["Action".to_string(), "Adventure".to_string()]);
+        assert_eq!(
+            extras.genres,
+            vec!["Action".to_string(), "Adventure".to_string()]
+        );
     }
 
     #[test]
@@ -856,7 +869,10 @@ mod tests {
 
     #[test]
     fn test_sanitize_store_term_collapses_whitespace() {
-        assert_eq!(sanitize_store_term("  Half-Life  2: Episode (One) "), "Half Life 2 Episode One");
+        assert_eq!(
+            sanitize_store_term("  Half-Life  2: Episode (One) "),
+            "Half Life 2 Episode One"
+        );
         assert_eq!(sanitize_store_term(""), "");
     }
 
@@ -936,15 +952,21 @@ mod tests {
             Some("https://shared.akamai.steamstatic.com/community_assets/images/apps/413410/abc.jpg".to_string())
         );
         assert_eq!(
-            modernize_community_image_url("https://shared.akamai.steamstatic.com/community_assets/images/apps/413410/abc.jpg"),
+            modernize_community_image_url(
+                "https://shared.akamai.steamstatic.com/community_assets/images/apps/413410/abc.jpg"
+            ),
             None
         );
-        assert_eq!(modernize_community_image_url("https://example.com/image.jpg"), None);
+        assert_eq!(
+            modernize_community_image_url("https://example.com/image.jpg"),
+            None
+        );
     }
 
     #[test]
     fn test_mirror_variants_covers_all_shared_mirrors() {
-        let url = "https://shared.akamai.steamstatic.com/community_assets/images/apps/4659620/a.jpg";
+        let url =
+            "https://shared.akamai.steamstatic.com/community_assets/images/apps/4659620/a.jpg";
         let variants = mirror_variants(url);
         assert_eq!(variants.len(), 3);
         assert!(variants[0].starts_with("https://shared.akamai.steamstatic.com/"));
@@ -975,12 +997,13 @@ mod tests {
 
     #[test]
     fn test_library_image_relative_prefers_english_usable_paths() {
-        let full: crate::types::SteamCmdLibraryAssetsFull = serde_json::from_value(serde_json::json!({
-            "library_capsule": {"image": {"english": "571b9e19/library_capsule.jpg"}},
-            "library_hero": {"image": {"koreana": "7bf388d4/library_hero.jpg"}},
-            "library_logo": {"image": {"english": ""}},
-        }))
-        .unwrap();
+        let full: crate::types::SteamCmdLibraryAssetsFull =
+            serde_json::from_value(serde_json::json!({
+                "library_capsule": {"image": {"english": "571b9e19/library_capsule.jpg"}},
+                "library_hero": {"image": {"koreana": "7bf388d4/library_hero.jpg"}},
+                "library_logo": {"image": {"english": ""}},
+            }))
+            .unwrap();
 
         assert_eq!(
             library_image_relative(&full, "library_capsule"),
@@ -1011,7 +1034,10 @@ mod tests {
             header_image_base("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/413410/header.jpg"),
             Some("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/413410".to_string())
         );
-        assert_eq!(header_image_base("https://example.com/some/other.png"), None);
+        assert_eq!(
+            header_image_base("https://example.com/some/other.png"),
+            None
+        );
     }
 
     #[test]
@@ -1050,7 +1076,10 @@ mod tests {
             convert_pinned_position("TopLeft"),
             Some(LogoPosition::TopLeft)
         );
-        assert_eq!(convert_pinned_position("Center"), Some(LogoPosition::Center));
+        assert_eq!(
+            convert_pinned_position("Center"),
+            Some(LogoPosition::Center)
+        );
         assert_eq!(convert_pinned_position(""), None);
     }
 }

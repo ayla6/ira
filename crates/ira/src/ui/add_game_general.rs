@@ -52,9 +52,10 @@ pub(super) fn build_general_page(
         {
             let entry = folder_entry.clone();
             let games_root = games_root.clone();
-            move || super::helpers::entry_path_closure(&entry)().or_else(|| {
-                (!games_root.is_empty()).then_some(games_root.clone())
-            })
+            move || {
+                super::helpers::entry_path_closure(&entry)()
+                    .or_else(|| (!games_root.is_empty()).then_some(games_root.clone()))
+            }
         },
         {
             let entry = folder_entry.clone();
@@ -82,9 +83,9 @@ pub(super) fn build_general_page(
             move || {
                 super::helpers::entry_path_closure(&entry)().or_else(|| {
                     let folder = folder.text().trim().to_string();
-                    (!folder.is_empty()).then_some(folder).or_else(|| {
-                        (!games_root.is_empty()).then_some(games_root.clone())
-                    })
+                    (!folder.is_empty())
+                        .then_some(folder)
+                        .or_else(|| (!games_root.is_empty()).then_some(games_root.clone()))
                 })
             }
         },
@@ -127,10 +128,8 @@ pub(super) fn build_general_page(
     ids_group.set_title(&crate::tr!("Service IDs"));
     let steam_id_entry = adw::EntryRow::new();
     steam_id_entry.set_title(&crate::tr!("Steam app ID"));
-    let steam_search_btn = super::helpers::icon_button(
-        "system-search-symbolic",
-        &crate::tr!("Search Steam store"),
-    );
+    let steam_search_btn =
+        super::helpers::icon_button("system-search-symbolic", &crate::tr!("Search Steam store"));
     {
         let sc = state.clone();
         let win_c = win.clone();
@@ -179,10 +178,8 @@ pub(super) fn build_general_page(
     let sgdb_id_entry = adw::EntryRow::new();
     sgdb_id_entry.set_title(&crate::tr!("SteamGridDB ID"));
     sgdb_id_entry.set_input_purpose(gtk4::InputPurpose::Number);
-    let sgdb_search_btn = super::helpers::icon_button(
-        "system-search-symbolic",
-        &crate::tr!("Search SteamGridDB"),
-    );
+    let sgdb_search_btn =
+        super::helpers::icon_button("system-search-symbolic", &crate::tr!("Search SteamGridDB"));
     {
         let sc = state.clone();
         let win_c = win.clone();

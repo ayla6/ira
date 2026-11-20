@@ -460,8 +460,7 @@ pub fn decoded_buttons(report: &[u8]) -> u32 {
 /// Unpacks one stick's two 12-bit fields from its three wire bytes.
 pub fn stick_raw(report: &[u8], offset: usize) -> (u16, u16) {
     let x = u16::from(report[offset]) | (u16::from(report[offset + 1] & 0x0F) << 8);
-    let y =
-        (u16::from(report[offset + 1] >> 4) & 0x0F) | (u16::from(report[offset + 2]) << 4);
+    let y = (u16::from(report[offset + 1] >> 4) & 0x0F) | (u16::from(report[offset + 2]) << 4);
     (x, y)
 }
 
@@ -481,9 +480,7 @@ pub fn decoded_axis(axis: GamepadAxis, raw: u16) -> f32 {
 /// m/s² and gyroscope in rad/s, both already in the SDL sensor frame via
 /// the Nintendo shuffle `[-y, z, -x]`.
 pub fn motion_from_report(report: &[u8]) -> ([f32; 3], [f32; 3]) {
-    let read_i16 = |offset: usize| {
-        i16::from_le_bytes([report[offset], report[offset + 1]])
-    };
+    let read_i16 = |offset: usize| i16::from_le_bytes([report[offset], report[offset + 1]]);
     // Samples are oldest first; the newest is the last.
     let base = 13 + 2 * 12;
     let accel_g = [

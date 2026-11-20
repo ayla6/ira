@@ -272,7 +272,6 @@ pub(super) fn setup_open_gog_status_action(
     actions.add_action(&open_gog);
 }
 
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum MassEntityList {
     Family,
@@ -282,15 +281,9 @@ pub(super) enum MassEntityList {
 }
 
 impl MassEntityList {
-    fn search(
-        self,
-        db: &ira_db::DbConn,
-        term: &str,
-    ) -> Vec<ira_models::ScraperEntity> {
+    fn search(self, db: &ira_db::DbConn, term: &str) -> Vec<ira_models::ScraperEntity> {
         match self {
-            MassEntityList::Family => {
-                ira_db::search_families(db, term).unwrap_or_default()
-            }
+            MassEntityList::Family => ira_db::search_families(db, term).unwrap_or_default(),
             MassEntityList::Genre => ira_db::search_genres(db, term).unwrap_or_default(),
             MassEntityList::Developer | MassEntityList::Publisher => {
                 ira_db::scraper_companies_search(db, term).unwrap_or_default()
@@ -449,9 +442,7 @@ impl OrganizeSource for GroupSource {
         ira_db::get_all_groups(db)
             .unwrap_or_default()
             .into_iter()
-            .filter(|group| {
-                query.is_empty() || group.name.to_lowercase().contains(&query)
-            })
+            .filter(|group| query.is_empty() || group.name.to_lowercase().contains(&query))
             .map(|group| ira_models::ScraperEntity {
                 id: group.id.to_string(),
                 name: group.name,
@@ -694,10 +685,8 @@ fn show_organize_picker(
                 .map(|&db_id| source.held_by(&db, db_id))
                 .collect();
             let (shared, _) = partition_entities(&all);
-            let shared_id: std::collections::HashSet<&str> = shared
-                .iter()
-                .map(|entity| entity.id.as_str())
-                .collect();
+            let shared_id: std::collections::HashSet<&str> =
+                shared.iter().map(|entity| entity.id.as_str()).collect();
             for entity in &shared {
                 if !query.is_empty() && !entity.name.to_lowercase().contains(&query) {
                     continue;
@@ -710,9 +699,7 @@ fn show_organize_picker(
                 row.set_use_markup(false);
                 row.set_title(&entity.name);
                 row.set_subtitle(&format!("id {}", entity.id));
-                if let (Some(kind), Ok(id)) =
-                    (source.entity_kind(), entity.id.parse::<i64>())
-                {
+                if let (Some(kind), Ok(id)) = (source.entity_kind(), entity.id.parse::<i64>()) {
                     // The row opens the editor; the button still picks.
                     // Saving there repaints here.
                     let state = state.clone();
@@ -759,9 +746,7 @@ fn show_organize_picker(
                 row.set_use_markup(false);
                 row.set_title(&entity.name);
                 row.set_subtitle(&format!("id {}", entity.id));
-                if let (Some(kind), Ok(id)) =
-                    (source.entity_kind(), entity.id.parse::<i64>())
-                {
+                if let (Some(kind), Ok(id)) = (source.entity_kind(), entity.id.parse::<i64>()) {
                     let state = state.clone();
                     let dialog = dialog.clone();
                     let name = entity.name.clone();
@@ -891,7 +876,6 @@ pub(super) fn setup_organize_groups_action(
     });
     actions.add_action(&action);
 }
-
 
 #[cfg(test)]
 mod tests {

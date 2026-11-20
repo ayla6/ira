@@ -592,7 +592,10 @@ mod tests {
     #[test]
     fn test_platform_display_name_never_scans() {
         // The type carries the answer: display needs no lookup.
-        assert_eq!(Platform::parse("snes").display_name(), "Super Nintendo Entertainment System");
+        assert_eq!(
+            Platform::parse("snes").display_name(),
+            "Super Nintendo Entertainment System"
+        );
         assert_eq!(Platform::parse("3ds").display_name(), "Nintendo 3DS");
         assert_eq!(Platform::parse("whatever").display_name(), "whatever");
     }
@@ -639,10 +642,7 @@ mod tests {
             find_console("gba").unwrap().short_name(),
             "Game Boy Advance"
         );
-        assert_eq!(
-            find_console("psx").unwrap().short_name(),
-            "PlayStation 1"
-        );
+        assert_eq!(find_console("psx").unwrap().short_name(), "PlayStation 1");
     }
 
     #[test]

@@ -6,8 +6,7 @@ use std::sync::Arc;
 
 use super::css::*;
 use super::helpers::{
-    clamped, clamped_boxed_list, clear_children, esc, poll_channel, replace_row_actions,
-    status_row,
+    clamped, clamped_boxed_list, clear_children, esc, poll_channel, replace_row_actions, status_row,
 };
 use super::matching::match_game_to_steam;
 use super::state::SharedState;

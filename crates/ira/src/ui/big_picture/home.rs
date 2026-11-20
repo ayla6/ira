@@ -4,11 +4,11 @@
 //! tooltip pill that marquees when it overflows.
 
 use super::marquee::Marquee;
-use crate::ui::selection_ring::SelectionRing;
 use super::view::BigPictureUi;
 use crate::ui::css::*;
 use crate::ui::recent_carousel::RecentRow;
 use crate::ui::recent_row::{build_cover, update_cover};
+use crate::ui::selection_ring::SelectionRing;
 use crate::ui::state::SharedState;
 use crate::Game;
 use gtk4::prelude::*;
@@ -16,7 +16,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
-
 
 /// How many recent games the carousel keeps.
 const RECENT_LIMIT: usize = 12;
@@ -153,7 +152,8 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
     {
         let wheel_state = state.clone();
         let wheel = gtk4::EventControllerScroll::new(
-            gtk4::EventControllerScrollFlags::VERTICAL | gtk4::EventControllerScrollFlags::HORIZONTAL,
+            gtk4::EventControllerScrollFlags::VERTICAL
+                | gtk4::EventControllerScrollFlags::HORIZONTAL,
         );
         wheel.set_propagation_phase(gtk4::PropagationPhase::Capture);
         wheel.connect_scroll(move |_, _, _| {
@@ -183,7 +183,6 @@ pub(super) fn build(state: &SharedState, square_mode: bool) -> (gtk4::Overlay, H
     page.set_clip_overlay(&ring, true);
     page.add_overlay(marquee.widget());
     page.set_measure_overlay(marquee.widget(), false);
-
 
     let ui = HomeUi {
         page: page.clone(),
@@ -265,9 +264,7 @@ pub(super) fn refresh(state: &SharedState) {
     let current_games = ui.games.borrow().clone();
     let current_covers = ui.covers.borrow().clone();
     let selected_index = ui.selected.get();
-    let selected_key = selected_index.and_then(|index| {
-        current_games.get(index).map(Game::grid_id)
-    });
+    let selected_key = selected_index.and_then(|index| current_games.get(index).map(Game::grid_id));
     let at_tile = matches!(
         selected_index,
         Some(index) if index >= current_games.len() && index > 0
@@ -293,17 +290,15 @@ pub(super) fn refresh(state: &SharedState) {
     // The achievement watcher re-reports games constantly. A refresh is a
     // diff: retained cover widgets keep their paintable, hover state and
     // parentage while only changed paths or labels are updated.
-    let unchanged = ui.built_capsule.get() == capsule
-        && ui.built_square.get() == square_mode
-        && {
-            let current = ui.games.borrow();
-            current.len() == games.len()
-                && current.iter().zip(&games).all(|(a, b)| {
-                    a.grid_id() == b.grid_id()
-                        && carousel_art_path(a, square_mode) == carousel_art_path(b, square_mode)
-                        && a.name == b.name
-                })
-        };
+    let unchanged = ui.built_capsule.get() == capsule && ui.built_square.get() == square_mode && {
+        let current = ui.games.borrow();
+        current.len() == games.len()
+            && current.iter().zip(&games).all(|(a, b)| {
+                a.grid_id() == b.grid_id()
+                    && carousel_art_path(a, square_mode) == carousel_art_path(b, square_mode)
+                    && a.name == b.name
+            })
+    };
     if unchanged {
         return;
     }
@@ -329,19 +324,23 @@ pub(super) fn refresh(state: &SharedState) {
         // square, so neither slot ever blanks for want of the other.
         let art = carousel_art_path(game, square_mode);
         let key = game.grid_id();
-        let cover = if let Some(position) = old_covers
-            .iter()
-            .position(|(old_key, _)| *old_key == key)
-        {
-            let (_, cover) = old_covers.remove(position);
-            update_cover(&cover, game, &art, width, capsule, square_mode);
-            cover
-        } else {
-            let click_key = key.clone();
-            build_cover(state, game, &art, width, capsule, square_mode, move |state| {
-                on_cover_clicked_key(state, &click_key)
-            })
-        };
+        let cover =
+            if let Some(position) = old_covers.iter().position(|(old_key, _)| *old_key == key) {
+                let (_, cover) = old_covers.remove(position);
+                update_cover(&cover, game, &art, width, capsule, square_mode);
+                cover
+            } else {
+                let click_key = key.clone();
+                build_cover(
+                    state,
+                    game,
+                    &art,
+                    width,
+                    capsule,
+                    square_mode,
+                    move |state| on_cover_clicked_key(state, &click_key),
+                )
+            };
         covers.push(cover);
     }
     let tile = current_covers
@@ -427,17 +426,13 @@ fn on_cover_clicked(state: &SharedState, index: usize) {
 }
 
 fn on_cover_clicked_key(state: &SharedState, key: &str) {
-    let index = state
-        .borrow()
-        .big_picture
-        .as_ref()
-        .and_then(|big| {
-            big.home
-                .games
-                .borrow()
-                .iter()
-                .position(|game| game.grid_id() == key)
-        });
+    let index = state.borrow().big_picture.as_ref().and_then(|big| {
+        big.home
+            .games
+            .borrow()
+            .iter()
+            .position(|game| game.grid_id() == key)
+    });
     if let Some(index) = index {
         on_cover_clicked(state, index);
     }
@@ -585,12 +580,7 @@ fn snap_to_boundary(ui: &HomeUi) {
 /// happens once, on a fresh press (`allow_wrap`): from anywhere else the
 /// row moves one step, and a held direction that reaches an end meets a
 /// wall instead of cycling around forever.
-fn next_selection(
-    current: usize,
-    count: usize,
-    delta: i32,
-    allow_wrap: bool,
-) -> Option<usize> {
+fn next_selection(current: usize, count: usize, delta: i32, allow_wrap: bool) -> Option<usize> {
     if count == 0 {
         return None;
     }
@@ -609,15 +599,11 @@ pub(super) fn launch_selected(state: &SharedState) {
     if super::launch_locked(state) {
         return;
     }
-    let game = state
-        .borrow()
-        .big_picture
-        .as_ref()
-        .and_then(|big| {
-            let ui = &big.home;
-            let selected = ui.selected.get()?;
-            ui.games.borrow().get(selected).cloned()
-        });
+    let game = state.borrow().big_picture.as_ref().and_then(|big| {
+        let ui = &big.home;
+        let selected = ui.selected.get()?;
+        ui.games.borrow().get(selected).cloned()
+    });
     let Some(game) = game else {
         return;
     };
@@ -768,16 +754,26 @@ fn sync_title_position(big: &Rc<BigPictureUi>) {
     }
     ui.marquee.set_visible(true);
     ui.ring.set_visible(true);
-    ui.marquee
-        .set_position(center, viewport, content_top - crate::ui::css::bp_ring_outset(), false);
+    ui.marquee.set_position(
+        center,
+        viewport,
+        content_top - crate::ui::css::bp_ring_outset(),
+        false,
+    );
     let ring_scale = viewport / 1920.0;
     // The ring hugs what is visibly selected: the full capsule on a game
     // cover, the centered half-size circle on the All Software tile — a
     // true circle there, since the tile's content is round.
     if is_tile {
         let circle = capsule / 2.0;
-        ui.ring
-            .place(center - circle / 2.0, content_top, circle, circle, ring_scale, true);
+        ui.ring.place(
+            center - circle / 2.0,
+            content_top,
+            circle,
+            circle,
+            ring_scale,
+            true,
+        );
     } else {
         ui.ring
             .place(center - w / 2.0, cover_top, w, capsule, ring_scale, false);
@@ -873,7 +869,8 @@ fn build_all_tile(state: &SharedState, capsule: i32) -> gtk4::Widget {
     let click = gtk4::GestureClick::new();
     click.connect_pressed(move |_, _, _, _| {
         if let Some(big) = open_state.borrow().big_picture.clone() {
-            big.all.set_tab(&open_state, super::all_games::Tab::Everything);
+            big.all
+                .set_tab(&open_state, super::all_games::Tab::Everything);
         }
     });
     vbox.add_controller(click);

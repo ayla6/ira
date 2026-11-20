@@ -435,8 +435,8 @@ mod tests {
         assert_eq!(read_i16(24), -8192);
         let tick = u16::from_le_bytes([r[28], r[29]]);
         assert_eq!(tick, 30_000); // microseconds, straight into the u16
-        // Alternate layout: touchpad counters at 32/36 with the released
-        // bit set, battery at 30 reading fully charged (status 2).
+                                  // Alternate layout: touchpad counters at 32/36 with the released
+                                  // bit set, battery at 30 reading fully charged (status 2).
         assert_eq!(r[32], 0x80);
         assert_eq!(r[36], 0x80);
         assert_eq!(r[33], 0);

@@ -59,7 +59,9 @@ fn parse_iso8601(s: &str) -> Option<i64> {
     // Format: YYYY-MM-DDTHH:MM:SS (optionally with fractional seconds or timezone)
     let (date, time) = s.trim().split_once('T')?;
     let mut date_parts = date.split('-');
-    let (Some(year_s), Some(month_s), Some(day_s)) = (date_parts.next(), date_parts.next(), date_parts.next()) else {
+    let (Some(year_s), Some(month_s), Some(day_s)) =
+        (date_parts.next(), date_parts.next(), date_parts.next())
+    else {
         return None;
     };
     if date_parts.next().is_some() {

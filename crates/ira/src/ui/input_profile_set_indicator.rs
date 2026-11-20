@@ -82,9 +82,7 @@ impl SetIndicator {
             }
             EditingTarget::Layer(_) => {
                 let text = match target.parent_name(&profile) {
-                    Some(parent) => {
-                        crate::tr!("over {parent}").replace("{parent}", &parent)
-                    }
+                    Some(parent) => crate::tr!("over {parent}").replace("{parent}", &parent),
                     None => String::new(),
                 };
                 self.detail.set_visible(!text.is_empty());

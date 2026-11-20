@@ -3,9 +3,7 @@
 //! (gyro mouse output scaled down while a trigger is held).
 
 use super::input_profile_sheet_base::combo_row;
-use super::input_profile_widgets::{
-    slider_row, switch_row, SettingGroup, SliderSpec,
-};
+use super::input_profile_widgets::{slider_row, switch_row, SettingGroup, SliderSpec};
 use adw::prelude::*;
 use ira_input::{GyroConfig, TriggerDampening};
 use std::cell::RefCell;
@@ -47,7 +45,8 @@ fn momentum_group(gyro: &Rc<RefCell<GyroConfig>>, on_adjusted: &Rc<dyn Fn()>) ->
                 gyro.borrow_mut().momentum.friction = value as f32;
                 on_adjusted();
             }
-        });
+        },
+    );
     let enable = switch_row(
         &crate::tr!("Enable momentum"),
         Some(&crate::tr!(
@@ -101,7 +100,8 @@ fn dampening_group(gyro: &Rc<RefCell<GyroConfig>>, on_adjusted: &Rc<dyn Fn()>) -
                 gyro.borrow_mut().dampening_amount = value as f32;
                 on_adjusted();
             }
-        });
+        },
+    );
     amount.set_sensitive(gyro.borrow().trigger_dampening != TriggerDampening::Off);
 
     let gyro_for_mode = gyro.clone();

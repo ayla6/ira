@@ -26,10 +26,9 @@ pub fn canvas_panel_rect(
     let (x, y) = match OverlayPosition::from_u32(position) {
         OverlayPosition::TopRight => (screen_w as f32 - MARGIN - w, MARGIN),
         OverlayPosition::BottomLeft => (MARGIN, screen_h as f32 - MARGIN - h),
-        OverlayPosition::BottomRight => (
-            screen_w as f32 - MARGIN - w,
-            screen_h as f32 - MARGIN - h,
-        ),
+        OverlayPosition::BottomRight => {
+            (screen_w as f32 - MARGIN - w, screen_h as f32 - MARGIN - h)
+        }
         OverlayPosition::Center => ((screen_w as f32 - w) / 2.0, (screen_h as f32 - h) / 2.0),
         OverlayPosition::TopLeft => (MARGIN, MARGIN),
     };

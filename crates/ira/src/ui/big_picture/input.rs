@@ -115,8 +115,8 @@ impl AxisNav {
             return None;
         }
         let pressure = ((self.pressure - STICK_ENGAGE) / (1.0 - STICK_ENGAGE)).clamp(0.0, 1.0);
-        let hold = (now_ms.saturating_sub(self.held_since_ms) as f32 / REPEAT_RAMP_MS as f32)
-            .min(1.0);
+        let hold =
+            (now_ms.saturating_sub(self.held_since_ms) as f32 / REPEAT_RAMP_MS as f32).min(1.0);
         let interval =
             REPEAT_EVERY_MS as f32 * (1.0 + 0.45 * (1.0 - pressure)) * (1.0 - 0.5 * hold);
         self.next_repeat_ms = now_ms + (interval.max(55.0) as u64);
@@ -174,7 +174,8 @@ impl NavState {
     }
 
     fn repeat_due(&mut self, now_ms: u64) -> Option<NavCommand> {
-        self.h.repeat_due(now_ms)
+        self.h
+            .repeat_due(now_ms)
             .or_else(|| self.v.repeat_due(now_ms))
             .or_else(|| self.l.repeat_due(now_ms).then_some(NavCommand::PrevTab))
             .or_else(|| self.r.repeat_due(now_ms).then_some(NavCommand::NextTab))
@@ -309,8 +310,7 @@ impl PadUi {
         // Twins count as their physical source, never as extra pads:
         // the reader opens the virtual nodes (the grabbed physicals
         // are silent), but the rail shows the real controller.
-        let infos: Vec<ira_input::DeviceInfo> =
-            pads.iter().map(|pad| pad.info().clone()).collect();
+        let infos: Vec<ira_input::DeviceInfo> = pads.iter().map(|pad| pad.info().clone()).collect();
         let (count, family) = ira_input::pad_status_summary(&infos);
         self.count = count;
         self.family = family;
@@ -334,12 +334,7 @@ impl PadUi {
     }
 }
 
-fn fold_event(
-    nav: &mut NavState,
-    event: ira_input::InputEvent,
-    tx: &Sender<NavMsg>,
-    now_ms: u64,
-) {
+fn fold_event(nav: &mut NavState, event: ira_input::InputEvent, tx: &Sender<NavMsg>, now_ms: u64) {
     let pressed = event.value > 0.5;
     match event.source {
         InputSource::Button(GamepadButton::DpadLeft) => {
@@ -380,17 +375,21 @@ fn fold_event(
             let _ = tx.send(NavMsg::Nav(NavCommand::Tertiary, true));
         }
         InputSource::Axis(GamepadAxis::LeftX) => {
-            nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)
+            nav.h
+                .apply_stick(event.value, NavCommand::Right, NavCommand::Left)
         }
         InputSource::Axis(GamepadAxis::LeftY) => {
-            nav.v.apply_stick(event.value, NavCommand::Down, NavCommand::Up)
+            nav.v
+                .apply_stick(event.value, NavCommand::Down, NavCommand::Up)
         }
         // The right stick navigates exactly like the left.
         InputSource::Axis(GamepadAxis::RightX) => {
-            nav.h.apply_stick(event.value, NavCommand::Right, NavCommand::Left)
+            nav.h
+                .apply_stick(event.value, NavCommand::Right, NavCommand::Left)
         }
         InputSource::Axis(GamepadAxis::RightY) => {
-            nav.v.apply_stick(event.value, NavCommand::Down, NavCommand::Up)
+            nav.v
+                .apply_stick(event.value, NavCommand::Down, NavCommand::Up)
         }
         _ => {}
     }
@@ -549,7 +548,10 @@ mod tests {
         nav.h.apply_stick(0.0, NavCommand::Right, NavCommand::Left);
         assert_eq!(nav.update(REPEAT_DELAY_MS + 2), None);
         assert_eq!(nav.repeat_due(REPEAT_DELAY_MS + 2), None);
-        assert_eq!(nav.v.repeat_due(1 + REPEAT_DELAY_MS + REPEAT_EVERY_MS), Some(NavCommand::Up));
+        assert_eq!(
+            nav.v.repeat_due(1 + REPEAT_DELAY_MS + REPEAT_EVERY_MS),
+            Some(NavCommand::Up)
+        );
     }
 
     #[test]
@@ -568,12 +570,18 @@ mod tests {
         assert_eq!(nav.repeat_due(REPEAT_DELAY_MS - 1), None);
         assert_eq!(nav.repeat_due(REPEAT_DELAY_MS), Some(NavCommand::PrevTab));
         assert_eq!(nav.repeat_due(REPEAT_DELAY_MS + 1), None);
-        assert_eq!(nav.repeat_due(REPEAT_DELAY_MS + 140), Some(NavCommand::PrevTab));
+        assert_eq!(
+            nav.repeat_due(REPEAT_DELAY_MS + 140),
+            Some(NavCommand::PrevTab)
+        );
         // A re-press while still held is noise; a release fires nothing;
         // after it, a fresh press fires again.
         assert!(!nav.l.update(true, REPEAT_DELAY_MS + 150));
         assert!(!nav.l.update(false, REPEAT_DELAY_MS + 160));
-        assert!(nav.l.update(true, REPEAT_DELAY_MS + 170), "re-press after release fires");
+        assert!(
+            nav.l.update(true, REPEAT_DELAY_MS + 170),
+            "re-press after release fires"
+        );
     }
 
     #[test]

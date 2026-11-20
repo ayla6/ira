@@ -84,12 +84,8 @@ impl AutoCriterion {
     /// AND across rule lines, OR across the values of one line.
     pub fn matches(&self, game: &Game, ctx: &AutoGroupContext) -> bool {
         match self.dimension {
-            AutoDimension::Genre => {
-                values_overlap(&self.values, ctx.genres.get(&game.db_id))
-            }
-            AutoDimension::Family => {
-                values_overlap(&self.values, ctx.families.get(&game.db_id))
-            }
+            AutoDimension::Genre => values_overlap(&self.values, ctx.genres.get(&game.db_id)),
+            AutoDimension::Family => values_overlap(&self.values, ctx.families.get(&game.db_id)),
             AutoDimension::Developer => {
                 values_overlap(&self.values, ctx.developers.get(&game.db_id))
             }
@@ -271,10 +267,7 @@ mod tests {
     fn ctx() -> AutoGroupContext {
         AutoGroupContext {
             genres: HashMap::from([(7, vec!["JRPG".to_string(), "Turn-based".to_string()])]),
-            families: HashMap::from([(
-                7,
-                vec!["Chrono (Series)".to_string()],
-            )]),
+            families: HashMap::from([(7, vec!["Chrono (Series)".to_string()])]),
             ..Default::default()
         }
     }
@@ -501,7 +494,10 @@ mod tests {
                 nodes: vec![
                     AutoNode::Logic {
                         logic: AutoLogic::All,
-                        nodes: vec![leaf(AutoDimension::Genre, &["JRPG"]), leaf(AutoDimension::Console, &["SNES"])],
+                        nodes: vec![
+                            leaf(AutoDimension::Genre, &["JRPG"]),
+                            leaf(AutoDimension::Console, &["SNES"]),
+                        ],
                     },
                     AutoNode::Logic {
                         logic: AutoLogic::All,
@@ -589,5 +585,4 @@ mod tests {
         let back: AutoGroup = serde_json::from_str(&json).unwrap();
         assert_eq!(back, group);
     }
-
 }

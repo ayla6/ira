@@ -174,8 +174,11 @@ fn member_row(
     row.set_subtitle(&format!(
         "{}  ·  {}",
         identity_line(entry),
-        crate::tr!("{} on its own")
-            .replacen("{}", &super::game_display::format_playtime(entry.playtime), 1)
+        crate::tr!("{} on its own").replacen(
+            "{}",
+            &super::game_display::format_playtime(entry.playtime),
+            1
+        )
     ));
     let remove = gtk4::Button::from_icon_name("edit-delete-symbolic");
     remove.add_css_class(CSS_FLAT);
@@ -202,7 +205,12 @@ fn member_row(
 }
 
 /// Stop counting this entry together with its link.
-fn leave_row(page: &gtk4::Box, state: &SharedState, game: &Game, win: &adw::Window) -> adw::ActionRow {
+fn leave_row(
+    page: &gtk4::Box,
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+) -> adw::ActionRow {
     let row = adw::ActionRow::new();
     row.set_title(&crate::tr!("Leave link"));
     row.set_subtitle(&crate::tr!("Count this entry's time on its own again"));
@@ -342,7 +350,8 @@ fn build_game_picker(games: &[GameEntry]) -> (gtk4::Widget, GameChecks) {
         row.set_activatable_widget(Some(&check));
         let row_widget = row.clone();
         list.append(&row);
-        rows.borrow_mut().push((game.title.to_lowercase(), row_widget.into()));
+        rows.borrow_mut()
+            .push((game.title.to_lowercase(), row_widget.into()));
         checks.borrow_mut().push((game.id, check));
     }
     search.connect_search_changed({
@@ -450,7 +459,14 @@ mod tests {
     #[test]
     fn test_identity_parts_names_source_id_and_location() {
         assert_eq!(
-            identity_parts(GameKind::Steam, "12345", "", "", "/games/elden/elden.exe", ""),
+            identity_parts(
+                GameKind::Steam,
+                "12345",
+                "",
+                "",
+                "/games/elden/elden.exe",
+                ""
+            ),
             "Steam  ·  App 12345  ·  /games/elden/elden.exe"
         );
     }
@@ -458,7 +474,10 @@ mod tests {
     #[test]
     fn test_identity_parts_drops_missing_pieces() {
         // No ids, no location: just the source.
-        assert_eq!(identity_parts(GameKind::Switch, "", "", "", "", ""), "Nintendo Switch");
+        assert_eq!(
+            identity_parts(GameKind::Switch, "", "", "", "", ""),
+            "Nintendo Switch"
+        );
         // A console entry identifies by its serial.
         assert_eq!(
             identity_parts(

@@ -216,9 +216,9 @@ pub(crate) fn region_groups(
             // L4/R4 then PL/PR, so list them spatially instead of numerically.
             // Other controllers give the numbers no known layout — keep
             // numeric order there.
-            let paddle_order: &[GamepadButton] = if device.is_some_and(|device| {
-                device.family() == ira_input::ControllerFamily::EightBitDo
-            }) {
+            let paddle_order: &[GamepadButton] = if device
+                .is_some_and(|device| device.family() == ira_input::ControllerFamily::EightBitDo)
+            {
                 &[
                     GamepadButton::Paddle2,
                     GamepadButton::Paddle1,

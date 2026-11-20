@@ -17,8 +17,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
 use ira_overlay_ipc::{
-    gamepad_button_mask_from_evdev, InputEventRaw, ShmHeader, EVT_KEY_PRESS, EVT_SCROLL,
-    EVT_SCREENSHOT, EVT_TOGGLE_RECORD,
+    gamepad_button_mask_from_evdev, InputEventRaw, ShmHeader, EVT_KEY_PRESS, EVT_SCREENSHOT,
+    EVT_SCROLL, EVT_TOGGLE_RECORD,
 };
 
 use crate::state;

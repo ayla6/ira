@@ -7,8 +7,7 @@
 use super::input_profile_options::source_options_for_device;
 use super::input_profile_sheet_base::combo_row;
 use super::input_profile_widgets::{
-    slider_entry_row, slider_row_with_scale, switch_row, OptionChoice,
-    SettingGroup, SliderSpec,
+    slider_entry_row, slider_row_with_scale, switch_row, OptionChoice, SettingGroup, SliderSpec,
 };
 use adw::prelude::*;
 use ira_input::{
@@ -62,7 +61,9 @@ pub(super) fn add_gyro_group(
         activation_index(&gyro.borrow().activation),
     );
     activation.set_title(&crate::tr!("Choose Gyro Button(s)"));
-    activation.set_subtitle(&activation_description(activation_index(&gyro.borrow().activation)));
+    activation.set_subtitle(&activation_description(activation_index(
+        &gyro.borrow().activation,
+    )));
     let button = combo_row(
         &button_option_labels(&button_options),
         activation_button_index(&button_options, &gyro.borrow().activation),
@@ -107,7 +108,8 @@ pub(super) fn add_gyro_group(
             move |value| {
                 gyro.borrow_mut().rotate_output = value as f32;
                 on_adjusted();
-            })
+            },
+        )
         .0
     };
     let stick_max_output = {
@@ -126,10 +128,7 @@ pub(super) fn add_gyro_group(
         .0
     };
     let stick_response_style = {
-        let styles = [
-            crate::tr!("Circular"),
-            crate::tr!("Per Axis"),
-        ];
+        let styles = [crate::tr!("Circular"), crate::tr!("Per Axis")];
         let gyro = gyro.clone();
         let on_adjusted = on_adjusted.clone();
         let combo = combo_row(&styles, response_style_index(&stick.response_style));
@@ -211,7 +210,9 @@ pub(super) fn add_gyro_group(
             let initial = f64::from(gyro.borrow().sensitivity);
             slider_entry_row(
                 &crate::tr!("Sensitivity"),
-                Some(&crate::tr!("Multiplier applied to gyro motion; type for precise values")),
+                Some(&crate::tr!(
+                    "Multiplier applied to gyro motion; type for precise values"
+                )),
                 &SliderSpec(0.05, 20.0, 0.05, initial),
                 move |value| {
                     gyro.borrow_mut().sensitivity = value as f32;
@@ -504,7 +505,10 @@ fn orientation_row(
         .position(|(candidate, _)| *candidate == orientation)
         .unwrap_or(0);
     let combo = combo_row(
-        &choices.iter().map(|(_, choice)| choice.title.clone()).collect::<Vec<_>>(),
+        &choices
+            .iter()
+            .map(|(_, choice)| choice.title.clone())
+            .collect::<Vec<_>>(),
         current as u32,
     );
     combo.set_title(&crate::tr!("Orientation"));
@@ -542,7 +546,8 @@ fn activation_description(selected: u32) -> String {
         0 => crate::tr!("The gyro is always on").to_string(),
         1 => crate::tr!("Gyro is off unless any assigned button is held.").to_string(),
         2 => crate::tr!("Gyro is on unless any assigned button is held.").to_string(),
-        3 => crate::tr!("Gyro will toggle on or off any time an assigned button is pressed.").to_string(),
+        3 => crate::tr!("Gyro will toggle on or off any time an assigned button is pressed.")
+            .to_string(),
         _ => String::new(),
     }
 }

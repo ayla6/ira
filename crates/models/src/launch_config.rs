@@ -205,7 +205,11 @@ impl WineConfig {
             battleye: pick(has("battleye"), &self.battleye, &default.battleye),
             eac: pick(has("eac"), &self.eac, &default.eac),
             show_debug: pick(has("show_debug"), &self.show_debug, &default.show_debug),
-            dll_overrides: pick(has("dll_overrides"), &self.dll_overrides, &default.dll_overrides),
+            dll_overrides: pick(
+                has("dll_overrides"),
+                &self.dll_overrides,
+                &default.dll_overrides,
+            ),
             audio: pick(has("audio"), &self.audio, &default.audio),
             graphics: pick(has("graphics"), &self.graphics, &default.graphics),
             desktop_integration: pick(
@@ -231,8 +235,16 @@ impl WineConfig {
                 &default.dxvk_frame_rate,
             ),
             dxvk_hud: pick(has("dxvk_hud"), &self.dxvk_hud, &default.dxvk_hud),
-            proton_wow64: pick(has("proton_wow64"), &self.proton_wow64, &default.proton_wow64),
-            proton_ntsync: pick(has("proton_ntsync"), &self.proton_ntsync, &default.proton_ntsync),
+            proton_wow64: pick(
+                has("proton_wow64"),
+                &self.proton_wow64,
+                &default.proton_wow64,
+            ),
+            proton_ntsync: pick(
+                has("proton_ntsync"),
+                &self.proton_ntsync,
+                &default.proton_ntsync,
+            ),
             proton_disable_lsteamclient: pick(
                 has("proton_disable_lsteamclient"),
                 &self.proton_disable_lsteamclient,

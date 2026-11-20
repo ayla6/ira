@@ -506,8 +506,11 @@ pub(super) fn build_lutris_settings_page(
                     super::helpers::confirm_dialog(
                         &settings_win,
                         &crate::tr!("Import Lutris games"),
-                        &crate::tr!("Import {} Lutris game(s) as managed Wine games?")
-                            .replacen("{}", &lutris_games.len().to_string(), 1),
+                        &crate::tr!("Import {} Lutris game(s) as managed Wine games?").replacen(
+                            "{}",
+                            &lutris_games.len().to_string(),
+                            1,
+                        ),
                         &crate::tr!("Migrate"),
                         adw::ResponseAppearance::Suggested,
                         move || {
@@ -1332,7 +1335,12 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
     let mut seeded: Vec<&ira_config::SgdbFilteredUser> = cfg.sgdb_filtered_users.iter().collect();
     seeded.sort_by_key(|user| user.name.to_lowercase());
     for user in &seeded {
-        add_filtered_user_row(&filter_users_list, &user.name, &user.steam64, &filter_user_ids);
+        add_filtered_user_row(
+            &filter_users_list,
+            &user.name,
+            &user.steam64,
+            &filter_user_ids,
+        );
     }
 
     // Search and add share one entry: the query filters the rows, and a
@@ -1370,7 +1378,10 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
                     continue;
                 };
                 user_row.set_visible(
-                    user_row.widget_name().to_lowercase().contains(&query_folded),
+                    user_row
+                        .widget_name()
+                        .to_lowercase()
+                        .contains(&query_folded),
                 );
             }
             let known = !query.is_empty()
@@ -1379,9 +1390,7 @@ pub(super) fn build_sgdb_settings_page(cfg: &Config) -> (gtk4::Box, SgdbSettings
                     .any(|u| u.name.eq_ignore_ascii_case(&query));
             add_row.set_visible(!query.is_empty() && !known);
             if !query.is_empty() {
-                add_row.set_title(
-                    &crate::tr!("Add \"{}\"").replacen("{}", &query, 1),
-                );
+                add_row.set_title(&crate::tr!("Add \"{}\"").replacen("{}", &query, 1));
             }
         });
     }
@@ -1580,9 +1589,7 @@ fn make_filtered_user_row(
                 .and_then(|content| content.downcast::<adw::ToastOverlay>().ok());
             // HIG pattern for destructive list actions: announce the change
             // and offer Undo before the removal is final.
-            let toast = adw::Toast::new(
-                &crate::tr!("{} was unfiltered").replacen("{}", &name, 1),
-            );
+            let toast = adw::Toast::new(&crate::tr!("{} was unfiltered").replacen("{}", &name, 1));
             toast.set_button_label(Some(&crate::tr!("Undo")));
             toast.set_timeout(5);
             {

@@ -38,9 +38,7 @@ pub fn parse_npbind_bytes(data: &[u8]) -> Result<Vec<String>, String> {
 
     let num_entries = data
         .get(0x18..0x20)
-        .map(|s| {
-            u64::from_be_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]) as usize
-        })
+        .map(|s| u64::from_be_bytes([s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]) as usize)
         .unwrap_or(0);
     let mut offset = 0x80usize;
     let mut result = Vec::new();

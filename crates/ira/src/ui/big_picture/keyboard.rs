@@ -33,24 +33,60 @@ pub(super) enum Page {
 /// action column riding every row's last entry.
 const LETTER_ROWS: &[&[Key]] = &[
     &[
-        Key::Char('1'), Key::Char('2'), Key::Char('3'), Key::Char('4'), Key::Char('5'),
-        Key::Char('6'), Key::Char('7'), Key::Char('8'), Key::Char('9'), Key::Char('0'),
-        Key::Char('-'), Key::Backspace,
+        Key::Char('1'),
+        Key::Char('2'),
+        Key::Char('3'),
+        Key::Char('4'),
+        Key::Char('5'),
+        Key::Char('6'),
+        Key::Char('7'),
+        Key::Char('8'),
+        Key::Char('9'),
+        Key::Char('0'),
+        Key::Char('-'),
+        Key::Backspace,
     ],
     &[
-        Key::Char('q'), Key::Char('w'), Key::Char('e'), Key::Char('r'), Key::Char('t'),
-        Key::Char('y'), Key::Char('u'), Key::Char('i'), Key::Char('o'), Key::Char('p'),
-        Key::Char('@'), Key::Return,
+        Key::Char('q'),
+        Key::Char('w'),
+        Key::Char('e'),
+        Key::Char('r'),
+        Key::Char('t'),
+        Key::Char('y'),
+        Key::Char('u'),
+        Key::Char('i'),
+        Key::Char('o'),
+        Key::Char('p'),
+        Key::Char('@'),
+        Key::Return,
     ],
     &[
-        Key::Char('a'), Key::Char('s'), Key::Char('d'), Key::Char('f'), Key::Char('g'),
-        Key::Char('h'), Key::Char('j'), Key::Char('k'), Key::Char('l'), Key::Char(';'),
-        Key::Char('"'), Key::Return,
+        Key::Char('a'),
+        Key::Char('s'),
+        Key::Char('d'),
+        Key::Char('f'),
+        Key::Char('g'),
+        Key::Char('h'),
+        Key::Char('j'),
+        Key::Char('k'),
+        Key::Char('l'),
+        Key::Char(';'),
+        Key::Char('"'),
+        Key::Return,
     ],
     &[
-        Key::Char('z'), Key::Char('x'), Key::Char('c'), Key::Char('v'), Key::Char('b'),
-        Key::Char('n'), Key::Char('m'), Key::Char('<'), Key::Char('>'), Key::Char('+'),
-        Key::Char('='), Key::Ok,
+        Key::Char('z'),
+        Key::Char('x'),
+        Key::Char('c'),
+        Key::Char('v'),
+        Key::Char('b'),
+        Key::Char('n'),
+        Key::Char('m'),
+        Key::Char('<'),
+        Key::Char('>'),
+        Key::Char('+'),
+        Key::Char('='),
+        Key::Ok,
     ],
     &[Key::Shift, Key::Page, Key::Space, Key::Ok],
 ];
@@ -58,24 +94,60 @@ const LETTER_ROWS: &[&[Key]] = &[
 /// The symbol page: digits and punctuation, same shape as the letter page.
 const SYMBOL_ROWS: &[&[Key]] = &[
     &[
-        Key::Char('~'), Key::Char('`'), Key::Char('|'), Key::Char('_'), Key::Char('{'),
-        Key::Char('}'), Key::Char('['), Key::Char(']'), Key::Char('\\'), Key::Char('<'),
-        Key::Char('>'), Key::Backspace,
+        Key::Char('~'),
+        Key::Char('`'),
+        Key::Char('|'),
+        Key::Char('_'),
+        Key::Char('{'),
+        Key::Char('}'),
+        Key::Char('['),
+        Key::Char(']'),
+        Key::Char('\\'),
+        Key::Char('<'),
+        Key::Char('>'),
+        Key::Backspace,
     ],
     &[
-        Key::Char('/'), Key::Char(':'), Key::Char(';'), Key::Char('('), Key::Char(')'),
-        Key::Char('$'), Key::Char('&'), Key::Char('@'), Key::Char('"'), Key::Char('\''),
-        Key::Char('*'), Key::Return,
+        Key::Char('/'),
+        Key::Char(':'),
+        Key::Char(';'),
+        Key::Char('('),
+        Key::Char(')'),
+        Key::Char('$'),
+        Key::Char('&'),
+        Key::Char('@'),
+        Key::Char('"'),
+        Key::Char('\''),
+        Key::Char('*'),
+        Key::Return,
     ],
     &[
-        Key::Char('<'), Key::Char('>'), Key::Char('('), Key::Char(')'), Key::Char('['),
-        Key::Char(']'), Key::Char('{'), Key::Char('}'), Key::Char('+'), Key::Char('='),
-        Key::Char('*'), Key::Return,
+        Key::Char('<'),
+        Key::Char('>'),
+        Key::Char('('),
+        Key::Char(')'),
+        Key::Char('['),
+        Key::Char(']'),
+        Key::Char('{'),
+        Key::Char('}'),
+        Key::Char('+'),
+        Key::Char('='),
+        Key::Char('*'),
+        Key::Return,
     ],
     &[
-        Key::Char('['), Key::Char(']'), Key::Char('{'), Key::Char('}'), Key::Char('('),
-        Key::Char(')'), Key::Char('-'), Key::Char('_'), Key::Char('/'), Key::Char(':'),
-        Key::Char('"'), Key::Ok,
+        Key::Char('['),
+        Key::Char(']'),
+        Key::Char('{'),
+        Key::Char('}'),
+        Key::Char('('),
+        Key::Char(')'),
+        Key::Char('-'),
+        Key::Char('_'),
+        Key::Char('/'),
+        Key::Char(':'),
+        Key::Char('"'),
+        Key::Ok,
     ],
     &[Key::Shift, Key::Page, Key::Space, Key::Ok],
 ];
@@ -83,8 +155,18 @@ const SYMBOL_ROWS: &[&[Key]] = &[
 /// A letter key's shifted self (the top row's digits become symbols).
 fn shifted(c: char) -> char {
     match c {
-        '1' => '!', '2' => '@', '3' => '#', '4' => '$', '5' => '%', '6' => '^',
-        '7' => '&', '8' => '*', '9' => '(', '0' => ')', '-' => '_', c => c,
+        '1' => '!',
+        '2' => '@',
+        '3' => '#',
+        '4' => '$',
+        '5' => '%',
+        '6' => '^',
+        '7' => '&',
+        '8' => '*',
+        '9' => '(',
+        '0' => ')',
+        '-' => '_',
+        c => c,
     }
 }
 
@@ -100,9 +182,7 @@ fn shifted(c: char) -> char {
 /// OK rows 3 and bottom). The action column's ride must not count its own
 /// key's twin as progress.
 fn same_key(rows: &[&[Key]], a: (usize, usize), b: (usize, usize)) -> bool {
-    let key = |(row, col): (usize, usize)| {
-        rows.get(row).and_then(|keys| keys.get(col)).copied()
-    };
+    let key = |(row, col): (usize, usize)| rows.get(row).and_then(|keys| keys.get(col)).copied();
     match (key(a), key(b)) {
         (Some(Key::Ok), Some(Key::Ok)) | (Some(Key::Return), Some(Key::Return)) => true,
         _ => a == b,
@@ -302,17 +382,20 @@ impl Keyboard {
         // The caret blinks while the keyboard shows; typing re-pins it
         // visible (see refresh_preview).
         let blink_state = state.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(BLINK_EVERY_MS), move || {
-            if let Some(big) = blink_state.borrow().big_picture.clone() {
-                let shown = &big.keyboard;
-                if shown.is_open() {
-                    let on = !shown.blink_on.get();
-                    shown.blink_on.set(on);
-                    shown.preview_caret.set_opacity(if on { 1.0 } else { 0.0 });
+        glib::timeout_add_local(
+            std::time::Duration::from_millis(BLINK_EVERY_MS),
+            move || {
+                if let Some(big) = blink_state.borrow().big_picture.clone() {
+                    let shown = &big.keyboard;
+                    if shown.is_open() {
+                        let on = !shown.blink_on.get();
+                        shown.blink_on.set(on);
+                        shown.preview_caret.set_opacity(if on { 1.0 } else { 0.0 });
+                    }
                 }
-            }
-            glib::ControlFlow::Continue
-        });
+                glib::ControlFlow::Continue
+            },
+        );
         keyboard
     }
 
@@ -437,12 +520,7 @@ impl Keyboard {
         }
     }
 
-    fn key_button(
-        &self,
-        state: &SharedState,
-        key: Key,
-        position: (usize, usize),
-    ) -> gtk4::Widget {
+    fn key_button(&self, state: &SharedState, key: Key, position: (usize, usize)) -> gtk4::Widget {
         let button = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         button.add_css_class(CSS_BP_KEY);
         if self.cursor.get() == position {
@@ -611,10 +689,22 @@ impl Keyboard {
                 ira_input::GamepadButton::RightShoulder,
                 Hint::Icon("right-large-symbolic"),
             ),
-            (ira_input::GamepadButton::LeftStick, Hint::Text(crate::tr!("Shift"))),
-            (ira_input::GamepadButton::A, Hint::Text(crate::tr!("Select"))),
-            (ira_input::GamepadButton::B, Hint::Text(crate::tr!("Delete"))),
-            (ira_input::GamepadButton::X, Hint::Text(crate::tr!("Cancel"))),
+            (
+                ira_input::GamepadButton::LeftStick,
+                Hint::Text(crate::tr!("Shift")),
+            ),
+            (
+                ira_input::GamepadButton::A,
+                Hint::Text(crate::tr!("Select")),
+            ),
+            (
+                ira_input::GamepadButton::B,
+                Hint::Text(crate::tr!("Delete")),
+            ),
+            (
+                ira_input::GamepadButton::X,
+                Hint::Text(crate::tr!("Cancel")),
+            ),
         ] {
             let item = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(8.0));
             let glyph = gtk4::Image::new();
@@ -625,11 +715,8 @@ impl Keyboard {
             fallback.set_valign(gtk4::Align::Center);
             fallback.add_css_class(CSS_BP_PROMPT);
             let source = ira_input::InputSource::Button(button);
-            let has_asset = crate::ui::input_profile_assets::set_source_asset(
-                &glyph,
-                source,
-                family,
-            );
+            let has_asset =
+                crate::ui::input_profile_assets::set_source_asset(&glyph, source, family);
             if !has_asset {
                 fallback.set_text(&crate::ui::input_profile_assets::source_badge(
                     source, family,
@@ -726,11 +813,10 @@ impl Keyboard {
             Key::Space => self.insert(' '),
             Key::Backspace => self.backspace(),
             Key::Page => {
-                self.page
-                    .set(match self.page.get() {
-                        Page::Letters => Page::Symbols,
-                        Page::Symbols => Page::Letters,
-                    });
+                self.page.set(match self.page.get() {
+                    Page::Letters => Page::Symbols,
+                    Page::Symbols => Page::Letters,
+                });
                 let (row, col) = self.cursor.get();
                 let rows = self.rows();
                 let row = row.min(rows.len().saturating_sub(1));
@@ -869,8 +955,7 @@ impl Keyboard {
         let rect = layout.index_to_pos(byte as i32);
         let scale = gtk4::pango::SCALE as f64;
         let inset = ((rect.height() as f64 / scale) * 0.14).round() as i32;
-        let x = scaled_px(PREVIEW_TEXT_INSET)
-            + (rect.x() as f64 / scale).round() as i32
+        let x = scaled_px(PREVIEW_TEXT_INSET) + (rect.x() as f64 / scale).round() as i32
             - scaled_px(CARET_WIDTH);
         self.preview_caret.set_margin_start(x.max(0));
         self.preview_caret

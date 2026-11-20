@@ -323,22 +323,14 @@ struct SteamLogoApply {
 type LogoFetchRx = Rc<RefCell<mpsc::Receiver<Option<(Option<ira_models::LogoPosition>, i32)>>>>;
 
 fn apply_steam_logo_result(ctx: &SteamLogoApply) -> glib::ControlFlow {
-    let (
-        Some(btn),
-        Some(selected),
-        Some(size_adj),
-        Some(modified),
-        Some(btns),
-        Some(preview),
-    ) = (
+    let (Some(btn), Some(selected), Some(size_adj), Some(modified), Some(btns), Some(preview)) = (
         ctx.btn_weak.upgrade(),
         ctx.selected_weak.upgrade(),
         ctx.size_weak.upgrade(),
         ctx.modified_weak.upgrade(),
         ctx.btns_weak.upgrade(),
         ctx.preview_weak.upgrade(),
-    )
-    else {
+    ) else {
         return glib::ControlFlow::Break;
     };
     match ctx.rx.borrow_mut().try_recv() {

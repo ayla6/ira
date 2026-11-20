@@ -27,12 +27,7 @@ impl CursorWatcher {
     /// the X server cannot be asked right now; callers keep the previous
     /// state instead of switching on unknowns.
     pub fn cursor_visible(&self) -> Option<bool> {
-        let image = self
-            .conn
-            .xfixes_get_cursor_image()
-            .ok()?
-            .reply()
-            .ok()?;
+        let image = self.conn.xfixes_get_cursor_image().ok()?.reply().ok()?;
         Some(image_is_visible(image.width, &image.cursor_image))
     }
 }

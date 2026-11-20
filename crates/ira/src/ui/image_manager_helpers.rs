@@ -27,10 +27,12 @@ pub(super) fn add_sgdb_filtered_user(state: &SharedState, author: &str, steam64:
         {
             return;
         }
-        s.cfg.sgdb_filtered_users.push(ira_config::SgdbFilteredUser {
-            name: author.to_string(),
-            steam64: steam64.trim().to_string(),
-        });
+        s.cfg
+            .sgdb_filtered_users
+            .push(ira_config::SgdbFilteredUser {
+                name: author.to_string(),
+                steam64: steam64.trim().to_string(),
+            });
         s.steam.set_sgdb_filtered_users(
             &s.cfg
                 .sgdb_filtered_users
@@ -224,29 +226,27 @@ pub(super) fn native_icon_bytes(
     // ROM roots (e.g. "game.nds" or "game.zip"), while console games store
     // an absolute path.
     let game_root_owned;
-    let game_root: &std::path::Path =
-        if matches!(
-            (game.kind, game.platform_id.id()),
-            (ira_models::GameKind::Retro, "nds")
-                | (ira_models::GameKind::Switch, _)
-        ) {
-            let p = std::path::Path::new(&game.game_path);
-            if p.is_absolute() {
-                p
-            } else {
-                // Emulator-library titles live in the emulator's own game
-                // directories, so they resolve even when the file sits
-                // outside Ira's ROM roots.
-                game_root_owned = cfg
-                    .resolve_rom_path(game.platform_id.id(), &game.game_path)
-                    .or_else(|| {
-                        ira_platforms::switch::resolve_rom(&game.game_path, switch_executable)
-                    })?;
-                &game_root_owned
-            }
+    let game_root: &std::path::Path = if matches!(
+        (game.kind, game.platform_id.id()),
+        (ira_models::GameKind::Retro, "nds") | (ira_models::GameKind::Switch, _)
+    ) {
+        let p = std::path::Path::new(&game.game_path);
+        if p.is_absolute() {
+            p
         } else {
-            std::path::Path::new(&game.game_path)
-        };
+            // Emulator-library titles live in the emulator's own game
+            // directories, so they resolve even when the file sits
+            // outside Ira's ROM roots.
+            game_root_owned = cfg
+                .resolve_rom_path(game.platform_id.id(), &game.game_path)
+                .or_else(|| {
+                    ira_platforms::switch::resolve_rom(&game.game_path, switch_executable)
+                })?;
+            &game_root_owned
+        }
+    } else {
+        std::path::Path::new(&game.game_path)
+    };
     match game.kind {
         ira_models::GameKind::Retro if game.platform_id == "nds" => decode_nds_icon(game_root),
         ira_models::GameKind::Switch => decode_switch_icon(game_root, switch_executable),
@@ -292,7 +292,12 @@ pub(super) fn write_native_icon_to_disk(
     };
     let _ = std::fs::create_dir_all(&image_dir);
     ira_parser::remove_image_variants(&image_dir, asset.file_base());
-    if std::fs::write(image_dir.join(format!("{}.webp", asset.file_base())), webp_bytes).is_err() {
+    if std::fs::write(
+        image_dir.join(format!("{}.webp", asset.file_base())),
+        webp_bytes,
+    )
+    .is_err()
+    {
         return false;
     }
     ira_parser::ensure_small_image(

@@ -70,11 +70,10 @@ pub(crate) fn playtimes_for_sort(
                     members
                         .iter()
                         .filter_map(|id| {
-                            ira_db::find_by_db_id(db, *id)
-                                .unwrap_or_else(|e| {
-                                    eprintln!("Failed to read linked game {id}: {e}");
-                                    None
-                                })
+                            ira_db::find_by_db_id(db, *id).unwrap_or_else(|e| {
+                                eprintln!("Failed to read linked game {id}: {e}");
+                                None
+                            })
                         })
                         .map(|entry| entry.playtime)
                         .sum()
@@ -192,16 +191,8 @@ pub fn filter_and_sort(games: &[Game], f: &GameFilter) -> Vec<Game> {
         })
         .collect();
 
-    matched.sort_by(|a, b| {
-        game_compare(
-            a,
-            b,
-            *sort_mode,
-            *sort_descending,
-            entity_names,
-            playtimes,
-        )
-    });
+    matched
+        .sort_by(|a, b| game_compare(a, b, *sort_mode, *sort_descending, entity_names, playtimes));
     matched.into_iter().cloned().collect()
 }
 
@@ -221,8 +212,9 @@ pub(crate) fn sort_detail(
                 game.completion_pct() as u8
             )
         }),
-        SortMode::HoursPlayed => (playtime > 0.0)
-            .then(|| super::game_display::format_playtime(playtime)),
+        SortMode::HoursPlayed => {
+            (playtime > 0.0).then(|| super::game_display::format_playtime(playtime))
+        }
         SortMode::LastPlayed => {
             if game.last_played == 0 {
                 None
@@ -241,10 +233,12 @@ pub(crate) fn sort_detail(
                 None
             }
         }
-        SortMode::MetacriticScore => (game.metacritic_score >= 0)
-            .then(|| game.metacritic_score.to_string()),
-        SortMode::SteamReview => (game.steam_review_score >= 0)
-            .then(|| format!("{}%", game.steam_review_score)),
+        SortMode::MetacriticScore => {
+            (game.metacritic_score >= 0).then(|| game.metacritic_score.to_string())
+        }
+        SortMode::SteamReview => {
+            (game.steam_review_score >= 0).then(|| format!("{}%", game.steam_review_score))
+        }
         SortMode::Publisher | SortMode::Developer => entity_names.get(&game.db_id).cloned(),
     }
 }
@@ -312,7 +306,6 @@ pub(crate) fn group_categories<'a>(
     }
     categories
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -431,7 +424,10 @@ mod tests {
         let links = ira_db::playtime_links(&db).unwrap();
         let mut by_game = HashMap::new();
         for (game_id, group_id) in links {
-            by_game.entry(group_id).or_insert_with(Vec::new).push(game_id);
+            by_game
+                .entry(group_id)
+                .or_insert_with(Vec::new)
+                .push(game_id);
         }
         let mut links = HashMap::new();
         for members in by_game.into_values() {
@@ -485,7 +481,12 @@ mod tests {
             Some("15 Sep, 2014".into())
         );
         assert_eq!(
-            sort_detail(&game, SortMode::MetacriticScore, game.playtime, &entity_names),
+            sort_detail(
+                &game,
+                SortMode::MetacriticScore,
+                game.playtime,
+                &entity_names
+            ),
             Some("88".into())
         );
         assert_eq!(

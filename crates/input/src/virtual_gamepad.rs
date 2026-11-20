@@ -248,8 +248,11 @@ impl VirtualGamepad {
                 let Some(code) = button_code(self.backend, *button) else {
                     return Ok(());
                 };
-                self.pending
-                    .push(InputEvent::new(EventType::KEY.0, code.0, i32::from(*pressed)));
+                self.pending.push(InputEvent::new(
+                    EventType::KEY.0,
+                    code.0,
+                    i32::from(*pressed),
+                ));
                 if let Some(input) = self.mirrored_hat_event(*button, *pressed) {
                     // The Xbox and DirectInput identities ship the d-pad
                     // keys AND mirror it as hat 0: every controller database
@@ -263,7 +266,8 @@ impl VirtualGamepad {
                 let Some(code) = axis_code(self.backend, *axis) else {
                     return Ok(());
                 };
-                let input = InputEvent::new(EventType::ABSOLUTE.0, code.0, axis_value(*axis, *value));
+                let input =
+                    InputEvent::new(EventType::ABSOLUTE.0, code.0, axis_value(*axis, *value));
                 self.pending.push(input);
             }
             _ => {}
@@ -326,9 +330,7 @@ impl VirtualGamepad {
     pub fn steam_input_sdl_mapping() -> String {
         format!(
             "{},{},{}",
-            STEAM_INPUT_GUID,
-            STEAM_INPUT_SDL_NAME,
-            STEAM_INPUT_SDL_BINDINGS
+            STEAM_INPUT_GUID, STEAM_INPUT_SDL_NAME, STEAM_INPUT_SDL_BINDINGS
         )
     }
 
@@ -790,17 +792,20 @@ mod tests {
     use crate::rumble::{stop_command, RumbleCommand};
     use crate::VirtualGamepadBackend::{DirectInput, DualSense, DualShock4, SwitchPro, XInput};
     use crate::{GamepadAxis, GamepadButton, OutputEvent};
-    use std::collections::HashMap;
     use evdev::{FFEffectCode, InputId, KeyCode};
+    use std::collections::HashMap;
 
     #[test]
     fn test_playback_start_replays_the_stored_effect() {
         let mut effects = HashMap::new();
-        effects.insert(3, RumbleCommand {
-            strong: 10,
-            weak: 20,
-            duration_ms: 300,
-        });
+        effects.insert(
+            3,
+            RumbleCommand {
+                strong: 10,
+                weak: 20,
+                duration_ms: 300,
+            },
+        );
         assert_eq!(
             playback_command(&effects, FFEffectCode(3), 1),
             Some(RumbleCommand {
@@ -853,17 +858,17 @@ mod tests {
         // clicks to slots 6..10, written against xpad's 11-key set. The
         // virtual pad must carry exactly those codes so the slots line up.
         let expected: Vec<KeyCode> = [
-            KeyCode::BTN_SOUTH,   // b0
-            KeyCode::BTN_EAST,    // b1
-            KeyCode::BTN_NORTH,   // b2
-            KeyCode::BTN_WEST,    // b3
-            KeyCode::BTN_TL,      // b4
-            KeyCode::BTN_TR,      // b5
-            KeyCode::BTN_SELECT,  // b6 (back)
-            KeyCode::BTN_START,   // b7
-            KeyCode::BTN_MODE,    // b8 (guide)
-            KeyCode::BTN_THUMBL,  // b9 (left stick click)
-            KeyCode::BTN_THUMBR,  // b10 (right stick click)
+            KeyCode::BTN_SOUTH,  // b0
+            KeyCode::BTN_EAST,   // b1
+            KeyCode::BTN_NORTH,  // b2
+            KeyCode::BTN_WEST,   // b3
+            KeyCode::BTN_TL,     // b4
+            KeyCode::BTN_TR,     // b5
+            KeyCode::BTN_SELECT, // b6 (back)
+            KeyCode::BTN_START,  // b7
+            KeyCode::BTN_MODE,   // b8 (guide)
+            KeyCode::BTN_THUMBL, // b9 (left stick click)
+            KeyCode::BTN_THUMBR, // b10 (right stick click)
         ]
         .into_iter()
         .chain([
@@ -880,8 +885,9 @@ mod tests {
         assert!(!gamepad_buttons(XInput).contains(KeyCode::BTN_TR2));
         // Same for the Steam Input identity, whose database entries use the
         // same xpad-shaped slot table.
-        assert!(!gamepad_buttons(crate::VirtualGamepadBackend::SteamInput)
-            .contains(KeyCode::BTN_TL2));
+        assert!(
+            !gamepad_buttons(crate::VirtualGamepadBackend::SteamInput).contains(KeyCode::BTN_TL2)
+        );
         // Triggers are analog-only there: no digital trigger key events.
         assert_eq!(button_code(XInput, GamepadButton::LeftTrigger), None);
         assert_eq!(button_code(XInput, GamepadButton::RightTrigger), None);
@@ -1105,15 +1111,19 @@ mod tests {
             "the d-up key and its hat 0 movement both ship"
         );
         assert!(
-            queued.iter().any(|event| event.event_type() == evdev::EventType::ABSOLUTE
-                && event.code() == evdev::AbsoluteAxisCode::ABS_HAT0Y.0
-                && event.value() == -1),
+            queued
+                .iter()
+                .any(|event| event.event_type() == evdev::EventType::ABSOLUTE
+                    && event.code() == evdev::AbsoluteAxisCode::ABS_HAT0Y.0
+                    && event.value() == -1),
             "hat 0 moves up"
         );
         assert!(
-            queued.iter().any(|event| event.event_type() == evdev::EventType::KEY
-                && event.code() == KeyCode::BTN_DPAD_UP.0
-                && event.value() == 1),
+            queued
+                .iter()
+                .any(|event| event.event_type() == evdev::EventType::KEY
+                    && event.code() == KeyCode::BTN_DPAD_UP.0
+                    && event.value() == 1),
             "the d-up key ships beside the hat"
         );
     }
@@ -1135,14 +1145,21 @@ mod tests {
                 2,
                 "{backend:?}: the d-left key and its hat 0 movement both ship"
             );
-            assert!(queued.iter().any(|event| event.event_type() == evdev::EventType::KEY
-                && event.code() == KeyCode::BTN_DPAD_LEFT.0
-                && event.value() == 1));
-            assert!(queued.iter().any(|event| event.event_type() == evdev::EventType::ABSOLUTE
-                && event.code() == evdev::AbsoluteAxisCode::ABS_HAT0X.0
-                && event.value() == -1));
+            assert!(queued
+                .iter()
+                .any(|event| event.event_type() == evdev::EventType::KEY
+                    && event.code() == KeyCode::BTN_DPAD_LEFT.0
+                    && event.value() == 1));
+            assert!(queued
+                .iter()
+                .any(|event| event.event_type() == evdev::EventType::ABSOLUTE
+                    && event.code() == evdev::AbsoluteAxisCode::ABS_HAT0X.0
+                    && event.value() == -1));
             // The hat axes are declared so consumers discover them.
-            let codes: Vec<_> = axis_setups(backend).iter().map(|setup| setup.code()).collect();
+            let codes: Vec<_> = axis_setups(backend)
+                .iter()
+                .map(|setup| setup.code())
+                .collect();
             assert!(codes.contains(&evdev::AbsoluteAxisCode::ABS_HAT0X.0));
             assert!(codes.contains(&evdev::AbsoluteAxisCode::ABS_HAT0Y.0));
         }
@@ -1182,7 +1199,10 @@ mod tests {
         use crate::VirtualGamepadBackend::SteamInput;
         // The identity SDL special-cases as the Steam virtual gamepad; the
         // evdev name stays Ira-prefixed so the hub ignores our own pad.
-        assert_eq!(device_name(SteamInput, None), "Ira Virtual Steam Input Controller");
+        assert_eq!(
+            device_name(SteamInput, None),
+            "Ira Virtual Steam Input Controller"
+        );
         assert_eq!(
             device_id(SteamInput),
             InputId::new(evdev::BusType::BUS_USB, 0x28de, 0x11ff, 0x0100)
@@ -1204,9 +1224,9 @@ mod tests {
         // The env mapping must carry the exact GUID the uinput node gets:
         // bus USB, vendor/product/version little-endian, zero CRC.
         let mapping = VirtualGamepad::steam_input_sdl_mapping();
-        assert!(mapping.starts_with(
-            "03000000de280000ff11000000010000,Steam Virtual Gamepad,a:b0,b:b1"
-        ));
+        assert!(
+            mapping.starts_with("03000000de280000ff11000000010000,Steam Virtual Gamepad,a:b0,b:b1")
+        );
         assert!(mapping.contains("dpup:b11,dpdown:b12,dpleft:b13,dpright:b14"));
         assert!(mapping.contains("back:b6,start:b7,guide:b8,leftstick:b9,rightstick:b10"));
         assert!(mapping.contains("lefttrigger:a2,righttrigger:a5"));

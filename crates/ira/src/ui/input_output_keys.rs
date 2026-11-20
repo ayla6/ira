@@ -298,8 +298,22 @@ pub(crate) fn build_keyboard_page(
             .collect();
         key_strip(content, &labels, current, on_pick, window);
     }
-    key_section(content, &crate::tr!("Navigation"), &navigation_keys(), current, on_pick, window);
-    key_section(content, &crate::tr!("Arrow Keys"), &arrow_keys(), current, on_pick, window);
+    key_section(
+        content,
+        &crate::tr!("Navigation"),
+        &navigation_keys(),
+        current,
+        on_pick,
+        window,
+    );
+    key_section(
+        content,
+        &crate::tr!("Arrow Keys"),
+        &arrow_keys(),
+        current,
+        on_pick,
+        window,
+    );
     let hint = gtk4::Label::new(Some(&crate::tr!(
         "Use “Any key” below for keys not shown here."
     )));
@@ -334,8 +348,22 @@ pub(crate) fn build_numpad_page(
     on_pick: &Rc<dyn Fn(Option<OutputAction>)>,
     window: &adw::Dialog,
 ) {
-    key_section(content, &crate::tr!("Navigation"), &navigation_keys(), current, on_pick, window);
-    key_section(content, &crate::tr!("Arrow Keys"), &arrow_keys(), current, on_pick, window);
+    key_section(
+        content,
+        &crate::tr!("Navigation"),
+        &navigation_keys(),
+        current,
+        on_pick,
+        window,
+    );
+    key_section(
+        content,
+        &crate::tr!("Arrow Keys"),
+        &arrow_keys(),
+        current,
+        on_pick,
+        window,
+    );
     let numpad = [
         ("Num Lock", 69),
         ("Num /", 98),

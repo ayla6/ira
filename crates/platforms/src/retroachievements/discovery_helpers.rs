@@ -246,7 +246,8 @@ mod tests {
     }
 
     #[test]
-    fn test_match_index_resolves_by_exact_hash() {        let games = vec![
+    fn test_match_index_resolves_by_exact_hash() {
+        let games = vec![
             entry(1, "Devil Survivor", 0, &["abc123"]),
             entry(2, "A Totally Different Game", 10, &[]),
         ];
@@ -277,7 +278,12 @@ mod tests {
 
     #[test]
     fn test_match_index_falls_back_to_zero_achievement_title() {
-        let games = vec![entry(7, "Shin Megami Tensei: Devil Survivor", 0, &["abc123"])];
+        let games = vec![entry(
+            7,
+            "Shin Megami Tensei: Devil Survivor",
+            0,
+            &["abc123"],
+        )];
         let index = RaMatchIndex::new(&games);
         assert_eq!(
             index.find("", &normalize_name("Shin Megami Tensei - Devil Survivor")),
@@ -295,7 +301,10 @@ mod tests {
 
         let index = RaMatchIndex::new(&games);
         assert_eq!(index.find("", &normalize_name("Chrono_Trigger")), Some(3));
-        assert_eq!(index.find("", &normalize_name("Chrono Trigger [!]")), Some(3));
+        assert_eq!(
+            index.find("", &normalize_name("Chrono Trigger [!]")),
+            Some(3)
+        );
         assert_eq!(index.find("", "completely different game"), None);
         // A hash miss falls through to the title tiers rather than failing.
         assert_eq!(index.find("unknown", "chrono trigger"), Some(3));

@@ -47,13 +47,7 @@ pub fn retro_data_dir(save_dir: &str, db_id: i64) -> PathBuf {
     data_dir_in(save_dir, GameKind::Retro.as_str(), db_id)
 }
 
-fn data_dir_for(
-    save_dir: &str,
-    kind: GameKind,
-    id: &str,
-    db_id: i64,
-    enriched: bool,
-) -> PathBuf {
+fn data_dir_for(save_dir: &str, kind: GameKind, id: &str, db_id: i64, enriched: bool) -> PathBuf {
     match kind {
         GameKind::Retro => retro_data_dir(save_dir, db_id),
         GameKind::Switch => switch_data_dir(save_dir, db_id),

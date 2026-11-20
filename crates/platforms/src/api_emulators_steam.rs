@@ -49,7 +49,6 @@ pub fn centralize_steam_settings(
     )
 }
 
-
 pub fn write_gse_dlc_config(settings_dir: &Path, details: &AppDetails) -> Result<(), String> {
     let mut content = String::from("[app::dlcs]\n");
     let any_disabled = details.dlcs.values().any(|d| !d.enabled);
@@ -420,8 +419,9 @@ fn install_gse_into_folder(
         } else {
             "steam_api.dll"
         };
-        let dll_path = crate::api_emulators_shared::find_file_case_insensitive(dll_folder, dll_name)
-            .unwrap_or_else(|| dll_folder.join(dll_name));
+        let dll_path =
+            crate::api_emulators_shared::find_file_case_insensitive(dll_folder, dll_name)
+                .unwrap_or_else(|| dll_folder.join(dll_name));
         if dll_path.is_file() {
             if let Err(e) = generate_steam_interfaces(&dll_path, &interfaces_path) {
                 eprintln!("Failed to generate steam_interfaces.txt: {}", e);
@@ -442,8 +442,7 @@ fn install_gse_into_folder(
             let dst = dll_folder.join(dst_name);
             // Preserve the game's API surface: optional files such as
             // `steamclient` are patched only when the game already ships them.
-            if original.is_some() || has_emulator_backups(dll_folder, &[dst_name, src_name])
-            {
+            if original.is_some() || has_emulator_backups(dll_folder, &[dst_name, src_name]) {
                 swapped.push(crate::api_emulators_shared::swap_in_with_backup(
                     &src,
                     &dst,
@@ -658,11 +657,7 @@ mod tests {
         );
         assert!(!game_dir.join("steamclient64.dll").exists());
 
-        uninstall_gse(
-            &game_exe.to_string_lossy(),
-            &game_dir.to_string_lossy(),
-        )
-        .unwrap();
+        uninstall_gse(&game_exe.to_string_lossy(), &game_dir.to_string_lossy()).unwrap();
 
         assert_eq!(
             std::fs::read(game_dir.join("steam_api64.dll")).unwrap(),
@@ -704,11 +699,7 @@ mod tests {
         );
         assert!(!game_dir.join("LibSteam_Api64.So").exists());
 
-        uninstall_gse(
-            &game_exe.to_string_lossy(),
-            &game_dir.to_string_lossy(),
-        )
-        .unwrap();
+        uninstall_gse(&game_exe.to_string_lossy(), &game_dir.to_string_lossy()).unwrap();
         assert!(!game_dir.join("libsteam_api.so").exists());
         assert_eq!(
             std::fs::read(game_dir.join("libsteam_api64.so")).unwrap(),

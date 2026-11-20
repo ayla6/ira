@@ -118,9 +118,7 @@ impl ImuUhidDevice {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        imu_report, ACCEL_LSB_PER_G, GYRO_LSB_PER_DPS, IMU_REPORT_LEN, REPORT_DESCRIPTOR,
-    };
+    use super::{imu_report, ACCEL_LSB_PER_G, GYRO_LSB_PER_DPS, IMU_REPORT_LEN, REPORT_DESCRIPTOR};
 
     #[test]
     fn test_report_scales_to_fixed_point_units() {

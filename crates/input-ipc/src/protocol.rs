@@ -15,14 +15,21 @@ pub enum Request {
     Launch(LaunchRequest),
     Status,
     /// `stop_running` also stops an active game session (SIGTERM semantics).
-    Shutdown { stop_running: bool },
+    Shutdown {
+        stop_running: bool,
+    },
     /// Switch a running session's controller layout: the session reloads
     /// from `profile` as if that file had been edited in place. Addressed
     /// by the launch `tag`, so the sender needs no connection to the
     /// session's launch.
-    ReloadProfile { tag: i64, profile: String },
+    ReloadProfile {
+        tag: i64,
+        profile: String,
+    },
     /// Stop the game session identified by its launch tag.
-    Stop { tag: i64 },
+    Stop {
+        tag: i64,
+    },
     /// While the app is open it keeps this wish on file: a no-game session routes an
     /// idle controller through its default layout. `enabled: false` (or disconnecting)
     /// releases it; a game launch supersedes it until the last game ends.
@@ -35,7 +42,9 @@ pub enum Request {
     /// A game that will not be remapped is about to start, so the desktop session
     /// must not remap the pad underneath it. The hold lives on the requesting
     /// connection, so disconnecting releases it with no explicit resume needed.
-    HoldDesktop { hold: bool },
+    HoldDesktop {
+        hold: bool,
+    },
 }
 
 /// A game session handed to the daemon. `command` is the fully built game command
@@ -63,7 +72,9 @@ pub struct LaunchRequest {
 pub enum Response {
     /// The session was accepted; lifecycle arrives as events, tagged with
     /// the session id that identifies them to their owner.
-    Launched { session: u64 },
+    Launched {
+        session: u64,
+    },
     Status(DaemonStatus),
     Reloaded,
     Applied,
@@ -71,7 +82,9 @@ pub enum Response {
     /// A named-field variant on purpose: serde cannot serialize an
     /// internally tagged newtype variant that holds a bare string, so the
     /// errors below would never reach a client and leave it waiting.
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,17 +106,26 @@ pub enum Event {
         child_pid: i32,
         command: Vec<String>,
     },
-    SessionEnded { session: u64, code: i32 },
+    SessionEnded {
+        session: u64,
+        code: i32,
+    },
     /// One line of the game's stdout or stderr, forwarded for the in-app
     /// game log.
-    Output { session: u64, line: String },
+    Output {
+        session: u64,
+        line: String,
+    },
     /// Physical controller presence, daemon-wide (not session-scoped).
     Controller {
         connected: bool,
         name: String,
         path: String,
     },
-    ProfileReloaded { session: u64, path: String },
+    ProfileReloaded {
+        session: u64,
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,7 +254,10 @@ mod tests {
                 child_pid: 42,
                 command: vec!["game".into()],
             },
-            Event::SessionEnded { session: 1, code: 3 },
+            Event::SessionEnded {
+                session: 1,
+                code: 3,
+            },
             Event::Output {
                 session: 1,
                 line: "game: started".into(),

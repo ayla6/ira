@@ -22,11 +22,7 @@ pub(super) fn installed_meta(executable: &str, title_id: &str) -> Option<Control
     installed_meta_in(&dirs, title_id, &keys)
 }
 
-fn installed_meta_in(
-    dirs: &[PathBuf],
-    title_id: &str,
-    keys: &SwitchKeys,
-) -> Option<ControlMeta> {
+fn installed_meta_in(dirs: &[PathBuf], title_id: &str, keys: &SwitchKeys) -> Option<ControlMeta> {
     for dir in dirs {
         for entry_dir in entry_dirs(dir) {
             let (nca_files, tickets) = collect_ncas_and_tickets(&entry_dir);

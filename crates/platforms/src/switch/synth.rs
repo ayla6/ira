@@ -6,7 +6,6 @@ use xts_mode::Xts128;
 
 use super::nca::{HEADER_SIZE, SECTOR_SIZE};
 
-
 pub(crate) const TEST_HEADER_KEY: [u8; 32] = [0x42; 32];
 pub(crate) const TEST_KAEK: [u8; 16] = [0x57; 16];
 /// The per-section key planted in key-area slot 2.
@@ -47,8 +46,14 @@ pub(crate) fn romfs_fixture(icon: &[u8]) -> Vec<u8> {
 pub(crate) fn test_keys_text() -> String {
     format!(
         "header_key = {}\nkey_area_key_application_00 = {}\n",
-        TEST_HEADER_KEY.iter().map(|b| format!("{b:02x}")).collect::<String>(),
-        TEST_KAEK.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+        TEST_HEADER_KEY
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
+        TEST_KAEK
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
     )
 }
 
@@ -85,10 +90,9 @@ pub(crate) fn synthetic_control_nca(title_id: u64) -> Vec<u8> {
         header[0x300 + slot * 16..0x300 + slot * 16 + 16].copy_from_slice(&block);
     }
 
-    let sector_tweak =
-        |sector: u128| -> xts_mode::Array<u8, aes::cipher::consts::U16> {
-            xts_mode::Array(sector.to_be_bytes())
-        };
+    let sector_tweak = |sector: u128| -> xts_mode::Array<u8, aes::cipher::consts::U16> {
+        xts_mode::Array(sector.to_be_bytes())
+    };
     Xts128::<aes::Aes128>::new(
         aes::Aes128::new_from_slice(&TEST_HEADER_KEY[..16]).unwrap(),
         aes::Aes128::new_from_slice(&TEST_HEADER_KEY[16..]).unwrap(),

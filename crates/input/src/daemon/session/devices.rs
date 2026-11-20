@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    discover_gamepads, GyroProcessor, GyroProcessingOptions, InputProfile, MappingEngine,
+    discover_gamepads, GyroProcessingOptions, GyroProcessor, InputProfile, MappingEngine,
     PhysicalGamepad, Sdl3SensorBackend, VirtualKeyboard, VirtualMouse,
 };
 
@@ -155,7 +155,10 @@ pub(crate) enum GyroSource {
 }
 
 impl GyroSource {
-    pub(crate) fn read(&mut self, fallback_timestamp_us: u64) -> Result<Option<crate::SensorSample>, String> {
+    pub(crate) fn read(
+        &mut self,
+        fallback_timestamp_us: u64,
+    ) -> Result<Option<crate::SensorSample>, String> {
         match self {
             Self::Kernel(imu) => imu.read(fallback_timestamp_us),
             Self::Sdl(sdl) => sdl.read(fallback_timestamp_us),
@@ -206,7 +209,10 @@ pub(crate) fn apply_controller_layout(
 
 /// The Nintendo layout in effect for a device: the stored per-controller
 /// choice wins, else the family default.
-pub(crate) fn resolved_layout_for(device: &crate::DeviceInfo, calibration_store: Option<&Path>) -> bool {
+pub(crate) fn resolved_layout_for(
+    device: &crate::DeviceInfo,
+    calibration_store: Option<&Path>,
+) -> bool {
     match calibration_store {
         Some(path) => crate::resolved_nintendo_layout(path, device),
         None => device.prefers_nintendo_layout(),
@@ -240,24 +246,22 @@ pub(crate) fn open_rumble(
                     }
                 }
             }
-            None => match crate::PhysicalRumble::open_vendor_hidraw(
-                &path,
-                info.vendor,
-                info.product,
-            ) {
-                Ok(rumble) => {
-                    eprintln!(
-                        "ira-input: {primary_error}; replaying rumble through the 8BitDo \
+            None => {
+                match crate::PhysicalRumble::open_vendor_hidraw(&path, info.vendor, info.product) {
+                    Ok(rumble) => {
+                        eprintln!(
+                            "ira-input: {primary_error}; replaying rumble through the 8BitDo \
                          hidraw protocol instead"
-                    );
-                    Some(rumble)
+                        );
+                        Some(rumble)
+                    }
+                    Err(error) => {
+                        eprintln!("{primary_error}");
+                        eprintln!("ira-input: {error}");
+                        None
+                    }
                 }
-                Err(error) => {
-                    eprintln!("{primary_error}");
-                    eprintln!("ira-input: {error}");
-                    None
-                }
-            },
+            }
         },
     }
 }
@@ -310,8 +314,8 @@ pub(crate) fn make_gyro_processor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use crate::VirtualGamepadBackend;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_is_real_profile_excludes_builtin() {

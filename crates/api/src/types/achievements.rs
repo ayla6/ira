@@ -147,7 +147,10 @@ mod tests {
         let schema: SteamSchemaResponse = serde_json::from_str(fixture).unwrap();
         let achs = schema.game.available_game_stats.unwrap().achievements;
         assert_eq!(achs.len(), 2);
-        assert_eq!(achs[0].description, "Set out to resolve the incident for the first time.");
+        assert_eq!(
+            achs[0].description,
+            "Set out to resolve the incident for the first time."
+        );
         assert_eq!(achs[1].description, "");
         assert_eq!(achs[1].display_name, "The Very Angry Bookworm");
     }

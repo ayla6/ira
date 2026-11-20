@@ -244,13 +244,11 @@ pub(super) fn build_system_page(params: SystemPageParams) -> SystemWidgets {
     scroll.set_vexpand(true);
     scroll.set_hexpand(true);
 
-    params
-        .sidebar
-        .append(&settings_pages::settings_sidebar_row(
-            "emblem-system-symbolic",
-            "System",
-            "system",
-        ));
+    params.sidebar.append(&settings_pages::settings_sidebar_row(
+        "emblem-system-symbolic",
+        "System",
+        "system",
+    ));
     params.stack.add_named(&scroll, Some("system"));
 
     SystemWidgets {

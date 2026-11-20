@@ -81,9 +81,9 @@ impl SearchQuery {
         }
         let spaced: Vec<String> = fields.iter().map(|f| normalize_phrase(f)).collect();
         let joined: Vec<String> = spaced.iter().map(|h| joined_form(h)).collect();
-        self.phrases.iter().all(|p| {
-            contains_any(&p.spaced, &spaced) || contains_any(&p.joined, &joined)
-        })
+        self.phrases
+            .iter()
+            .all(|p| contains_any(&p.spaced, &spaced) || contains_any(&p.joined, &joined))
     }
 }
 

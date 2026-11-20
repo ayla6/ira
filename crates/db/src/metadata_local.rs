@@ -84,10 +84,7 @@ fn scan_table_for_tokens(
 
 /// The whole-table token scan behind [`steam_company_entity`]: real
 /// ScreenScraper ids first, then locals oldest-first.
-fn scan_companies(
-    conn: &DbConn,
-    tokens: &[String],
-) -> Option<ira_models::ScraperEntity> {
+fn scan_companies(conn: &DbConn, tokens: &[String]) -> Option<ira_models::ScraperEntity> {
     let c = match crate::lock_db(conn) {
         Ok(c) => c,
         Err(e) => {
@@ -95,15 +92,14 @@ fn scan_companies(
             return None;
         }
     };
-    let mut stmt = match c.prepare(
-        "SELECT id, name FROM scraper_companies ORDER BY (id < 0), id DESC",
-    ) {
-        Ok(stmt) => stmt,
-        Err(e) => {
-            eprintln!("steam_company_entity: scan prepare failed: {e}");
-            return None;
-        }
-    };
+    let mut stmt =
+        match c.prepare("SELECT id, name FROM scraper_companies ORDER BY (id < 0), id DESC") {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                eprintln!("steam_company_entity: scan prepare failed: {e}");
+                return None;
+            }
+        };
     let rows = match stmt.query_map([], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
     }) {

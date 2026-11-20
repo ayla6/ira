@@ -135,11 +135,7 @@ mod clip {
             false
         }
 
-        fn measure(
-            &self,
-            orientation: gtk4::Orientation,
-            for_size: i32,
-        ) -> (i32, i32, i32, i32) {
+        fn measure(&self, orientation: gtk4::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
             match self.a.borrow().as_ref() {
                 Some(child) => child.measure(orientation, for_size),
                 None => (0, 0, -1, -1),
@@ -183,13 +179,11 @@ mod clip {
             };
             let (_, natural_w, _, _) = child.measure(gtk4::Orientation::Horizontal, -1);
             let alloc_w = natural_w.min(wrap_w).max(1);
-            let (_, natural_h, _, _) =
-                child.measure(gtk4::Orientation::Vertical, alloc_w);
+            let (_, natural_h, _, _) = child.measure(gtk4::Orientation::Vertical, alloc_w);
             let y = ((height - natural_h) / 2).max(0) as f32;
             let x = self.base_x.get() as f32;
-            let transform = |px: f32| {
-                gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(px, y))
-            };
+            let transform =
+                |px: f32| gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(px, y));
             child.allocate(alloc_w, natural_h.max(1), height, Some(transform(x)));
             drop(guard);
             if let Some(copy) = self.b.borrow().as_ref() {
@@ -234,7 +228,10 @@ impl Bubble {
         let (base_y, apex_y) = if self.tail_up {
             (self.y + s(TAIL_BASE_OVERLAP), self.y - tail_height)
         } else {
-            (self.y + self.h - s(TAIL_BASE_OVERLAP), self.y + self.h + tail_height)
+            (
+                self.y + self.h - s(TAIL_BASE_OVERLAP),
+                self.y + self.h + tail_height,
+            )
         };
         if self.tail_up {
             // Apex first: clockwise, like the pill.
@@ -269,8 +266,20 @@ fn bubble_path(
     cr.new_sub_path();
     cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
     cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
-    cr.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-    cr.arc(x + r, y + r, r, std::f64::consts::PI, -std::f64::consts::FRAC_PI_2);
+    cr.arc(
+        x + r,
+        y + h - r,
+        r,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    cr.arc(
+        x + r,
+        y + r,
+        r,
+        std::f64::consts::PI,
+        -std::f64::consts::FRAC_PI_2,
+    );
     cr.close_path();
     let [(ax, ay), (bx, by), (cx, cy)] = bubble.tail(tail_half, tail_height);
     cr.move_to(ax, ay);
@@ -417,7 +426,8 @@ mod imp {
                 ctx.fill().expect("bubble fill");
             }
             if let Some(clip) = self.clip.borrow().as_ref() {
-                self.obj().snapshot_child(clip.upcast_ref::<gtk4::Widget>(), snapshot);
+                self.obj()
+                    .snapshot_child(clip.upcast_ref::<gtk4::Widget>(), snapshot);
             }
         }
 
@@ -438,19 +448,23 @@ mod imp {
             // still report the previous pass.
             let viewport = {
                 let stored = self.viewport.get();
-                if stored > 1.0 { stored } else { width as f64 }
+                if stored > 1.0 {
+                    stored
+                } else {
+                    width as f64
+                }
             };
             let center = self.center_x.get();
             let margin = s(EDGE_MARGIN);
 
             // The drift can only engage once the label carries its final
             // style — measuring at set_text time races the CSS font size.
-            let single_h =
-                label.measure(gtk4::Orientation::Vertical, -1).1 as f64;
+            let single_h = label.measure(gtk4::Orientation::Vertical, -1).1 as f64;
             let bubble_w = (natural_w + 2.0 * s(PAD_X as f64)).min(max_width);
             let content_w = (bubble_w - 2.0 * s(PAD_X as f64)).max(1.0);
-            let wrapped_h =
-                label.measure(gtk4::Orientation::Vertical, content_w as i32).1 as f64;
+            let wrapped_h = label
+                .measure(gtk4::Orientation::Vertical, content_w as i32)
+                .1 as f64;
             // The drift engages whenever the unwrapped line overflows the
             // content width — the classic ticker — not just for novels.
             let overflowing = should_drift(natural_w, content_w);
@@ -466,8 +480,8 @@ mod imp {
             // The bubble hugs its text and only caps at max_width when the
             // text overflows (that cap is the drift's clip window). It
             // centers on the tile, clamped to stay on screen.
-            let bubble_x = (center - bubble_w / 2.0)
-                .clamp(margin, (viewport - bubble_w - margin).max(margin));
+            let bubble_x =
+                (center - bubble_w / 2.0).clamp(margin, (viewport - bubble_w - margin).max(margin));
             // Settled text wraps to the content width; drifting text
             // stays single-line and slides.
             if let Some(clip) = self.clip.borrow().as_ref() {
@@ -524,11 +538,10 @@ mod imp {
                 // Copy B follows one period behind, entering from the
                 // right as copy A exits left — the classic ticker.
                 clip.imp().period.set(self.period.get().round() as i32);
-                let tx = gtk4::gsk::Transform::new()
-                    .translate(&gtk4::graphene::Point::new(
-                        bubble_x.round() as f32,
-                        bubble_y as f32,
-                    ));
+                let tx = gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(
+                    bubble_x.round() as f32,
+                    bubble_y as f32,
+                ));
                 clip.allocate(bubble_w as i32, bubble_h, -1, Some(tx));
             }
         }
@@ -745,11 +758,14 @@ impl Marquee {
 
 #[cfg(test)]
 mod tests {
-    use super::{advance_slide, advance_with_dwell, should_drift, Bubble, SPEED, DWELL_TICKS};
+    use super::{advance_slide, advance_with_dwell, should_drift, Bubble, DWELL_TICKS, SPEED};
 
     #[test]
     fn test_should_drift_engages_on_overflow_only() {
-        assert!(should_drift(500.0, 300.0), "a line wider than the bubble slides");
+        assert!(
+            should_drift(500.0, 300.0),
+            "a line wider than the bubble slides"
+        );
         assert!(
             !should_drift(200.0, 300.0),
             "a fitting line sits still, however many rows it wraps to"

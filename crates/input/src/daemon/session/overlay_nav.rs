@@ -77,8 +77,14 @@ fn stick_halves(
         beyond || (held.contains_key(source) && !back)
     };
     vec![
-        (neg, latched(&neg, value < -STICK_PRESS, value > -STICK_RELEASE)),
-        (pos, latched(&pos, value > STICK_PRESS, value < STICK_RELEASE)),
+        (
+            neg,
+            latched(&neg, value < -STICK_PRESS, value > -STICK_RELEASE),
+        ),
+        (
+            pos,
+            latched(&pos, value > STICK_PRESS, value < STICK_RELEASE),
+        ),
     ]
 }
 
@@ -119,9 +125,7 @@ fn repeat_due(
         return Vec::new();
     }
     held.iter()
-        .filter(|(source, since)| {
-            repeats(**source) && now.duration_since(**since) >= REPEAT_DELAY
-        })
+        .filter(|(source, since)| repeats(**source) && now.duration_since(**since) >= REPEAT_DELAY)
         .map(|(source, _)| *source)
         .collect()
 }
@@ -269,12 +273,10 @@ mod tests {
             vec![InputSource::Button(GamepadButton::DpadDown)]
         );
         // …nothing before the initial delay…
-        let fresh: HashMap<InputSource, Instant> = [(
-            InputSource::Button(GamepadButton::DpadDown),
-            now,
-        )]
-        .into_iter()
-        .collect();
+        let fresh: HashMap<InputSource, Instant> =
+            [(InputSource::Button(GamepadButton::DpadDown), now)]
+                .into_iter()
+                .collect();
         assert!(repeat_due(&fresh, now - Duration::from_secs(1), now).is_empty());
         // …and rate-limiting holds back a second immediate pass.
         assert!(repeat_due(&held, now, now).is_empty());

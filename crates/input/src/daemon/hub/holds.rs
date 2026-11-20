@@ -64,14 +64,14 @@ impl SiblingHolds {
                     if next.imu.as_deref() == Some(node.as_path()) {
                         continue;
                     }
-                    match Device::open(&node).map_err(|error| error.to_string()).and_then(
-                        |mut device| {
+                    match Device::open(&node)
+                        .map_err(|error| error.to_string())
+                        .and_then(|mut device| {
                             device
                                 .grab()
                                 .map_err(|error| error.to_string())
                                 .map(|()| device)
-                        },
-                    ) {
+                        }) {
                         Ok(device) => {
                             eprintln!(
                                 "hub: holding {} silent; the remapped session owns the pad",
@@ -207,11 +207,8 @@ mod tests {
         .unwrap();
         std::fs::create_dir_all(&class).unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(
-            hid.join("input4").join("event4"),
-            class.join("event4"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(hid.join("input4").join("event4"), class.join("event4"))
+            .unwrap();
         let nodes = companion_event_nodes(&class, Path::new("/dev/input/event4"));
         assert!(nodes.is_empty());
     }

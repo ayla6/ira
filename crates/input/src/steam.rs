@@ -132,9 +132,7 @@ fn environment_has_steam_app(environment: &[u8], app_id: &str) -> bool {
             .any(|key| {
                 variable
                     .strip_prefix(key.as_bytes())
-                    .is_some_and(|value| {
-                        value.first() == Some(&b'=') && &value[1..] == app_id
-                    })
+                    .is_some_and(|value| value.first() == Some(&b'=') && &value[1..] == app_id)
             })
     })
 }

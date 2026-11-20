@@ -5,12 +5,10 @@
 //! behavior through the same button pattern instead of a section dropdown.
 
 use super::input_output_picker::{show_output_picker, OutputPickerScope};
-use super::input_profile_input_rows::input_expander_row;
 use super::input_profile_editor_regions::{region_groups, source_label, Region};
+use super::input_profile_input_rows::input_expander_row;
 use adw::prelude::*;
-use ira_input::{
-    ActivatorKind, InputMapping, InputProfile, InputSource, OutputAction,
-};
+use ira_input::{ActivatorKind, InputMapping, InputProfile, InputSource, OutputAction};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -117,9 +115,7 @@ fn dpad_behavior_selected(
         None => directional_pad(modes),
         Some(mode) => modes
             .iter()
-            .position(|candidate| {
-                super::input_profile_source_modes::same_mode(candidate, mode)
-            })
+            .position(|candidate| super::input_profile_source_modes::same_mode(candidate, mode))
             .unwrap_or_else(|| directional_pad(modes)),
     }
 }
@@ -168,16 +164,18 @@ fn dpad_behavior_rows(ctx: &PagesCtx) -> Vec<adw::ComboRow> {
             &crate::tr!("Left Joystick"),
             &crate::tr!("Right Joystick"),
         ])));
-        output.set_selected(
-            super::input_profile_stick_indices::output_index(settings.output) as u32,
-        );
+        output
+            .set_selected(super::input_profile_stick_indices::output_index(settings.output) as u32);
         let ctx_for_output = ctx.clone();
         output.connect_selected_notify(move |output| {
             let output_choice =
                 super::input_profile_stick_indices::output_from_index(output.selected() as usize);
-            write_dpad_mode(&ctx_for_output, Some(ira_input::SourceMode::Joystick(
-                ira_input::JoystickSettings::new(output_choice),
-            )));
+            write_dpad_mode(
+                &ctx_for_output,
+                Some(ira_input::SourceMode::Joystick(
+                    ira_input::JoystickSettings::new(output_choice),
+                )),
+            );
             (ctx_for_output.on_adjusted)();
         });
         rows.push(output);
@@ -192,7 +190,10 @@ fn write_dpad_mode(ctx: &PagesCtx, mode: Option<ira_input::SourceMode>) {
     let Some(inputs) = ctx.active_target.get().inputs_mut(&mut profile) else {
         return;
     };
-    match inputs.iter_mut().find(|input| input.source == dpad_behavior_source()) {
+    match inputs
+        .iter_mut()
+        .find(|input| input.source == dpad_behavior_source())
+    {
         Some(input) => input.mode = mode,
         None => {
             if mode.is_some() {
@@ -232,9 +233,11 @@ pub(crate) fn rebind_hook(ctx: &PagesCtx, source: InputSource) -> Rc<dyn Fn()> {
 /// output. Rarer activators (double press, soft pull, shifts) keep their
 /// outputs; those stay in the advanced sheet.
 fn primary_output(mapping: &InputMapping) -> Option<OutputAction> {
-    mapping.activators.first().and_then(|activator| {
-        activator.outputs.first()
-    }).cloned()
+    mapping
+        .activators
+        .first()
+        .and_then(|activator| activator.outputs.first())
+        .cloned()
 }
 
 fn open_rebind_picker(ctx: &PagesCtx, source: InputSource) {
@@ -314,7 +317,7 @@ mod tests {
     use crate::ui::input_profile_input_rows::behavior_choices;
     use ira_input::{GamepadAxis, GamepadButton, InputSource};
 
-        #[test]
+    #[test]
     fn test_behavior_choices_align_with_modes_for() {
         for source in [
             InputSource::Axis(GamepadAxis::LeftX),
@@ -382,9 +385,9 @@ mod tests {
     fn test_default_stick_mapping_has_no_activators() {
         // A behavior pick on an unmapped stick creates the identity default
         // with the mode swapped in — no stray click bindings.
-        let stick = super::super::input_profile_input_rows::default_mapping(
-            InputSource::Axis(GamepadAxis::RightX),
-        );
+        let stick = super::super::input_profile_input_rows::default_mapping(InputSource::Axis(
+            GamepadAxis::RightX,
+        ));
         assert!(stick.activators.is_empty());
         assert!(stick.mode.is_some());
     }
@@ -428,21 +431,15 @@ mod gtk_repro {
         let ctx = PagesCtx {
             window: window.clone(),
             profile: std::rc::Rc::new(std::cell::RefCell::new(InputProfile::default())),
-            active_target: std::rc::Rc::new(std::cell::Cell::new(
-                EditingTarget::Set(0),
-            )),
+            active_target: std::rc::Rc::new(std::cell::Cell::new(EditingTarget::Set(0))),
             indicator: std::rc::Rc::new(
                 super::super::input_profile_set_indicator::SetIndicator::new(),
             ),
             device: None,
             on_dirty: std::rc::Rc::new(|| {}),
             on_adjusted: std::rc::Rc::new(|| {}),
-            gyro: std::rc::Rc::new(std::cell::RefCell::new(
-                InputProfile::default().gyro,
-            )),
-            expansion: std::rc::Rc::new(std::cell::RefCell::new(
-                std::collections::HashMap::new(),
-            )),
+            gyro: std::rc::Rc::new(std::cell::RefCell::new(InputProfile::default().gyro)),
+            expansion: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
         };
         let mut region_boxes = Vec::new();
         for region in Region::ALL {

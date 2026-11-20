@@ -171,7 +171,9 @@ fn id_from_entry_name(name: &str) -> EntryId {
     match name.strip_suffix(".cnmt.nca") {
         // Only the exact 16-hex shape: a hash-named (original card dump)
         // meta NCA has no readable title id in its name.
-        Some(stem) if is_title_id(stem) => EntryId::Cnmt(base_application_id(stem).unwrap_or(stem.to_string())),
+        Some(stem) if is_title_id(stem) => {
+            EntryId::Cnmt(base_application_id(stem).unwrap_or(stem.to_string()))
+        }
         _ => EntryId::None,
     }
 }
@@ -212,7 +214,11 @@ pub fn read_nro_asset(path: &Path) -> Option<(Vec<u8>, String)> {
     let icon = section(8)?;
     let nacp = section(0x18)?;
 
-    let icon = read_at(&mut file, asset_offset + icon.offset, icon.size.min(MAX_READ))?;
+    let icon = read_at(
+        &mut file,
+        asset_offset + icon.offset,
+        icon.size.min(MAX_READ),
+    )?;
     let title = read_at(
         &mut file,
         asset_offset + nacp.offset,
@@ -522,11 +528,7 @@ mod tests {
     fn test_title_id_from_xci_cnmt_name_without_ticket() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("game.xci");
-        std::fs::write(
-            &path,
-            xci_fixture(&["01000ab001234800.cnmt.nca"]),
-        )
-        .unwrap();
+        std::fs::write(&path, xci_fixture(&["01000ab001234800.cnmt.nca"])).unwrap();
         assert_eq!(
             title_id_from_xci(&path),
             Some("01000ab001234000".to_string())

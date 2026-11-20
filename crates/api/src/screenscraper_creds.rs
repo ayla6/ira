@@ -36,7 +36,10 @@ fn unscramble(scrambled: &[u8]) -> String {
 }
 
 fn baked_dev_pair() -> (String, String) {
-    (unscramble(DEV_ID_SCRAMBLED), unscramble(DEV_PASSWORD_SCRAMBLED))
+    (
+        unscramble(DEV_ID_SCRAMBLED),
+        unscramble(DEV_PASSWORD_SCRAMBLED),
+    )
 }
 
 /// ScreenScraper credentials, in the API's own two-pair model: the
@@ -104,7 +107,10 @@ mod tests {
     fn test_baked_dev_pair_is_configured() {
         let creds = ScraperCreds::from_account("aya".into(), "s3cret".into());
         assert_eq!(creds.user, "aya");
-        assert!(creds.is_configured(), "the granted developer pair is baked in");
+        assert!(
+            creds.is_configured(),
+            "the granted developer pair is baked in"
+        );
         // A corrupted paste would decode to junk; the pair must be sane text.
         for value in [&creds.dev_id, &creds.dev_password] {
             assert!(!value.is_empty());
@@ -150,7 +156,10 @@ mod tests {
     fn print_dev_arrays() {
         let devid = std::env::var("SS_DEVID").expect("SS_DEVID not set");
         let devpassword = std::env::var("SS_DEVPASSWORD").expect("SS_DEVPASSWORD not set");
-        for (name, value) in [("DEV_ID_SCRAMBLED", devid), ("DEV_PASSWORD_SCRAMBLED", devpassword)] {
+        for (name, value) in [
+            ("DEV_ID_SCRAMBLED", devid),
+            ("DEV_PASSWORD_SCRAMBLED", devpassword),
+        ] {
             let bytes = scramble(value.as_bytes(), SCRAMBLE_KEY);
             let list = bytes
                 .iter()

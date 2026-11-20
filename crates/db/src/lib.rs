@@ -1,8 +1,9 @@
+mod auto_groups;
 mod crud;
 mod crud_merge;
+mod discs;
 mod entities;
 mod entities_merge;
-mod discs;
 mod game_config;
 mod groups;
 mod links;
@@ -20,16 +21,15 @@ mod sessions;
 mod settings;
 mod setup;
 mod variants;
-mod auto_groups;
 
+pub use auto_groups::*;
 pub use crud::*;
 pub use crud_merge::*;
+pub use discs::*;
 pub use entities::*;
 pub use entities_merge::*;
-pub use discs::*;
 pub use game_config::*;
 pub use groups::*;
-pub use auto_groups::*;
 pub use links::*;
 pub use lookup::*;
 pub use metadata::*;
@@ -37,12 +37,12 @@ pub use metadata_local::*;
 pub use metadata_lookup::*;
 pub use metadata_marks::*;
 pub use profiles::*;
-pub use read_only::open_read_only;
-pub use rom_serials::*;
 pub(crate) use query::{
     execute, positional_placeholders, query_all, query_optional, query_optional_scalar,
     query_scalar_all, IN_QUERY_CHUNK_SIZE,
 };
+pub use read_only::open_read_only;
+pub use rom_serials::*;
 pub(crate) use row_mapping::{err, game_entry_from_row, lock_db, GAME_COLUMNS};
 pub use sessions::*;
 pub use settings::*;

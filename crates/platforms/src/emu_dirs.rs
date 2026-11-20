@@ -28,7 +28,9 @@ pub(crate) fn app_path_for(executable: &str, suffix: &str) -> PathBuf {
 }
 
 pub fn cache_home() -> PathBuf {
-    base_dirs().get_cache_home().unwrap_or_else(|| home_dir().join(".cache"))
+    base_dirs()
+        .get_cache_home()
+        .unwrap_or_else(|| home_dir().join(".cache"))
 }
 
 pub fn config_home() -> PathBuf {

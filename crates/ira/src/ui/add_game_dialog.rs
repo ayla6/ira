@@ -10,16 +10,7 @@ use adw::prelude::*;
 use ira_models::{GameLaunchConfig, WineConfig};
 
 pub fn show_add_game_dialog(state: &SharedState) {
-    let (
-        window,
-        db,
-        sender,
-        steam,
-        save_dir,
-        ra_username,
-        ra_web_api_key,
-        default_wine_config,
-    ) = {
+    let (window, db, sender, steam, save_dir, ra_username, ra_web_api_key, default_wine_config) = {
         let s = state.borrow();
         (
             s.window.clone(),

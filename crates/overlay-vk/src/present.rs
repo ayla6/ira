@@ -166,9 +166,7 @@ fn forward_frame_events(present_info: &vk::PresentInfoKHR) -> (bool, bool) {
 /// Looks up the first present swapchain and snapshots the scalars plus
 /// the current image's handles under one lock. None chains straight
 /// through. No `Vec` clones — the map stays locked only for the copy.
-fn load_present_ctx(
-    present_info: &vk::PresentInfoKHR,
-) -> Option<(vk::SwapchainKHR, PresentCtx)> {
+fn load_present_ctx(present_info: &vk::PresentInfoKHR) -> Option<(vk::SwapchainKHR, PresentCtx)> {
     // Read up front: input polling translates coordinates per swapchain.
     let swapchain = unsafe { present_info.p_swapchains.read() };
     let image_index = unsafe { *present_info.p_image_indices } as usize;
@@ -312,7 +310,13 @@ unsafe fn record_ui_pass(
     };
     (ctx.fns.cmd_set_scissor)(frame.cmd, 0, 1, &scissor as *const vk::Rect2D);
     crate::canvas::draw_quad(ctx.fns, frame.cmd, swapchain.as_raw(), ctx.extent, panel);
-    crate::canvas::draw_cursor(ctx.fns, frame.cmd, swapchain.as_raw(), ctx.extent, panel.rect);
+    crate::canvas::draw_cursor(
+        ctx.fns,
+        frame.cmd,
+        swapchain.as_raw(),
+        ctx.extent,
+        panel.rect,
+    );
 
     (ctx.fns.cmd_end_render_pass)(frame.cmd);
 }

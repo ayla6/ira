@@ -67,10 +67,7 @@ pub(crate) fn target_env_for(
         // gyro-shaped axes AND stop it from ever being a sensor (SDL keeps
         // a node in one list only). The hint turns it sensor-only.
         envs.push(("SDL_ACCELEROMETER_AS_JOYSTICK".to_string(), "0".to_string()));
-        envs.push((
-            "SDL_GAMECONTROLLERCONFIG".to_string(),
-            mapping,
-        ));
+        envs.push(("SDL_GAMECONTROLLERCONFIG".to_string(), mapping));
         if let (Some(vendor), Some(product)) = (vendor, product) {
             let ignored = format!("0x{vendor:04x}/0x{product:04x}");
             envs.push((
@@ -89,10 +86,7 @@ pub(crate) fn target_env_for(
     // The uinput backends' native motion is an accelerometer-class evdev
     // node; SDL2's default hint lists such nodes as joysticks with
     // gyro-shaped axes instead of the sensors they are.
-    envs.push((
-        "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
-        "0".to_string(),
-    ));
+    envs.push(("SDL_ACCELEROMETER_AS_JOYSTICK".to_string(), "0".to_string()));
     if let Some(mapping) = sdl_mapping_for_backend(backend) {
         envs.push(("SDL_GAMECONTROLLERCONFIG".to_string(), mapping));
     }
@@ -105,10 +99,7 @@ pub(crate) fn target_env_for(
             // The gamecontroller hint only stops the pad from becoming a
             // gamepad; the blacklist removes it from SDL's joystick layer
             // entirely, so games poking raw joysticks never see it either.
-            envs.push((
-                "SDL_JOYSTICK_BLACKLIST_DEVICES".to_string(),
-                ignored_device,
-            ));
+            envs.push(("SDL_JOYSTICK_BLACKLIST_DEVICES".to_string(), ignored_device));
         }
     }
     envs
@@ -255,9 +246,12 @@ mod tests {
         // from every SDL layer.
         let args = {
             let mut args = vec!["run".to_string(), "com.example.Game".to_string()];
-            for (key, value) in
-                target_env_for(VirtualGamepadBackend::SwitchPro, Some(0x057e), Some(0x2009), false)
-            {
+            for (key, value) in target_env_for(
+                VirtualGamepadBackend::SwitchPro,
+                Some(0x057e),
+                Some(0x2009),
+                false,
+            ) {
                 inject_flatpak_env("/usr/bin/flatpak", &mut args, &key, &value);
             }
             args
@@ -301,10 +295,7 @@ mod tests {
                 "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
                 "0x2dc8/0x3106".to_string()
             )));
-            assert!(envs.contains(&(
-                "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
-                "0".to_string()
-            )));
+            assert!(envs.contains(&("SDL_ACCELEROMETER_AS_JOYSTICK".to_string(), "0".to_string())));
         }
     }
 
@@ -313,11 +304,13 @@ mod tests {
         // The uinput backends' native motion rides an accelerometer-class
         // evdev node; the game's SDL must classify it as a sensor, not as
         // a second controller with gyro-shaped axes.
-        let envs = target_env_for(VirtualGamepadBackend::XInput, Some(0x2dc8), Some(0x3106), false);
-        assert!(envs.contains(&(
-            "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
-            "0".to_string()
-        )));
+        let envs = target_env_for(
+            VirtualGamepadBackend::XInput,
+            Some(0x2dc8),
+            Some(0x3106),
+            false,
+        );
+        assert!(envs.contains(&("SDL_ACCELEROMETER_AS_JOYSTICK".to_string(), "0".to_string())));
         // The physical pad is hidden from both SDL layers: off the gamepad
         // list and off the joystick list entirely.
         assert!(envs.contains(&(
@@ -334,21 +327,27 @@ mod tests {
     fn test_target_env_hides_hyphenated_identity_from_the_joystick_layer() {
         // An 8BitDo speaking the virtual pad's wire protocol is virtualized
         // as XInput; nothing may leak it into the game's SDL.
-        let envs = target_env_for(VirtualGamepadBackend::XInput, Some(0x2dc8), Some(0x6012), false);
+        let envs = target_env_for(
+            VirtualGamepadBackend::XInput,
+            Some(0x2dc8),
+            Some(0x6012),
+            false,
+        );
         assert!(envs.contains(&(
             "SDL_JOYSTICK_BLACKLIST_DEVICES".to_string(),
             "0x2dc8/0x6012".to_string()
         )));
-        assert!(envs.contains(&(
-            "SDL_JOYSTICK_HIDAPI".to_string(),
-            "0".to_string()
-        )));
+        assert!(envs.contains(&("SDL_JOYSTICK_HIDAPI".to_string(), "0".to_string())));
     }
 
     #[test]
     fn test_passthrough_target_env_stays_empty() {
-        let envs =
-            target_env_for(VirtualGamepadBackend::SwitchPro, Some(0x057e), Some(0x2009), true);
+        let envs = target_env_for(
+            VirtualGamepadBackend::SwitchPro,
+            Some(0x057e),
+            Some(0x2009),
+            true,
+        );
         assert!(envs.is_empty());
     }
 
@@ -364,15 +363,17 @@ mod tests {
             ignored_device_for_target(0x2dc8, 0x3106, VirtualGamepadBackend::SteamInput),
             Some("0x2dc8/0x3106".to_string())
         );
-        let envs = target_env_for(VirtualGamepadBackend::SteamInput, Some(0x2dc8), Some(0x3106), false);
-        assert!(envs.contains(&(
-            "SDL_ACCELEROMETER_AS_JOYSTICK".to_string(),
-            "0".to_string()
-        )));
-        assert!(envs.iter().any(
-            |(key, value)| key == "SDL_GAMECONTROLLERCONFIG"
-                && value.starts_with("03000000de280000ff11000000010000")
-        ));
+        let envs = target_env_for(
+            VirtualGamepadBackend::SteamInput,
+            Some(0x2dc8),
+            Some(0x3106),
+            false,
+        );
+        assert!(envs.contains(&("SDL_ACCELEROMETER_AS_JOYSTICK".to_string(), "0".to_string())));
+        assert!(envs
+            .iter()
+            .any(|(key, value)| key == "SDL_GAMECONTROLLERCONFIG"
+                && value.starts_with("03000000de280000ff11000000010000")));
     }
 
     #[test]
@@ -387,7 +388,12 @@ mod tests {
         // The virtual pad presents the canonical Xbox identity, so the
         // physical pad's blacklist entry can never match it: SDL sees
         // exactly one controller, mapped by the shipped Xbox mapping.
-        let envs = target_env_for(VirtualGamepadBackend::XInput, Some(0x2dc8), Some(0x6012), false);
+        let envs = target_env_for(
+            VirtualGamepadBackend::XInput,
+            Some(0x2dc8),
+            Some(0x6012),
+            false,
+        );
         assert!(envs.contains(&(
             "SDL_GAMECONTROLLER_IGNORE_DEVICES".to_string(),
             "0x2dc8/0x6012".to_string()
@@ -397,8 +403,7 @@ mod tests {
             .find(|(key, _)| key == "SDL_GAMECONTROLLERCONFIG")
             .map(|(_, value)| value)
             .expect("XInput env carries a mapping");
-        assert!(mapping.starts_with(
-            "030000005e0400008e02000014010000,Microsoft X-Box 360 pad,a:b0,b:b1"
-        ));
+        assert!(mapping
+            .starts_with("030000005e0400008e02000014010000,Microsoft X-Box 360 pad,a:b0,b:b1"));
     }
 }

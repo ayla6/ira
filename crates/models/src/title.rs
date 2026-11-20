@@ -125,7 +125,10 @@ mod tests {
 
     #[test]
     fn test_normalize_name_basic() {
-        assert_eq!(normalize_name("Final Fantasy VII (USA)"), "final fantasy vii");
+        assert_eq!(
+            normalize_name("Final Fantasy VII (USA)"),
+            "final fantasy vii"
+        );
     }
 
     #[test]
@@ -175,7 +178,10 @@ mod tests {
         );
         // A comma inside prose is not an article marker.
         assert_eq!(normalize_name("Me, the Robot"), "me the robot");
-        assert_eq!(normalize_name("Game, Anthology Edition"), "game anthology edition");
+        assert_eq!(
+            normalize_name("Game, Anthology Edition"),
+            "game anthology edition"
+        );
     }
 
     #[test]

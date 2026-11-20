@@ -281,7 +281,8 @@ impl GameMenu {
                 }
                 *self.rows.borrow_mut() = rows;
             }
-            MenuKind::ConfirmDelete { id, name } => {                let header = ira_widgets::menu::menu_header(
+            MenuKind::ConfirmDelete { id, name } => {
+                let header = ira_widgets::menu::menu_header(
                     &crate::tr!("Delete {}?").replacen("{}", &name, 1),
                 );
                 self.panel.append(&header);

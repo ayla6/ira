@@ -373,16 +373,18 @@ impl GyroProcessor {
                 }
                 None => Self::controller_space(rotation),
             },
-            GyroOrientation::PlayerSpace => match self.gravity.and_then(|gravity| gravity.normalized())
-            {
-                Some(gravity) => Self::player_space(rotation, gravity),
-                None => Self::controller_space(rotation),
-            },
-            GyroOrientation::WorldSpace => match self.gravity.and_then(|gravity| gravity.normalized())
-            {
-                Some(gravity) => self.world_space(rotation, gravity),
-                None => Self::controller_space(rotation),
-            },
+            GyroOrientation::PlayerSpace => {
+                match self.gravity.and_then(|gravity| gravity.normalized()) {
+                    Some(gravity) => Self::player_space(rotation, gravity),
+                    None => Self::controller_space(rotation),
+                }
+            }
+            GyroOrientation::WorldSpace => {
+                match self.gravity.and_then(|gravity| gravity.normalized()) {
+                    Some(gravity) => self.world_space(rotation, gravity),
+                    None => Self::controller_space(rotation),
+                }
+            }
         };
         if self.options.smoothing {
             let speed = (yaw * yaw + pitch * pitch).sqrt();
@@ -551,7 +553,11 @@ mod tests {
     /// state, and return the final rates. Gravity is given in g; the
     /// processor consumes m/s².
     fn sample(processor: &mut GyroProcessor, rotation: [f32; 3], gravity: [f32; 3]) -> GyroRates {
-        let gravity = [gravity[0] * G_TO_MS2, gravity[1] * G_TO_MS2, gravity[2] * G_TO_MS2];
+        let gravity = [
+            gravity[0] * G_TO_MS2,
+            gravity[1] * G_TO_MS2,
+            gravity[2] * G_TO_MS2,
+        ];
         for _ in 0..200 {
             processor.process([0.0; 3], Some(gravity), DT);
         }
@@ -745,11 +751,7 @@ mod tests {
         }
         assert!(rates.gravity_locked, "m/s² readings must lock gravity");
         // Player-space yaw reads the full turn rate regardless of tilt.
-        assert!(
-            (rates.yaw.abs() - 0.5).abs() < 0.01,
-            "yaw: {}",
-            rates.yaw
-        );
+        assert!((rates.yaw.abs() - 0.5).abs() < 0.01, "yaw: {}", rates.yaw);
     }
 
     #[test]
@@ -798,8 +800,12 @@ mod tests {
             .process([0.0, 0.0, 0.02], Some([0.0, 0.0, G_TO_MS2]), DT)
             .yaw;
         assert!(damped.abs() < 0.01, "damped yaw: {damped}");
-        let flick = fast.process([0.0, 0.0, 2.0], Some([0.0, 0.0, G_TO_MS2]), DT).yaw;
-        let raw_flick = raw.process([0.0, 0.0, 2.0], Some([0.0, 0.0, G_TO_MS2]), DT).yaw;
+        let flick = fast
+            .process([0.0, 0.0, 2.0], Some([0.0, 0.0, G_TO_MS2]), DT)
+            .yaw;
+        let raw_flick = raw
+            .process([0.0, 0.0, 2.0], Some([0.0, 0.0, G_TO_MS2]), DT)
+            .yaw;
         assert!(
             (flick - raw_flick).abs() < 0.01,
             "flick: {flick} vs {raw_flick}"
@@ -898,8 +904,7 @@ mod tests {
         // sweep carries gyro signal: rotation +0.5 rad/s about the pitch
         // axis with the accel direction following the same rotation. The
         // fusion must track it: drained pitch delta ≈ the 30° sweep.
-        let elevation_at =
-            |tilt: f32| [0.0, tilt.cos() * G_TO_MS2, -tilt.sin() * G_TO_MS2];
+        let elevation_at = |tilt: f32| [0.0, tilt.cos() * G_TO_MS2, -tilt.sin() * G_TO_MS2];
         for _ in 0..200 {
             processor.process([0.0; 3], Some(elevation_at((30.0f32).to_radians())), DT);
         }
@@ -935,11 +940,7 @@ mod tests {
         let mut worst = 0.0f32;
         for step in 0..400 {
             let wobble = if step % 2 == 0 { 0.3 } else { -0.3 };
-            let rates = processor.process(
-                [0.0; 3],
-                Some([wobble * G_TO_MS2, 0.0, G_TO_MS2]),
-                DT,
-            );
+            let rates = processor.process([0.0; 3], Some([wobble * G_TO_MS2, 0.0, G_TO_MS2]), DT);
             worst = worst.max(rates.pitch.abs());
         }
         let (_, pitch) = processor.take_laser_deltas();

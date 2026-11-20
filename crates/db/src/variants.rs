@@ -43,11 +43,10 @@ fn variant_insert_columns() -> String {
 fn variant_from_row(row: &rusqlite::Row, game_id: i64) -> rusqlite::Result<GameVariant> {
     let env_str: String = row.get(6)?;
     let variant_id: i64 = row.get(0)?;
-    let env_vars: Vec<(String, String)> =
-        serde_json::from_str(&env_str).unwrap_or_else(|e| {
-            eprintln!("Corrupt env_vars JSON for variant {variant_id} of game {game_id}: {e}");
-            Vec::new()
-        });
+    let env_vars: Vec<(String, String)> = serde_json::from_str(&env_str).unwrap_or_else(|e| {
+        eprintln!("Corrupt env_vars JSON for variant {variant_id} of game {game_id}: {e}");
+        Vec::new()
+    });
     Ok(GameVariant {
         id: variant_id,
         game_id: row.get(1)?,
@@ -211,7 +210,11 @@ pub fn reorder_variants(conn: &DbConn, ordered_ids: &[i64]) -> Result<(), String
 }
 
 pub fn delete_variant(conn: &DbConn, variant_id: i64) -> Result<(), String> {
-    crate::execute(conn, "DELETE FROM game_variants WHERE id = ?1", params![variant_id])?;
+    crate::execute(
+        conn,
+        "DELETE FROM game_variants WHERE id = ?1",
+        params![variant_id],
+    )?;
     Ok(())
 }
 
@@ -251,7 +254,11 @@ pub fn update_variant_playtime(
     variant_id: i64,
     playtime: f64,
 ) -> Result<(), String> {
-    crate::execute(conn, "UPDATE game_variants SET playtime = ?1 WHERE id = ?2", params![playtime, variant_id])?;
+    crate::execute(
+        conn,
+        "UPDATE game_variants SET playtime = ?1 WHERE id = ?2",
+        params![playtime, variant_id],
+    )?;
     Ok(())
 }
 
@@ -260,7 +267,11 @@ pub fn set_variant_last_played(
     variant_id: i64,
     last_played: i64,
 ) -> Result<(), String> {
-    crate::execute(conn, "UPDATE game_variants SET last_played = ?1 WHERE id = ?2", params![last_played, variant_id])?;
+    crate::execute(
+        conn,
+        "UPDATE game_variants SET last_played = ?1 WHERE id = ?2",
+        params![last_played, variant_id],
+    )?;
     Ok(())
 }
 

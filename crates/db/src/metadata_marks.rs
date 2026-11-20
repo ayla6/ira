@@ -66,7 +66,11 @@ pub fn steam_garnished_ids(conn: &DbConn) -> Result<Vec<i64>, String> {
 /// different store entry, so forget it. Called wherever `steam_id` is
 /// written — the marker is only valid for the current id.
 pub fn clear_steam_garnish(conn: &DbConn, game_id: i64) -> Result<(), String> {
-    crate::execute(conn, "DELETE FROM steam_garnish WHERE game_id = ?1", params![game_id])?;
+    crate::execute(
+        conn,
+        "DELETE FROM steam_garnish WHERE game_id = ?1",
+        params![game_id],
+    )?;
     Ok(())
 }
 
@@ -106,13 +110,21 @@ mod tests {
         tombstone_match_miss(&conn, id, miss_source::SS).unwrap();
         assert_eq!(match_missed_ids(&conn, miss_source::SS).unwrap(), vec![id]);
         // Sources stay separate: an SS miss is no Steam miss.
-        assert!(match_missed_ids(&conn, miss_source::STEAM).unwrap().is_empty());
+        assert!(match_missed_ids(&conn, miss_source::STEAM)
+            .unwrap()
+            .is_empty());
         tombstone_match_miss(&conn, id, miss_source::STEAM).unwrap();
-        assert_eq!(match_missed_ids(&conn, miss_source::STEAM).unwrap(), vec![id]);
+        assert_eq!(
+            match_missed_ids(&conn, miss_source::STEAM).unwrap(),
+            vec![id]
+        );
         // A later match clears it and the game re-enters the pool.
         clear_match_miss(&conn, id, miss_source::SS).unwrap();
         assert!(match_missed_ids(&conn, miss_source::SS).unwrap().is_empty());
-        assert_eq!(match_missed_ids(&conn, miss_source::STEAM).unwrap(), vec![id]);
+        assert_eq!(
+            match_missed_ids(&conn, miss_source::STEAM).unwrap(),
+            vec![id]
+        );
     }
 
     #[test]

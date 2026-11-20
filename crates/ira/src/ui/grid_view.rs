@@ -239,14 +239,7 @@ fn wire_tile_clicks(state: &SharedState, vbox: &gtk4::Box) {
             return;
         }
         if let Some(game) = sc2.borrow().find_game(db_id, variant_id) {
-            show_game_context_menu(
-                &sc2,
-                &game,
-                &widget,
-                x,
-                y,
-                None::<&gtk4::ListBoxRow>,
-            );
+            show_game_context_menu(&sc2, &game, &widget, x, y, None::<&gtk4::ListBoxRow>);
         }
     });
     vbox.add_controller(right_click);
@@ -369,11 +362,7 @@ fn bind_square_art(
     };
     match ira_images::cached_texture(art) {
         Some(texture) => set(Some(texture)),
-        None => ira_images::load_texture_async_with_priority(
-            &path,
-            glib::Priority::DEFAULT,
-            set,
-        ),
+        None => ira_images::load_texture_async_with_priority(&path, glib::Priority::DEFAULT, set),
     }
 }
 
@@ -609,15 +598,7 @@ pub fn show_grid_view(state: &SharedState) {
         return;
     }
 
-    build_grid_view(
-        state,
-        &games,
-        min_w,
-        item_h,
-        sort_mode,
-        square,
-        &header_box,
-    );
+    build_grid_view(state, &games, min_w, item_h, sort_mode, square, &header_box);
 }
 
 pub fn show_loading_view(state: &SharedState, status: &str, completed: usize, total: usize) {

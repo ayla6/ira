@@ -141,7 +141,6 @@ pub fn centralize_galaxy_settings(game_folder: &str) -> Result<Option<PathBuf>, 
     )
 }
 
-
 const GOG_DLL_NAMES: &[&str] = &["galaxy.dll", "galaxy64.dll"];
 
 pub fn find_gog_dlls_recursive(game_folder: &str) -> Vec<PathBuf> {
@@ -205,8 +204,7 @@ pub fn install_nge_from_folder(
         .find(|d| !is_nge_installed(d))
         .ok_or_else(|| "No unpatched GOG Galaxy DLLs found in game folder".to_string())?;
 
-    let is64 =
-        detect_folder_bitness(dll_folder, GALAXY_64_FILES, GALAXY_32_FILES).unwrap_or(false);
+    let is64 = detect_folder_bitness(dll_folder, GALAXY_64_FILES, GALAXY_32_FILES).unwrap_or(false);
     install_nge_into_folder(save_dir, dll_folder, is64, product_id, version)
 }
 
@@ -335,7 +333,10 @@ mod tests {
     fn test_write_nge_dlc_config_unlock_flag() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("s");
-        nge_config(&dir, r#"{"GalaxyEmu":{"Apps":{"UnlockDlcs":true,"DlcList":{}}}}"#);
+        nge_config(
+            &dir,
+            r#"{"GalaxyEmu":{"Apps":{"UnlockDlcs":true,"DlcList":{}}}}"#,
+        );
         let mut details = AppDetails {
             name: String::new(),
             languages: Vec::new(),
@@ -356,7 +357,10 @@ mod tests {
         let data = std::fs::read_to_string(dir.join("NemirtingasGalaxyEmu.json")).unwrap();
         let json: serde_json::Value = serde_json::from_str(&data).unwrap();
         assert_eq!(json["GalaxyEmu"]["Apps"]["UnlockDlcs"], false);
-        assert!(json["GalaxyEmu"]["Apps"]["DlcList"].as_object().unwrap().is_empty());
+        assert!(json["GalaxyEmu"]["Apps"]["DlcList"]
+            .as_object()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

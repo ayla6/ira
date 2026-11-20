@@ -46,8 +46,8 @@ pub fn safe_migrate_dir_contents(source: &Path, target: &Path) -> usize {
 /// Copy a file and verify the destination byte-for-byte (a rolling
 /// digest over both files).
 fn safe_copy_and_verify(src: &Path, dst: &Path) -> bool {
-    use std::io::Read;
     use std::hash::{Hash, Hasher};
+    use std::io::Read;
     if let Err(e) = std::fs::copy(src, dst) {
         eprintln!(
             "safe_migrate: copy {} -> {}: {e}",
@@ -99,7 +99,10 @@ mod tests {
 
         assert_eq!(count, 2);
         assert_eq!(std::fs::read(dst.join("a.sav")).unwrap(), b"hello");
-        assert_eq!(std::fs::read(dst.join("sub").join("b.sav")).unwrap(), b"world");
+        assert_eq!(
+            std::fs::read(dst.join("sub").join("b.sav")).unwrap(),
+            b"world"
+        );
         assert!(!src.join("a.sav").exists());
         assert!(!src.join("sub").join("b.sav").exists());
     }

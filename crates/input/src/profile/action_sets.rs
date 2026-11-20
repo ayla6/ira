@@ -50,8 +50,7 @@ impl InputProfile {
                 removed_layers.push(layer_index);
             }
         }
-        self.action_layers
-            .retain(|layer| layer.parent_set != name);
+        self.action_layers.retain(|layer| layer.parent_set != name);
         self.for_every_output(&mut |output| match output {
             OutputAction::SwitchActionSet(target) => {
                 if *target == index {

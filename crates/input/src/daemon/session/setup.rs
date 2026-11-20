@@ -2,18 +2,21 @@ use std::io::BufRead;
 
 use std::sync::mpsc::Receiver;
 
-use crate::{MappingEngine, MirroredIdentity, ReportRateEstimator, VirtualGamepad, VirtualKeyboard, VirtualMouse};
+use crate::{
+    MappingEngine, MirroredIdentity, ReportRateEstimator, VirtualGamepad, VirtualKeyboard,
+    VirtualMouse,
+};
 
+use super::super::hub::{HubCommand, HubHandle, PadEvent, Subscribe};
+use super::super::{
+    inject_flatpak_env, target_env_for, Arguments, ProfileMonitor, SessionEvent, SteamWatcher,
+    TraceState,
+};
 use super::devices::{
     apply_controller_deadzone, is_real_profile, load_profile_or_default, make_gyro_processor,
 };
 use super::loop_io::LoopSchedule;
 use super::sensor::{tick_needed_for, SensorPipeline};
-use super::super::hub::{HubCommand, HubHandle, PadEvent, Subscribe};
-use super::super::{
-    inject_flatpak_env, target_env_for, Arguments,
-    ProfileMonitor, SessionEvent, SteamWatcher, TraceState,
-};
 use crate::profile::VirtualGamepadBackend;
 
 /// Everything the mapping loop needs, opened once before the event loop starts.
@@ -50,7 +53,6 @@ pub(crate) struct SessionSetup {
     pub(crate) cursor_visible: Option<bool>,
 }
 
-
 /// Whether the session must virtualize the pad at all: `false` when the
 /// physical pad already speaks the backend's native protocol, so the game
 /// can use it directly. Switch-protocol detection comes from the hub's
@@ -63,13 +65,12 @@ fn native_passthrough_for(
 ) -> bool {
     match backend {
         VirtualGamepadBackend::SwitchPro => switch_protocol,
-        VirtualGamepadBackend::DualSense => {
-            pad.is_some_and(|(vendor, product)| crate::physical::is_dualsense_identity(vendor, product))
-        }
-        VirtualGamepadBackend::DualShock4 => pad
-            .is_some_and(|(vendor, product)| {
-                crate::physical::is_dualshock4_identity(vendor, product)
-            }),
+        VirtualGamepadBackend::DualSense => pad.is_some_and(|(vendor, product)| {
+            crate::physical::is_dualsense_identity(vendor, product)
+        }),
+        VirtualGamepadBackend::DualShock4 => pad.is_some_and(|(vendor, product)| {
+            crate::physical::is_dualshock4_identity(vendor, product)
+        }),
         VirtualGamepadBackend::XInput
         | VirtualGamepadBackend::DirectInput
         | VirtualGamepadBackend::SteamInput
@@ -155,7 +156,11 @@ fn child_env_overrides<'a>(
         .flatten()
         .map(|(key, value)| (key.as_str(), value.as_str()))
         .collect();
-    env.extend(target_envs.iter().map(|(key, value)| (key.as_str(), value.as_str())));
+    env.extend(
+        target_envs
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
     env
 }
 
@@ -184,14 +189,13 @@ fn pump_output<R: std::io::Read + Send + 'static>(
 pub(crate) fn mirror_identity(
     pad: &Option<(String, String, u16, u16, u16)>,
 ) -> Option<MirroredIdentity> {
-    pad.as_ref().map(
-        |(name, _, vendor, product, version)| MirroredIdentity {
+    pad.as_ref()
+        .map(|(name, _, vendor, product, version)| MirroredIdentity {
             name: name.clone(),
             vendor: *vendor,
             product: *product,
             version: *version,
-        },
-    )
+        })
 }
 
 pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, String> {
@@ -238,9 +242,7 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
         device: arguments.device.clone(),
         reply: reply_tx,
     }));
-    let snapshot = reply_rx
-        .recv()
-        .map_err(|_| "pad hub is gone".to_string())?;
+    let snapshot = reply_rx.recv().map_err(|_| "pad hub is gone".to_string())?;
     let motion_available = snapshot.motion;
     // A pad that already speaks the profile's native protocol (an 8BitDo
     // dongle or real pad in Switch mode for a Switch Pro profile, a real
@@ -250,7 +252,10 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     let native_passthrough = native_passthrough_for(
         mapper.profile().backend,
         snapshot.switch_protocol,
-        snapshot.pad.as_ref().map(|(_, _, vendor, product, _)| (*vendor, *product)),
+        snapshot
+            .pad
+            .as_ref()
+            .map(|(_, _, vendor, product, _)| (*vendor, *product)),
     );
     if native_passthrough {
         eprintln!(
@@ -306,7 +311,10 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     let child = spawn_session_child(
         arguments,
         &mapper,
-        snapshot.pad.as_ref().map(|(_, _, vendor, product, _)| (*vendor, *product)),
+        snapshot
+            .pad
+            .as_ref()
+            .map(|(_, _, vendor, product, _)| (*vendor, *product)),
         native_passthrough,
     );
     let pad_state = crate::PadState::default();
@@ -363,7 +371,6 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
     };
     let cursor_visible: Option<bool> = None;
 
-
     // Profile saves wake the session channel the moment they land, so a
     // reload applies instantly even while the loop is parked on the hub.
     if let Some(fd) = profile_monitor.as_ref().and_then(|monitor| monitor.fd()) {
@@ -404,10 +411,7 @@ pub(crate) fn setup_session(arguments: &Arguments) -> Result<SessionSetup, Strin
 /// Whether the session gets an X focus watcher: only when unfocused
 /// pausing is wanted AND the game is observable from this display. The
 /// daemon-toggle marker means gamescope/flatpak, where the game is not.
-fn focus_watcher_allowed(
-    pause_unfocused: bool,
-    env: Option<&[(String, String)]>,
-) -> bool {
+fn focus_watcher_allowed(pause_unfocused: bool, env: Option<&[(String, String)]>) -> bool {
     pause_unfocused
         && !env.is_some_and(|vars| {
             vars.iter()
@@ -479,7 +483,10 @@ mod tests {
 
     #[test]
     fn test_focus_watcher_allowed_skips_daemon_toggle_sessions() {
-        let marker = vec![(ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(), "1".to_string())];
+        let marker = vec![(
+            ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(),
+            "1".to_string(),
+        )];
         // Gamescope/flatpak: the game is unobservable from the desktop
         // display, so no watcher even when pausing is wanted.
         assert!(!focus_watcher_allowed(true, Some(&marker)));
@@ -496,14 +503,30 @@ mod tests {
         let dualsense = Some((0x054c, 0x0ce6));
         // A real DualSense passes through on the DualSense backend only.
         assert!(native_passthrough_for(Backend::DualSense, false, dualsense));
-        assert!(!native_passthrough_for(Backend::DualShock4, false, dualsense));
-        assert!(!native_passthrough_for(Backend::SwitchPro, false, dualsense));
+        assert!(!native_passthrough_for(
+            Backend::DualShock4,
+            false,
+            dualsense
+        ));
+        assert!(!native_passthrough_for(
+            Backend::SwitchPro,
+            false,
+            dualsense
+        ));
         // A real DualShock 4 passes through on its own backend.
-        assert!(native_passthrough_for(Backend::DualShock4, false, Some((0x054c, 0x09cc))));
+        assert!(native_passthrough_for(
+            Backend::DualShock4,
+            false,
+            Some((0x054c, 0x09cc))
+        ));
         // Switch pads follow the hub's wire-protocol probe instead of
         // identity: the dongle can enumerate before its mode is known.
         assert!(native_passthrough_for(Backend::SwitchPro, true, None));
-        assert!(!native_passthrough_for(Backend::SwitchPro, false, Some((0x057e, 0x2009))));
+        assert!(!native_passthrough_for(
+            Backend::SwitchPro,
+            false,
+            Some((0x057e, 0x2009))
+        ));
         // No pad, or an unrelated pad: virtualize as usual.
         assert!(!native_passthrough_for(Backend::DualSense, false, None));
         assert!(!native_passthrough_for(
@@ -513,7 +536,10 @@ mod tests {
         ));
         // The uinput backends never pass through.
         assert!(!native_passthrough_for(Backend::XInput, true, dualsense));
-        assert!(!native_passthrough_for(Backend::SteamInput, false, dualsense));
+        assert!(!native_passthrough_for(
+            Backend::SteamInput,
+            false,
+            dualsense
+        ));
     }
 }
-

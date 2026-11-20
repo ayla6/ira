@@ -90,7 +90,10 @@ pub struct CanvasAction {
 
 impl CanvasAction {
     pub fn of(kind: u32) -> Self {
-        Self { kind, _pad: [0; 12] }
+        Self {
+            kind,
+            _pad: [0; 12],
+        }
     }
 }
 

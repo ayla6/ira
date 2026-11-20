@@ -328,7 +328,10 @@ fn apply_pause_env(env: &mut Vec<(String, String)>, ctx: &LaunchContext) {
         ctx.trophy_source,
         ctx.overlay_shm.as_deref(),
     ) {
-        eprintln!("ira-pause: setting {k}=1 for Goldberg game '{}'", ctx.game_name);
+        eprintln!(
+            "ira-pause: setting {k}=1 for Goldberg game '{}'",
+            ctx.game_name
+        );
         env_set(env, &k, &v);
     } else if ctx.pause_game_on_overlay {
         eprintln!(
@@ -441,7 +444,8 @@ fn spawn_wrapped(req: WrappedSpawn<'_>) -> Result<i32, String> {
 
     let log_path = super::wrapper::game_log_path(&ctx.save_dir, ctx.game_id);
 
-    let child = match super::wrapper::spawn_game(command, env, game_dir.as_deref(), Some(&log_path)) {
+    let child = match super::wrapper::spawn_game(command, env, game_dir.as_deref(), Some(&log_path))
+    {
         Ok(child) => child,
         Err(e) => {
             if let Some(mut host) = host_child {
@@ -558,16 +562,16 @@ mod tests {
         // Assert
         assert_eq!(
             env,
-            Some((
-                "IRA_GBE_PAUSE_ON_OVERLAY".to_string(),
-                "1".to_string()
-            ))
+            Some(("IRA_GBE_PAUSE_ON_OVERLAY".to_string(), "1".to_string()))
         );
     }
 
     #[test]
     fn test_gbe_pause_env_unset_when_disabled() {
-        assert_eq!(gbe_pause_env(false, TrophySource::Gse, Some("/ira_overlay_42")), None);
+        assert_eq!(
+            gbe_pause_env(false, TrophySource::Gse, Some("/ira_overlay_42")),
+            None
+        );
     }
 
     #[test]
@@ -577,7 +581,10 @@ mod tests {
             gbe_pause_env(true, TrophySource::SteamNative, Some("/ira_overlay_42")),
             None
         );
-        assert_eq!(gbe_pause_env(true, TrophySource::Nge, Some("/ira_overlay_42")), None);
+        assert_eq!(
+            gbe_pause_env(true, TrophySource::Nge, Some("/ira_overlay_42")),
+            None
+        );
         // …and without overlay SHM there is no visibility signal to follow.
         assert_eq!(gbe_pause_env(true, TrophySource::Gse, None), None);
     }

@@ -182,7 +182,8 @@ fn parent_of(path: &Path) -> PathBuf {
     }
 }
 
-fn parse_inotify_buffer(buffer: &[u8]) -> Vec<ParsedEvent> {    let header = std::mem::size_of::<libc::inotify_event>();
+fn parse_inotify_buffer(buffer: &[u8]) -> Vec<ParsedEvent> {
+    let header = std::mem::size_of::<libc::inotify_event>();
     let mut events = Vec::new();
     let mut offset = 0;
     while offset + header <= buffer.len() {

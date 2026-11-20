@@ -46,11 +46,7 @@ where
     rows.collect::<Result<Vec<_>, _>>().map_err(err)
 }
 
-pub(crate) fn query_scalar_all<T, P>(
-    conn: &DbConn,
-    sql: &str,
-    params: P,
-) -> Result<Vec<T>, String>
+pub(crate) fn query_scalar_all<T, P>(conn: &DbConn, sql: &str, params: P) -> Result<Vec<T>, String>
 where
     T: rusqlite::types::FromSql,
     P: rusqlite::Params,
@@ -58,7 +54,11 @@ where
     query_all(conn, sql, params, |row| row.get(0))
 }
 
-pub(crate) fn execute(conn: &DbConn, sql: &str, params: impl rusqlite::Params) -> Result<usize, String> {
+pub(crate) fn execute(
+    conn: &DbConn,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> Result<usize, String> {
     let c = lock_db(conn)?;
     c.execute(sql, params).map_err(err)
 }
@@ -76,8 +76,8 @@ pub(crate) fn positional_placeholders(count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::init_db;
+    use super::*;
     use rusqlite::params;
 
     #[test]
@@ -85,8 +85,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let conn = init_db(&tmp.path().join("test.db").to_string_lossy());
         let hit: Option<i64> =
-            query_optional_scalar(&conn, "SELECT id FROM games WHERE id = ?1", params![7])
-                .unwrap();
+            query_optional_scalar(&conn, "SELECT id FROM games WHERE id = ?1", params![7]).unwrap();
         assert_eq!(hit, None);
     }
 }

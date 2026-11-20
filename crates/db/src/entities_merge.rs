@@ -1,4 +1,4 @@
-use crate::entities::{KIND_COMPANY, spec};
+use crate::entities::{spec, KIND_COMPANY};
 use crate::{err, DbConn};
 use rusqlite::params;
 
@@ -89,8 +89,11 @@ fn repoint_aliases(
         )
         .map_err(err)?;
     }
-    tx.execute(&format!("DELETE FROM {lookup} WHERE id = ?1"), params![absorbed])
-        .map_err(err)?;
+    tx.execute(
+        &format!("DELETE FROM {lookup} WHERE id = ?1"),
+        params![absorbed],
+    )
+    .map_err(err)?;
     Ok(())
 }
 
@@ -164,14 +167,33 @@ mod tests {
     #[test]
     fn test_merge_moves_references_and_leaves_an_alias() {
         let (conn, _tmp) = setup_db();
-        let a = add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "", trophy_id: "", native_id: "", platform_id: "", title: "One" }).unwrap();
-        let b = add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "", trophy_id: "", native_id: "", platform_id: "", title: "Two" }).unwrap();
-        crate::store_scraper_metadata(
+        let a = add_game(
             &conn,
-            a,
-            &genre_metadata(vec![entity(-3, "RPG")]),
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "One",
+            },
         )
         .unwrap();
+        let b = add_game(
+            &conn,
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Two",
+            },
+        )
+        .unwrap();
+        crate::store_scraper_metadata(&conn, a, &genre_metadata(vec![entity(-3, "RPG")])).unwrap();
         crate::store_scraper_metadata(
             &conn,
             b,
@@ -182,8 +204,14 @@ mod tests {
         // Merging the local row into the real one: the real id wins.
         let survivor = merge_entities(&conn, KIND_GENRE, -3, 2620).unwrap();
         assert_eq!(survivor, 2620);
-        assert_eq!(crate::entity_usage(&conn, KIND_GENRE).unwrap().get(&2620), Some(&2));
-        assert_eq!(crate::entity_usage(&conn, KIND_GENRE).unwrap().get(&-3), None);
+        assert_eq!(
+            crate::entity_usage(&conn, KIND_GENRE).unwrap().get(&2620),
+            Some(&2)
+        );
+        assert_eq!(
+            crate::entity_usage(&conn, KIND_GENRE).unwrap().get(&-3),
+            None
+        );
         // The absorbed spelling stays behind as an alias of the
         // survivor: the next match bringing "RPG" resolves to 2620.
         assert!(crate::entity_aliases(&conn, KIND_GENRE, 2620)
@@ -195,7 +223,8 @@ mod tests {
         // An explicit alias outranks the merge trail — the user said
         // so, and the user is who the table serves.
         crate::add_entity_alias(&conn, KIND_GENRE, "Role Playing Game", -3).unwrap();
-        let resolved = crate::resolve_entities(&conn, KIND_GENRE, &[entity(2620, "Role Playing Game")]);
+        let resolved =
+            crate::resolve_entities(&conn, KIND_GENRE, &[entity(2620, "Role Playing Game")]);
         assert_eq!(resolved[0].id, "-3");
         let _ = GENRES;
     }
@@ -203,10 +232,19 @@ mod tests {
     #[test]
     fn test_merge_prefers_the_real_id_whichever_way_it_was_asked() {
         // Picking the local row as the target: the real id survives.
-        assert_eq!(merge_entities(&setup_db().0, KIND_GENRE, -3, 2620).unwrap(), 2620);
+        assert_eq!(
+            merge_entities(&setup_db().0, KIND_GENRE, -3, 2620).unwrap(),
+            2620
+        );
         // Two locals, or two reals: the user's target wins.
-        assert_eq!(merge_entities(&setup_db().0, KIND_GENRE, -7, -3).unwrap(), -7);
-        assert_eq!(merge_entities(&setup_db().0, KIND_GENRE, 2620, 2406).unwrap(), 2620);
+        assert_eq!(
+            merge_entities(&setup_db().0, KIND_GENRE, -7, -3).unwrap(),
+            -7
+        );
+        assert_eq!(
+            merge_entities(&setup_db().0, KIND_GENRE, 2620, 2406).unwrap(),
+            2620
+        );
         // Merging a row into itself is refused.
         assert!(merge_entities(&setup_db().0, KIND_GENRE, 2620, 2620).is_err());
     }

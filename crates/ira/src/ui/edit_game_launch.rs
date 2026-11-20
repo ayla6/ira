@@ -185,13 +185,11 @@ pub(super) fn build_launch_config_page(params: LaunchConfigParams) -> Option<Lau
 
     page.append(&lc_group);
 
-    params
-        .sidebar
-        .append(&settings_pages::settings_sidebar_row(
-            "preferences-other-symbolic",
-            &crate::tr!("Launch config"),
-            "launch",
-        ));
+    params.sidebar.append(&settings_pages::settings_sidebar_row(
+        "preferences-other-symbolic",
+        &crate::tr!("Launch config"),
+        "launch",
+    ));
     params
         .stack
         .add_named(&super::helpers::scrolled_page(&page), Some("launch"));

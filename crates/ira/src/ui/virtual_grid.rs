@@ -238,13 +238,7 @@ mod imp {
         /// no width is known yet) and must never overwrite the live
         /// layout every scroll computation reads — only allocation,
         /// which always knows the real width, publishes.
-        fn build_plan(
-            &self,
-            width: i32,
-            viewport_h: i32,
-            header_h: i32,
-            store: bool,
-        ) -> Vec<Slot> {
+        fn build_plan(&self, width: i32, viewport_h: i32, header_h: i32, store: bool) -> Vec<Slot> {
             let sections = self.sections.borrow().clone();
             let (n_cols, item_w, item_h, sp) = compute_grid_layout(
                 width,
@@ -419,10 +413,7 @@ mod imp {
                     self.prev_width.get().max(1).max(800)
                 };
                 let plan = self.build_plan(width, 0, header_h, false);
-                let h = plan
-                    .last()
-                    .map(|slot| slot.y + slot.h)
-                    .unwrap_or(header_h);
+                let h = plan.last().map(|slot| slot.y + slot.h).unwrap_or(header_h);
                 (0, h, -1, -1)
             } else {
                 (min_w, min_w * 30, -1, -1)
@@ -529,10 +520,11 @@ mod imp {
             // window still clips these cells to the actual viewport.
             let view_top = actual_scroll;
             let view_bottom = actual_scroll.saturating_add(height);
-            let (realize_top, realize_bottom) =
-                overscanned_viewport(view_top, view_bottom, row_h);
+            let (realize_top, realize_bottom) = overscanned_viewport(view_top, view_bottom, row_h);
             let first_slot = plan.partition_point(|slot| slot.y + slot.h <= realize_top);
-            let last_slot = plan.partition_point(|slot| slot.y < realize_bottom).max(first_slot);
+            let last_slot = plan
+                .partition_point(|slot| slot.y < realize_bottom)
+                .max(first_slot);
 
             let setup = self.setup_fn.borrow().clone();
             let bind = self.bind_fn.borrow().clone();
@@ -615,9 +607,10 @@ mod imp {
                         continue;
                     };
                     if *is_header {
-                        if let (Some(bind), Some(title)) =
-                            (header_bind.as_ref(), sections.get(slot.section).map(|(t, _)| t))
-                        {
+                        if let (Some(bind), Some(title)) = (
+                            header_bind.as_ref(),
+                            sections.get(slot.section).map(|(t, _)| t),
+                        ) {
                             bind(widget, title);
                         }
                     } else if let Some(ref model) = *self.model.borrow() {
@@ -649,9 +642,10 @@ mod imp {
                         continue;
                     };
                     if *is_header {
-                        if let (Some(bind), Some(title)) =
-                            (header_bind.as_ref(), sections.get(slot.section).map(|(t, _)| t))
-                        {
+                        if let (Some(bind), Some(title)) = (
+                            header_bind.as_ref(),
+                            sections.get(slot.section).map(|(t, _)| t),
+                        ) {
                             bind(widget, title);
                         }
                         continue;
@@ -678,7 +672,6 @@ mod imp {
                 }
             }
 
-
             {
                 let visible = self.visible.borrow();
                 for (slot_idx, (_, widget)) in visible.iter() {
@@ -693,8 +686,6 @@ mod imp {
                     widget.allocate(slot.w, slot.h, -1, Some(tx));
                 }
             }
-
-
 
             drop(plan);
             if let Some(post) = self.post_layout_fn.borrow().as_ref() {

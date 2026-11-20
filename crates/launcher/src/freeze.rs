@@ -13,14 +13,14 @@
 //! game could never receive the un-toggle hotkey again (deadlock), so those
 //! games pause cooperatively (Goldberg fork) or not at all.
 
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::procfs::process_comm;
 
-pub use super::freeze_scope::Scope;
 use super::freeze_scope::freeze_set;
+pub use super::freeze_scope::Scope;
 
 /// What the watcher needs. Built by the caller only when freezing is both
 /// enabled and safe; presence of this struct is the freeze permit.

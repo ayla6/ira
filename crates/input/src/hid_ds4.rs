@@ -372,8 +372,8 @@ fn hid_motor_scale(byte: u8) -> u16 {
 mod tests {
     use super::{
         capabilities_report, hat_value, sdl_mapping, usb_state_report, ACCEL_COUNTS_PER_G,
-        GRAVITY_MS2, GYRO_COUNTS_PER_DPS, REPORT_DESCRIPTOR, REPORT_ID_USB_STATE,
-        USB_STATE_REPORT_LEN, DEVICE_NAME, SDL_GUID,
+        DEVICE_NAME, GRAVITY_MS2, GYRO_COUNTS_PER_DPS, REPORT_DESCRIPTOR, REPORT_ID_USB_STATE,
+        SDL_GUID, USB_STATE_REPORT_LEN,
     };
     use crate::motion_udp::{MotionSample, PadState};
 

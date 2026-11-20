@@ -214,8 +214,7 @@ pub fn trim_transparent_margins(png: &[u8]) -> Option<Vec<u8>> {
     if right <= left || bottom <= top || (left == 0 && top == 0 && right == w && bottom == h) {
         return None;
     }
-    let cropped =
-        image::imageops::crop_imm(&img, left, top, right - left, bottom - top).to_image();
+    let cropped = image::imageops::crop_imm(&img, left, top, right - left, bottom - top).to_image();
     encode_png_bytes(&cropped)
 }
 

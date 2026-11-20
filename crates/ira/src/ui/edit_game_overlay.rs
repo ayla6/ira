@@ -31,7 +31,9 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     );
     let (pause_row, pause_state) = build_override_switch_row(
         &crate::tr!("Pause game while overlay is visible"),
-        &crate::tr!("Freezes the game while the overlay is up (gamescope mode). Not for online games."),
+        &crate::tr!(
+            "Freezes the game while the overlay is up (gamescope mode). Not for online games."
+        ),
         params.pause_default,
         params.launch.pause_game_on_overlay,
     );
@@ -80,13 +82,11 @@ pub(super) fn build_overlay_page(params: OverlayPageParams) -> OverlayWidgets {
     scroll.set_vexpand(true);
     scroll.set_hexpand(true);
 
-    params
-        .sidebar
-        .append(&settings_pages::settings_sidebar_row(
-            "layers-symbolic",
-            &crate::tr!("Overlay"),
-            "overlay",
-        ));
+    params.sidebar.append(&settings_pages::settings_sidebar_row(
+        "layers-symbolic",
+        &crate::tr!("Overlay"),
+        "overlay",
+    ));
     params.stack.add_named(&scroll, Some("overlay"));
 
     OverlayWidgets {

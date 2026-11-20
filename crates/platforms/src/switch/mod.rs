@@ -26,8 +26,8 @@ mod nca;
 mod ncz;
 mod registered;
 mod rom;
-mod xci;
 mod ryujinx;
+mod xci;
 
 pub use config::resolve_rom;
 pub use nca::ControlMeta;
@@ -202,7 +202,9 @@ impl SwitchCaches {
     }
 
     fn id_for_name(&self, name_key: &str) -> Option<&str> {
-        self.caches.iter().find_map(|cache| cache.id_for_name(name_key))
+        self.caches
+            .iter()
+            .find_map(|cache| cache.id_for_name(name_key))
     }
 }
 
@@ -230,9 +232,7 @@ impl SwitchCaches {
         let mut seen = std::collections::HashSet::new();
         for cache in &self.installed {
             for (id, entry) in cache.by_id.iter() {
-                if entry.title.is_empty()
-                    || rom::is_update_title_id(id)
-                    || !seen.insert(id.clone())
+                if entry.title.is_empty() || rom::is_update_title_id(id) || !seen.insert(id.clone())
                 {
                     continue;
                 }
@@ -257,10 +257,8 @@ pub fn discover_installed_games(
 ) -> Vec<SwitchInstalledGame> {
     let caches = SwitchCaches::load(executable);
     let mut games = caches.installed_games();
-    let mut seen: std::collections::HashSet<String> = games
-        .iter()
-        .map(|game| game.title_id.clone())
-        .collect();
+    let mut seen: std::collections::HashSet<String> =
+        games.iter().map(|game| game.title_id.clone()).collect();
     for game in ryujinx::library_games(executable, compressed_switch_roms) {
         if seen.insert(game.title_id.clone()) {
             games.push(game);
@@ -439,11 +437,7 @@ mod tests {
         eden.insert("0100000000010000", String::new(), None);
         // The same title cached twice dedupes to one entry.
         let mut eden_portable = TitleCache::empty();
-        eden_portable.insert(
-            "01007ef00011e000",
-            "The Legend of Zelda".to_string(),
-            None,
-        );
+        eden_portable.insert("01007ef00011e000", "The Legend of Zelda".to_string(), None);
 
         let caches = SwitchCaches {
             caches: vec![eden.clone(), eden_portable.clone()],

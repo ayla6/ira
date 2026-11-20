@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use crate::emu_dirs::{app_path_for, home_dir};
+use std::path::{Path, PathBuf};
 
 pub const AZAHAR_FLATPAK_ID: &str = "org.azahar_emu.Azahar";
 

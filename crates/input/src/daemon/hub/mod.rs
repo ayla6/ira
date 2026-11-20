@@ -56,7 +56,9 @@ pub(crate) enum PadEvent {
     Frozen,
     /// (Re)gained focus routing, carrying the physical pressed set to reconcile
     /// mapper state lost across the routing gap instead of sticking it forever.
-    Live { pressed: Vec<InputSource> },
+    Live {
+        pressed: Vec<InputSource>,
+    },
     /// Session-local wake: the profile watcher thread signals a save. The
     /// hub never sends this variant.
     ProfileChanged,
@@ -93,22 +95,34 @@ pub(crate) struct Subscribe {
 pub(crate) enum HubCommand {
     Subscribe(Subscribe),
     Unsubscribe(u64),
-    Focus { id: u64, focused: bool },
+    Focus {
+        id: u64,
+        focused: bool,
+    },
     /// Rumble from a session; only the routed session's commands play.
-    Rumble { id: u64, command: RumbleCommand },
+    Rumble {
+        id: u64,
+        command: RumbleCommand,
+    },
     /// Physical button pressed set, for overlay-close hand-back: no edges
     /// arrive while held through the overlay's input blackout.
     GetPressed {
         reply: Sender<HashSet<InputSource>>,
     },
     /// Server-routed layout switch for one session, regardless of focus.
-    ReloadProfile { id: u64, path: PathBuf },
+    ReloadProfile {
+        id: u64,
+        path: PathBuf,
+    },
     /// Ask one session to finish cleanly (a desktop-default session being
     /// replaced or released).
     Stop(u64),
     /// The session passes the physical pad through untouched (it already
     /// speaks the profile's native protocol): the hub must not grab it.
-    SetPassthrough { id: u64, passthrough: bool },
+    SetPassthrough {
+        id: u64,
+        passthrough: bool,
+    },
 }
 
 struct RouteEntry {
@@ -197,7 +211,8 @@ fn run(commands: Receiver<HubCommand>, controller_events: Sender<(bool, String, 
         // While any session claims the pad, companion evdev nodes are held
         // exclusively; re-evaluated every pass so reconnects are re-held.
         let any_claiming = routes.values().any(|route| !route.passthrough);
-        if subscribed && any_claiming
+        if subscribed
+            && any_claiming
             && pad
                 .gamepad
                 .as_ref()
@@ -467,16 +482,14 @@ fn drain_commands(
                     let _ = entry.events.send(PadEvent::ReloadProfile(path));
                 }
             }
-            Ok(HubCommand::Stop(id)) => {
-                match routes.get(&id) {
-                    Some(entry) => {
-                        let _ = entry.events.send(PadEvent::Stop);
-                    }
-                    None => {
-                        pending_stops.insert(id, Instant::now());
-                    }
+            Ok(HubCommand::Stop(id)) => match routes.get(&id) {
+                Some(entry) => {
+                    let _ = entry.events.send(PadEvent::Stop);
                 }
-            }
+                None => {
+                    pending_stops.insert(id, Instant::now());
+                }
+            },
         }
     }
 }
@@ -601,7 +614,6 @@ fn forward_releases(
     }
 }
 
-
 fn broadcast_motion(routes: &HashMap<u64, RouteEntry>, available: bool) {
     for entry in routes.values() {
         let _ = entry.events.send(PadEvent::Motion(available));
@@ -725,10 +737,9 @@ mod tests {
         // Arrange: session 7 focused and unrouted, A physically held.
         let (mut routes, _, rx) = routed_entry();
         let mut routed = None;
-        let pressed: HashSet<InputSource> =
-            [crate::InputSource::Button(crate::GamepadButton::A)]
-                .into_iter()
-                .collect();
+        let pressed: HashSet<InputSource> = [crate::InputSource::Button(crate::GamepadButton::A)]
+            .into_iter()
+            .collect();
         let mut last_live = None;
         retarget(&mut routes, &mut routed, &pressed, &mut last_live);
         // Assert: routed with the pressed set for reconciliation.
@@ -776,7 +787,10 @@ mod tests {
         // Assert: only the release is forwarded; truth tracked (B held, A up).
         match rx.try_recv() {
             Ok(PadEvent::Input(event)) => {
-                assert_eq!(event.source, crate::InputSource::Button(crate::GamepadButton::A));
+                assert_eq!(
+                    event.source,
+                    crate::InputSource::Button(crate::GamepadButton::A)
+                );
                 assert_eq!(event.value, 0.0);
             }
             other => panic!("expected the release forwarded, got {other:?}"),

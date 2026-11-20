@@ -144,18 +144,16 @@ pub(super) fn profile_matches_game(profile: &InputProfile, game_id: i64) -> bool
 /// ids — native, platform, or Steam.
 pub(super) fn profile_matches_platform(profile: &InputProfile, game: &crate::Game) -> bool {
     profile.compatible_platform_ids.is_empty()
-        || profile
-            .compatible_platform_ids
-            .iter()
-            .any(|candidate| {
-                candidate == &game.native_id
-                    || candidate == &game.platform_id
-                    || candidate == &game.steam_id
-            })
+        || profile.compatible_platform_ids.iter().any(|candidate| {
+            candidate == &game.native_id
+                || candidate == &game.platform_id
+                || candidate == &game.steam_id
+        })
 }
 
 pub(super) fn delete_profile(path: &Path) -> Result<(), String> {
-    std::fs::remove_file(path).map_err(|error| format!("Could not delete controller profile: {error}"))
+    std::fs::remove_file(path)
+        .map_err(|error| format!("Could not delete controller profile: {error}"))
 }
 
 pub(super) fn managed_profile_path(save_dir: &str, name: &str) -> PathBuf {
@@ -384,6 +382,9 @@ mod tests {
         assert_eq!(find_controller_default_profile(save_dir, "pad"), None);
         let plain = super::controller_default_path(save_dir, "pad");
         super::write_profile(&plain, &InputProfile::default()).unwrap();
-        assert_eq!(find_controller_default_profile(save_dir, "pad"), Some(plain));
+        assert_eq!(
+            find_controller_default_profile(save_dir, "pad"),
+            Some(plain)
+        );
     }
 }

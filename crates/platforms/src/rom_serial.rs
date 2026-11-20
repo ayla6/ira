@@ -11,8 +11,8 @@ struct DiscInfo {
 /// never yield one; `gdi`/`cdi` serials live in the IP.BIN boot header;
 /// `wbfs`/`gcz` are multi-GB images probed, never hashed.
 const DISC_EXTENSIONS: &[&str] = &[
-    "bin", "cue", "chd", "pbp", "iso", "ecm", "gcm", "cso", "rvz", "gcz", "wbfs", "wia",
-    "wud", "wux", "mdf", "img", "gz", "gdi", "cdi",
+    "bin", "cue", "chd", "pbp", "iso", "ecm", "gcm", "cso", "rvz", "gcz", "wbfs", "wia", "wud",
+    "wux", "mdf", "img", "gz", "gdi", "cdi",
 ];
 
 pub(crate) fn is_disc_extension(path: &Path) -> bool {

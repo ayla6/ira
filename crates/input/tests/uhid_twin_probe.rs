@@ -53,10 +53,7 @@ fn evdev_snapshot() -> HashSet<PathBuf> {
 /// nodes at any moment, and breaking early on those misses the twins.
 fn new_devices(before: &HashSet<PathBuf>) -> Vec<evdev::Device> {
     std::thread::sleep(std::time::Duration::from_secs(3));
-    let mut pending: Vec<PathBuf> = evdev_snapshot()
-        .difference(before)
-        .cloned()
-        .collect();
+    let mut pending: Vec<PathBuf> = evdev_snapshot().difference(before).cloned().collect();
     let mut devices = Vec::new();
     for attempt in 0..2 {
         if attempt > 0 {
@@ -156,12 +153,16 @@ fn uhid_twins_expose_full_gamepad_controls() {
 
     let ds4_twin = devices
         .iter()
-        .find(|device| device.input_id().vendor() == 0x0f0d && device.input_id().product() == 0x00ee)
+        .find(|device| {
+            device.input_id().vendor() == 0x0f0d && device.input_id().product() == 0x00ee
+        })
         .expect("DS4 twin evdev node must exist");
     assert_gamepad_controls("DS4", ds4_twin);
     let dualsense_twin = devices
         .iter()
-        .find(|device| device.input_id().vendor() == 0x0f0d && device.input_id().product() == 0x0163)
+        .find(|device| {
+            device.input_id().vendor() == 0x0f0d && device.input_id().product() == 0x0163
+        })
         .expect("DualSense twin evdev node must exist");
     assert_gamepad_controls("DualSense", dualsense_twin);
     // hid-nintendo registers its nodes only after its USB handshake
@@ -183,7 +184,11 @@ fn uhid_twins_expose_full_gamepad_controls() {
 
 /// The first NEW evdev node with this input id that is the gamepad itself:
 /// hid-nintendo also registers an IMU companion whose node must be skipped.
-fn twin_node(before: &HashSet<PathBuf>, vendor: u16, product: u16) -> Option<(PathBuf, evdev::Device)> {
+fn twin_node(
+    before: &HashSet<PathBuf>,
+    vendor: u16,
+    product: u16,
+) -> Option<(PathBuf, evdev::Device)> {
     let now = evdev_snapshot();
     if now.len() <= before.len() {
         return None;
@@ -260,7 +265,10 @@ fn uhid_switch_pro_handshake_earns_a_rumble_capable_pad() {
     let name = device.name().unwrap_or_default();
     eprintln!("registered twin pad: {name}");
     let keys = device.supported_keys().expect("keys");
-    assert!(keys.contains(evdev::KeyCode::BTN_SOUTH), "{name}: no face buttons");
+    assert!(
+        keys.contains(evdev::KeyCode::BTN_SOUTH),
+        "{name}: no face buttons"
+    );
     assert!(keys.contains(evdev::KeyCode::BTN_START), "{name}: no start");
     let rumble_ready = device
         .supported_ff()

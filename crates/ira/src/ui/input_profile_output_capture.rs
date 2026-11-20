@@ -42,10 +42,7 @@ pub(super) fn evdev_keycode(hardware_keycode: u32) -> Option<u16> {
         .and_then(|keycode| keycode.try_into().ok())
 }
 
-fn capture_dialog(
-    title: &str,
-    instruction: &str,
-) -> (adw::Dialog, gtk4::Label, gtk4::Box) {
+fn capture_dialog(title: &str, instruction: &str) -> (adw::Dialog, gtk4::Label, gtk4::Box) {
     let dialog = adw::Dialog::new();
     dialog.set_title(title);
     dialog.set_content_width(360);

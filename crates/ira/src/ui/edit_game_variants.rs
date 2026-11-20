@@ -223,7 +223,12 @@ fn build_variant_images_and_logo_section(
             var_game.logo_position = v.logo_position.unwrap_or(LogoPosition::DEFAULT);
             var_game.logo_size = v.logo_size;
             if let Some((logo_ui, logo_pos, logo_size_adj, logo_mod)) =
-                super::game_logo::build_game_logo_page(&var_game, true, None, v.logo_position.is_none())
+                super::game_logo::build_game_logo_page(
+                    &var_game,
+                    true,
+                    None,
+                    v.logo_position.is_none(),
+                )
             {
                 let logo_expander = adw::ExpanderRow::new();
                 logo_expander.set_title(&crate::tr!("Logo position"));

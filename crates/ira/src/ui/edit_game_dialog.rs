@@ -379,26 +379,22 @@ fn build_dialog_contents(
             &crate::tr!("Images"),
             "images",
         ));
-        stack.add_named(
-            &super::helpers::scrolled_page(&images_page),
-            Some("images"),
-        );
+        stack.add_named(&super::helpers::scrolled_page(&images_page), Some("images"));
     }
 
     let logo_controls: Option<(Rc<RefCell<ira_models::LogoPosition>>, gtk4::Adjustment)> = {
-        let steam_reset = if game.trophy_source.has_steam_enrichment()
-            && !game.steam_api_id().is_empty()
-        {
-            let s = state.borrow();
-            Some(super::game_logo::SteamLogoReset {
-                steam: s.steam.clone(),
-                app_id: game.steam_api_id().to_string(),
-                db: s.db.clone(),
-                db_id: game.db_id,
-            })
-        } else {
-            None
-        };
+        let steam_reset =
+            if game.trophy_source.has_steam_enrichment() && !game.steam_api_id().is_empty() {
+                let s = state.borrow();
+                Some(super::game_logo::SteamLogoReset {
+                    steam: s.steam.clone(),
+                    app_id: game.steam_api_id().to_string(),
+                    db: s.db.clone(),
+                    db_id: game.db_id,
+                })
+            } else {
+                None
+            };
         if let Some((logo_page, selected_pos, size_adj, _modified)) =
             super::game_logo::build_game_logo_page(&game, false, steam_reset, false)
         {
@@ -407,10 +403,7 @@ fn build_dialog_contents(
                 "Logo",
                 "logo",
             ));
-            stack.add_named(
-                &super::helpers::scrolled_page(&logo_page),
-                Some("logo"),
-            );
+            stack.add_named(&super::helpers::scrolled_page(&logo_page), Some("logo"));
             Some((selected_pos, size_adj))
         } else {
             None

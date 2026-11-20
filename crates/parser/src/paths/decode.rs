@@ -41,14 +41,18 @@ fn decode_largest_png_ico_frame(data: &[u8]) -> Option<image::DynamicImage> {
     let mut best: Option<(u64, image::DynamicImage)> = None;
     for index in 0..count {
         // A malformed entry loses only itself.
-        let Some(dir_end) = (6 + index * 16).checked_add(16).filter(|end| *end <= data.len())
+        let Some(dir_end) = (6 + index * 16)
+            .checked_add(16)
+            .filter(|end| *end <= data.len())
         else {
             continue;
         };
         let dir = &data[6 + index * 16..dir_end];
         let frame_size = u32::from_le_bytes([dir[8], dir[9], dir[10], dir[11]]) as usize;
         let frame_offset = u32::from_le_bytes([dir[12], dir[13], dir[14], dir[15]]) as usize;
-        let Some(frame_end) = frame_offset.checked_add(frame_size).filter(|end| *end <= data.len())
+        let Some(frame_end) = frame_offset
+            .checked_add(frame_size)
+            .filter(|end| *end <= data.len())
         else {
             continue;
         };
@@ -60,7 +64,10 @@ fn decode_largest_png_ico_frame(data: &[u8]) -> Option<image::DynamicImage> {
             continue;
         };
         let actual = u64::from(img.width()) * u64::from(img.height());
-        if best.as_ref().is_none_or(|(best_area, _)| actual > *best_area) {
+        if best
+            .as_ref()
+            .is_none_or(|(best_area, _)| actual > *best_area)
+        {
             best = Some((actual, img));
         }
     }
@@ -164,7 +171,10 @@ mod tests {
     fn test_encode_lossless_webp_round_trips() {
         let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 200, 30, 255]));
         let encoded = encode_lossless_webp(img.as_raw(), 4, 4);
-        assert_eq!(image::guess_format(&encoded).unwrap(), image::ImageFormat::WebP);
+        assert_eq!(
+            image::guess_format(&encoded).unwrap(),
+            image::ImageFormat::WebP
+        );
         let back = image::load_from_memory(&encoded).unwrap().into_rgba8();
         assert_eq!(back.dimensions(), (4, 4));
         assert!(back.pixels().all(|pixel| pixel.0 == [10, 200, 30, 255]));

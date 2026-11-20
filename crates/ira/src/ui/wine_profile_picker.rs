@@ -58,13 +58,18 @@ pub fn build_wine_profile_picker(
             previous_n.set(idx);
             return;
         }
-        open_profile_editor(row, &state_n, &win_n, slug_n.as_deref(), &rebuilding_n, &previous_n);
+        open_profile_editor(
+            row,
+            &state_n,
+            &win_n,
+            slug_n.as_deref(),
+            &rebuilding_n,
+            &previous_n,
+        );
     });
 
-    let edit_btn = super::helpers::icon_button(
-        "document-edit-symbolic",
-        &crate::tr!("Edit profile"),
-    );
+    let edit_btn =
+        super::helpers::icon_button("document-edit-symbolic", &crate::tr!("Edit profile"));
 
     let row_c = glib::clone::Downgrade::downgrade(&row);
     let state_c = state.clone();
@@ -79,7 +84,14 @@ pub fn build_wine_profile_picker(
         let Some(win) = win_c.upgrade() else {
             return;
         };
-        open_profile_editor(&row, &state_c, &win, slug_c.as_deref(), &rebuilding_c, &previous_c);
+        open_profile_editor(
+            &row,
+            &state_c,
+            &win,
+            slug_c.as_deref(),
+            &rebuilding_c,
+            &previous_c,
+        );
     });
     row.add_suffix(&edit_btn);
     row

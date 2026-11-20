@@ -325,16 +325,8 @@ fn encode_half(freq_low: u16, freq_high: u16, amp: u16) -> [u8; 4] {
 /// The rumble-only output report (0x10): timer, then the strong (left)
 /// motor's half followed by the weak (right) motor's.
 pub fn rumble_output_report(timer: u8, strong: u16, weak: u16) -> [u8; 10] {
-    let left = encode_half(
-        DEFAULT_LOW_FREQ,
-        DEFAULT_HIGH_FREQ,
-        amplitude_code(strong),
-    );
-    let right = encode_half(
-        DEFAULT_LOW_FREQ,
-        DEFAULT_HIGH_FREQ,
-        amplitude_code(weak),
-    );
+    let left = encode_half(DEFAULT_LOW_FREQ, DEFAULT_HIGH_FREQ, amplitude_code(strong));
+    let right = encode_half(DEFAULT_LOW_FREQ, DEFAULT_HIGH_FREQ, amplitude_code(weak));
     [
         0x10, timer, left[0], left[1], left[2], left[3], right[0], right[1], right[2], right[3],
     ]

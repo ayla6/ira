@@ -84,17 +84,15 @@ pub(super) fn run_batch<T: Send + 'static>(
             }
             // A panicking worker must not skip the sentinel below — the
             // pass's completion bookkeeping depends on it.
-            let matched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                worker(item)
-            }))
-            .unwrap_or_else(|panic| {
-                eprintln!(
-                    "batch worker panicked on '{}': {}",
-                    item.name,
-                    panic_message(panic)
-                );
-                None
-            });
+            let matched = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| worker(item)))
+                .unwrap_or_else(|panic| {
+                    eprintln!(
+                        "batch worker panicked on '{}': {}",
+                        item.name,
+                        panic_message(panic)
+                    );
+                    None
+                });
             let _ = tx.try_send(BatchHit {
                 row_idx: item.row_idx,
                 db_id: item.db_id,
@@ -123,9 +121,9 @@ pub(super) fn run_batch<T: Send + 'static>(
         } else {
             format!("'{}'", hit.name)
         };
-        if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            on_result(hit)
-        })) {
+        if let Err(panic) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| on_result(hit)))
+        {
             eprintln!("batch applier panicked on {what}: {}", panic_message(panic));
         }
         glib::ControlFlow::Continue

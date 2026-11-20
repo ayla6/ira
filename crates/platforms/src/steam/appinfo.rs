@@ -130,9 +130,7 @@ fn value_after_pattern(
     let rel = search_region.windows(5).position(|w| w == pattern)?;
     let value_start = search_start + rel + 5;
     let null_pos = data[value_start..].iter().position(|&b| b == 0)?;
-    Some(
-        String::from_utf8_lossy(&data[value_start..value_start + null_pos]).to_string(),
-    )
+    Some(String::from_utf8_lossy(&data[value_start..value_start + null_pos]).to_string())
 }
 
 fn find_string_index(data: &[u8], table_offset: usize, target: &str) -> Option<usize> {

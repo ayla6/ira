@@ -4,13 +4,13 @@
 //! membership follows on the next rebuild, because it is derived,
 //! never stored.
 
-use adw::prelude::*;
-use ira_models::{AutoDimension, AutoGroup};
-use std::rc::Rc;
 use super::auto_group_editor::GroupsUi;
 use super::auto_group_values_page::{ValueMenus, ValueOption, ValuesPage};
 use super::css::CSS_HEADING;
 use super::state::SharedState;
+use adw::prelude::*;
+use ira_models::{AutoDimension, AutoGroup};
+use std::rc::Rc;
 
 pub(super) fn show_auto_group_create(state: &SharedState) {
     show(state, None);
@@ -167,7 +167,6 @@ fn show(state: &SharedState, existing: Option<AutoGroup>) {
 
     dialog.present(Some(&window));
 }
-
 
 /// One value menu per dimension, fetched once per dialog: the pickers
 /// offer what the library has on record (plus the console set, which is

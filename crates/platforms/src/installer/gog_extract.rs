@@ -71,8 +71,8 @@ fn parse_filesizes(head: &[u8]) -> Result<u64, String> {
 /// Number after `marker` in the makeself header (`offset=\`head -n 519…`,
 /// `filesizes="877150"`): the digits run to the first non-digit byte.
 fn parse_marker_u64(head: &[u8], marker: &[u8], label: &str) -> Result<u64, String> {
-    let marker_pos =
-        find_subsequence(head, marker).ok_or_else(|| format!("makeself {label} marker not found"))?;
+    let marker_pos = find_subsequence(head, marker)
+        .ok_or_else(|| format!("makeself {label} marker not found"))?;
     let rest = &head[marker_pos + marker.len()..];
     let end = rest
         .iter()

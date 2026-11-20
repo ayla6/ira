@@ -10,7 +10,11 @@ pub fn create_group(conn: &DbConn, name: &str) -> Result<i64, String> {
 }
 
 pub fn rename_group(conn: &DbConn, id: i64, name: &str) -> Result<(), String> {
-    crate::execute(conn, "UPDATE groups SET name = ?1 WHERE id = ?2", params![name, id])?;
+    crate::execute(
+        conn,
+        "UPDATE groups SET name = ?1 WHERE id = ?2",
+        params![name, id],
+    )?;
     Ok(())
 }
 
@@ -42,12 +46,20 @@ pub fn get_all_groups(conn: &DbConn) -> Result<Vec<Group>, String> {
 }
 
 pub fn add_game_to_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(), String> {
-    crate::execute(conn, "INSERT OR IGNORE INTO game_groups (game_id, group_id) VALUES (?1, ?2)", params![game_id, group_id])?;
+    crate::execute(
+        conn,
+        "INSERT OR IGNORE INTO game_groups (game_id, group_id) VALUES (?1, ?2)",
+        params![game_id, group_id],
+    )?;
     Ok(())
 }
 
 pub fn remove_game_from_group(conn: &DbConn, game_id: i64, group_id: i64) -> Result<(), String> {
-    crate::execute(conn, "DELETE FROM game_groups WHERE game_id = ?1 AND group_id = ?2", params![game_id, group_id])?;
+    crate::execute(
+        conn,
+        "DELETE FROM game_groups WHERE game_id = ?1 AND group_id = ?2",
+        params![game_id, group_id],
+    )?;
     Ok(())
 }
 

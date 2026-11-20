@@ -6,8 +6,7 @@ use adw::prelude::*;
 
 impl SgdbPickerCtx {
     pub(super) fn rebuild_all(&self) {
-        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
-        else {
+        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade()) else {
             return;
         };
         let assets = self.store.borrow();
@@ -20,8 +19,7 @@ impl SgdbPickerCtx {
         if start >= self.store.borrow().len() {
             return;
         }
-        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
-        else {
+        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade()) else {
             return;
         };
         let assets = self.store.borrow();
@@ -33,8 +31,7 @@ impl SgdbPickerCtx {
     /// the end, visible just before the first dimmed — the grid never
     /// stripes visible/dimmed/visible.
     fn settle_author_cards(&self, author: &str) {
-        let (Some(flow), Some(list)) = (self.flow.upgrade(), self.list_view.upgrade())
-        else {
+        let (Some(flow), Some(list)) = (self.flow.upgrade(), self.list_view.upgrade()) else {
             return;
         };
         settle_flow_author(self, &flow, author);
@@ -56,8 +53,7 @@ impl SgdbPickerCtx {
     /// place — no rebuild, so loaded thumbnails and the scroll position
     /// stay untouched. Shared by the filter and unfilter halves.
     fn for_each_author_card(&self, author: &str, mut f: impl FnMut(&gtk4::Widget)) {
-        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade())
-        else {
+        let (Some(flow), Some(list_view)) = (self.flow.upgrade(), self.list_view.upgrade()) else {
             return;
         };
         for container in [&flow.upcast::<gtk4::Widget>(), &list_view.upcast()] {

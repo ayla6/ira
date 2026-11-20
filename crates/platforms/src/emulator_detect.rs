@@ -168,9 +168,9 @@ pub fn detect_ra_cores_for_console(console: &str) -> Vec<RaCore> {
         .into_iter()
         .filter(|core| {
             let id = core_id(&core.path);
-            names
-                .iter()
-                .any(|name| id == *name || id.strip_prefix(name).is_some_and(|r| r.starts_with('_')))
+            names.iter().any(|name| {
+                id == *name || id.strip_prefix(name).is_some_and(|r| r.starts_with('_'))
+            })
         })
         .collect()
 }
@@ -392,11 +392,7 @@ mod tests {
         );
         assert_eq!(
             cmd,
-            vec![
-                "dolphin-emu",
-                "/games/gc/disc1.iso",
-                "/games/gc/disc2.iso",
-            ]
+            vec!["dolphin-emu", "/games/gc/disc1.iso", "/games/gc/disc2.iso",]
         );
     }
 

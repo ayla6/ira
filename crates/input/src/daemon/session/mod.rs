@@ -23,12 +23,12 @@ use std::time::{Duration, Instant};
 use crate::InputSource;
 
 use super::hub::{HubCommand, HubHandle, PadEvent};
-use super::{Arguments, SessionEvent, SteamWatcher};
 use super::signals::{install_signal_handlers, STOP_REQUESTED};
+use super::{Arguments, SessionEvent, SteamWatcher};
 use devices::{apply_controller_deadzone, make_gyro_processor};
 use inputs::{poll_cursor_switch, process_pad_events};
 use loop_io::{
-    floor_poll_timeout, FOCUS_POLL_INTERVAL, LoopActivity, PROCESS_POLL_INTERVAL,
+    floor_poll_timeout, LoopActivity, FOCUS_POLL_INTERVAL, PROCESS_POLL_INTERVAL,
     PROFILE_POLL_INTERVAL,
 };
 use outputs::{
@@ -81,11 +81,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
     // The hub routes pad traffic to whoever owns focus; until it says
     // otherwise this session is frozen. `None` means the first focus
     // reading has not been reported yet.
-    let mut reported_focus: Option<bool> = if focus.is_none() {
-        Some(true)
-    } else {
-        None
-    };
+    let mut reported_focus: Option<bool> = if focus.is_none() { Some(true) } else { None };
     let mut hub_live = false;
     let mut pending: Vec<PadEvent> = Vec::new();
     // Overlay toggle authority (gamescope/flatpak only): the daemon owns the physical
@@ -144,8 +140,12 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                 paused_for_focus = true;
                 eprintln!("ira-input: game window unfocused; pausing input");
                 if let Err(error) = release_outputs(
-                    &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
-                    &mut pad_state, &mut trace,
+                    &mut mapper,
+                    &mut virtual_gamepad,
+                    &mut keyboard,
+                    &mut mouse,
+                    &mut pad_state,
+                    &mut trace,
                 ) {
                     eprintln!("ira-input: failed to release outputs on pause: {error}");
                 }
@@ -342,8 +342,12 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     if hub_live {
                         hub_live = false;
                         if let Err(error) = release_outputs(
-                            &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
-                            &mut pad_state, &mut trace,
+                            &mut mapper,
+                            &mut virtual_gamepad,
+                            &mut keyboard,
+                            &mut mouse,
+                            &mut pad_state,
+                            &mut trace,
                         ) {
                             eprintln!("ira-input: failed to release frozen outputs: {error}");
                         }
@@ -351,10 +355,17 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                 }
                 PadEvent::Stop => {
                     // The server replaced this session: wind down with no exit code.
-                    eprintln!("ira-input: session {} stopping on request", arguments.session_id);
+                    eprintln!(
+                        "ira-input: session {} stopping on request",
+                        arguments.session_id
+                    );
                     if let Err(error) = release_outputs(
-                        &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
-                        &mut pad_state, &mut trace,
+                        &mut mapper,
+                        &mut virtual_gamepad,
+                        &mut keyboard,
+                        &mut mouse,
+                        &mut pad_state,
+                        &mut trace,
                     ) {
                         eprintln!("ira-input: failed to release outputs on stop: {error}");
                     }
@@ -454,17 +465,15 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                         swallowed.len()
                     );
                 }
-                let handed: HashSet<InputSource> =
-                    pressed.iter().copied().collect::<HashSet<_>>()
-                        .difference(&swallowed)
-                        .copied()
-                        .collect();
+                let handed: HashSet<InputSource> = pressed
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>()
+                    .difference(&swallowed)
+                    .copied()
+                    .collect();
                 let mut handed_back = 0;
-                for event in inputs::presses_for_held(
-                    mapper.held_buttons(),
-                    &handed,
-                    now_us(),
-                ) {
+                for event in inputs::presses_for_held(mapper.held_buttons(), &handed, now_us()) {
                     handed_back += 1;
                     if let Err(error) = emit_mapped(
                         &mut mapper,
@@ -506,9 +515,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         // Overlay navigation (gamescope/flatpak only): the daemon translates pad
         // presses to canvas commands while visible; the game never sees them.
         if overlay_open {
-            if overlay_nav.is_none()
-                && nav_retry_at.elapsed() >= Duration::from_secs(1)
-            {
+            if overlay_nav.is_none() && nav_retry_at.elapsed() >= Duration::from_secs(1) {
                 nav_retry_at = Instant::now();
                 overlay_nav = overlay_nav::OverlayNav::arm(arguments.env.as_deref());
                 if overlay_nav.is_some() {
@@ -520,8 +527,7 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
                     if let PadEvent::Input(input) = event {
                         // Any pad press while open is consumed: holding it through the
                         // close must swallow, never hand back.
-                        if matches!(input.source, InputSource::Button(_)) && input.value > 0.5
-                        {
+                        if matches!(input.source, InputSource::Button(_)) && input.value > 0.5 {
                             consumed_while_open.insert(input.source);
                         }
                         nav.feed(input);
@@ -619,8 +625,12 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         }
         if let Err(error) = result {
             if let Err(reset_error) = release_outputs(
-                &mut mapper, &mut virtual_gamepad, &mut keyboard, &mut mouse,
-                &mut pad_state, &mut trace,
+                &mut mapper,
+                &mut virtual_gamepad,
+                &mut keyboard,
+                &mut mouse,
+                &mut pad_state,
+                &mut trace,
             ) {
                 eprintln!("ira-input: failed to emit reset releases: {reset_error}");
             }
@@ -665,8 +675,8 @@ pub fn run_session(arguments: Arguments) -> Result<i32, String> {
         }
         // With the inotify pump waking the channel, saves apply instantly; the
         // periodic cadence is only the fallback when inotify is unavailable.
-        let profile_wake_due = profile_wake_fd.is_some()
-            || schedule.profile.elapsed() >= PROFILE_POLL_INTERVAL;
+        let profile_wake_due =
+            profile_wake_fd.is_some() || schedule.profile.elapsed() >= PROFILE_POLL_INTERVAL;
         if profile_monitor.is_some() && profile_wake_due {
             schedule.profile = Instant::now();
             if let Some(monitor) = profile_monitor.as_mut() {
@@ -752,7 +762,8 @@ pub(crate) fn daemon_toggle_shm_name(env: Option<&[(String, String)]>) -> Option
                 .find(|(key, _)| key == "IRA_OVERLAY_SHM")
                 .map(|(_, name)| name.clone())
         })?
-}fn release_outputs(
+}
+fn release_outputs(
     mapper: &mut crate::MappingEngine,
     virtual_gamepad: &mut crate::VirtualGamepad,
     keyboard: &mut Option<crate::VirtualKeyboard>,
@@ -780,10 +791,16 @@ mod tests {
     fn test_daemon_toggle_shm_name_needs_marker_and_mapping() {
         assert_eq!(daemon_toggle_shm_name(None), None);
         assert_eq!(daemon_toggle_shm_name(Some(&[])), None);
-        let marked = vec![(ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(), "1".to_string())];
+        let marked = vec![(
+            ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(),
+            "1".to_string(),
+        )];
         assert_eq!(daemon_toggle_shm_name(Some(&marked)), None);
         let armed = vec![
-            (ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(), "1".to_string()),
+            (
+                ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(),
+                "1".to_string(),
+            ),
             ("IRA_OVERLAY_SHM".to_string(), "/ira_overlay_1".to_string()),
         ];
         assert_eq!(
@@ -791,7 +808,10 @@ mod tests {
             Some("/ira_overlay_1".to_string())
         );
         let off = vec![
-            (ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(), "0".to_string()),
+            (
+                ira_overlay_ipc::DAEMON_TOGGLE_ENV.to_string(),
+                "0".to_string(),
+            ),
             ("IRA_OVERLAY_SHM".to_string(), "/ira_overlay_1".to_string()),
         ];
         assert_eq!(daemon_toggle_shm_name(Some(&off)), None);

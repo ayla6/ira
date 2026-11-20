@@ -315,7 +315,8 @@ impl KeyIntercept {
         }
         self.devices.retain(|path, _| seen.contains(path));
         self.needs_grab.retain(|path| seen.contains(path));
-        self.warned.retain(|path| seen.contains(path) || self.devices.contains_key(path));
+        self.warned
+            .retain(|path| seen.contains(path) || self.devices.contains_key(path));
     }
 }
 

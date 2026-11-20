@@ -127,8 +127,7 @@ impl DiscPicker {
         }
         self.selection.set(0);
         self.pill.set_text(&self.tile_name(0));
-        self.pill
-            .set_max_width(480.0 * scale.max(0.5));
+        self.pill.set_max_width(480.0 * scale.max(0.5));
         self.track_selection();
         self.root.set_visible(true);
         // Park on the fallback geometry right away so the name pill
@@ -199,13 +198,11 @@ impl DiscPicker {
         if super::launch_locked(state) {
             return;
         }
-        let tile = self.tiles.borrow().get(self.selection.get()).map(|tile| {
-            (
-                tile.disc_id,
-                self.db_id.get(),
-                self.variant_id.get(),
-            )
-        });
+        let tile = self
+            .tiles
+            .borrow()
+            .get(self.selection.get())
+            .map(|tile| (tile.disc_id, self.db_id.get(), self.variant_id.get()));
         let Some((disc_id, db_id, variant_id)) = tile else {
             return;
         };
@@ -214,9 +211,10 @@ impl DiscPicker {
     }
 
     fn tile_name(&self, index: usize) -> String {
-        self.tiles.borrow().get(index).map_or_else(String::new, |tile| {
-            tile.label.clone()
-        })
+        self.tiles
+            .borrow()
+            .get(index)
+            .map_or_else(String::new, |tile| tile.label.clone())
     }
 
     /// Re-derive the ring rect and the pill anchor from the selected

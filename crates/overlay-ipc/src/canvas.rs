@@ -35,8 +35,7 @@ pub const CANVAS_MAX_BYTES: usize = CANVAS_MAX_W * CANVAS_MAX_H * CANVAS_BPP;
 pub const CURSOR_MAX: usize = 128;
 pub const CURSOR_MAX_BYTES: usize = CURSOR_MAX * CURSOR_MAX * CANVAS_BPP;
 
-pub const CANVAS_SHM_SIZE: usize =
-    std::mem::size_of::<CanvasHeader>() + CANVAS_MAX_BYTES;
+pub const CANVAS_SHM_SIZE: usize = std::mem::size_of::<CanvasHeader>() + CANVAS_MAX_BYTES;
 
 #[repr(C)]
 pub struct CanvasHeader {
@@ -97,8 +96,7 @@ unsafe impl Send for CanvasShm {}
 impl CanvasShm {
     pub fn create(db_id: i64) -> Result<Self, String> {
         let path = canvas_shm_path(db_id);
-        let c_path =
-            std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?;
+        let c_path = std::ffi::CString::new(path.as_str()).map_err(|e| e.to_string())?;
         unsafe { libc::shm_unlink(c_path.as_ptr()) };
         let fd = open_fd(&path, libc::O_RDWR | libc::O_CREAT, "canvas")?;
         Self::map_shm_fd(fd, true)
@@ -177,10 +175,7 @@ impl CanvasShm {
             return Err(format!("bad canvas extent {w}x{h}"));
         }
         if pixels.len() != w * h * CANVAS_BPP {
-            return Err(format!(
-                "pixel len {} != {w}x{h}x4",
-                pixels.len()
-            ));
+            return Err(format!("pixel len {} != {w}x{h}x4", pixels.len()));
         }
         self.pixels_mut()[..pixels.len()].copy_from_slice(pixels);
         let hdr = self.header_mut();
@@ -277,11 +272,7 @@ impl CanvasShm {
     }
 }
 
-fn push_ring<T: Copy, const N: usize>(
-    slots: &mut [T; N],
-    write_idx: &AtomicU32,
-    val: T,
-) {
+fn push_ring<T: Copy, const N: usize>(slots: &mut [T; N], write_idx: &AtomicU32, val: T) {
     let idx = write_idx.load(Ordering::SeqCst);
     slots[idx as usize % N] = val;
     std::sync::atomic::fence(Ordering::SeqCst);

@@ -49,7 +49,7 @@ pub(crate) struct ScraperSlot {
     match_parent: adw::PreferencesGroup,
     rows: Rc<RefCell<Vec<gtk4::Widget>>>,
     match_row: Rc<RefCell<Option<adw::ActionRow>>>,
-    pub(super)     draft: Rc<RefCell<ScraperMetadata>>,
+    pub(super) draft: Rc<RefCell<ScraperMetadata>>,
     /// The staged Steam id (the Service match row): saved to `steam_id`
     /// at Save time, alongside the metadata draft.
     pub(super) steam_id: Rc<RefCell<String>>,
@@ -90,8 +90,7 @@ pub(super) fn build_scraper_section(
     // platforms, and PC games whose diff search fills them too. PS3/PS4
     // games carry a product code here, not a console.
     let console = ira_models::scraper_console_id(game.kind, game.platform_id.id());
-    let eligible =
-        game.kind.is_pc() || ira_models::screenscraper_system_id(&console).is_some();
+    let eligible = game.kind.is_pc() || ira_models::screenscraper_system_id(&console).is_some();
     if metadata.is_none() && !eligible {
         return None;
     }
@@ -101,9 +100,7 @@ pub(super) fn build_scraper_section(
         rows: Rc::new(RefCell::new(Vec::new())),
         match_row: Rc::new(RefCell::new(None)),
         draft: Rc::new(RefCell::new(metadata.clone().unwrap_or_default())),
-        steam_id: Rc::new(RefCell::new(
-            game.steam_id.clone(),
-        )),
+        steam_id: Rc::new(RefCell::new(game.steam_id.clone())),
         pending: Rc::new(RefCell::new(SsPending::None)),
         pre_match: Rc::new(RefCell::new(None)),
     };
@@ -168,7 +165,9 @@ pub(super) fn apply_scraper_draft(state: &SharedState, db_id: i64) -> bool {
         // The draft carried the picked id into the store above; what is
         // left is the miss marker and the in-memory copy of the game.
         SsPending::Match(_) => {
-            if let Err(e) = ira_db::clear_match_miss(&state.borrow().db, db_id, ira_db::miss_source::SS) {
+            if let Err(e) =
+                ira_db::clear_match_miss(&state.borrow().db, db_id, ira_db::miss_source::SS)
+            {
                 eprintln!("Failed to clear the ScreenScraper miss marker: {e}");
             }
             if let Some(g) = state
@@ -357,7 +356,8 @@ fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &Scra
     fact_rows(state, game, win, &metadata, slot);
     synopsis_row(state, game, win, slot, &metadata.synopses);
     let match_row = search_row(state, game, win, slot);
-    slot.match_parent.add(&match_row.clone().upcast::<gtk4::Widget>());
+    slot.match_parent
+        .add(&match_row.clone().upcast::<gtk4::Widget>());
     *slot.match_row.borrow_mut() = Some(match_row);
 }
 
@@ -367,7 +367,12 @@ fn rebuild_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &Scra
 /// Never call from inside a fact row's own handler (the players entry,
 /// the rating spin): those rows show their edit already, and a rebuild
 /// would pull the widget out from under the user.
-pub(super) fn refresh_rows(state: &SharedState, game: &Game, win: &adw::Window, slot: &ScraperSlot) {
+pub(super) fn refresh_rows(
+    state: &SharedState,
+    game: &Game,
+    win: &adw::Window,
+    slot: &ScraperSlot,
+) {
     rebuild_rows(state, game, win, slot);
 }
 
@@ -625,14 +630,14 @@ fn release_date_row(
         pick.on_apply({
             let pick = pick.clone();
             move || {
-            // The typed date wins while valid; an empty entry applies
-            // whatever day the calendar shows.
-            let Some(stored) = pick.date() else { return };
-            edit_field(&slot, |m| {
-                m.release_date = stored.clone();
-                m.release_timestamp = ira_db::scraper_release_timestamp(&stored);
-            });
-            refresh_rows(&state, &game, &win, &slot);
+                // The typed date wins while valid; an empty entry applies
+                // whatever day the calendar shows.
+                let Some(stored) = pick.date() else { return };
+                edit_field(&slot, |m| {
+                    m.release_date = stored.clone();
+                    m.release_timestamp = ira_db::scraper_release_timestamp(&stored);
+                });
+                refresh_rows(&state, &game, &win, &slot);
             }
         });
     }
@@ -758,13 +763,11 @@ fn classifications_row(
                 strip.append(&mark);
             }
             None => {
-                let text = ira_models::ratings::display(
-                    &classification.kind,
-                    &classification.value,
-                )
-                .unwrap_or_else(|| {
-                    format!("{} {}", classification.kind, classification.value)
-                });
+                let text =
+                    ira_models::ratings::display(&classification.kind, &classification.value)
+                        .unwrap_or_else(|| {
+                            format!("{} {}", classification.kind, classification.value)
+                        });
                 let chip = gtk4::Label::new(Some(&text));
                 chip.set_use_markup(false);
                 chip.add_css_class(CSS_CAPTION);
@@ -1076,15 +1079,7 @@ fn search_row(
                     stage_ss_match(st, id, picked, &stage_slot);
                 },
             ));
-            show_ss_search_dialog(
-                &dialog_state,
-                db_id,
-                &name,
-                &platform_id,
-                &win,
-                sink,
-                None,
-            );
+            show_ss_search_dialog(&dialog_state, db_id, &name, &platform_id, &win, sink, None);
         });
     }
     row.add_suffix(&btn);
@@ -1128,13 +1123,11 @@ fn run_auto_match(state: &SharedState, game: &Game, slot: &ScraperSlot) {
     });
     let state = state.clone();
     let slot = slot.clone();
-    poll_channel(rx, move |matched| {
-        match matched.as_ref() {
-            Some(picked) => stage_ss_match(&state, db_id, picked, &slot),
-            None => {
-                repaint_slot(&state, db_id);
-                slot.set_match_status(&crate::tr!("No ScreenScraper entry found"));
-            }
+    poll_channel(rx, move |matched| match matched.as_ref() {
+        Some(picked) => stage_ss_match(&state, db_id, picked, &slot),
+        None => {
+            repaint_slot(&state, db_id);
+            slot.set_match_status(&crate::tr!("No ScreenScraper entry found"));
         }
     });
 }

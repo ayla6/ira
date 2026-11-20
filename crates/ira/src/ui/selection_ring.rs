@@ -110,8 +110,7 @@ mod imp {
                 return;
             }
             let (ox, oy, ow, oh) = outer;
-            let bounds =
-                gtk4::graphene::Rect::new(ox as f32, oy as f32, ow as f32, oh as f32);
+            let bounds = gtk4::graphene::Rect::new(ox as f32, oy as f32, ow as f32, oh as f32);
             let ctx = snapshot.append_cairo(&bounds);
             if self.round.get() {
                 let cx = ox + ow / 2.0;
@@ -155,8 +154,20 @@ fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f6
     cr.new_sub_path();
     cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
     cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
-    cr.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-    cr.arc(x + r, y + r, r, std::f64::consts::PI, -std::f64::consts::FRAC_PI_2);
+    cr.arc(
+        x + r,
+        y + h - r,
+        r,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    cr.arc(
+        x + r,
+        y + r,
+        r,
+        std::f64::consts::PI,
+        -std::f64::consts::FRAC_PI_2,
+    );
     cr.close_path();
 }
 

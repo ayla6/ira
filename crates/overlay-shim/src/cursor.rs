@@ -23,8 +23,7 @@ type HasErrorFn = unsafe extern "C" fn(*mut c_void) -> c_int;
 type DisconnectFn = unsafe extern "C" fn(*mut c_void);
 type FlushFn = unsafe extern "C" fn(*mut c_void) -> c_int;
 type GetInputFocusFn = unsafe extern "C" fn(*mut c_void) -> u32;
-type GetInputFocusReplyFn =
-    unsafe extern "C" fn(*mut c_void, u32, *mut *mut c_void) -> *mut c_void;
+type GetInputFocusReplyFn = unsafe extern "C" fn(*mut c_void, u32, *mut *mut c_void) -> *mut c_void;
 type UngrabPointerFn = unsafe extern "C" fn(*mut c_void) -> u32;
 type UngrabKeyboardFn = unsafe extern "C" fn(*mut c_void) -> u32;
 type ChangeAttrsFn = unsafe extern "C" fn(*mut c_void, u32, u32, *const u32) -> u32;
@@ -90,8 +89,7 @@ pub fn force_cursor_visible() {
     let Some(api) = XcbApi::resolve() else {
         return;
     };
-    let ungrab_keyboard: Option<UngrabKeyboardFn> =
-        sym!(c"xcb_ungrab_keyboard", UngrabKeyboardFn);
+    let ungrab_keyboard: Option<UngrabKeyboardFn> = sym!(c"xcb_ungrab_keyboard", UngrabKeyboardFn);
 
     let conn = unsafe { (api.connect)(std::ptr::null(), std::ptr::null_mut()) };
     if conn.is_null() || unsafe { (api.has_error)(conn) } != 0 {

@@ -219,10 +219,7 @@ impl SwitchProUhidDevice {
         // equal means nothing changed on the pad or the sensors.
         let unchanged = self
             .last_report
-            .is_some_and(|last| {
-                last[0] == report[0]
-                    && last[2..] == report[2..]
-            });
+            .is_some_and(|last| last[0] == report[0] && last[2..] == report[2..]);
         if unchanged {
             return Ok(());
         }
@@ -553,8 +550,8 @@ fn unpack_fields(bytes: [u8; 3]) -> (u16, u16) {
 #[cfg(test)]
 mod tests {
     use super::{
-        handshake_reply, spi_flash, standard_report, stick_bytes, unpack_fields,
-        PadState, REPORT_DESCRIPTOR,
+        handshake_reply, spi_flash, standard_report, stick_bytes, unpack_fields, PadState,
+        REPORT_DESCRIPTOR,
     };
 
     #[test]
@@ -578,11 +575,14 @@ mod tests {
         // Sticks described as X/Y/Rx/Ry twelve-bit fields.
         assert!(REPORT_DESCRIPTOR.windows(2).any(|w| w == [0x09, 0x30]));
         assert!(REPORT_DESCRIPTOR.windows(2).any(|w| w == [0x09, 0x34]));
-        assert!(REPORT_DESCRIPTOR.windows(3).any(|w| w == [0x75, 0x0C, 0x95]));
+        assert!(REPORT_DESCRIPTOR
+            .windows(3)
+            .any(|w| w == [0x75, 0x0C, 0x95]));
         // No accelerometer usages: motion rides the undescribed constant
         // tail and the paired sensor twin, never a phantom axis set here.
-        assert!(!REPORT_DESCRIPTOR.windows(2).any(|w| w == [0x09, 0x33]
-            && REPORT_DESCRIPTOR.windows(2).any(|w2| w2 == [0x09, 0x32])));
+        assert!(!REPORT_DESCRIPTOR.windows(2).any(
+            |w| w == [0x09, 0x33] && REPORT_DESCRIPTOR.windows(2).any(|w2| w2 == [0x09, 0x32])
+        ));
     }
 
     /// The 0x30 report's input fields as (flags, body-relative bit
@@ -635,10 +635,10 @@ mod tests {
         assert_eq!(
             fields,
             vec![
-                (0x03, 0),   // constant: timer + battery
-                (0x02, 16),  // buttons, wire bytes 3..5
-                (0x02, 40),  // sticks, wire bytes 6..11
-                (0x03, 88),  // constant: vibrator + IMU tail
+                (0x03, 0),  // constant: timer + battery
+                (0x02, 16), // buttons, wire bytes 3..5
+                (0x02, 40), // sticks, wire bytes 6..11
+                (0x03, 88), // constant: vibrator + IMU tail
             ]
         );
         // The button and stick offsets agree with where standard_report
@@ -704,7 +704,7 @@ mod tests {
         assert_eq!(report[3], 1 << 2); // south (B) in the first button byte
         assert_eq!(report[5], 1 << 7); // ZL in the third button byte
         assert_eq!(report.len(), 64); // endpoint-sized like real hardware
-                                     // Third IMU sample's accel Z lands as 1g x 4096.
+                                      // Third IMU sample's accel Z lands as 1g x 4096.
         let offset = 13 + 2 * 12 + 4; // skip 2 samples, accel z slot
         let raw = i16::from_le_bytes([report[offset], report[offset + 1]]);
         assert_eq!(raw, 4096);

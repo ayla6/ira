@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use super::context_menu_actions::{
     setup_controller_action, setup_delete_game_action, setup_edit_action, setup_hide_action,
-    setup_multi_entity_add_actions, setup_multi_toggle_hide_action,
-    setup_open_game_folder_action, setup_open_gog_status_action, setup_open_images_action,
-    setup_open_save_location_action, setup_open_steam_status_action,     setup_open_wine_prefix_action, setup_organize_groups_action, setup_play_action,
-    setup_play_history_action, setup_run_manual_script_action,
+    setup_multi_entity_add_actions, setup_multi_toggle_hide_action, setup_open_game_folder_action,
+    setup_open_gog_status_action, setup_open_images_action, setup_open_save_location_action,
+    setup_open_steam_status_action, setup_open_wine_prefix_action, setup_organize_groups_action,
+    setup_play_action, setup_play_history_action, setup_run_manual_script_action,
 };
 use super::state::SharedState;
 use crate::Game;
@@ -22,7 +22,14 @@ fn setup_and_show_popover(
     let popover = gtk4::PopoverMenu::from_model(Some(menu));
     popover.set_halign(gtk4::Align::Start);
     popover.set_has_arrow(false);
-    super::helpers::popup_context_popover(parent, &popover, actions, "game", at_x as i32, at_y as i32);
+    super::helpers::popup_context_popover(
+        parent,
+        &popover,
+        actions,
+        "game",
+        at_x as i32,
+        at_y as i32,
+    );
 }
 
 /// The entity-picker entries behind "Organise" — the same actions land
@@ -37,12 +44,7 @@ fn append_organise_entity_entries(menu: &gio::Menu) {
 fn resolve_game_locations(
     s: &super::state::AppState,
     game: &Game,
-) -> (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    String,
-) {
+) -> (Option<String>, Option<String>, Option<String>, String) {
     let config = super::helpers::logged_game_config(&s.db, game.db_id);
     let app_default = s.cfg.default_wine_config.clone();
     let (launch, mut wine, profile_id) = config.unwrap_or_default();
@@ -75,12 +77,11 @@ fn resolve_game_locations(
     } else {
         None
     };
-    let game_file =
-        if !resolved_game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
-            Some(resolved_game_path)
-        } else {
-            None
-        };
+    let game_file = if !resolved_game_path.is_empty() && game.kind != ira_models::GameKind::Steam {
+        Some(resolved_game_path)
+    } else {
+        None
+    };
     let show_wine = game.kind == ira_models::GameKind::Wine && wine.enabled;
     (
         game_dir,
@@ -111,14 +112,7 @@ pub fn show_game_context_menu(
             .map(|g| g.hidden)
             .unwrap_or(game.hidden);
         let (folder, file, prefix, script) = resolve_game_locations(&s, game);
-        (
-            hidden,
-            folder,
-            file,
-            prefix,
-            script,
-            s.save_dir.clone(),
-        )
+        (hidden, folder, file, prefix, script, s.save_dir.clone())
     };
 
     let menu = gio::Menu::new();
@@ -211,12 +205,7 @@ pub fn show_game_context_menu(
     setup_play_history_action(&actions, state.clone(), game.db_id, game.variant_id);
     setup_hide_action(&actions, state.clone(), game.db_id, current_hidden);
     if !manual_script.is_empty() {
-        setup_run_manual_script_action(
-            &actions,
-            game.clone(),
-            manual_script,
-            game_folder.clone(),
-        );
+        setup_run_manual_script_action(&actions, game.clone(), manual_script, game_folder.clone());
     }
     if is_deletable {
         setup_delete_game_action(&actions, state.clone(), game.clone());
@@ -287,7 +276,6 @@ pub fn show_multi_game_context_menu(
     setup_and_show_popover(&menu, &actions, parent, at_x, at_y);
 }
 
-
 /// Shift+right-click on grid covers: a small menu to reset (delete) any of
 /// the game's stored art files, so the fallback — or a fresh auto
 /// download — takes over.
@@ -346,7 +334,14 @@ pub fn show_image_reset_menu(
     let popover = gtk4::PopoverMenu::from_model(Some(&menu));
     popover.set_halign(gtk4::Align::Start);
     popover.set_has_arrow(false);
-    super::helpers::popup_context_popover(parent, &popover, &actions, "image", at_x as i32, at_y as i32);
+    super::helpers::popup_context_popover(
+        parent,
+        &popover,
+        &actions,
+        "image",
+        at_x as i32,
+        at_y as i32,
+    );
 }
 
 /// Delete one stored art file from the game's data dir and update the

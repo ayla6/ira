@@ -25,10 +25,8 @@ pub(super) fn add_open_emulator_row(
     let row = adw::ActionRow::new();
     row.set_title(&crate::tr!("Open emulator"));
     row.set_subtitle(
-        &crate::tr!(
-            "Start {name} without loading a game, using the current controller mapping"
-        )
-        .replace("{name}", &esc(display_label)),
+        &crate::tr!("Start {name} without loading a game, using the current controller mapping")
+            .replace("{name}", &esc(display_label)),
     );
 
     let open = gtk4::Button::from_icon_name("media-playback-start-symbolic");
@@ -155,6 +153,9 @@ mod tests {
             merge_console_overrides((None, None), None, "/saved.json"),
             (None, Some("/saved.json".to_string()))
         );
-        assert_eq!(merge_console_overrides((None, None), None, ""), (None, None));
+        assert_eq!(
+            merge_console_overrides((None, None), None, ""),
+            (None, None)
+        );
     }
 }

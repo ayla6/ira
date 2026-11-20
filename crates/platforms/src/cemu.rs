@@ -1,6 +1,6 @@
+use crate::emu_dirs::{app_path_for, home_dir};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use crate::emu_dirs::{app_path_for, home_dir};
 
 pub const CEMU_FLATPAK_ID: &str = "info.cemu.Cemu";
 

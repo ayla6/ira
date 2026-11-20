@@ -333,12 +333,8 @@ pub fn load_game(entry: &GameEntry, save_dir: &str) -> Result<Game, String> {
     let status_map = if is_steam_native {
         steam_native_status_map(app_id, &steam_native_data)
     } else {
-        let status_path = ira_parser::unlock_status_path(
-            save_dir,
-            entry.trophy_source,
-            app_id,
-            &entry.native_id,
-        );
+        let status_path =
+            ira_parser::unlock_status_path(save_dir, entry.trophy_source, app_id, &entry.native_id);
         ira_parser::load_status_map(&status_path)
     };
 
@@ -371,19 +367,18 @@ fn steam_native_status_map(
     app_id: &str,
     data: &ira_platforms::steam::SteamAchievementData,
 ) -> HashMap<String, AchievementStatus> {
-    let mut map: HashMap<String, AchievementStatus> =
-        ira_platforms::steam::read_user_stats(app_id)
-            .into_iter()
-            .map(|(name, (earned, earned_time))| {
-                (
-                    name,
-                    AchievementStatus {
-                        earned,
-                        earned_time,
-                    },
-                )
-            })
-            .collect();
+    let mut map: HashMap<String, AchievementStatus> = ira_platforms::steam::read_user_stats(app_id)
+        .into_iter()
+        .map(|(name, (earned, earned_time))| {
+            (
+                name,
+                AchievementStatus {
+                    earned,
+                    earned_time,
+                },
+            )
+        })
+        .collect();
     for ach in &data.achievements {
         map.entry(ach.id.clone())
             .and_modify(|s| {
@@ -477,10 +472,7 @@ fn push_meta_achievements(
 
 /// Unlock status with neither metadata nor a Steam cache entry: bare
 /// name-only achievements so progress is still visible.
-fn push_bare_status_achievements(
-    game: &mut Game,
-    status_map: &HashMap<String, AchievementStatus>,
-) {
+fn push_bare_status_achievements(game: &mut Game, status_map: &HashMap<String, AchievementStatus>) {
     let mut keys: Vec<_> = status_map.keys().cloned().collect();
     keys.sort();
     for name in keys {

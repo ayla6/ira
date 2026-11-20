@@ -34,8 +34,8 @@ pub struct DaemonClient {
 
 impl DaemonClient {
     pub fn connect(path: &Path) -> Result<Self, String> {
-        let stream =
-            UnixStream::connect(path).map_err(|error| format!("connect {}: {error}", path.display()))?;
+        let stream = UnixStream::connect(path)
+            .map_err(|error| format!("connect {}: {error}", path.display()))?;
         let reader = BufReader::new(stream.try_clone().map_err(|error| error.to_string())?);
         Ok(Self {
             stream,
@@ -202,9 +202,7 @@ impl DaemonClient {
             events: libc::POLLIN,
             revents: 0,
         };
-        let timeout_ms = timeout
-            .as_millis()
-            .min(libc::c_int::MAX as u128) as libc::c_int;
+        let timeout_ms = timeout.as_millis().min(libc::c_int::MAX as u128) as libc::c_int;
         // EINTR just means a signal arrived during the wait; retry once by
         // reporting idle so the caller's next tick re-polls.
         let ready = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };

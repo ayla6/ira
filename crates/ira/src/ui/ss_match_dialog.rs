@@ -116,7 +116,9 @@ pub(super) fn persist_ss_match(state: &SharedState, db_id: i64, picked: &Scraped
 /// drifts from the dump. The cleaner takes the dump tags off either way,
 /// and a name that is only a bare title id falls through to the other.
 fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
-    let entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten()?;
+    let entry = ira_db::find_by_db_id(&state.borrow().db, db_id)
+        .ok()
+        .flatten()?;
     // PS3/PS4 games carry a product code here, not a console.
     let console = ira_models::scraper_console_id(entry.kind, entry.platform_id.id());
     // PC titles come from Steam or the user; switch and the other
@@ -128,8 +130,9 @@ fn rom_stem(state: &SharedState, db_id: i64) -> Option<String> {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let trusted =
-        entry.title_trusted || entry.kind.is_pc() || ira_models::title_from_trusted_source(&console);
+    let trusted = entry.title_trusted
+        || entry.kind.is_pc()
+        || ira_models::title_from_trusted_source(&console);
     pick_search_name(trusted, &stem, &entry.title, &entry.title)
 }
 
@@ -250,7 +253,9 @@ pub fn show_ss_search_dialog(
     // disabled ScreenScraper means no requests at all, manual included.
     let disabled = !state.borrow().cfg.screenscraper_enabled;
     // Say which console the search is scoped to.
-    let db_entry = ira_db::find_by_db_id(&state.borrow().db, db_id).ok().flatten();
+    let db_entry = ira_db::find_by_db_id(&state.borrow().db, db_id)
+        .ok()
+        .flatten();
     let console = match &db_entry {
         Some(entry) if entry.kind.is_pc() => crate::tr!("PC"),
         _ => ira_models::find_console(platform_id)
@@ -501,5 +506,4 @@ mod tests {
             (None, "Mario 64".to_string())
         );
     }
-
 }

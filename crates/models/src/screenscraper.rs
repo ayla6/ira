@@ -64,8 +64,7 @@ impl ScraperMetadata {
     fn holds(list: &[ScraperEntity], entity: &ScraperEntity) -> bool {
         let tokens = company_tokens(&entity.name);
         list.iter().any(|held| {
-            held.id == entity.id
-                || (!tokens.is_empty() && company_tokens(&held.name) == tokens)
+            held.id == entity.id || (!tokens.is_empty() && company_tokens(&held.name) == tokens)
         })
     }
 
@@ -94,8 +93,7 @@ impl ScraperMetadata {
                 let tokens = company_tokens(&entity.name);
                 if !tokens.is_empty() {
                     for held in list.iter_mut() {
-                        let held_is_local =
-                            held.id.parse::<i64>().is_ok_and(|id| id < 0);
+                        let held_is_local = held.id.parse::<i64>().is_ok_and(|id| id < 0);
                         if held_is_local && company_tokens(&held.name) == tokens {
                             *held = entity.clone();
                             continue 'answer;
@@ -116,13 +114,11 @@ impl ScraperMetadata {
     pub fn classifications_differ(&self, other: &ScraperMetadata) -> bool {
         self.classifications.len() != other.classifications.len()
             || self.classifications.iter().any(|c| {
-                !other
-                    .classifications
-                    .iter()
-                    .any(|o| {
-                        crate::ratings::canonical_kind(&o.kind) == crate::ratings::canonical_kind(&c.kind)
-                            && o.value == c.value
-                    })
+                !other.classifications.iter().any(|o| {
+                    crate::ratings::canonical_kind(&o.kind)
+                        == crate::ratings::canonical_kind(&c.kind)
+                        && o.value == c.value
+                })
             })
     }
 
@@ -320,11 +316,7 @@ pub fn title_from_trusted_source(platform_id: &str) -> bool {
 /// before, from an official console header, or from Steam/the user on
 /// PC. ScreenScraper matches enrich around trusted titles instead of
 /// replacing them.
-pub fn is_title_trusted(
-    kind: crate::GameKind,
-    title_trusted: bool,
-    platform_id: &str,
-) -> bool {
+pub fn is_title_trusted(kind: crate::GameKind, title_trusted: bool, platform_id: &str) -> bool {
     title_trusted || kind.is_pc() || title_from_trusted_source(platform_id)
 }
 
@@ -348,9 +340,29 @@ pub fn scraper_console_id(kind: crate::GameKind, platform_id: &str) -> String {
 /// "Naughty Dog, LLC" where ScreenScraper writes "Naughty Dog", "Sega
 /// Games" where it writes "Sega" — dropped when companies compare.
 const COMPANY_FILLER: &[&str] = &[
-    "llc", "inc", "ltd", "limited", "gmbh", "co", "corp", "corporation", "studio", "studios",
-    "games", "entertainment", "interactive", "software", "digital", "sa", "sas", "srl", "bv",
-    "nv", "plc", "ag", "kk",
+    "llc",
+    "inc",
+    "ltd",
+    "limited",
+    "gmbh",
+    "co",
+    "corp",
+    "corporation",
+    "studio",
+    "studios",
+    "games",
+    "entertainment",
+    "interactive",
+    "software",
+    "digital",
+    "sa",
+    "sas",
+    "srl",
+    "bv",
+    "nv",
+    "plc",
+    "ag",
+    "kk",
 ];
 
 /// A company name reduced to its identifying tokens: lowercased, split
@@ -525,11 +537,19 @@ mod tests {
         assert_eq!(stored.synopses[0].1, "SS's words.");
         // Lists: mixed together, nothing replaced.
         assert_eq!(
-            stored.developers.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            stored
+                .developers
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["-1", "2911"]
         );
         assert_eq!(
-            stored.genres.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            stored
+                .genres
+                .iter()
+                .map(|e| e.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["100", "2620"]
         );
         // Boards fold to the canonical kind; the stored value wins for
@@ -868,10 +888,7 @@ mod tests {
             screenscraper_pc_system_id(crate::GameKind::Steam),
             Some(138)
         );
-        assert_eq!(
-            screenscraper_pc_system_id(crate::GameKind::Wine),
-            Some(138)
-        );
+        assert_eq!(screenscraper_pc_system_id(crate::GameKind::Wine), Some(138));
         assert_eq!(
             screenscraper_pc_system_id(crate::GameKind::Linux),
             Some(145)
@@ -983,13 +1000,21 @@ mod tests {
             assert!(super::is_title_trusted(kind, false, "12345"));
         }
         // Console headers stay trusted; filename stems do not.
-        assert!(super::is_title_trusted(crate::GameKind::Switch, false, "switch"));
+        assert!(super::is_title_trusted(
+            crate::GameKind::Switch,
+            false,
+            "switch"
+        ));
         assert!(!super::is_title_trusted(
             crate::GameKind::Retro,
             false,
             "snes"
         ));
         // An explicit flag trusts any row.
-        assert!(super::is_title_trusted(crate::GameKind::Retro, true, "snes"));
+        assert!(super::is_title_trusted(
+            crate::GameKind::Retro,
+            true,
+            "snes"
+        ));
     }
 }

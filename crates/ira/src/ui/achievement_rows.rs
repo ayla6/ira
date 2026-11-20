@@ -203,7 +203,8 @@ pub fn create_global_stats_row(
         build_spoiler_stack(&row, &content_stack, ach, budget)
     } else {
         let img = achievement_icon(ach, budget);
-        let content = make_global_content(img, &ach.display_name, &ach.description, ach.global_percent);
+        let content =
+            make_global_content(img, &ach.display_name, &ach.description, ach.global_percent);
         content_stack.add_named(&content, Some("real"));
         content_stack.set_visible_child_name("real");
         None

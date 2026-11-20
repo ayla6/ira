@@ -225,7 +225,10 @@ mod tests {
     }
 
     fn detected() -> Vec<DetectedEmulator> {
-        vec![emu("/usr/bin/dolphin-emu"), emu("flatpak:org.DolphinEmu.dolphin-emu")]
+        vec![
+            emu("/usr/bin/dolphin-emu"),
+            emu("flatpak:org.DolphinEmu.dolphin-emu"),
+        ]
     }
 
     #[test]
@@ -235,7 +238,10 @@ mod tests {
 
     #[test]
     fn test_selection_for_override_matches_detected_commands() {
-        assert_eq!(selection_for_override("/usr/bin/dolphin-emu", &detected()), 1);
+        assert_eq!(
+            selection_for_override("/usr/bin/dolphin-emu", &detected()),
+            1
+        );
         assert_eq!(
             selection_for_override("flatpak:org.DolphinEmu.dolphin-emu", &detected()),
             2

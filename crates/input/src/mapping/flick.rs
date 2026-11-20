@@ -135,7 +135,10 @@ fn emit_flick_for_stick(
         let shaped = 1.0 - (1.0 - progress) * (1.0 - progress);
         let delta_shaped = shaped - state.last_shaped;
         state.last_shaped = shaped;
-        push_yaw(output, delta_shaped * state.flick_angle * cfg.dots_per_360 / std::f32::consts::TAU);
+        push_yaw(
+            output,
+            delta_shaped * state.flick_angle * cfg.dots_per_360 / std::f32::consts::TAU,
+        );
         if progress >= 1.0 {
             state.flick_start_us = None;
         }
@@ -342,7 +345,8 @@ mod tests {
     }
 
     #[test]
-    fn test_rim_wobble_does_not_reflick() {        // Dropping just below the engage point while engaged must not end
+    fn test_rim_wobble_does_not_reflick() {
+        // Dropping just below the engage point while engaged must not end
         // the flick, or re-crossing the rim would snap all over again.
         let profile = flick_profile();
         let dots = profile.gyro.dots_per_360;

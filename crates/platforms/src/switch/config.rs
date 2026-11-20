@@ -17,7 +17,10 @@ use crate::emu_dirs;
 const YUZU_FAMILY_INSTALLS: &[&str] = &["eden", "suyu", "citron", "sudachi", "yuzu"];
 
 pub fn game_list_cache_dirs_for(executable: &str) -> Vec<PathBuf> {
-    game_list_cache_dirs_in(executable, &crate::switch_detect::detected_launch_commands())
+    game_list_cache_dirs_in(
+        executable,
+        &crate::switch_detect::detected_launch_commands(),
+    )
 }
 
 pub(crate) fn game_list_cache_dirs_in(executable: &str, detected: &[String]) -> Vec<PathBuf> {
@@ -71,7 +74,10 @@ pub(crate) fn game_list_cache_dirs_in(executable: &str, detected: &[String]) -> 
 /// title. Same install layouts as the cache: portable `user` trees of
 /// every detected install, then the shared XDG data dirs.
 pub fn nand_registered_dirs_for(executable: &str) -> Vec<PathBuf> {
-    nand_registered_dirs_in(executable, &crate::switch_detect::detected_launch_commands())
+    nand_registered_dirs_in(
+        executable,
+        &crate::switch_detect::detected_launch_commands(),
+    )
 }
 
 pub(crate) fn nand_registered_dirs_in(executable: &str, detected: &[String]) -> Vec<PathBuf> {
@@ -102,7 +108,9 @@ pub(crate) fn nand_registered_dirs_in(executable: &str, detected: &[String]) -> 
     }
     for name in YUZU_FAMILY_INSTALLS {
         push_root(
-            emu_dirs::data_home().join(name).join("nand/System/Contents"),
+            emu_dirs::data_home()
+                .join(name)
+                .join("nand/System/Contents"),
             &mut roots,
         );
     }
@@ -155,8 +163,7 @@ mod tests {
         let dirs = game_list_cache_dirs_in(executable, &[]);
         assert_eq!(
             dirs.first(),
-            Some(&emu_dirs::home_dir()
-                .join(".var/app/dev.eden_emu.eden/cache/eden/game_list"))
+            Some(&emu_dirs::home_dir().join(".var/app/dev.eden_emu.eden/cache/eden/game_list"))
         );
     }
 
@@ -173,20 +180,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let exe = tmp.path().join("eden.AppImage");
         std::fs::write(&exe, b"").unwrap();
-        let portable = tmp
-            .path()
-            .join("user/data/nand/System/Contents/Registered");
+        let portable = tmp.path().join("user/data/nand/System/Contents/Registered");
 
         let dirs = nand_registered_dirs_in(&exe.to_string_lossy(), &[]);
         assert_eq!(dirs.first(), Some(&portable));
-        assert!(dirs.contains(
-            &emu_dirs::data_home().join("eden/nand/System/Contents/Registered")
-        ));
+        assert!(dirs.contains(&emu_dirs::data_home().join("eden/nand/System/Contents/Registered")));
     }
 }
-
-
-
 
 /// Game directories configured in every yuzu-family install's own
 /// settings (`qt-config.ini` `[Paths] gamedirs`), portable `user/config`
@@ -263,7 +263,10 @@ fn qt_config_paths(executable: &str) -> Vec<PathBuf> {
         }
         let path = std::path::Path::new(&exe);
         for root in [path.parent(), Some(path)].into_iter().flatten() {
-            push(root.join("user").join("config").join("qt-config.ini"), &mut out);
+            push(
+                root.join("user").join("config").join("qt-config.ini"),
+                &mut out,
+            );
         }
         if let Some(app) = crate::emu_dirs::flatpak_app_dir(&exe) {
             push(app.join("config").join("qt-config.ini"), &mut out);
@@ -272,7 +275,9 @@ fn qt_config_paths(executable: &str) -> Vec<PathBuf> {
     // The forks this codebase recognizes; Eden reads their directories too.
     for name in YUZU_FAMILY_INSTALLS {
         push(
-            crate::emu_dirs::config_home().join(name).join("qt-config.ini"),
+            crate::emu_dirs::config_home()
+                .join(name)
+                .join("qt-config.ini"),
             &mut out,
         );
     }

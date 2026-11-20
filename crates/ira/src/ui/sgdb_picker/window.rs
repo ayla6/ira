@@ -216,8 +216,8 @@ pub(crate) fn show_sgdb_picker(params: ShowSgdbPickerParams) {
 #[cfg(test)]
 mod tests {
     use super::super::cards::build_sgdb_asset_card;
-    use crate::ui::state::SgdbAssetsCacheEntry;
     use super::*;
+    use crate::ui::state::SgdbAssetsCacheEntry;
     use ira_api::types::SgdbAsset;
     use std::collections::HashMap;
 
@@ -371,24 +371,18 @@ mod tests {
         win.close();
         pump();
         assert!(!win.is_visible(), "second close did not hide");
-        let config_path = home
-            .path()
-            .join(".config")
-            .join("ira")
-            .join("config.json");
-        let config_text = std::fs::read_to_string(&config_path)
-            .expect("config file written by close");
+        let config_path = home.path().join(".config").join("ira").join("config.json");
+        let config_text =
+            std::fs::read_to_string(&config_path).expect("config file written by close");
         let config_json: serde_json::Value =
             serde_json::from_str(&config_text).expect("config parses");
         assert_eq!(
             config_json["sgdb_picker_size"]["grid"],
             serde_json::json!([900, 700])
         );
-        assert!(
-            config_json["sgdb_picker_zoom"]["grid"]
-                .as_i64()
-                .is_some_and(|z| (100..=500).contains(&z))
-        );
+        assert!(config_json["sgdb_picker_zoom"]["grid"]
+            .as_i64()
+            .is_some_and(|z| (100..=500).contains(&z)));
         let cache2: Rc<RefCell<HashMap<String, SgdbAssetsCacheEntry>>> = Default::default();
         show_sgdb_picker(ShowSgdbPickerParams {
             steam: &steam,
@@ -474,9 +468,8 @@ mod tests {
             measure_flow.append(&card);
         }
         pump();
-        let height_of = |w: &gtk4::Widget| {
-            w.compute_bounds(w).map(|r| r.height() as i32).unwrap_or(-1)
-        };
+        let height_of =
+            |w: &gtk4::Widget| w.compute_bounds(w).map(|r| r.height() as i32).unwrap_or(-1);
         let first = measure_flow
             .first_child()
             .and_then(|c| c.downcast::<gtk4::FlowBoxChild>().ok())

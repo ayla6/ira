@@ -214,7 +214,10 @@ fn build_group_card(
         let card = card.clone();
         let inner = inner.clone();
         remove.connect_clicked(move |_| {
-            inner.borrow_mut().groups.retain(|(group, _)| *group != card);
+            inner
+                .borrow_mut()
+                .groups
+                .retain(|(group, _)| *group != card);
             if let Some(parent) = card.parent().and_downcast::<gtk4::Box>() {
                 parent.remove(&card);
             }
@@ -437,10 +440,7 @@ impl ControlRows {
     /// Shows the rows `dimension` needs; value dimensions refill the
     /// check list with `picked` pre-checked.
     fn sync(&self, dimension: AutoDimension, picked: HashSet<String>, menus: &Rc<ValueMenus>) {
-        let named = !matches!(
-            dimension,
-            AutoDimension::Released | AutoDimension::Playtime
-        );
+        let named = !matches!(dimension, AutoDimension::Released | AutoDimension::Playtime);
         let dates = dimension == AutoDimension::Released;
         let hours = dimension == AutoDimension::Playtime;
         self.values_row.set_visible(named);

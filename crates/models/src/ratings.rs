@@ -133,7 +133,10 @@ pub fn find_board(kind: &str) -> Option<&'static RatingBoard> {
     let normalized = normalize(kind);
     BOARDS.iter().find(|board| {
         kinds_equal(board.id, &normalized)
-            || board.aliases.iter().any(|alias| kinds_equal(alias, &normalized))
+            || board
+                .aliases
+                .iter()
+                .any(|alias| kinds_equal(alias, &normalized))
     })
 }
 
@@ -266,11 +269,20 @@ mod tests {
         assert_eq!(find_board("JV").map(|b| b.id), Some("SELL"));
         assert_eq!(rating_slug("JV", "+7 ans"), Some("sell-7".to_string()));
         // Oddly spelled numbers elsewhere resolve the same way.
-        assert_eq!(rating_slug("NZOFLC", "R 13"), Some("nzoflc-r13".to_string()));
+        assert_eq!(
+            rating_slug("NZOFLC", "R 13"),
+            Some("nzoflc-r13".to_string())
+        );
         // Display names canonicalize the board and the value casing.
-        assert_eq!(super::display("STEAM_GERMANY", "12"), Some("USK 12".to_string()));
+        assert_eq!(
+            super::display("STEAM_GERMANY", "12"),
+            Some("USK 12".to_string())
+        );
         assert_eq!(super::display("CERO", "a"), Some("CERO A".to_string()));
-        assert_eq!(super::display("DEJUS", "12"), Some("ClassInd 12".to_string()));
+        assert_eq!(
+            super::display("DEJUS", "12"),
+            Some("ClassInd 12".to_string())
+        );
         assert_eq!(super::display("NOTABOARD", "12"), None);
         // A lettered value never matches through digits.
         assert_eq!(rating_slug("ESRB", "E10+"), Some("esrb-e10".to_string()));

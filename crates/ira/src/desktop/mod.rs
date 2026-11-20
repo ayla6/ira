@@ -1,8 +1,8 @@
 pub(crate) mod entries;
 mod environment;
 mod files;
-mod launcher;
 pub mod integration;
+mod launcher;
 mod modes;
 pub(crate) mod paths;
 pub mod protocol;
@@ -15,5 +15,5 @@ mod shortcut_icons;
 pub mod tray;
 mod tray_protocol;
 mod tray_service;
-pub use modes::special_mode;
 pub use launcher::resolve_window_identity;
+pub use modes::special_mode;

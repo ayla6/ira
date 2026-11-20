@@ -178,10 +178,8 @@ fn add_gyro_rows(
             // Clear the measured values but keep controller-level choices:
             // deleting the entry outright would also drop the Nintendo
             // layout toggle stored beside them.
-            let stored =
-                ira_input::load_calibration(&store_path, device.vendor, device.product);
-            let mut cleared =
-                stored.unwrap_or_else(|| ira_input::default_calibration_for(&device));
+            let stored = ira_input::load_calibration(&store_path, device.vendor, device.product);
+            let mut cleared = stored.unwrap_or_else(|| ira_input::default_calibration_for(&device));
             cleared.x = 0.0;
             cleared.y = 0.0;
             cleared.z = 0.0;
@@ -262,14 +260,12 @@ fn save_gyro_bias(
     bias: ControllerCalibration,
     bias_label: &gtk4::Label,
 ) {
-    let mut calibration =
-        ira_input::load_calibration(store_path, device.vendor, device.product).unwrap_or_else(
-            || {
-                let mut seeded = bias;
-                seeded.nintendo_layout = device.prefers_nintendo_layout();
-                seeded
-            },
-        );
+    let mut calibration = ira_input::load_calibration(store_path, device.vendor, device.product)
+        .unwrap_or_else(|| {
+            let mut seeded = bias;
+            seeded.nintendo_layout = device.prefers_nintendo_layout();
+            seeded
+        });
     calibration.x = bias.x;
     calibration.y = bias.y;
     calibration.z = bias.z;
@@ -292,7 +288,8 @@ fn deadzone_row(
         title,
         Some(subtitle),
         &SliderSpec(0.0, 50.0, 1.0, f64::from(initial_percent) * 100.0),
-        |_| {});
+        |_| {},
+    );
     // Coalesce the load-modify-store cycle until the slider settles.
     // Programmatic updates (reset, post-calibration sync) run while the
     // updating guard is held and must not schedule a write at all.

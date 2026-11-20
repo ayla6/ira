@@ -78,20 +78,18 @@ fn is_imu_companion(device: &Device) -> bool {
     if device.name() == Some("Ira Virtual Motion Sensors") {
         return false;
     }
-    let axes = device
-        .supported_absolute_axes()
-        .is_some_and(|axes| {
-            [
-                AbsoluteAxisCode::ABS_X,
-                AbsoluteAxisCode::ABS_Y,
-                AbsoluteAxisCode::ABS_Z,
-                AbsoluteAxisCode::ABS_RX,
-                AbsoluteAxisCode::ABS_RY,
-                AbsoluteAxisCode::ABS_RZ,
-            ]
-            .into_iter()
-            .all(|axis| axes.contains(axis))
-        });
+    let axes = device.supported_absolute_axes().is_some_and(|axes| {
+        [
+            AbsoluteAxisCode::ABS_X,
+            AbsoluteAxisCode::ABS_Y,
+            AbsoluteAxisCode::ABS_Z,
+            AbsoluteAxisCode::ABS_RX,
+            AbsoluteAxisCode::ABS_RY,
+            AbsoluteAxisCode::ABS_RZ,
+        ]
+        .into_iter()
+        .all(|axis| axes.contains(axis))
+    });
     let no_face_button = device
         .supported_keys()
         .is_none_or(|keys| !keys.contains(KeyCode::BTN_SOUTH));
@@ -236,10 +234,13 @@ pub fn imu_sample(
     gyro_resolution: f32,
     timestamp_us: u64,
 ) -> SensorSample {
-    let to_device_frame =
-        |raw: [i32; 3], resolution: f32| -> [f32; 3] {
-            [raw[0] as f32 / resolution, raw[1] as f32 / resolution, raw[2] as f32 / resolution]
-        };
+    let to_device_frame = |raw: [i32; 3], resolution: f32| -> [f32; 3] {
+        [
+            raw[0] as f32 / resolution,
+            raw[1] as f32 / resolution,
+            raw[2] as f32 / resolution,
+        ]
+    };
     let accel_g = to_device_frame(accel_raw, accel_resolution);
     let gyro_dps = to_device_frame(gyro_raw, gyro_resolution);
     const DEG_TO_RAD: f32 = std::f32::consts::PI / 180.0;

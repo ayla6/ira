@@ -125,17 +125,12 @@ fn pick_outer_ring_command(
     current: Option<&OutputAction>,
     reopen: &Reopen,
 ) {
-    let Some(window) = base
-        .child_expander
-        .borrow()
-        .as_ref()
-        .and_then(|expander| {
-            expander
-                .upcast_ref::<gtk4::Widget>()
-                .root()
-                .and_then(|root| root.downcast::<gtk4::Window>().ok())
-        })
-    else {
+    let Some(window) = base.child_expander.borrow().as_ref().and_then(|expander| {
+        expander
+            .upcast_ref::<gtk4::Widget>()
+            .root()
+            .and_then(|root| root.downcast::<gtk4::Window>().ok())
+    }) else {
         return;
     };
     let profile = base.profile.borrow();

@@ -65,11 +65,7 @@ pub(crate) fn atomic_copy(src: &Path, dst: &Path) -> Result<(), String> {
     let tmp = dst.with_file_name(format!("{name}.tmp"));
     if let Err(e) = std::fs::copy(src, &tmp) {
         let _ = std::fs::remove_file(&tmp);
-        return Err(format!(
-            "copy {} → {}: {e}",
-            src.display(),
-            dst.display()
-        ));
+        return Err(format!("copy {} → {}: {e}", src.display(), dst.display()));
     }
     if let Err(e) = std::fs::rename(&tmp, dst) {
         let _ = std::fs::remove_file(&tmp);
@@ -197,8 +193,6 @@ pub(crate) fn restore_backup(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-
-
 pub fn api_emulators_dir(save_dir: &str) -> PathBuf {
     Path::new(save_dir).join("api_emulators")
 }
@@ -229,7 +223,11 @@ pub(crate) fn detect_arch(game_exe: &str) -> &'static str {
             || std::fs::metadata(game_exe)
                 .map(|m| m.len() > 1_500_000)
                 .unwrap_or(false);
-        if is64 { "x64" } else { "x86" }
+        if is64 {
+            "x64"
+        } else {
+            "x86"
+        }
     } else if std::env::consts::ARCH == "x86_64" {
         "x64"
     } else {
@@ -562,7 +560,8 @@ fn merge_settings_contents(source: &Path, target: &Path) -> Result<(), String> {
 
 #[cfg(unix)]
 fn remove_settings_path(path: &Path) -> Result<(), String> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|e| format!("stat {}: {e}", path.display()))?;
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|e| format!("stat {}: {e}", path.display()))?;
     if metadata.file_type().is_symlink() || metadata.is_file() {
         std::fs::remove_file(path).map_err(|e| format!("remove {}: {e}", path.display()))?;
     } else if metadata.is_dir() {
@@ -1024,10 +1023,12 @@ mod tests {
             swap_in_with_backup(&emu_a, &first_orig, Some(&first_orig)).unwrap(),
             // Linux shape: the backup lives under the 64-bit source name
             // while the emulator lands at a fresh destination name.
-            swap_in_with_backup(&emu_b, &dir.join("libsteam_api.so"), Some(&second_orig))
-                .unwrap(),
+            swap_in_with_backup(&emu_b, &dir.join("libsteam_api.so"), Some(&second_orig)).unwrap(),
         ];
-        assert_eq!(std::fs::read(dir.join("libsteam_api.so")).unwrap(), b"emu-b");
+        assert_eq!(
+            std::fs::read(dir.join("libsteam_api.so")).unwrap(),
+            b"emu-b"
+        );
         // A later failure restores nothing with a backup left behind.
         let src_dir = tmp.path().join("srcdir");
         std::fs::create_dir_all(&src_dir).unwrap();
@@ -1252,6 +1253,9 @@ mod tests {
             .unwrap()
             .file_type()
             .is_symlink());
-        assert_eq!(std::fs::read(stale.join("steam_appid.txt")).unwrap(), b"123");
+        assert_eq!(
+            std::fs::read(stale.join("steam_appid.txt")).unwrap(),
+            b"123"
+        );
     }
 }

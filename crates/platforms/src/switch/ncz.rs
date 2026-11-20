@@ -256,8 +256,7 @@ mod tests {
             }
         }
         for (i, size) in sizes.iter().enumerate() {
-            out[sizes_at + i * 4..sizes_at + i * 4 + 4]
-                .copy_from_slice(&size.to_le_bytes());
+            out[sizes_at + i * 4..sizes_at + i * 4 + 4].copy_from_slice(&size.to_le_bytes());
         }
         out
     }
@@ -265,12 +264,7 @@ mod tests {
     fn payload(size: usize) -> Vec<u8> {
         // Compressible but not trivially: repeated 251-byte phrase.
         let phrase = b"The quick brown fox jumps over the lazy dog. ";
-        phrase
-            .iter()
-            .cycle()
-            .take(size)
-            .copied()
-            .collect()
+        phrase.iter().cycle().take(size).copied().collect()
     }
 
     fn write_fixture(data: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
@@ -337,12 +331,7 @@ mod tests {
     fn test_read_range_rejects_bad_exponent() {
         let mut fixture = ncz_fixture(&payload(100), None);
         // Block-size exponent lives 3 bytes into the NCZBLOCK header.
-        let at = fixture
-            .windows(8)
-            .position(|w| w == b"NCZBLOCK")
-            .unwrap()
-            + 8
-            + 3;
+        let at = fixture.windows(8).position(|w| w == b"NCZBLOCK").unwrap() + 8 + 3;
         fixture[at] = 40;
         let (_tmp, path) = write_fixture(&fixture);
         assert!(read_range(&path, 0, VERBATIM_PREFIX, 100, 1 << 26).is_none());

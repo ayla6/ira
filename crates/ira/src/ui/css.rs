@@ -3,16 +3,14 @@ pub const CSS_BOXED_LIST: &str = "boxed-list";
 // lives in the shared widgets crate so the overlay speaks the same
 // visual language; re-exported here so existing call sites keep working.
 pub use ira_widgets::style::{
-    bp_ring_outset, bp_scale, set_bp_scale, CSS_BP_ALL, CSS_BP_ALL_PAGE,
-    CSS_BP_ALL_TILE, CSS_BP_BATT, CSS_BP_BOTTOM, CSS_BP_CLOCK, CSS_BP_CURSOR_HIDDEN,
-    CSS_BP_DATE, CSS_BP_GROUP_SLOT, CSS_BP_KEY, CSS_BP_KEY_ACTIVE,
-    CSS_BP_KEY_CARET, CSS_BP_KEY_DISABLED, CSS_BP_KEY_OK, CSS_BP_KEY_PREVIEW,
-    CSS_BP_KEY_SELECTED, CSS_BP_KEYBOARD, CSS_BP_MENU_DIM, CSS_BP_MENU_PANEL,
-    CSS_BP_MENU_ROW_ACTIVE, CSS_BP_MENU_ROW_SELECTED,
-    CSS_BP_OPTION_PANEL, CSS_BP_PAD_DOT, CSS_BP_PAD_LIT, CSS_BP_PAGE_SUBTITLE,
-    CSS_BP_PAGE_TITLE, CSS_BP_PROMPT, CSS_BP_ROOT, CSS_BP_RUNNING,
-    CSS_BP_RUNNING_STATUS, CSS_BP_RUNNING_TITLE, CSS_BP_SELECTED,
-    CSS_BP_SQ, CSS_BP_STATUS, CSS_BP_TABS, CSS_BP_TITLE,
+    bp_ring_outset, bp_scale, set_bp_scale, CSS_BP_ALL, CSS_BP_ALL_PAGE, CSS_BP_ALL_TILE,
+    CSS_BP_BATT, CSS_BP_BOTTOM, CSS_BP_CLOCK, CSS_BP_CURSOR_HIDDEN, CSS_BP_DATE, CSS_BP_GROUP_SLOT,
+    CSS_BP_KEY, CSS_BP_KEYBOARD, CSS_BP_KEY_ACTIVE, CSS_BP_KEY_CARET, CSS_BP_KEY_DISABLED,
+    CSS_BP_KEY_OK, CSS_BP_KEY_PREVIEW, CSS_BP_KEY_SELECTED, CSS_BP_MENU_DIM, CSS_BP_MENU_PANEL,
+    CSS_BP_MENU_ROW_ACTIVE, CSS_BP_MENU_ROW_SELECTED, CSS_BP_OPTION_PANEL, CSS_BP_PAD_DOT,
+    CSS_BP_PAD_LIT, CSS_BP_PAGE_SUBTITLE, CSS_BP_PAGE_TITLE, CSS_BP_PROMPT, CSS_BP_ROOT,
+    CSS_BP_RUNNING, CSS_BP_RUNNING_STATUS, CSS_BP_RUNNING_TITLE, CSS_BP_SELECTED, CSS_BP_SQ,
+    CSS_BP_STATUS, CSS_BP_TABS, CSS_BP_TITLE,
 };
 pub const CSS_CAPTION: &str = "caption";
 pub const CSS_CIRCULAR: &str = "circular";
@@ -375,12 +373,14 @@ button.sgdb-filter:hover {
 }
 ";
 
-
 /// The full stylesheet at a given viewport scale (1.0 = the 1080p
 /// reference). The big-picture section scales; the desktop section does not.
 pub fn app_css(ui_scale: f64) -> String {
-    format!("{APP_CSS}
-{}", ira_widgets::style::bp_css(ui_scale))
+    format!(
+        "{APP_CSS}
+{}",
+        ira_widgets::style::bp_css(ui_scale)
+    )
 }
 
 /// Install the global stylesheet and icon theme additions on the default

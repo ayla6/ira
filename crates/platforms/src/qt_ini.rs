@@ -75,7 +75,10 @@ mod tests {
         let ini = QtIni::parse(
             "[Data%20Storage]\nnand_directory=/tmp/nand/\nnand_directory\\default=false\n",
         );
-        assert_eq!(ini.get("Data Storage", "nand_directory"), Some("/tmp/nand/"));
+        assert_eq!(
+            ini.get("Data Storage", "nand_directory"),
+            Some("/tmp/nand/")
+        );
         // Suffixed `…\default` keys must not shadow the real value.
         assert_ne!(ini.get("Data Storage", "nand_directory"), Some("false"));
     }

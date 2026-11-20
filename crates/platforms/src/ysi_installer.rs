@@ -28,8 +28,7 @@ fn archive_offset(meta: &YsiMetadata) -> u64 {
 /// Parse YSI metadata from the first lines (up to 700, like robust_extract.sh):
 /// the multi-gigabyte binary tail is not UTF-8, so never read the whole file.
 pub fn parse_ysi_metadata(path: &Path) -> Result<YsiMetadata, String> {
-    let file =
-        std::fs::File::open(path).map_err(|e| format!("Failed to read installer: {e}"))?;
+    let file = std::fs::File::open(path).map_err(|e| format!("Failed to read installer: {e}"))?;
     let reader = std::io::BufReader::new(file);
 
     let mut vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();

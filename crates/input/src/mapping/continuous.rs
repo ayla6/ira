@@ -215,8 +215,7 @@ impl MappingEngine {
             // Steam's "Dots Per 360°": one full physical turn produces this
             // many mouse pixels at 1x sensitivity.
             let counts_per_radian = gyro.dots_per_360 / std::f32::consts::TAU;
-            let scale =
-                counts_per_radian * gyro.sensitivity * dt * self.gyro_dampening_scale();
+            let scale = counts_per_radian * gyro.sensitivity * dt * self.gyro_dampening_scale();
             let (yaw, pitch) = rotate_gyro_output(
                 self.gyro_effective.yaw,
                 self.gyro_effective.pitch,
@@ -322,10 +321,9 @@ fn gyro_stick_deflection(
         normalized.clamp(0.0, 1.0).powf(settings.power_curve) * settings.max_output
     };
     let (x, y) = match settings.response_style {
-        GyroStickResponseStyle::PerAxis => (
-            curve(yaw / MAX_TURN_RATE),
-            curve(pitch / MAX_TURN_RATE),
-        ),
+        GyroStickResponseStyle::PerAxis => {
+            (curve(yaw / MAX_TURN_RATE), curve(pitch / MAX_TURN_RATE))
+        }
         GyroStickResponseStyle::Circular => {
             let magnitude = (yaw * yaw + pitch * pitch).sqrt();
             if magnitude <= f32::EPSILON {
@@ -339,7 +337,10 @@ fn gyro_stick_deflection(
     if settings.lock_at_edges {
         let magnitude = (x * x + y * y).sqrt();
         if magnitude > settings.max_output && magnitude > f32::EPSILON {
-            return (x / magnitude * settings.max_output, y / magnitude * settings.max_output);
+            return (
+                x / magnitude * settings.max_output,
+                y / magnitude * settings.max_output,
+            );
         }
     }
     (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0))
@@ -464,19 +465,24 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 2.0,
-            pitch: -1.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 2.0,
+                pitch: -1.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         let events = engine.tick(4_000);
         let dt = 0.004;
         assert!(
-            (motion(&events, MouseAxis::X) - 2.0 * (6545.0 / std::f32::consts::TAU) * dt).abs() < 0.5
+            (motion(&events, MouseAxis::X) - 2.0 * (6545.0 / std::f32::consts::TAU) * dt).abs()
+                < 0.5
         );
         // Positive pitch aims up, which is negative screen Y.
         assert!(
-            (motion(&events, MouseAxis::Y) - 1.0 * (6545.0 / std::f32::consts::TAU) * dt).abs() < 0.5
+            (motion(&events, MouseAxis::Y) - 1.0 * (6545.0 / std::f32::consts::TAU) * dt).abs()
+                < 0.5
         );
     }
 
@@ -492,11 +498,14 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 1.0,
-            pitch: 1.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 1.0,
+                pitch: 1.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         let events = engine.tick(4_000);
         assert!(motion(&events, MouseAxis::X) < 0.0);
         // Double negation: pitch up is negative Y, inverted back to positive.
@@ -514,20 +523,26 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 1.0,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 1.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         assert!(engine.tick(4_000).is_empty());
         // Pressing the activation re-engages from rest; the next sensor
         // sample drives output again.
         engine.process(event(InputSource::Button(GamepadButton::LeftTrigger), 1.0));
-        engine.update_gyro(GyroRates {
-            yaw: 1.0,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 6_000);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 1.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            6_000,
+        );
         assert!(!engine.tick(8_000).is_empty());
         engine.process(event(InputSource::Button(GamepadButton::LeftTrigger), 0.0));
         assert!(engine.tick(12_000).is_empty());
@@ -730,11 +745,14 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 1.0,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 1.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         assert!(!engine.gyro_active());
         engine.process(event(InputSource::Button(GamepadButton::Guide), 1.0));
         engine.process(event(InputSource::Button(GamepadButton::Guide), 0.0));
@@ -755,11 +773,14 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 0.75,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 0.75,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         let events = engine.tick(4_000);
         // 0.75 rad/s over 1.5 rad/s-per-unit = half deflection.
         assert!(events.iter().any(|event| matches!(
@@ -767,11 +788,14 @@ mod tests {
             OutputEvent::GamepadAxis { axis: GamepadAxis::RightX, value } if (value - 0.5).abs() < 0.001
         )));
         // 3 rad/s is double the full-deflection rate and clamps.
-        engine.update_gyro(GyroRates {
-            yaw: 0.0,
-            pitch: -3.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 0.0,
+                pitch: -3.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         let events = engine.tick(8_000);
         assert!(events.iter().any(|event| matches!(
             event,
@@ -792,11 +816,14 @@ mod tests {
         };
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(event(InputSource::Axis(GamepadAxis::RightX), 0.25));
-        engine.update_gyro(GyroRates {
-            yaw: 0.75,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 0.75,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         let events = engine.tick(4_000);
         assert!(events.iter().any(|event| matches!(
             event,
@@ -860,11 +887,14 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 5.0,
-            pitch: 5.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 5.0,
+                pitch: 5.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         assert!(engine.tick(4_000).is_empty());
     }
 
@@ -884,11 +914,14 @@ mod tests {
         };
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 1.0));
-        engine.update_gyro(GyroRates {
-            yaw: 4.0,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 4.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         let dt = 0.004f32;
         let held = motion(&engine.tick(4_000), MouseAxis::X);
         assert!(
@@ -924,11 +957,14 @@ mod tests {
         };
         let mut engine = MappingEngine::new(profile).unwrap();
         engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 1.0));
-        engine.update_gyro(GyroRates {
-            yaw: 4.0,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 4.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         assert!(motion(&engine.tick(4_000), MouseAxis::X) > 0.0);
         engine.process(event(InputSource::Button(GamepadButton::LeftShoulder), 0.0));
         assert_eq!(motion(&engine.tick(8_000), MouseAxis::X), 0.0);
@@ -946,11 +982,14 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 1.0,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 1.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         let full = motion(&engine.tick(4_000), MouseAxis::X);
 
         // Below the soft-pull threshold nothing changes.
@@ -983,11 +1022,14 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 1.0,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 1.0,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         engine.tick(4_000);
         // A half pull is not a full pull: no dampening.
         engine.process(event(InputSource::Axis(GamepadAxis::LeftTrigger), 0.5));
@@ -1012,11 +1054,14 @@ mod tests {
             ..InputProfile::default()
         };
         let mut engine = MappingEngine::new(profile).unwrap();
-        engine.update_gyro(GyroRates {
-            yaw: 0.75,
-            pitch: 0.0,
-            gravity_locked: true,
-        }, 0);
+        engine.update_gyro(
+            GyroRates {
+                yaw: 0.75,
+                pitch: 0.0,
+                gravity_locked: true,
+            },
+            0,
+        );
         // Trigger past its soft pull: had dampening leaked into the stick
         // path, the deflection would be zeroed and no axis event emitted.
         engine.process(event(InputSource::Axis(GamepadAxis::RightTrigger), 0.6));

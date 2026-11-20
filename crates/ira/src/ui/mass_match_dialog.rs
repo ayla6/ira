@@ -248,11 +248,7 @@ impl RowVis {
 
     /// One widget plus its running sources per game, in order; set right
     /// after the rows exist.
-    pub(super) fn set_rows(
-        &self,
-        rows: Vec<gtk4::ListBoxRow>,
-        pending: Vec<HashSet<MatchSource>>,
-    ) {
+    pub(super) fn set_rows(&self, rows: Vec<gtk4::ListBoxRow>, pending: Vec<HashSet<MatchSource>>) {
         *self.rows.borrow_mut() = rows;
         *self.pending.borrow_mut() = pending;
     }
@@ -284,18 +280,17 @@ impl RowVis {
     /// The toggle flipped: show everything, or re-hide the concluded.
     fn apply_all(&self) {
         if self.show_finished.get() {
-            self.rows.borrow().iter().for_each(|row| row.set_visible(true));
+            self.rows
+                .borrow()
+                .iter()
+                .for_each(|row| row.set_visible(true));
         } else {
             let rows = self.rows.borrow();
             let pending = self.pending.borrow();
             let hiding: Vec<&gtk4::ListBoxRow> = rows
                 .iter()
                 .enumerate()
-                .filter(|(idx, _)| {
-                    pending
-                        .get(*idx)
-                        .is_some_and(|running| running.is_empty())
-                })
+                .filter(|(idx, _)| pending.get(*idx).is_some_and(|running| running.is_empty()))
                 .map(|(_, row)| row)
                 .collect();
             hide_row_stable(&self.scrolled, &hiding);
@@ -340,10 +335,7 @@ impl RowVis {
 /// by its height. Positions are captured before anything hides (the
 /// layout goes stale as rows collapse), then the scroll offset moves
 /// up by exactly the hidden-above total.
-fn hide_row_stable(
-    scrolled: &glib::WeakRef<gtk4::ScrolledWindow>,
-    hiding: &[&gtk4::ListBoxRow],
-) {
+fn hide_row_stable(scrolled: &glib::WeakRef<gtk4::ScrolledWindow>, hiding: &[&gtk4::ListBoxRow]) {
     if hiding.is_empty() {
         return;
     }
@@ -466,10 +458,7 @@ fn populate_match_list(
             match source {
                 MatchSource::Steam | MatchSource::Sgdb => {
                     let actions_box = source_sub_row(&sources, source);
-                    actions_box.append(&status_label(
-                        &crate::tr!("Searching…"),
-                        CSS_DIM_LABEL,
-                    ));
+                    actions_box.append(&status_label(&crate::tr!("Searching…"), CSS_DIM_LABEL));
                     if source == MatchSource::Steam {
                         actions.steam = Some(actions_box);
                     } else {
@@ -509,10 +498,7 @@ fn populate_match_list(
         ));
         rows.push(actions);
     }
-    vis.set_rows(
-        rows.iter().map(|r| r.row.clone()).collect(),
-        pendings,
-    );
+    vis.set_rows(rows.iter().map(|r| r.row.clone()).collect(), pendings);
     rows
 }
 
@@ -583,8 +569,7 @@ fn start_steam_batch_matching(
             move |hit| {
                 // Record first: a missing box must not leave the row pending forever.
                 vis.source_done(hit.row_idx, MatchSource::Steam);
-                let Some(steam_box) = rows.get(hit.row_idx).and_then(|r| r.steam.clone())
-                else {
+                let Some(steam_box) = rows.get(hit.row_idx).and_then(|r| r.steam.clone()) else {
                     return;
                 };
                 if let Some((sid, match_name)) = hit.matched {
@@ -623,12 +608,7 @@ fn start_steam_batch_matching(
 /// Repaint a worker-matched Steam line as its id link plus veto.
 /// Manual picks repaint label-only through the search handler — the user
 /// just chose them, so there is nothing to veto.
-fn paint_steam_matched(
-    steam_box: &gtk4::Box,
-    sid: &str,
-    match_name: &str,
-    veto: SteamLineVeto,
-) {
+fn paint_steam_matched(steam_box: &gtk4::Box, sid: &str, match_name: &str, veto: SteamLineVeto) {
     let unmatch = gtk4::Button::with_label(&crate::tr!("Unmatch"));
     unmatch.add_css_class(CSS_DESTRUCTIVE_ACTION);
     unmatch.set_valign(gtk4::Align::Center);
@@ -710,10 +690,7 @@ fn append_steam_link_veto(
                 eprintln!("Steam link veto: miss record failed: {e}");
             }
             replace_row_actions(&steam_box, |ab| {
-                ab.append(&status_label(
-                    &crate::tr!("Skipped"),
-                    CSS_DIM_LABEL,
-                ));
+                ab.append(&status_label(&crate::tr!("Skipped"), CSS_DIM_LABEL));
             });
             vis.source_done(row_idx, MatchSource::SteamLink);
         });
@@ -781,10 +758,7 @@ fn start_sgdb_batch_matching(
 /// runs. The source label on the line already says Steam link, so the
 /// status itself stays short.
 fn attach_steam_link_actions(link_box: &gtk4::Box) {
-    link_box.append(&status_label(
-        &crate::tr!("Searching…"),
-        CSS_DIM_LABEL,
-    ));
+    link_box.append(&status_label(&crate::tr!("Searching…"), CSS_DIM_LABEL));
 }
 
 /// The console→Steam pass: every row with a Steam box gets an exact
@@ -806,8 +780,8 @@ fn start_steam_title_matching(
         .enumerate()
         .filter(|(i, g)| {
             rows.get(*i).is_some_and(|r| r.steam_link.is_some())
-            && needs_steam_title_match(g)
-            && !missed.contains(&g.db_id)
+                && needs_steam_title_match(g)
+                && !missed.contains(&g.db_id)
         })
         .map(|(row_idx, g)| BatchItem {
             name: g.name.clone(),
@@ -891,7 +865,10 @@ fn start_steam_title_matching(
                     // No answer at all — quota and network heal, so this
                     // retries next open instead of tombstoning.
                     Err(e) => {
-                        eprintln!("Steam title pass: '{0}': search failed, will retry: {e}", item.name);
+                        eprintln!(
+                            "Steam title pass: '{0}': search failed, will retry: {e}",
+                            item.name
+                        );
                         None
                     }
                 }
@@ -902,8 +879,11 @@ fn start_steam_title_matching(
                 if let Some(job) = &job {
                     job.finish(
                         &state,
-                        &crate::tr!("{} Steam candidates")
-                            .replacen("{}", &candidates.get().to_string(), 1),
+                        &crate::tr!("{} Steam candidates").replacen(
+                            "{}",
+                            &candidates.get().to_string(),
+                            1,
+                        ),
                         &crate::tr!("Matching finished"),
                     );
                 }
@@ -929,10 +909,7 @@ fn start_steam_title_matching(
             };
             let Some((id, candidate)) = hit.matched else {
                 replace_row_actions(&steam_box, |ab| {
-                    ab.append(&status_label(
-                        &crate::tr!("No Steam match"),
-                        CSS_DIM_LABEL,
-                    ));
+                    ab.append(&status_label(&crate::tr!("No Steam match"), CSS_DIM_LABEL));
                 });
                 done_tick(&vis);
                 return;
@@ -953,7 +930,11 @@ fn start_steam_title_matching(
                     link_btn.connect_clicked(move |_| {
                         if super::fetch_metadata::store_steam_link(&state, db_id, &id) {
                             replace_row_actions(&steam_box, |ab| {
-                                ab.append(&match_id_button(MatchSource::SteamLink, &id, &candidate));
+                                ab.append(&match_id_button(
+                                    MatchSource::SteamLink,
+                                    &id,
+                                    &candidate,
+                                ));
                                 append_steam_link_veto(&state, &steam_box, db_id, row_idx, &vis);
                             });
                             vis.source_done(row_idx, MatchSource::SteamLink);
@@ -967,18 +948,13 @@ fn start_steam_title_matching(
                     let vis = vis.clone();
                     let steam_box = steam_box.clone();
                     skip_btn.connect_clicked(move |_| {
-                        if let Err(e) = ira_db::tombstone_match_miss(
-                            &db,
-                            db_id,
-                            ira_db::miss_source::STEAM,
-                        ) {
+                        if let Err(e) =
+                            ira_db::tombstone_match_miss(&db, db_id, ira_db::miss_source::STEAM)
+                        {
                             eprintln!("Steam title pass: miss record failed: {e}");
                         }
                         replace_row_actions(&steam_box, |ab| {
-                            ab.append(&status_label(
-                                &crate::tr!("Skipped"),
-                                CSS_DIM_LABEL,
-                            ));
+                            ab.append(&status_label(&crate::tr!("Skipped"), CSS_DIM_LABEL));
                         });
                         vis.source_done(row_idx, MatchSource::SteamLink);
                     });
@@ -993,7 +969,10 @@ pub fn show_mass_match_dialog(state: &SharedState) {
     let window = state.borrow().window.clone();
 
     let (needs_matching, title_map) = collect_unmatched_games(state);
-    eprintln!("Mass matcher: opening with {} candidate game(s)", needs_matching.len());
+    eprintln!(
+        "Mass matcher: opening with {} candidate game(s)",
+        needs_matching.len()
+    );
     if needs_matching.is_empty() {
         let d = adw::AlertDialog::new(
             Some(&crate::tr!("Nothing to match")),
@@ -1048,28 +1027,30 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 
     let (scrolled, list) = super::helpers::clamped_boxed_list(600);
     scrolled.set_vexpand(true);
-    let ss_missed: HashSet<i64> = match ira_db::match_missed_ids(&state.borrow().db, ira_db::miss_source::SS) {
-        Ok(ids) => ids.into_iter().collect(),
-        Err(e) => {
-            eprintln!("Mass matcher: could not read ScreenScraper misses: {e}");
-            HashSet::new()
-        }
-    };
+    let ss_missed: HashSet<i64> =
+        match ira_db::match_missed_ids(&state.borrow().db, ira_db::miss_source::SS) {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => {
+                eprintln!("Mass matcher: could not read ScreenScraper misses: {e}");
+                HashSet::new()
+            }
+        };
     // show_finished mirrors the switch below, inverted: with the switch
     // off, nothing hides and every row plays its pass out in the open.
     // The switch restores its saved position, so a reopened dialog keeps
     // working the way it was left.
     let hide_done = state.borrow().cfg.mass_match_hide_done;
     let show_finished = Rc::new(Cell::new(!hide_done));
-    let vis = RowVis::new(
-        show_finished.clone(),
-        &scrolled,
-        &title,
-        subtitle,
-        count,
-    );
+    let vis = RowVis::new(show_finished.clone(), &scrolled, &title, subtitle, count);
     let vis_toggle = vis.clone();
-    let rows = populate_match_list(&list, &needs_matching, state, dialog.upcast_ref(), &ss_missed, &vis);
+    let rows = populate_match_list(
+        &list,
+        &needs_matching,
+        state,
+        dialog.upcast_ref(),
+        &ss_missed,
+        &vis,
+    );
     vis.apply_all();
     let show_finished_c = show_finished.clone();
     let state_c = state.clone();
@@ -1114,9 +1095,27 @@ pub fn show_mass_match_dialog(state: &SharedState) {
         dialog.upcast_ref(),
         vis.clone(),
     );
-    start_sgdb_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref(), vis.clone());
-    start_ra_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref(), vis.clone());
-    start_ss_batch_matching(state, &needs_matching, &rows, dialog.upcast_ref(), vis.clone());
+    start_sgdb_batch_matching(
+        state,
+        &needs_matching,
+        &rows,
+        dialog.upcast_ref(),
+        vis.clone(),
+    );
+    start_ra_batch_matching(
+        state,
+        &needs_matching,
+        &rows,
+        dialog.upcast_ref(),
+        vis.clone(),
+    );
+    start_ss_batch_matching(
+        state,
+        &needs_matching,
+        &rows,
+        dialog.upcast_ref(),
+        vis.clone(),
+    );
     start_steam_title_matching(state, &needs_matching, &rows, vis);
 }
 
@@ -1124,10 +1123,7 @@ pub fn show_mass_match_dialog(state: &SharedState) {
 /// source, each with its own action box. Sources stack vertically instead
 /// of crowding into the header's suffix, so every pass repaints its own
 /// line and matched lines gain room for an Unmatch button.
-fn create_match_row(
-    list: &gtk4::ListBox,
-    game: &Game,
-) -> (gtk4::Box, RowActions) {
+fn create_match_row(list: &gtk4::ListBox, game: &Game) -> (gtk4::Box, RowActions) {
     let row = gtk4::ListBoxRow::new();
     let outer = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
     outer.set_margin_top(6);
@@ -1145,8 +1141,7 @@ fn create_match_row(
     title.set_single_line_mode(true);
     title.set_tooltip_text(Some(&game.name));
     header.append(&title);
-    let platform =
-        gtk4::Label::new(Some(game.platform_id.display_name()));
+    let platform = gtk4::Label::new(Some(game.platform_id.display_name()));
     platform.set_halign(gtk4::Align::End);
     platform.set_valign(gtk4::Align::BaselineCenter);
     platform.add_css_class(CSS_DIM_LABEL);
@@ -1277,8 +1272,14 @@ mod tests {
         // "X: Y" and "X - Y" normalize identically: the store's
         // spelling must not decide the match.
         let results = vec![
-            ("787480".to_string(), "Phoenix Wright: Ace Attorney Trilogy".to_string()),
-            ("1032760".to_string(), "Phoenix Wright: Ace Attorney Trilogy - Turnabout Tunes".to_string()),
+            (
+                "787480".to_string(),
+                "Phoenix Wright: Ace Attorney Trilogy".to_string(),
+            ),
+            (
+                "1032760".to_string(),
+                "Phoenix Wright: Ace Attorney Trilogy - Turnabout Tunes".to_string(),
+            ),
         ];
         let norm = normalize_title("Phoenix Wright - Ace Attorney Trilogy");
         assert_eq!(
@@ -1293,14 +1294,12 @@ mod tests {
     }
 
     #[test]
-    fn test_name_searches_skip_unsearchable_names() {        for name in ["", "   ", "App ID: 1234567"] {
+    fn test_name_searches_skip_unsearchable_names() {
+        for name in ["", "   ", "App ID: 1234567"] {
             assert!(!has_searchable_name(name), "{name:?} is not searchable");
             let mut sgdb = game(ira_models::GameKind::Switch);
             sgdb.name = name.to_string();
-            assert!(
-                !needs_sgdb_match(&sgdb),
-                "sgdb must not search {name:?}"
-            );
+            assert!(!needs_sgdb_match(&sgdb), "sgdb must not search {name:?}");
             let mut ss = game(ira_models::GameKind::Switch);
             ss.name = name.to_string();
             ss.platform_id = ira_models::Platform::parse("switch");

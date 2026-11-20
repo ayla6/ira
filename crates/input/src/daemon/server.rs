@@ -84,8 +84,8 @@ pub fn run_daemon_on(path: &Path) -> Result<i32, String> {
         return Ok(0);
     }
     let _ = std::fs::remove_file(path);
-    let listener = UnixListener::bind(path)
-        .map_err(|error| format!("bind {}: {error}", path.display()))?;
+    let listener =
+        UnixListener::bind(path).map_err(|error| format!("bind {}: {error}", path.display()))?;
     listener
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
@@ -168,7 +168,12 @@ fn loop_timeout(session_active: bool, idle_since: Option<Instant>) -> Duration {
     }
 }
 
-fn pump_sessions(table: &mut SessionTable, clients: &mut Vec<Client>, hub: &HubHandle, shutdown: bool) {
+fn pump_sessions(
+    table: &mut SessionTable,
+    clients: &mut Vec<Client>,
+    hub: &HubHandle,
+    shutdown: bool,
+) {
     for index in (0..table.sessions.len()).rev() {
         while let Ok(event) = table.sessions[index].events.try_recv() {
             broadcast(
@@ -181,13 +186,16 @@ fn pump_sessions(table: &mut SessionTable, clients: &mut Vec<Client>, hub: &HubH
             let code = result.unwrap_or(-1);
             eprintln!("ira-input: session {} ended with code {}", handle.id, code);
             hub.send(HubCommand::Unsubscribe(handle.id));
-            broadcast(clients, &Event::SessionEnded { session: handle.id, code });
+            broadcast(
+                clients,
+                &Event::SessionEnded {
+                    session: handle.id,
+                    code,
+                },
+            );
         }
     }
-    if table.sessions.is_empty()
-        && !shutdown
-        && table.desktop_holds.is_empty()
-    {
+    if table.sessions.is_empty() && !shutdown && table.desktop_holds.is_empty() {
         if let Some(wish) = table.desktop_wish.clone() {
             if !clients.is_empty() {
                 start_desktop_session(&wish, hub, table);
@@ -268,9 +276,10 @@ fn session_event_to_protocol(session: u64, event: &SessionEvent) -> Event {
             name: name.clone(),
             path: path.clone(),
         },
-        SessionEvent::ProfileReloaded { path } => {
-            Event::ProfileReloaded { session, path: path.clone() }
-        }
+        SessionEvent::ProfileReloaded { path } => Event::ProfileReloaded {
+            session,
+            path: path.clone(),
+        },
     }
 }
 
@@ -290,11 +299,23 @@ fn poll_sockets(
         revents: 0,
     }));
     let timeout_ms = timeout.as_millis().min(libc::c_int::MAX as u128) as libc::c_int;
-    let result = unsafe { libc::poll(descriptors.as_mut_ptr(), descriptors.len() as u64, timeout_ms) };
+    let result = unsafe {
+        libc::poll(
+            descriptors.as_mut_ptr(),
+            descriptors.len() as u64,
+            timeout_ms,
+        )
+    };
     if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
-        return Err(format!("daemon poll failed: {}", std::io::Error::last_os_error()));
+        return Err(format!(
+            "daemon poll failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
-    Ok(descriptors.iter().map(|d| d.revents & libc::POLLIN != 0).collect())
+    Ok(descriptors
+        .iter()
+        .map(|d| d.revents & libc::POLLIN != 0)
+        .collect())
 }
 
 fn accept(listener: &UnixListener, clients: &mut Vec<Client>, next_client_id: &mut u64) {
@@ -340,11 +361,7 @@ fn read_client(clients: &mut Vec<Client>, index: usize) -> (Vec<Request>, Option
         }
     }
     let mut requests = Vec::new();
-    while let Some(newline) = clients[index]
-        .buffer
-        .iter()
-        .position(|byte| *byte == b'\n')
-    {
+    while let Some(newline) = clients[index].buffer.iter().position(|byte| *byte == b'\n') {
         let line: Vec<u8> = clients[index].buffer.drain(..=newline).collect();
         if let Ok(Wire::Request(request)) = serde_json::from_slice(&line[..line.len() - 1]) {
             requests.push(request);
@@ -493,8 +510,8 @@ fn process_request(
                     clients,
                     index,
                     Response::Error {
-                    message: "game sessions are running".to_string(),
-                },
+                        message: "game sessions are running".to_string(),
+                    },
                 );
                 return;
             }
@@ -523,12 +540,17 @@ fn start_session(
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let arguments = Arguments {
-        device: launch
-            .device
+        device: launch.device.as_deref().map(std::path::PathBuf::from),
+        profile: launch
+            .profile
             .as_deref()
-            .map(std::path::PathBuf::from),
-        profile: launch.profile.as_deref().map(Path::new).map(Path::to_path_buf),
-        calibration: launch.calibration.as_deref().map(Path::new).map(Path::to_path_buf),
+            .map(Path::new)
+            .map(Path::to_path_buf),
+        calibration: launch
+            .calibration
+            .as_deref()
+            .map(Path::new)
+            .map(Path::to_path_buf),
         pause_unfocused: launch.pause_unfocused,
         trace: launch.trace,
         motion_port: launch.motion_port,
@@ -667,8 +689,7 @@ mod tests {
     fn write_profile(path: &Path, backend: crate::VirtualGamepadBackend) {
         std::fs::write(
             path,
-            serde_json::to_vec(&crate::InputProfile::default_gamepad_for_backend(backend))
-                .unwrap(),
+            serde_json::to_vec(&crate::InputProfile::default_gamepad_for_backend(backend)).unwrap(),
         )
         .unwrap();
     }
@@ -724,10 +745,7 @@ mod tests {
         // A holding client suspends the desktop behaviour for as long as it
         // stays connected.
         let mut holder = wait_for_server(&path);
-        match holder
-            .request(Request::HoldDesktop { hold: true })
-            .unwrap()
-        {
+        match holder.request(Request::HoldDesktop { hold: true }).unwrap() {
             Response::Applied => {}
             other => panic!("expected applied, got {other:?}"),
         }
@@ -891,10 +909,7 @@ mod tests {
                                 .compare_exchange(1, 2, Ordering::SeqCst, Ordering::SeqCst)
                                 .is_ok()
                             {
-                                write_profile(
-                                    &profile_path,
-                                    crate::VirtualGamepadBackend::XInput,
-                                );
+                                write_profile(&profile_path, crate::VirtualGamepadBackend::XInput);
                             }
                         }
                     }
@@ -952,10 +967,7 @@ mod tests {
             .map(|status| status.session_active)
             .unwrap_or(false)
         {
-            assert!(
-                Instant::now() < deadline,
-                "the session never became active"
-            );
+            assert!(Instant::now() < deadline, "the session never became active");
             std::thread::sleep(Duration::from_millis(20));
         }
         let unknown = switcher.request(Request::ReloadProfile {

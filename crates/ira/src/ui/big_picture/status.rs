@@ -33,12 +33,10 @@ struct Battery {
 /// charge state when the kernel says.
 fn read_battery(dir: &Path) -> Option<Battery> {
     let kind = match std::fs::read_to_string(dir.join("type")) {
-        Ok(text) if text.trim() == "Battery" => {
-            match std::fs::read_to_string(dir.join("scope")) {
-                Ok(scope) if scope.trim() == "Device" => BatteryKind::Peripheral,
-                _ => BatteryKind::System,
-            }
-        }
+        Ok(text) if text.trim() == "Battery" => match std::fs::read_to_string(dir.join("scope")) {
+            Ok(scope) if scope.trim() == "Device" => BatteryKind::Peripheral,
+            _ => BatteryKind::System,
+        },
         _ => return None,
     };
     let capacity = std::fs::read_to_string(dir.join("capacity"))
@@ -49,7 +47,11 @@ fn read_battery(dir: &Path) -> Option<Battery> {
     let charging = std::fs::read_to_string(dir.join("status"))
         .map(|status| status.trim() == "Charging")
         .unwrap_or(false);
-    Some(Battery { capacity, kind, charging })
+    Some(Battery {
+        capacity,
+        kind,
+        charging,
+    })
 }
 
 /// Scan every power_supply; unreadable or non-battery entries are skipped.
@@ -139,7 +141,14 @@ impl StatusBar {
         cluster.append(&clock);
         root.append(&cluster);
 
-        let status = Self { root, date, clock, battery, battery_icon, battery_label };
+        let status = Self {
+            root,
+            date,
+            clock,
+            battery,
+            battery_icon,
+            battery_label,
+        };
         status.refresh();
         let date = status.date.clone();
         let clock = status.clock.clone();
@@ -280,9 +289,12 @@ impl BottomBar {
             self.family.set(family);
             self.rebuild_prompts();
         }
-        self.pads.set_tooltip_text(Some(
-            &crate::tr!("Controllers connected: {}").replacen("{}", &count.to_string(), 1),
-        ));
+        self.pads
+            .set_tooltip_text(Some(&crate::tr!("Controllers connected: {}").replacen(
+                "{}",
+                &count.to_string(),
+                1,
+            )));
     }
 
     /// Replace the prompt row, e.g. A/Play on the home screen, B/Back plus
@@ -290,16 +302,14 @@ impl BottomBar {
     /// icon set the input customization uses. Both live in one fixed-size
     /// slot so the row stays aligned while prompts are rebuilt.
     pub(super) fn set_prompts(&self, items: &[(ira_input::GamepadButton, &str)]) {
-        *self.prompt_items.borrow_mut() =
-            items.iter().map(|(b, l)| (*b, l.to_string())).collect();
+        *self.prompt_items.borrow_mut() = items.iter().map(|(b, l)| (*b, l.to_string())).collect();
         self.rebuild_prompts();
     }
 
     fn rebuild_prompts(&self) {
         let family = self.family.get();
         crate::ui::helpers::clear_children(&self.prompts);
-        let items: Vec<(ira_input::GamepadButton, String)> =
-            self.prompt_items.borrow().clone();
+        let items: Vec<(ira_input::GamepadButton, String)> = self.prompt_items.borrow().clone();
         for (button, label) in items {
             let label = label.as_str();
             let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
@@ -317,11 +327,8 @@ impl BottomBar {
             fallback.set_valign(gtk4::Align::Center);
             fallback.add_css_class(CSS_BP_PROMPT);
             let source = ira_input::InputSource::Button(button);
-            let has_asset = crate::ui::input_profile_assets::set_source_asset(
-                &glyph,
-                source,
-                family,
-            );
+            let has_asset =
+                crate::ui::input_profile_assets::set_source_asset(&glyph, source, family);
             if !has_asset {
                 fallback.set_text(&crate::ui::input_profile_assets::source_badge(
                     source, family,
@@ -386,8 +393,16 @@ mod tests {
 
     #[test]
     fn test_system_battery_ignores_peripheral_packs() {
-        let system = Battery { capacity: 40, kind: BatteryKind::System, charging: false };
-        let peripheral = Battery { capacity: 99, kind: BatteryKind::Peripheral, charging: false };
+        let system = Battery {
+            capacity: 40,
+            kind: BatteryKind::System,
+            charging: false,
+        };
+        let peripheral = Battery {
+            capacity: 99,
+            kind: BatteryKind::Peripheral,
+            charging: false,
+        };
         assert_eq!(system_battery(&[peripheral, system]).unwrap().capacity, 40);
         assert!(system_battery(&[peripheral]).is_none());
         assert!(system_battery(&[]).is_none());
@@ -400,6 +415,9 @@ mod tests {
         assert_eq!(battery_icon_name(40, false), "battery-low-symbolic");
         assert_eq!(battery_icon_name(15, false), "battery-caution-symbolic");
         assert_eq!(battery_icon_name(5, false), "battery-empty-symbolic");
-        assert_eq!(battery_icon_name(70, true), "battery-good-charging-symbolic");
+        assert_eq!(
+            battery_icon_name(70, true),
+            "battery-good-charging-symbolic"
+        );
     }
 }

@@ -34,7 +34,9 @@ pub(crate) fn clean_rom_name(name: &str) -> String {
     // A token that is nothing but a console id ("0004000000054000", or
     // the same with a region letter glued on) rides in front of hShop
     // and dump names; it names nothing.
-    words.retain(|word| !(word.len() >= 10 && word.chars().filter(|c| c.is_ascii_digit()).count() >= 8));
+    words.retain(|word| {
+        !(word.len() >= 10 && word.chars().filter(|c| c.is_ascii_digit()).count() >= 8)
+    });
     // hShop file endings survive file_stem as whole words when the
     // stack is deeper than one extension ("... (U).legit.decrypted").
     const ENDINGS: &[&str] = &["legit", "pirate", "piratelegit", "decrypted", "3ds", "cci"];
@@ -99,11 +101,7 @@ fn separator_segments(name: &str) -> Vec<&str> {
     }
     segments
         .iter()
-        .map(|s| {
-            s.trim_matches(|c| {
-                matches!(c, '-' | ':' | '+' | '\u{2013}' | '\u{2014}' | ' ')
-            })
-        })
+        .map(|s| s.trim_matches(|c| matches!(c, '-' | ':' | '+' | '\u{2013}' | '\u{2014}' | ' ')))
         .filter(|s| !s.is_empty())
         .collect()
 }
@@ -124,9 +122,7 @@ fn raw_separator_richness(name: &str) -> usize {
         match c {
             '(' | '[' => depth += 1,
             ')' | ']' => depth = depth.saturating_sub(1),
-            '-' | ':' | '.' | '_' | '\'' | '\u{2013}' | '\u{2014}' | '\u{a789}'
-                if depth == 0 =>
-            {
+            '-' | ':' | '.' | '_' | '\'' | '\u{2013}' | '\u{2014}' | '\u{a789}' if depth == 0 => {
                 separators += 1
             }
             _ => {}
@@ -167,7 +163,10 @@ pub(crate) fn pick_search_name(
     let order: [usize; 3] = if trusted_title { [1, 0, 2] } else { [0, 1, 2] };
     let usable = |i: usize| !cleaned[i].is_empty() && !looks_like_title_id(&cleaned[i]);
     if trusted_title {
-        return order.into_iter().find(|&i| usable(i)).map(|i| cleaned[i].clone());
+        return order
+            .into_iter()
+            .find(|&i| usable(i))
+            .map(|i| cleaned[i].clone());
     }
     order
         .into_iter()
@@ -312,7 +311,10 @@ mod tests {
             clean_rom_name("Fire Emblem - Three Houses (USA) (En,Fr,De) [b]"),
             "Fire Emblem - Three Houses"
         );
-        assert_eq!(clean_rom_name("Zelda_No_Densetsu [v1.0]"), "Zelda No Densetsu");
+        assert_eq!(
+            clean_rom_name("Zelda_No_Densetsu [v1.0]"),
+            "Zelda No Densetsu"
+        );
         // Unbalanced opening brackets still keep the text.
         assert_eq!(clean_rom_name("Half Life (Source"), "Half Life");
         assert_eq!(clean_rom_name("   "), "");
@@ -331,9 +333,15 @@ mod tests {
         // Switch metadata titles carry trademark glyphs and the
         // filesystem-safe colon.
         assert_eq!(clean_rom_name("Bayonetta\u{2122}"), "Bayonetta");
-        assert_eq!(clean_rom_name("Catherine\u{a789} Full Body"), "Catherine: Full Body");
+        assert_eq!(
+            clean_rom_name("Catherine\u{a789} Full Body"),
+            "Catherine: Full Body"
+        );
         // In-word dashes survive (Pac-Man must keep searching as Pac-Man).
-        assert_eq!(clean_rom_name("Pac-Man Collection (USA)"), "Pac-Man Collection");
+        assert_eq!(
+            clean_rom_name("Pac-Man Collection (USA)"),
+            "Pac-Man Collection"
+        );
     }
 
     #[test]
@@ -347,19 +355,28 @@ mod tests {
             "Super Mario 3D Land"
         );
         // A short numeric head stays ("1943: The Battle of Midway").
-        assert_eq!(clean_rom_name("1943 The Battle of Midway"), "1943 The Battle of Midway");
+        assert_eq!(
+            clean_rom_name("1943 The Battle of Midway"),
+            "1943 The Battle of Midway"
+        );
         // The last word is never stripped into an empty name.
         assert_eq!(clean_rom_name("Decrypted"), "Decrypted");
     }
 
     #[test]
     fn test_clean_rom_name_keeps_punctuation_the_source_needs() {
-        assert_eq!(clean_rom_name("13 Sentinels: Aegis Rim"), "13 Sentinels: Aegis Rim");
+        assert_eq!(
+            clean_rom_name("13 Sentinels: Aegis Rim"),
+            "13 Sentinels: Aegis Rim"
+        );
         assert_eq!(
             clean_rom_name("Ace Attorney - Justice for All (USA)"),
             "Ace Attorney - Justice for All"
         );
-        assert_eq!(clean_rom_name("Pok\u{e9}mon: Let's Go"), "Pok\u{e9}mon: Let's Go");
+        assert_eq!(
+            clean_rom_name("Pok\u{e9}mon: Let's Go"),
+            "Pok\u{e9}mon: Let's Go"
+        );
     }
 
     #[test]
@@ -431,12 +448,20 @@ mod tests {
         // A healthy library keeps the file-first order: the scene file
         // carries the separator, a shortened library title does not.
         assert_eq!(
-            pick_search_name(false, "Ace Combat 04 - Shattered Skies", "Ace Combat 04", ""),
+            pick_search_name(
+                false,
+                "Ace Combat 04 - Shattered Skies",
+                "Ace Combat 04",
+                ""
+            ),
             Some("Ace Combat 04 - Shattered Skies".to_string())
         );
         // Nameless candidates never win.
         assert_eq!(pick_search_name(false, "", "", ""), None);
-        assert_eq!(pick_search_name(false, "", "Okami", ""), Some("Okami".to_string()));
+        assert_eq!(
+            pick_search_name(false, "", "Okami", ""),
+            Some("Okami".to_string())
+        );
         assert_eq!(
             pick_search_name(true, "", "", "Okami"),
             Some("Okami".to_string())
@@ -503,7 +528,10 @@ mod tests {
     fn test_search_term_prefers_the_distinctive_tail() {
         // The last segment is what both the dump and ScreenScraper's name
         // agree is the game's own; series heads bury the game.
-        assert_eq!(search_term("Ace Combat 04 - Shattered Skies"), "Shattered Skies");
+        assert_eq!(
+            search_term("Ace Combat 04 - Shattered Skies"),
+            "Shattered Skies"
+        );
         assert_eq!(
             search_term("Simple 2000 Series Vol. 50 - The Daibijin"),
             "The Daibijin"
@@ -544,10 +572,7 @@ mod tests {
 
     #[test]
     fn test_region_hints_reads_dump_tags_only() {
-        assert_eq!(
-            region_hints("The Daibijin (Japan) [b]"),
-            vec!["jp"]
-        );
+        assert_eq!(region_hints("The Daibijin (Japan) [b]"), vec!["jp"]);
         assert_eq!(region_hints("Game (USA) (Europe)"), vec!["us", "eu"]);
         // Language lists and revisions are not regions; untagged names
         // and bracket-less names carry nothing.

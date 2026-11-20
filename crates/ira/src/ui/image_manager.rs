@@ -485,7 +485,11 @@ fn build_reset_icon_button(
         // written behind it. A miss changes nothing, so the page is left
         // alone — rebuilding it here made the floating sheet grow.
         let Some(bytes) = super::image_manager_helpers::native_icon_bytes(
-            &gc, &cfg, &azahar_exe, &cemu_exe, &switch_exe,
+            &gc,
+            &cfg,
+            &azahar_exe,
+            &cemu_exe,
+            &switch_exe,
         ) else {
             return;
         };
@@ -647,7 +651,12 @@ fn build_ss_square_button(
     let db_id = game.db_id;
     let (steam, cfg, db, save_dir) = {
         let s = state.borrow();
-        (s.steam.clone(), s.cfg.clone(), s.db.clone(), s.save_dir.clone())
+        (
+            s.steam.clone(),
+            s.cfg.clone(),
+            s.db.clone(),
+            s.save_dir.clone(),
+        )
     };
     let refresh = Rc::clone(refresh_images);
     let pending_copies_ss = pending_copies.clone();
@@ -667,8 +676,7 @@ fn build_ss_square_button(
         std::thread::spawn({
             let save_dir = save_dir.clone();
             move || {
-                let _s =
-                    tracing::info_span!("ss_square_download", db_id = db_id).entered();
+                let _s = tracing::info_span!("ss_square_download", db_id = db_id).entered();
                 let result = (|| {
                     let entry = ira_db::find_by_db_id(&db, db_id)
                         .ok()
@@ -745,8 +753,7 @@ fn build_ss_slot_button(
         std::thread::spawn({
             let ss_id = ss_id.clone();
             move || {
-                let _s =
-                    tracing::info_span!("ss_slot_download", db_id = db_id).entered();
+                let _s = tracing::info_span!("ss_slot_download", db_id = db_id).entered();
                 let result = (|| {
                     let creds = ira_api::ScraperCreds::from_account(
                         cfg.screenscraper_id.clone(),
@@ -760,9 +767,7 @@ fn build_ss_slot_button(
                         .iter()
                         .find_map(|game| kind.url(game))
                         .ok_or_else(|| "No ScreenScraper art found".to_string())?;
-                    let bytes = steam
-                        .screenscraper_media(&url)
-                        .map_err(|e| e.to_string())?;
+                    let bytes = steam.screenscraper_media(&url).map_err(|e| e.to_string())?;
                     ira_parser::convert_bytes_to_lossless_webp(&bytes)
                         .ok_or_else(|| "No ScreenScraper art found".to_string())
                 })();
@@ -800,8 +805,7 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
     // carry (Goldberg, native Steam) — resolved in one place. A retro,
     // Switch or Lutris id is not a Steam id, and neither is a GOG
     // product id (Nge) — those keep the buttons off.
-    let is_steam =
-        game.trophy_source.has_steam_app_id() && !game.steam_api_id().is_empty();
+    let is_steam = game.trophy_source.has_steam_app_id() && !game.steam_api_id().is_empty();
     let id = game.steam_api_id().to_string();
     let save_dir = state.borrow().save_dir.clone();
 
@@ -914,7 +918,6 @@ fn build_image_section(params: BuildImageSectionParams) -> gtk4::Box {
         btns.append(&btn);
     }
 
-
     let sgdb_ctx = SgdbPickerCtx {
         state,
         asset_type,
@@ -961,15 +964,17 @@ fn build_discs_section(
         pending_copies: &Option<Rc<RefCell<HashMap<String, PendingImage>>>>,
         key: &str,
     ) -> Option<Vec<u8>> {
-        pending_copies.as_ref().and_then(|pc| match pc.borrow().get(key) {
-            Some(PendingImage::Path(p))
-                if !p.is_empty() && std::path::Path::new(p).is_file() =>
-            {
-                std::fs::read(p).ok()
-            }
-            Some(PendingImage::Bytes(b)) if !b.is_empty() => Some(b.to_vec()),
-            _ => None,
-        })
+        pending_copies
+            .as_ref()
+            .and_then(|pc| match pc.borrow().get(key) {
+                Some(PendingImage::Path(p))
+                    if !p.is_empty() && std::path::Path::new(p).is_file() =>
+                {
+                    std::fs::read(p).ok()
+                }
+                Some(PendingImage::Bytes(b)) if !b.is_empty() => Some(b.to_vec()),
+                _ => None,
+            })
     }
 
     let db = state.borrow().db.clone();
@@ -1000,8 +1005,7 @@ fn build_discs_section(
         let key = super::disc_art::disc_file_base(disc.disc_number);
         // Settings drafts win over what is already on disk.
         let initial = draft_bytes(pending_copies, &key).or_else(|| {
-            ira_parser::find_image_file(&data_dir, &key)
-                .and_then(|path| std::fs::read(path).ok())
+            ira_parser::find_image_file(&data_dir, &key).and_then(|path| std::fs::read(path).ok())
         });
         if initial.is_none() {
             missing_before += 1;
@@ -1084,9 +1088,9 @@ fn build_discs_section(
     controls.append(&status);
 
     let ss_btn = gtk4::Button::with_label("SS");
-    ss_btn.set_tooltip_text(Some(
-        &crate::tr!("Download missing disc art from ScreenScraper"),
-    ));
+    ss_btn.set_tooltip_text(Some(&crate::tr!(
+        "Download missing disc art from ScreenScraper"
+    )));
     ss_btn.set_halign(gtk4::Align::End);
     {
         let sc = state.clone();
@@ -1109,15 +1113,12 @@ fn build_discs_section(
                         }
                         // Trimmed like persisted art so staged tiles
                         // already sit at their regular size.
-                        let png =
-                            ira_parser::trim_transparent_margins(&png).unwrap_or(png);
+                        let png = ira_parser::trim_transparent_margins(&png).unwrap_or(png);
                         if update_cells
                             .borrow()
                             .iter()
                             .find(|(number, _, _)| *number == disc)
-                            .is_some_and(|(_, picture, stack)| {
-                                set_cell_art(picture, stack, &png)
-                            })
+                            .is_some_and(|(_, picture, stack)| set_cell_art(picture, stack, &png))
                         {
                             fresh += 1;
                         }
@@ -1128,10 +1129,11 @@ fn build_discs_section(
                     }
                 }
                 if fresh > 0 {
-                    status_text.set_text(
-                        &crate::tr!("Downloaded {}")
-                            .replacen("{}", &fresh.to_string(), 1),
-                    );
+                    status_text.set_text(&crate::tr!("Downloaded {}").replacen(
+                        "{}",
+                        &fresh.to_string(),
+                        1,
+                    ));
                 } else if missing_before == 0 {
                     status_text.set_text(&crate::tr!("Disc art is up to date"));
                 } else {

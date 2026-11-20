@@ -27,8 +27,7 @@ fn main() {
 
     println!("\n== detected switch emulators:");
     for choice in ira_platforms::emulator_detect::detect_emulators("switch") {
-        let n =
-            ira_platforms::switch::discover_installed_games(&choice.launch_command, true).len();
+        let n = ira_platforms::switch::discover_installed_games(&choice.launch_command, true).len();
         println!("  {:?} -> {n} installed titles", choice.launch_command);
     }
     let n = ira_platforms::switch::discover_installed_games(&exe, true).len();

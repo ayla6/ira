@@ -51,12 +51,7 @@ fn combo_set_index(ctx: &PagesCtx) -> usize {
             .action_layers
             .get(index)
             .map(|layer| layer.parent_set.clone())
-            .and_then(|name| {
-                profile
-                    .action_sets
-                    .iter()
-                    .position(|set| set.name == name)
-            })
+            .and_then(|name| profile.action_sets.iter().position(|set| set.name == name))
             .unwrap_or(0),
     }
 }
@@ -110,7 +105,15 @@ fn sets_group(
         let layers = layers.clone();
         let cursor = cursor.clone();
         add_row.connect_activated(move |_| {
-            show_add_set_dialog(&ctx, &combo, &rename, &rename_target, &layers, &cursor, &rebuild);
+            show_add_set_dialog(
+                &ctx,
+                &combo,
+                &rename,
+                &rename_target,
+                &layers,
+                &cursor,
+                &rebuild,
+            );
         });
     }
 
@@ -126,7 +129,15 @@ fn sets_group(
         let layers = layers.clone();
         let cursor = cursor.clone();
         delete_row.connect_activated(move |_| {
-            delete_active_set(&ctx, &combo, &rename, &rename_target, &layers, &cursor, &rebuild);
+            delete_active_set(
+                &ctx,
+                &combo,
+                &rename,
+                &rename_target,
+                &layers,
+                &cursor,
+                &rebuild,
+            );
         });
     }
 
@@ -371,7 +382,11 @@ impl CursorOptions {
         shown.set_title(&crate::tr!("Action set when cursor shown"));
         let hidden = adw::ComboRow::new();
         hidden.set_title(&crate::tr!("Action set when cursor hidden"));
-        let this = Self { group, shown, hidden };
+        let this = Self {
+            group,
+            shown,
+            hidden,
+        };
         this.refresh(ctx);
 
         for (combo, field) in [

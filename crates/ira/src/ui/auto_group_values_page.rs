@@ -47,8 +47,7 @@ pub(super) type ValueMenus = HashMap<ira_models::AutoDimension, Vec<ValueOption>
 
 /// One row of a rule's value dimension: the option, its row, and its
 /// check. The editor collects the picked names from these.
-pub(super) type ValueChecks =
-    Rc<RefCell<Vec<(ValueOption, adw::ActionRow, gtk4::CheckButton)>>>;
+pub(super) type ValueChecks = Rc<RefCell<Vec<(ValueOption, adw::ActionRow, gtk4::CheckButton)>>>;
 
 /// The page-switch callback: `true` when the values page came up.
 pub(super) type NavigateFn = Rc<dyn Fn(bool)>;
@@ -209,12 +208,14 @@ pub(super) fn fill_check_list(
             check.connect_toggled(move |_| refresh_values_row(&checks, &values_row));
         }
         list.append(&row);
-        checks
-            .borrow_mut()
-            .push((ValueOption {
+        checks.borrow_mut().push((
+            ValueOption {
                 value: opt.value.clone(),
                 search: opt.search.clone(),
-            }, row, check));
+            },
+            row,
+            check,
+        ));
     }
     if options.is_empty() {
         let empty = adw::ActionRow::new();
@@ -273,7 +274,12 @@ fn entity_edit_button(
             }
         });
         super::edit_game_entity_dialog::show_entity_editor(
-            &refill.state, &row_c, kind, id, &name, on_saved,
+            &refill.state,
+            &row_c,
+            kind,
+            id,
+            &name,
+            on_saved,
         );
     });
     pen

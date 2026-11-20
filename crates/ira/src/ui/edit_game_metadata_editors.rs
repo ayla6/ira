@@ -323,7 +323,10 @@ mod tests {
         let mut metadata = ScraperMetadata::default();
         upsert_classification(&mut metadata, "  CERO  ", " C ");
         assert_eq!(
-            metadata.classifications.first().map(|c| (c.kind.as_str(), c.value.as_str())),
+            metadata
+                .classifications
+                .first()
+                .map(|c| (c.kind.as_str(), c.value.as_str())),
             Some(("CERO", "C"))
         );
         // Empty boards and empty values store nothing.

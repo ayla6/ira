@@ -6,7 +6,6 @@
 use super::css::{CSS_ERROR, CSS_SUGGESTED_ACTION, CSS_TITLE_1, CSS_TOOLBAR};
 use super::helpers::DialogLayout;
 use super::input_profile_action_sets::build_sets_page;
-use super::input_profile_set_indicator::SetIndicator;
 use super::input_profile_editor_regions::Region;
 use super::input_profile_editor_save::{
     connect_persist, connect_unsaved_guard, is_dirty, persist_closure, EditorForm, SaveOutcome,
@@ -15,6 +14,7 @@ use super::input_profile_gyro_card::add_gyro_group;
 use super::input_profile_region_pages::{
     rebuild_region_pages, EditingTarget, PagesCtx, RegionPages,
 };
+use super::input_profile_set_indicator::SetIndicator;
 use super::input_profile_store::read_profile;
 use adw::prelude::*;
 use ira_input::{ActionSet, DeviceInfo, GyroConfig, InputProfile, VirtualGamepadBackend};
@@ -88,7 +88,9 @@ pub(super) fn show_input_profile_editor(
                 let mut profile = InputProfile::default();
                 if let Some(platform_id) = platform_id.as_deref() {
                     if !platform_id.is_empty() {
-                        profile.compatible_platform_ids.push(platform_id.to_string());
+                        profile
+                            .compatible_platform_ids
+                            .push(platform_id.to_string());
                     }
                 }
                 (profile, String::new(), false)
@@ -213,7 +215,11 @@ pub(super) fn show_input_profile_editor(
         let adjust_title = title.clone();
         *adjust_hook.borrow_mut() = Some(Rc::new(move || {
             adjust_title.set_text(adjust_form.name.borrow().as_str());
-            let dirty = is_dirty(adjust_unsaved.get(), &adjust_form, &adjust_baseline.borrow());
+            let dirty = is_dirty(
+                adjust_unsaved.get(),
+                &adjust_form,
+                &adjust_baseline.borrow(),
+            );
             adjust_save.set_sensitive(dirty);
             adjust_apply.set_sensitive(dirty);
         }));
@@ -293,7 +299,13 @@ pub(super) fn show_input_profile_editor(
         window_for_cancel.close();
     });
 
-    connect_unsaved_guard(&layout.window, &persist_save, &baseline, &form, &force_close);
+    connect_unsaved_guard(
+        &layout.window,
+        &persist_save,
+        &baseline,
+        &form,
+        &force_close,
+    );
 
     layout.window.present(Some(parent));
 }
@@ -349,11 +361,7 @@ fn build_pages(
             "gyro",
         ));
     add_gyro_group(&gyro_box, gyro, ctx.device.as_ref(), &ctx.on_adjusted);
-    super::input_profile_gyro_motion::add_gyro_motion_groups(
-        &gyro_box,
-        gyro,
-        &ctx.on_adjusted,
-    );
+    super::input_profile_gyro_motion::add_gyro_motion_groups(&gyro_box, gyro, &ctx.on_adjusted);
 
     let (sets_scroll, sets_box) = scrolling_page();
     layout.stack.add_named(&sets_scroll, Some("sets"));

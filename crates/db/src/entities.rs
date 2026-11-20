@@ -106,7 +106,11 @@ pub fn add_entity_alias(
 }
 
 pub fn remove_entity_alias(conn: &DbConn, alias_id: i64) -> Result<(), String> {
-    crate::execute(conn, "DELETE FROM scraper_aliases WHERE id = ?1", params![alias_id])?;
+    crate::execute(
+        conn,
+        "DELETE FROM scraper_aliases WHERE id = ?1",
+        params![alias_id],
+    )?;
     Ok(())
 }
 
@@ -188,8 +192,10 @@ fn load_name_map(
     targets: &[i64],
 ) -> std::collections::HashMap<i64, String> {
     let placeholders = targets.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-    let target_params: Vec<&dyn rusqlite::types::ToSql> =
-        targets.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+    let target_params: Vec<&dyn rusqlite::types::ToSql> = targets
+        .iter()
+        .map(|id| id as &dyn rusqlite::types::ToSql)
+        .collect();
     let mut name_map: std::collections::HashMap<i64, String> = Default::default();
     match c.prepare(&format!(
         "SELECT id, name FROM {} WHERE id IN ({placeholders})",
@@ -242,7 +248,11 @@ pub fn resolve_entities(
     }
     let targets: Vec<i64> = {
         let mut seen = std::collections::HashSet::new();
-        alias_map.values().filter(|id| seen.insert(**id)).copied().collect()
+        alias_map
+            .values()
+            .filter(|id| seen.insert(**id))
+            .copied()
+            .collect()
     };
     let name_map = load_name_map(&c, spec, kind, &targets);
     entities
@@ -252,7 +262,10 @@ pub fn resolve_entities(
             let Some(target_id) = alias_map.get(&alias.to_lowercase()).copied() else {
                 return entity.clone();
             };
-            let name = name_map.get(&target_id).cloned().unwrap_or_else(|| entity.name.clone());
+            let name = name_map
+                .get(&target_id)
+                .cloned()
+                .unwrap_or_else(|| entity.name.clone());
             ira_models::ScraperEntity {
                 id: target_id.to_string(),
                 name,
@@ -535,7 +548,19 @@ mod tests {
     #[test]
     fn test_rename_latches_against_store_freshening() {
         let (conn, _tmp) = setup_db();
-        let game = add_game(&conn, crate::NewGame { kind: GameKind::Steam, trophy_source: TrophySource::Gse, steam_id: "", trophy_id: "", native_id: "", platform_id: "", title: "Game" }).unwrap();
+        let game = add_game(
+            &conn,
+            crate::NewGame {
+                kind: GameKind::Steam,
+                trophy_source: TrophySource::Gse,
+                steam_id: "",
+                trophy_id: "",
+                native_id: "",
+                platform_id: "",
+                title: "Game",
+            },
+        )
+        .unwrap();
         put_entity(&conn, GENRES, 2620, "Role Playing Game");
         rename_entity(&conn, KIND_GENRE, 2620, "RPG").unwrap();
         // The source's next spelling loses to the user's rename.

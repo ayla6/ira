@@ -272,7 +272,8 @@ fn activator_kind_controls(
             &crate::tr!("Soft pull threshold"),
             Some(&crate::tr!("Trigger travel that fires the soft pull")),
             &SliderSpec(0.05, 0.95, 0.05, f64::from(*threshold)),
-            move |value| write_kind_value(&base, index, value, set_soft_pull_threshold)));
+            move |value| write_kind_value(&base, index, value, set_soft_pull_threshold),
+        ));
     }
 }
 
@@ -449,7 +450,8 @@ fn activator_setting_controls(
                     }
                 });
                 (base_for_repeat.on_adjusted)();
-            }));
+            },
+        ));
     }
 }
 

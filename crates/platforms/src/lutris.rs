@@ -84,4 +84,3 @@ mod tests {
         assert!(lutris_db_path().ends_with("lutris/pga.db"));
     }
 }
-

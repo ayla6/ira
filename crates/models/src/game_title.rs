@@ -2,13 +2,16 @@ use super::game::Game;
 use chrono::Datelike;
 
 /// Variants share their base game's identity and do not create title collisions.
+/// Hidden games never collide with others, but still get a suffix themselves.
 impl Game {
     pub fn title_suffix(&self, games: &[Game]) -> String {
         let game = self;
         let peers: Vec<_> = games
             .iter()
             .filter(|other| {
-                other.db_id != game.db_id && other.name.eq_ignore_ascii_case(&game.name)
+                !other.hidden
+                    && other.db_id != game.db_id
+                    && other.name.eq_ignore_ascii_case(&game.name)
             })
             .collect();
         if peers.is_empty() {
@@ -122,5 +125,25 @@ mod tests {
             ..first.clone()
         };
         assert!(first.title_suffix(&[first.clone(), variant]).is_empty());
+    }
+
+    #[test]
+    fn test_title_suffix_ignores_hidden_peers() {
+        let first = Game {
+            db_id: 1,
+            name: "Game".into(),
+            platform_id: super::super::consoles::Platform::parse("psx"),
+            ..Default::default()
+        };
+        let hidden = Game {
+            db_id: 2,
+            hidden: true,
+            platform_id: super::super::consoles::Platform::parse("ps2"),
+            ..first.clone()
+        };
+        assert!(first
+            .title_suffix(&[first.clone(), hidden.clone()])
+            .is_empty());
+        assert_eq!(hidden.title_suffix(&[first, hidden.clone()]), "PS2");
     }
 }

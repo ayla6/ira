@@ -80,23 +80,17 @@ pub(crate) fn matching_ids(items: &[SearchItem], terms: &[String]) -> Vec<String
                 ira_models::normalize_name(&item.sort_title),
                 ira_models::normalize_name(&item.platform)
             );
-            terms.iter().all(|term| searchable.contains(term)).then(|| {
-                let rank = if name == query {
-                    0
-                } else if name.starts_with(&query) {
-                    1
-                } else {
-                    2
-                };
-                (rank, std::cmp::Reverse(item.last_played), name, item.id)
-            })
+            terms
+                .iter()
+                .all(|term| searchable.contains(term))
+                .then(|| (std::cmp::Reverse(item.last_played), name, item.id))
         })
         .collect();
     matches.sort();
     matches
         .into_iter()
         .take(24)
-        .map(|(_, _, _, id)| id.to_string())
+        .map(|(_, _, id)| id.to_string())
         .collect()
 }
 
@@ -144,9 +138,10 @@ mod tests {
     }
 
     #[test]
-    fn test_matching_ids_ranks_exact_then_prefix_and_bounds_results() {
+    fn test_matching_ids_orders_by_last_played_then_name_and_bounds_results() {
         let mut games = vec![item(1, "Super Game"), item(2, "Game Plus"), item(3, "Game")];
-        assert_eq!(matching_ids(&games, &["game".into()]), vec!["3", "2", "1"]);
+        games[0].last_played = 10;
+        assert_eq!(matching_ids(&games, &["game".into()]), vec!["1", "3", "2"]);
         games.extend((4..100).map(|id| item(id, "Game Extra")));
         assert_eq!(matching_ids(&games, &["game".into()]).len(), 24);
     }

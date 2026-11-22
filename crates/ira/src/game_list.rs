@@ -191,7 +191,7 @@ impl GameListOptions {
         }
     }
 
-    fn for_startup(cfg: &Config) -> Self {
+    pub fn for_startup(cfg: &Config) -> Self {
         let mut options = Self::from_config(cfg);
         options.steam_enabled &= options.auto_reload_steam;
         options.shadps4_enabled &= options.auto_reload_shadps4;

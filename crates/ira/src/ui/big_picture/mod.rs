@@ -9,6 +9,8 @@ mod disc_tile;
 mod game_menu;
 mod groups;
 mod home;
+mod icon_center;
+mod icon_row;
 mod input;
 mod keyboard;
 mod marquee;
@@ -18,6 +20,9 @@ mod scroll_glide;
 mod status;
 mod view;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+
 pub(super) use view::{build_window, refresh, BigPictureUi};
 
 /// True when Ira was spawned under Gamescope's compositor, whose Wayland
@@ -26,10 +31,27 @@ pub fn running_in_gamescope() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok_and(|display| display.starts_with("gamescope"))
 }
 
+/// The live mode. Seeded from the launch (`--big-picture`, or automatic
+/// under Gamescope) and flipped by `crate::ui::mode_switch`; launch workers
+/// read it off the main thread, hence the atomic.
+fn mode() -> &'static AtomicBool {
+    static MODE: OnceLock<AtomicBool> = OnceLock::new();
+    MODE.get_or_init(|| {
+        AtomicBool::new(
+            std::env::args().any(|arg| arg == "--big-picture") || running_in_gamescope(),
+        )
+    })
+}
+
 /// Big-picture mode: fullscreens the main window and drops the desktop
-/// chrome. Opt in via `--big-picture`; automatic under Gamescope.
+/// chrome.
 pub fn is_big_picture() -> bool {
-    std::env::args().any(|arg| arg == "--big-picture") || running_in_gamescope()
+    mode().load(Ordering::Relaxed)
+}
+
+/// Record the mode the window is about to be rebuilt in.
+pub(super) fn set_big_picture(big_picture: bool) {
+    mode().store(big_picture, Ordering::Relaxed);
 }
 
 /// Open the big-picture disc picker for a multi-disc game: a centered

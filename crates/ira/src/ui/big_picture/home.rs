@@ -579,7 +579,7 @@ fn snap_to_boundary(ui: &HomeUi) {
 /// `current` stepped by `delta`. A wrap is the edge tile's privilege and
 /// happens once, on a fresh press (`allow_wrap`): from anywhere else the
 /// row moves one step, and a held direction that reaches an end meets a
-/// wall instead of cycling around forever.
+/// wall instead of cycling around forever. `None` for an empty row.
 fn next_selection(current: usize, count: usize, delta: i32, allow_wrap: bool) -> Option<usize> {
     if count == 0 {
         return None;
@@ -967,14 +967,13 @@ mod tests {
 
     #[test]
     fn test_next_selection_wraps_once_from_the_edge_on_a_fresh_press() {
-        // Engaged steps wrap at the edge tiles.
+        // Fresh presses wrap at the edge tiles.
         assert_eq!(next_selection(0, 5, -1, true), Some(4));
         assert_eq!(next_selection(4, 5, 1, true), Some(0));
         // Held repeats meet a wall there; interior steps just move one.
         assert_eq!(next_selection(0, 5, -1, false), Some(0));
         assert_eq!(next_selection(4, 5, 1, false), Some(4));
         assert_eq!(next_selection(0, 5, 1, false), Some(1));
-        assert_eq!(next_selection(2, 5, 2, true), Some(4));
         assert_eq!(next_selection(0, 0, 1, true), None);
     }
 

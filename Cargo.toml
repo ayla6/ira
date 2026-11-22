@@ -33,3 +33,12 @@ unimplemented = "warn"
 # dependencies nor the lockfile.
 [profile.dev]
 debug = 1
+
+# Dependencies build with release settings even in dev: unoptimized image
+# decoders take most of a second per cover, so debug runs fill the library
+# seconds late. Workspace crates keep dev settings for fast incremental
+# builds.
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+codegen-units = 16

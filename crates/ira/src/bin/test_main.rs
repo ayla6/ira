@@ -14,6 +14,7 @@ fn main() {
         "trophies" => test_trophies(),
         "playtime" => test_playtime(),
         "scan" => bench_scan(),
+        "startup" => bench_startup(),
         "all" => {
             test_psf();
             test_npbind();
@@ -22,7 +23,7 @@ fn main() {
             test_playtime();
         }
         _ => {
-            eprintln!("Usage: ira-test [psf|npbind|discover|trophies|playtime|scan|all]");
+            eprintln!("Usage: ira-test [psf|npbind|discover|trophies|playtime|scan|startup|all]");
             std::process::exit(1);
         }
     }
@@ -121,6 +122,44 @@ fn test_playtime() {
 /// database (the real caches and data dirs are used as-is, like the app
 /// does). With the `trace` feature, spans go to `ira-scan-trace.json` in
 /// the temp dir for a per-phase breakdown.
+/// Time the startup library load (the sources the auto-reload settings
+/// enable) against a copy of the live database.
+fn bench_startup() {
+    let cfg = ira_config::load_config();
+    let src = format!("{}/ira.db", cfg.save_dir);
+    let dir = std::env::temp_dir().join(format!("ira-startup-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let db_copy = dir.join("ira.db");
+    std::fs::copy(&src, &db_copy).expect("copy database");
+    let db = ira_db::init_db(&db_copy.to_string_lossy());
+    let options = ira::game_list::GameListOptions::for_startup(&cfg);
+    let runs: usize = std::env::var("SCAN_RUNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2);
+    for run in 1..=runs {
+        let start = std::time::Instant::now();
+        let progress = std::sync::Arc::new(move |update: ira::game_list::GameListProgress| {
+            eprintln!(
+                "  [{:8.2?}] {} ({}/{})",
+                start.elapsed(),
+                update.status,
+                update.completed,
+                update.total
+            );
+        });
+        let games = ira::game_list::build_game_list(&db, &cfg.save_dir, &cfg, &options, progress);
+        println!(
+            "run {run}: {} games in {:.2?}",
+            games.len(),
+            start.elapsed()
+        );
+    }
+    if let Err(error) = std::fs::remove_dir_all(&dir) {
+        eprintln!("Failed to remove {}: {error}", dir.display());
+    }
+}
+
 fn bench_scan() {
     let cfg = ira_config::load_config();
     let src = format!("{}/ira.db", cfg.save_dir);

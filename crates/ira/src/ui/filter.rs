@@ -115,15 +115,25 @@ pub(crate) fn game_compare(
     playtimes: &PlaytimeValues,
 ) -> std::cmp::Ordering {
     let ord = match sort_mode {
-        SortMode::Publisher | SortMode::Developer => entity_names
-            .get(&a.db_id)
-            .map(String::as_str)
-            .cmp(&entity_names.get(&b.db_id).map(String::as_str))
-            .then_with(|| {
-                a.sort_key()
-                    .to_lowercase()
-                    .cmp(&b.sort_key().to_lowercase())
-            }),
+        SortMode::Publisher | SortMode::Developer => {
+            let credited = |game: &Game| {
+                entity_names
+                    .get(&game.db_id)
+                    .filter(|name| !name.is_empty())
+                    .map(|name| name.to_lowercase())
+            };
+            match (credited(a), credited(b)) {
+                // Uncredited games trail in both directions: reversing
+                // the order must not float them to the top.
+                (Some(_), None) => return std::cmp::Ordering::Less,
+                (None, Some(_)) => return std::cmp::Ordering::Greater,
+                (name_a, name_b) => name_a.cmp(&name_b).then_with(|| {
+                    a.sort_key()
+                        .to_lowercase()
+                        .cmp(&b.sort_key().to_lowercase())
+                }),
+            }
+        }
         SortMode::HoursPlayed => playtime_for_sort(a, playtimes)
             .partial_cmp(&playtime_for_sort(b, playtimes))
             .map(std::cmp::Ordering::reverse)
@@ -236,11 +246,27 @@ pub(crate) fn sort_detail(
         SortMode::MetacriticScore => {
             (game.metacritic_score >= 0).then(|| game.metacritic_score.to_string())
         }
-        SortMode::SteamReview => {
-            (game.steam_review_score >= 0).then(|| format!("{}%", game.steam_review_score))
-        }
+        SortMode::SteamReview => steam_review_label(game.steam_review_score),
         SortMode::Publisher | SortMode::Developer => entity_names.get(&game.db_id).cloned(),
     }
+}
+
+/// Steam's wording for its 1–9 review rating (what `steam_review_score`
+/// stores — a rating, never a percentage). `None` for no rating.
+pub(crate) fn steam_review_label(score: i64) -> Option<String> {
+    let label = match score {
+        9 => crate::tr!("Overwhelmingly Positive"),
+        8 => crate::tr!("Very Positive"),
+        7 => crate::tr!("Positive"),
+        6 => crate::tr!("Mostly Positive"),
+        5 => crate::tr!("Mixed"),
+        4 => crate::tr!("Mostly Negative"),
+        3 => crate::tr!("Negative"),
+        2 => crate::tr!("Very Negative"),
+        1 => crate::tr!("Overwhelmingly Negative"),
+        _ => return None,
+    };
+    Some(label)
 }
 
 /// The category name a game lands under for a group-by dimension: the
@@ -309,7 +335,7 @@ pub(crate) fn group_categories<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{game_compare, playtimes_for_sort, sort_detail};
+    use super::{game_compare, playtimes_for_sort, sort_detail, steam_review_label};
     use crate::Game;
     use ira_models::{GameKind, SortMode, TrophySource};
     use std::collections::HashMap;
@@ -367,6 +393,45 @@ mod tests {
             ),
             std::cmp::Ordering::Less
         );
+    }
+
+    #[test]
+    fn test_game_compare_uncredited_games_trail_in_both_directions() {
+        let credited = Game {
+            db_id: 1,
+            sort_title: "Zeta".into(),
+            ..Game::default()
+        };
+        let uncredited = Game {
+            db_id: 2,
+            sort_title: "Alpha".into(),
+            ..Game::default()
+        };
+        let names = HashMap::from([(1, "Atlus".to_string())]);
+        for descending in [false, true] {
+            assert_eq!(
+                game_compare(
+                    &credited,
+                    &uncredited,
+                    SortMode::Publisher,
+                    descending,
+                    &names,
+                    &Default::default(),
+                ),
+                std::cmp::Ordering::Less
+            );
+        }
+    }
+
+    #[test]
+    fn test_steam_review_label_names_the_rating() {
+        assert_eq!(
+            steam_review_label(9).as_deref(),
+            Some("Overwhelmingly Positive")
+        );
+        assert_eq!(steam_review_label(5).as_deref(), Some("Mixed"));
+        assert_eq!(steam_review_label(0), None);
+        assert_eq!(steam_review_label(-1), None);
     }
 
     #[test]
@@ -463,7 +528,7 @@ mod tests {
             playtime: 2.5,
             release_date: "15 Sep, 2014".into(),
             metacritic_score: 88,
-            steam_review_score: 94,
+            steam_review_score: 8,
             ..Game::default()
         };
         let entity_names = HashMap::from([(7, "Example Studio".to_string())]);
@@ -491,7 +556,7 @@ mod tests {
         );
         assert_eq!(
             sort_detail(&game, SortMode::SteamReview, game.playtime, &entity_names),
-            Some("94%".into())
+            Some("Very Positive".into())
         );
         assert_eq!(
             sort_detail(&game, SortMode::Developer, game.playtime, &entity_names),

@@ -380,6 +380,16 @@ fn build_menu_popover(state: &SharedState) -> gtk4::Popover {
     };
     popover_box.append(&rescan_btn);
 
+    let big_picture_btn = {
+        let popover_clone = popover.clone();
+        let state_clone = state.clone();
+        popover_menu_row(&crate::tr!("Big Picture Mode"), move || {
+            popover_clone.popdown();
+            super::mode_switch::switch_to(&state_clone, true);
+        })
+    };
+    popover_box.append(&big_picture_btn);
+
     let sep = gtk4::Separator::new(gtk4::Orientation::Horizontal);
     sep.set_margin_top(4);
     sep.set_margin_bottom(4);

@@ -181,6 +181,10 @@ impl ShoulderBadge {
 pub(super) struct AllSoftwareUi {
     page: gtk4::Box,
     surfaces: gtk4::Stack,
+    /// A still of the pages, laid over them while a switch fades away
+    /// from a group's games (see `cover_group_with_still`).
+    still: gtk4::Picture,
+    still_fade: RefCell<Option<adw::TimedAnimation>>,
     recent_page: gtk4::Widget,
     scrolled: gtk4::ScrolledWindow,
     grid: VirtualGrid,
@@ -217,10 +221,14 @@ pub(super) struct AllSoftwareUi {
     /// The header line and its wings; their margins and spacings are
     /// re-applied with the viewport scale.
     header: gtk4::CenterBox,
-    header_start: gtk4::Box,
-    header_center: gtk4::Box,
+    header_start: super::icon_row::IconRow,
+    header_center: super::icon_row::IconRow,
     /// The sort button's icon, scaled with the viewport like the rails'.
     sort_icon: gtk4::Image,
+    /// The Groups tiles' add button (the mouse's Y): hidden elsewhere,
+    /// including inside a group.
+    new_group_btn: gtk4::Button,
+    new_group_icon: gtk4::Image,
     tabs: adw::ToggleGroup,
     /// The L/R shoulder badges flanking the tabs.
     shoulder_l: ShoulderBadge,
@@ -280,9 +288,27 @@ pub(super) fn build(
             big.game_menu.open(&sort_state, kind);
         });
     }
-    let start = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(10.0));
+    let new_group_icon = gtk4::Image::from_icon_name("list-add-symbolic");
+    let new_group_btn = gtk4::Button::new();
+    new_group_btn.set_child(Some(&new_group_icon));
+    new_group_btn.add_css_class(CSS_FLAT);
+    new_group_btn.set_focusable(false);
+    new_group_btn.set_valign(gtk4::Align::Center);
+    new_group_btn.set_tooltip_text(Some(&crate::tr!("New Group")));
+    new_group_btn.set_visible(false);
+    {
+        let new_state = state.clone();
+        new_group_btn.connect_clicked(move |_| {
+            let big = new_state.borrow().big_picture.clone();
+            if let Some(big) = big {
+                big.all.groups_new(&new_state);
+            }
+        });
+    }
+    let start = super::icon_row::IconRow::new(scaled_px(10.0));
     start.append(&sort_btn);
     start.append(&ordering);
+    start.append(&new_group_btn);
     header.set_start_widget(Some(&start));
     let shoulder_l = ShoulderBadge::new();
     let shoulder_r = ShoulderBadge::new();
@@ -317,7 +343,8 @@ pub(super) fn build(
             center_tab_icons(tabs);
         }
     });
-    let center = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(14.0));
+    // The shoulder badges center on the tab labels' capitals.
+    let center = super::icon_row::IconRow::new(scaled_px(14.0));
     center.set_valign(gtk4::Align::Center);
     center.append(&shoulder_l.slot);
     center.append(&tabs);
@@ -415,7 +442,19 @@ pub(super) fn build(
     surfaces.add_named(&grid_overlay, Some("everything"));
     surfaces.add_named(groups.widget(), Some("groups"));
     surfaces.set_visible_child(recent_page);
-    page.append(&surfaces);
+    // The still rides above the stack, never inside it: a stack captures
+    // its outgoing page the instant it switches, and a page that was
+    // never laid out captures as a blank frame.
+    let still = gtk4::Picture::new();
+    still.set_can_shrink(true);
+    still.set_content_fit(gtk4::ContentFit::Fill);
+    still.set_can_target(false);
+    still.set_visible(false);
+    let surfaces_layer = gtk4::Overlay::new();
+    surfaces_layer.set_child(Some(&surfaces));
+    surfaces_layer.add_overlay(&still);
+    surfaces_layer.set_vexpand(true);
+    page.append(&surfaces_layer);
 
     let empty = gtk4::Label::new(Some(&crate::tr!("No games yet")));
     empty.add_css_class(CSS_BP_PAGE_SUBTITLE);
@@ -458,6 +497,8 @@ pub(super) fn build(
     let ui = AllSoftwareUi {
         page,
         surfaces,
+        still,
+        still_fade: RefCell::new(None),
         recent_page: recent_page.clone().upcast::<gtk4::Widget>(),
         scrolled,
         grid,
@@ -479,6 +520,8 @@ pub(super) fn build(
         header_start: start,
         header_center: center,
         sort_icon,
+        new_group_btn,
+        new_group_icon,
         tabs,
         shoulder_l,
         shoulder_r,
@@ -507,6 +550,7 @@ impl AllSoftwareUi {
             // The sort button rides the same wing; Recent shows neither.
             parent.set_visible(self.tab.get() != Tab::Recent);
         }
+        self.new_group_btn.set_visible(self.in_groups_tiles());
         match self.tab.get() {
             Tab::Recent => {
                 self.ordering.set_text("");
@@ -549,6 +593,7 @@ impl AllSoftwareUi {
         self.refresh_shoulders();
         self.scale_tab_icons(scale);
         self.sort_icon.set_pixel_size(scaled_px(22.0));
+        self.new_group_icon.set_pixel_size(scaled_px(22.0));
         self.header.set_margin_top(scaled_px(18.0));
         self.header.set_margin_bottom(scaled_px(6.0));
         self.header.set_margin_start(scaled_px(28.0));
@@ -596,11 +641,18 @@ impl AllSoftwareUi {
     /// the shoulders and the toggle group always land on the tab's own
     /// surface.
     pub(super) fn set_tab(&self, state: &SharedState, tab: Tab) {
-        if self.tab.get() == tab && self.groups_view.get().is_none() {
+        let open_group = self.groups_view.get();
+        if self.tab.get() == tab {
+            // Re-picking Groups from inside a group returns to its tiles.
+            if open_group.is_some() {
+                self.on_back(state);
+            }
             return;
         }
+        if open_group.is_some() {
+            self.cover_group_with_still();
+        }
         self.tab.set(tab);
-        self.groups_view.set(None);
         // A glide caught mid-flight by the slide shows a half-scrolled
         // tile at the viewport edge; land both surfaces before sliding.
         self.finish_scroll();
@@ -623,7 +675,53 @@ impl AllSoftwareUi {
             super::super::auto_groups::refresh_auto_members(state);
             self.groups_grid.reload(state);
         }
-        self.apply_mode(state);
+        if open_group.is_some() {
+            // The still already shows the outgoing page: switch under it
+            // at once and let its own fade be the transition.
+            self.without_slide(|s| s.apply_mode(state));
+            self.fade_still_out();
+        } else {
+            self.apply_mode(state);
+        }
+    }
+
+    /// Leave the open group behind a still of its games. A group's games
+    /// ride the Everything grid itself, and a stack only fades between
+    /// pages, never across one page changing its content. The still shows
+    /// exactly what is on screen, so laying it over the pages changes
+    /// nothing visible; the group closes underneath at once.
+    fn cover_group_with_still(&self) {
+        if let Some(fade) = self.still_fade.take() {
+            fade.skip();
+        }
+        let frame = gtk4::WidgetPaintable::new(Some(&self.surfaces)).current_image();
+        self.still.set_paintable(Some(&frame));
+        self.still.set_opacity(1.0);
+        self.still.set_visible(true);
+        self.groups_view.set(None);
+        self.selected.set(None);
+        self.scrolled.vadjustment().set_value(0.0);
+    }
+
+    /// Fade the still away over the stack's own switch duration and
+    /// curve, revealing the new page beneath it.
+    fn fade_still_out(&self) {
+        let target = adw::PropertyAnimationTarget::new(&self.still, "opacity");
+        let fade = adw::TimedAnimation::new(
+            &self.still,
+            1.0,
+            0.0,
+            self.surfaces.transition_duration(),
+            target,
+        );
+        fade.set_easing(adw::Easing::EaseOutCubic);
+        let still = self.still.clone();
+        fade.connect_done(move |_| {
+            still.set_visible(false);
+            still.set_paintable(None::<&gdk4::Paintable>);
+        });
+        fade.play();
+        self.still_fade.replace(Some(fade));
     }
 
     /// Step to the neighbouring tab (the shoulders), wrapping around.
@@ -641,34 +739,41 @@ impl AllSoftwareUi {
     /// the caller should quit.
     pub(super) fn on_back(&self, state: &SharedState) -> bool {
         if self.tab.get() == Tab::Groups && self.groups_view.get().is_some() {
-            self.groups_view.set(None);
-            // Popping the group view is not a category change: no slide.
+            // The stack's own fade would draw the outgoing grid live — and
+            // the grid refills with every game the moment the group
+            // closes. The still keeps the group's games on the way out.
+            self.cover_group_with_still();
             self.without_slide(|s| s.apply_mode(state));
+            self.fade_still_out();
             true
         } else {
             false
         }
     }
 
-    /// Activate the selected groups tile: New Group names (and creates)
-    /// a group through the keyboard, a group opens its game view.
+    /// Open the selected group's game view. No-op while no group exists.
     pub(super) fn groups_open_selected(&self, state: &SharedState) {
-        match self.groups_grid.selected_group_id(state) {
-            Some(id) => {
-                self.groups_view.set(Some(id));
-                self.selected.set(None);
-                // The group starts at its top: jump, don't glide from
-                // wherever the groups tiles were scrolled to.
-                self.scrolled.vadjustment().set_value(0.0);
-                // Same surface swap, not a category change: no slide.
-                self.without_slide(|s| s.apply_mode(state));
-            }
-            None => super::view::name_new_group(state, None),
-        }
+        let Some(id) = self.groups_grid.selected_group_id(state) else {
+            return;
+        };
+        self.groups_view.set(Some(id));
+        self.selected.set(None);
+        // The group starts at its top: jump, don't glide from wherever
+        // the groups tiles were scrolled to.
+        self.scrolled.vadjustment().set_value(0.0);
+        // The tiles and the game grid are separate pages, so the stack's
+        // own fade carries the way in.
+        self.apply_mode(state);
     }
 
-    /// Run a surface change with the tab fade suppressed — a group view
-    /// swap is not a category change.
+    /// Name (and create) a new group through the virtual keyboard: the
+    /// Y button and the header's add button.
+    pub(super) fn groups_new(&self, state: &SharedState) {
+        super::view::name_new_group(state, None);
+    }
+
+    /// Run a surface change with the stack's fade suppressed, for swaps
+    /// that bring their own transition (the still over a group).
     fn without_slide(&self, f: impl FnOnce(&Self)) {
         self.surfaces
             .set_transition_type(gtk4::StackTransitionType::None);
@@ -688,28 +793,17 @@ impl AllSoftwareUi {
         }
     }
 
-    /// Delete the group under the selection (the X button on the Groups
-    /// tiles). Membership rows go with it; games stay. Auto groups are
-    /// managed in the desktop settings, never from here.
-    /// The groups tab's X: ask before the group is gone for good.
-    pub(super) fn groups_delete_selected(&self, state: &SharedState) {
+    /// Open the selected group's settings (the Options button on the
+    /// Groups tiles): rename it, or delete it after a confirmation.
+    pub(super) fn groups_settings_selected(&self, state: &SharedState) {
         let Some(id) = self.groups_grid.selected_group_id(state) else {
             return;
         };
-        if id < 0 {
-            return;
-        }
-        let name = state
-            .borrow()
-            .groups
-            .iter()
-            .find(|g| g.id == id)
-            .map(|g| g.name.clone())
-            .unwrap_or_default();
+        let name = group_name(state, id);
         if let Some(big) = state.borrow().big_picture.clone() {
             big.game_menu.open(
                 state,
-                super::game_menu::MenuKind::ConfirmDelete { id, name },
+                super::game_menu::MenuKind::GroupSettings { id, name },
             );
         }
     }
@@ -725,36 +819,24 @@ impl AllSoftwareUi {
         self.apply_mode(state);
     }
 
-    /// Rename the group under the selection through the keyboard. Auto
-    /// groups are managed in the desktop settings, never from here.
-    pub(super) fn groups_rename_selected(&self, state: &SharedState) {
-        let Some(id) = self.groups_grid.selected_group_id(state) else {
-            return;
-        };
-        if id < 0 {
-            return;
-        }
-        let current = state
-            .borrow()
-            .groups
-            .iter()
-            .find(|g| g.id == id)
-            .map(|g| g.name.clone())
-            .unwrap_or_default();
-        super::view::rename_group(state, id, &current);
-    }
-
     /// Move the groups tile selection (arrows on the Groups tab).
     pub(super) fn groups_move(&self, state: &SharedState, dx: i32, dy: i32, engage: bool) {
         self.groups_grid.move_selection(state, dx, dy, engage);
     }
 
-    /// Pull the shared groups list back from the database.
+    /// Pull both kinds of group back from the database, re-deriving the
+    /// auto groups' memberships.
     fn sync_groups(&self, state: &SharedState) {
         let db = state.borrow().db.clone();
         let groups =
             crate::ui::helpers::logged_db_vec("Failed to read groups", ira_db::get_all_groups(&db));
-        state.borrow_mut().groups = groups;
+        let auto_groups = super::super::auto_groups::load_auto_groups(&db);
+        {
+            let mut s = state.borrow_mut();
+            s.groups = groups;
+            s.auto_groups = auto_groups;
+        }
+        super::super::auto_groups::refresh_auto_members(state);
     }
 
     /// After a create, rename, or delete: sync the tiles and land the
@@ -763,8 +845,7 @@ impl AllSoftwareUi {
         self.sync_groups(state);
         self.groups_view.set(None);
         self.groups_grid.reload(state);
-        if let Some(index) = state.borrow().groups.iter().position(|g| g.id == group_id) {
-            self.groups_grid.select_tile(index + 1);
+        if self.groups_grid.select_group(group_id) {
             self.groups_grid.repaint(state);
         }
         self.selected.set(None);
@@ -801,11 +882,14 @@ impl AllSoftwareUi {
         if let Some(big) = state.borrow().big_picture.clone() {
             let prompts: Vec<(ira_input::GamepadButton, String)> = if recent {
                 vec![(ira_input::GamepadButton::A, crate::tr!("Play"))]
+            } else if tiles && self.groups_grid.tile_count(state) == 0 {
+                vec![(ira_input::GamepadButton::Y, crate::tr!("New Group"))]
             } else if tiles {
                 vec![
-                    (ira_input::GamepadButton::X, crate::tr!("Delete Group")),
-                    (ira_input::GamepadButton::Start, crate::tr!("Rename")),
-                    (ira_input::GamepadButton::A, crate::tr!("OK")),
+                    (ira_input::GamepadButton::Y, crate::tr!("New Group")),
+                    (ira_input::GamepadButton::X, crate::tr!("Sort")),
+                    (ira_input::GamepadButton::Start, crate::tr!("Options")),
+                    (ira_input::GamepadButton::A, crate::tr!("Open")),
                 ]
             } else if self.groups_view.get().is_some() {
                 vec![
@@ -1473,44 +1557,16 @@ fn for_each_descendant(root: &gtk4::Widget, mut f: impl FnMut(&gtk4::Widget)) {
         }
     }
 }
-/// Vertically center each tab's icon on its label's capital-letter band.
-/// Plain box centering aligns the icon to the label's line box, and the
-/// bundled font's glyphs sit low in that box (its tall CJK line
-/// metrics), so the icon reads as floating above the text. Measure the
-/// real geometry from pango — the font's baseline and cap height
-/// against the rendered line height — instead of tuning pixels by eye.
+/// Vertically center each tab's icon on its label's capital-letter band
+/// (see `icon_center`).
 fn center_tab_icons(tabs: &adw::ToggleGroup) {
     for_each_descendant(&tabs.clone().upcast::<gtk4::Widget>(), |widget| {
         if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
-            center_icon_on_label(label);
+            if let Some(image) = sibling_image(label) {
+                super::icon_center::center_on_text(&image, label);
+            }
         }
     });
-}
-
-/// Drop the icon beside `label` so its center rests on the
-/// capital-letter band (baseline − cap height / 2) — the band the eye
-/// reads as "the text", identical for every word.
-fn center_icon_on_label(label: &gtk4::Label) {
-    let Some(image) = sibling_image(label) else {
-        return;
-    };
-    let layout = label.layout();
-    let (_, logical) = layout.extents();
-    // "X" measures the font's cap band independent of the word: every
-    // tab must agree, whatever the translation's descenders do.
-    let probe = pango::Layout::new(&label.pango_context());
-    probe.set_text("X");
-    let (cap, _) = probe.extents();
-    let Some(drop) = icon_drop_px(layout.baseline(), cap.height(), logical.height()) else {
-        return; // styles not settled yet; the map pass redoes it
-    };
-    // A fill-aligned image paints centered in whatever box it is given,
-    // so a margin moved it by only half; centered, the margin is the
-    // exact distance.
-    image.set_valign(gtk4::Align::Center);
-    if image.margin_top() != drop {
-        image.set_margin_top(drop);
-    }
 }
 
 /// The image sharing `label`'s container — AdwButtonContent's box.
@@ -1526,22 +1582,23 @@ fn sibling_image(label: &gtk4::Label) -> Option<gtk4::Image> {
     None
 }
 
-/// The margin dropping a centered icon onto the cap band, from pango
-/// extents (PANGO_SCALE units). `None` while the styles have not
-/// settled and the geometry would measure as zero.
-fn icon_drop_px(baseline: i32, cap_height: i32, line_height: i32) -> Option<i32> {
-    if line_height <= 0 || cap_height <= 0 {
-        return None;
+/// The display name of a manual group or an auto group (negated id).
+pub(super) fn group_name(state: &SharedState, id: i64) -> String {
+    let s = state.borrow();
+    if id < 0 {
+        s.auto_groups
+            .iter()
+            .find(|g| g.id == id)
+            .map(|g| g.name.clone())
+    } else {
+        s.groups.iter().find(|g| g.id == id).map(|g| g.name.clone())
     }
-    let drop = (i64::from(baseline) - i64::from(cap_height) / 2 - i64::from(line_height) / 2)
-        as f64
-        / f64::from(pango::SCALE);
-    Some(drop.round().max(0.0) as i32)
+    .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{grid_move, icon_drop_px, scroll_target, should_clear_cell_art};
+    use super::{grid_move, scroll_target, should_clear_cell_art};
 
     const COLS: usize = 5;
 
@@ -1647,20 +1704,5 @@ mod tests {
         // by the ring's room): row 3's top is 308, so 290 — never the row
         // above it.
         assert_eq!(scroll_target(15, COLS, row_h, top_pad, 490.0, 300.0), 290.0);
-    }
-
-    #[test]
-    fn test_icon_drop_lands_icon_center_on_cap_band() {
-        let k = pango::SCALE;
-        // A 30px line box, baseline at 25px, 15px caps: the cap band
-        // center sits at 25 − 7.5 = 17.5px, the box center at 15px →
-        // 2.5px down.
-        assert_eq!(icon_drop_px(25 * k, 15 * k, 30 * k), Some(3));
-        // Symmetric metrics need no offset.
-        assert_eq!(icon_drop_px(20 * k, 16 * k, 24 * k), Some(0));
-        // A taller line box than the cap band can reach never pushes up.
-        assert_eq!(icon_drop_px(20 * k, 16 * k, 40 * k), Some(0));
-        // Unstyled geometry measures as zero: skip the pass.
-        assert_eq!(icon_drop_px(0, 0, 0), None);
     }
 }

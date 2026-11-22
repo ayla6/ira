@@ -17,21 +17,22 @@ pub(super) struct Handle {
 }
 
 impl Handle {
-    pub(super) fn update(&self, visible: bool) {
+    /// Republish the menu labels; `labels[i]` belongs to item ID `i + 1`.
+    pub(super) fn update(&self, labels: Vec<String>) {
         let connection = self.connection.clone();
         let revision = self
             .revision
             .fetch_add(1, Ordering::Relaxed)
             .wrapping_add(1);
-        let label = if visible {
-            crate::tr!("Hide to background")
-        } else {
-            crate::tr!("Show Ira")
-        };
-        let changes = vec![(
-            1i32,
-            std::collections::HashMap::from([("label".to_string(), label.to_variant())]),
-        )];
+        let changes = (1i32..)
+            .zip(labels)
+            .map(|(id, label)| {
+                (
+                    id,
+                    std::collections::HashMap::from([("label".to_string(), label.to_variant())]),
+                )
+            })
+            .collect::<Vec<_>>();
         let removed: Vec<(i32, Vec<String>)> = Vec::new();
         self.context.invoke(move || {
             if let Err(error) = connection.emit_signal(

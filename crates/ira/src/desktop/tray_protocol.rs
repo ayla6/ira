@@ -140,7 +140,7 @@ pub(super) fn menu_call(
                 .ok_or("Invalid layout arguments")?;
             let values = selected_properties(tray, id, &names)?;
             let children = if id == 0 && depth != 0 {
-                (1..=2)
+                (1..=tray.menu().len() as i32)
                     .map(|id| {
                         Ok((
                             id,
@@ -162,7 +162,11 @@ pub(super) fn menu_call(
             let (ids, names) = params
                 .get::<(Vec<i32>, Vec<String>)>()
                 .ok_or("Invalid property arguments")?;
-            let ids = if ids.is_empty() { vec![0, 1, 2] } else { ids };
+            let ids = if ids.is_empty() {
+                (0..=tray.menu().len() as i32).collect()
+            } else {
+                ids
+            };
             let values = ids
                 .into_iter()
                 .filter_map(|id| {
@@ -237,7 +241,13 @@ mod tests {
             crate::tr!("Hide to background")
         );
         assert!(properties(&tray, i32::MIN).is_err());
-        assert!(properties(&tray, 3).is_err());
+        assert_eq!(
+            properties(&tray, 2).unwrap()["label"]
+                .get::<String>()
+                .unwrap(),
+            crate::tr!("Big Picture Mode")
+        );
+        assert!(properties(&tray, 4).is_err());
         let selected = selected_properties(&tray, 2, &["label".into()]).unwrap();
         assert_eq!(selected.len(), 1);
         assert!(selected.contains_key("label"));
@@ -289,11 +299,11 @@ mod tests {
             &mut tray,
             7,
             "GetGroupProperties",
-            &(vec![0i32, 1, 2, 3], Vec::<String>::new()).to_variant(),
+            &(vec![0i32, 1, 2, 3, 4], Vec::<String>::new()).to_variant(),
         )
         .unwrap();
         assert_eq!(group.type_().as_str(), "(a(ia{sv}))");
-        assert_eq!(group.child_value(0).n_children(), 3);
+        assert_eq!(group.child_value(0).n_children(), 4);
         let property =
             menu_call(&mut tray, 7, "GetProperty", &(1i32, "label").to_variant()).unwrap();
         assert_eq!(property.type_().as_str(), "(v)");
@@ -303,8 +313,13 @@ mod tests {
         event(&mut tray, 2, "clicked").unwrap();
         assert_eq!(
             receiver.try_recv().unwrap(),
+            super::super::tray::TrayAction::ToggleBigPicture
+        );
+        event(&mut tray, 3, "clicked").unwrap();
+        assert_eq!(
+            receiver.try_recv().unwrap(),
             super::super::tray::TrayAction::Quit
         );
-        assert!(event(&mut tray, 3, "clicked").is_err());
+        assert!(event(&mut tray, 4, "clicked").is_err());
     }
 }

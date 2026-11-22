@@ -1,6 +1,6 @@
 //! The Groups tab's tile grid: one tile per group — a collage of its
-//! members' squares over the group's name — plus a leading New Group
-//! tile. Tiles size with the viewport like the game grid's. The selection
+//! members' squares over the group's name. New groups come from the Y
+//! button or the header's add button. Tiles size with the viewport like the game grid's. The selection
 //! is ours (the FlowBox's own is off), driven by the same router that
 //! moves the game grid.
 
@@ -42,11 +42,13 @@ pub(super) struct GroupsGrid {
     tile: Cell<i32>,
     /// Each tile's square slot in tile order, for anchoring the ring.
     slots: RefCell<Vec<gtk4::Box>>,
-    /// Tile identity in display order: `None` is the leading New Group
-    /// tile, otherwise the manual group id or the auto group's negated
-    /// memory id. Selection resolves through this, so display orderings
-    /// (by size) can never desync which group a tile opens.
-    order: RefCell<Vec<Option<i64>>>,
+    /// Tile identity in display order: the manual group id or the auto
+    /// group's negated memory id. Selection resolves through this, so
+    /// display orderings (by size) can never desync which group a tile
+    /// opens.
+    order: RefCell<Vec<i64>>,
+    /// Shown instead of the tiles while no group exists.
+    empty: gtk4::Label,
     /// The running scroll glide, shared with the everything grid:
     /// discrete presses ease, held repeats snap so the camera never
     /// trails the selection.
@@ -92,6 +94,14 @@ impl GroupsGrid {
         overlay.add_overlay(&ring);
         overlay.set_measure_overlay(&ring, false);
         overlay.set_clip_overlay(&ring, true);
+        let empty = gtk4::Label::new(Some(&crate::tr!("No groups yet. Press Y to create one.")));
+        empty.add_css_class(CSS_BP_PAGE_SUBTITLE);
+        empty.set_halign(gtk4::Align::Center);
+        empty.set_valign(gtk4::Align::Center);
+        empty.set_can_target(false);
+        empty.set_visible(false);
+        crate::ui::helpers::crisp_label(&empty);
+        overlay.add_overlay(&empty);
         // First allocation lands here: size the tiles from the flow's real
         // width and rebuild. Without this, a first open shows the fallback
         // 200px slots floating in oversized cells.
@@ -117,6 +127,7 @@ impl GroupsGrid {
             tile: Cell::new(0),
             slots: RefCell::new(Vec::new()),
             order: RefCell::new(Vec::new()),
+            empty,
             scroll_glide: super::scroll_glide::ScrollGlide::new(),
         };
         grid.reload(state);
@@ -154,8 +165,7 @@ impl GroupsGrid {
         true
     }
 
-    /// Rebuild the tiles: New Group first, then one per manual group and
-    /// one per auto group in the configured order (alphabetical, or most
+    /// Rebuild the tiles: one per manual group and one per auto group in the configured order (alphabetical, or most
     /// games first). Counts and collages only consider games the library
     /// shows — hidden games are not advertised by a group tile. Auto
     /// membership comes from the shared map (refreshed on tab entry, like
@@ -202,8 +212,6 @@ impl GroupsGrid {
         } else {
             200
         };
-        self.append_new_group_tile(state, tile);
-        self.order.borrow_mut().push(None);
         // (member count, tile id, name, cover games) — the count feeds
         // the size ordering, the covers feed the collage.
         let mut entries: Vec<(usize, i64, String, Vec<&Game>)> = groups
@@ -213,22 +221,13 @@ impl GroupsGrid {
                     "Failed to read group members",
                     ira_db::get_game_ids_in_group(&db, group.id),
                 );
-                let covers: Vec<&Game> = members
-                    .iter()
-                    .filter_map(|id| visible_games.iter().find(|g| g.db_id == *id))
-                    .take(4)
-                    .collect();
+                let covers = collage_covers(members.iter().copied(), &visible_games);
                 (members.len(), group.id, group.name.clone(), covers)
             })
             .collect();
         for auto in &autos {
             let member_ids = members.get(&auto.id);
-            let covers: Vec<&Game> = member_ids
-                .into_iter()
-                .flatten()
-                .filter_map(|id| visible_games.iter().find(|g| g.db_id == *id))
-                .take(4)
-                .collect();
+            let covers = collage_covers(member_ids.into_iter().flatten().copied(), &visible_games);
             let count = member_ids.map(|ids| ids.len()).unwrap_or(0);
             entries.push((count, auto.id, auto.name.clone(), covers));
         }
@@ -237,14 +236,15 @@ impl GroupsGrid {
         }
         for (_, id, name, covers) in &entries {
             self.append_group_tile(state, name, covers, tile);
-            self.order.borrow_mut().push(Some(*id));
+            self.order.borrow_mut().push(*id);
         }
+        self.empty.set_visible(entries.is_empty());
         let selected = selected_group
             .and_then(|id| {
                 self.order
                     .borrow()
                     .iter()
-                    .position(|candidate| *candidate == Some(id))
+                    .position(|candidate| *candidate == id)
             })
             .unwrap_or(0);
         self.selection.set(selected);
@@ -295,25 +295,14 @@ impl GroupsGrid {
         slot
     }
 
-    fn append_new_group_tile(&self, state: &SharedState, tile: i32) {
-        let slot = self.append_tile_shell(state, &crate::tr!("New Group"), tile);
-        let icon = gtk4::Image::from_icon_name("list-add-symbolic");
-        icon.set_pixel_size((tile / 3).max(24));
-        // Expand + center: a plain centered child of a fill-allocation
-        // Box keeps the left edge, since its allocation is already its
-        // natural size.
-        icon.set_hexpand(true);
-        icon.set_vexpand(true);
-        icon.set_halign(gtk4::Align::Center);
-        icon.set_valign(gtk4::Align::Center);
-        slot.append(&icon);
-    }
-
     fn append_group_tile(&self, state: &SharedState, name: &str, covers: &[&Game], tile: i32) {
         let slot = self.append_tile_shell(state, name, tile);
         if covers.is_empty() {
             let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
             icon.set_pixel_size((tile / 3).max(24));
+            // Expand + center: a plain centered child of a fill-allocation
+            // Box keeps the left edge, since its allocation is already its
+            // natural size.
             icon.set_hexpand(true);
             icon.set_vexpand(true);
             icon.set_halign(gtk4::Align::Center);
@@ -377,7 +366,7 @@ impl GroupsGrid {
         slot.append(&collage);
     }
 
-    /// The selected tile's index (0 = New Group).
+    /// The selected tile's index.
     pub(super) fn selection(&self) -> usize {
         self.selection.get()
     }
@@ -393,17 +382,27 @@ impl GroupsGrid {
         self.repaint_selection();
     }
 
-    /// How many tiles exist: New Group plus one per manual and auto group.
+    /// How many tiles exist: one per manual and auto group.
     pub(super) fn tile_count(&self, _state: &SharedState) -> usize {
         self.order.borrow().len()
     }
 
-    /// The group id of the selected tile; None on the New Group tile.
+    /// The group id of the selected tile; `None` while no group exists.
     /// Auto groups resolve to their negated memory ids, which the group
     /// game view filters through the shared membership map.
     pub(super) fn selected_group_id(&self, _state: &SharedState) -> Option<i64> {
         let index = self.selection.get();
-        self.order.borrow().get(index).copied().flatten()
+        self.order.borrow().get(index).copied()
+    }
+
+    /// Point the selection at `group_id`'s tile, wherever the current
+    /// ordering placed it. False when no tile shows that group.
+    pub(super) fn select_group(&self, group_id: i64) -> bool {
+        let index = self.order.borrow().iter().position(|id| *id == group_id);
+        if let Some(index) = index {
+            self.selection.set(index);
+        }
+        index.is_some()
     }
 
     pub(super) fn move_selection(&self, state: &SharedState, dx: i32, dy: i32, engage: bool) {
@@ -508,6 +507,24 @@ impl GroupsGrid {
     }
 }
 
+/// The four covers a group's collage shows: most recently played first,
+/// then by title. Membership comes from unordered sets (auto groups are
+/// recomputed on every tab entry), so picking in membership order would
+/// reshuffle the collage each visit.
+fn collage_covers(ids: impl Iterator<Item = i64>, games: &[Game]) -> Vec<&Game> {
+    let mut covers: Vec<&Game> = ids
+        .filter_map(|id| games.iter().find(|g| g.db_id == id))
+        .collect();
+    covers.sort_by(|a, b| {
+        b.last_played
+            .cmp(&a.last_played)
+            .then_with(|| a.sort_key().cmp(b.sort_key()))
+            .then_with(|| a.db_id.cmp(&b.db_id))
+    });
+    covers.truncate(4);
+    covers
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,5 +593,39 @@ mod tests {
             "writer func must observe the real measure warning"
         );
         assert!(h2 <= 268, "matching tile must fit its column, got {h2}");
+    }
+
+    fn game(db_id: i64, name: &str, last_played: i64) -> Game {
+        Game {
+            db_id,
+            name: name.to_string(),
+            last_played,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_collage_covers_order_ignores_membership_order() {
+        let games = [
+            game(1, "Celeste", 0),
+            game(2, "Animal Well", 0),
+            game(3, "Balatro", 50),
+            game(4, "Dredge", 10),
+            game(5, "Elden Ring", 0),
+        ];
+        let ids = |order: [i64; 5]| -> Vec<i64> {
+            collage_covers(order.into_iter(), &games)
+                .iter()
+                .map(|g| g.db_id)
+                .collect()
+        };
+        assert_eq!(ids([1, 2, 3, 4, 5]), vec![3, 4, 2, 1]);
+        assert_eq!(ids([5, 4, 3, 2, 1]), vec![3, 4, 2, 1]);
+    }
+
+    #[test]
+    fn test_collage_covers_skips_games_not_shown() {
+        let games = [game(1, "Celeste", 0)];
+        assert_eq!(collage_covers([9, 1].into_iter(), &games).len(), 1);
     }
 }

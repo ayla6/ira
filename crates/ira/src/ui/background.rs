@@ -63,7 +63,7 @@ fn release_background_content(state: &SharedState) {
     });
 }
 
-fn teardown_content(state: &SharedState) {
+pub(super) fn teardown_content(state: &SharedState) {
     let (content_box, grid_header, sidebar_store, grid_store) = {
         let s = state.borrow();
         (

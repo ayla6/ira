@@ -676,7 +676,9 @@ impl Keyboard {
             Icon(&'static str),
             Text(String),
         }
-        let hints = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(24.0));
+        // One text line across the hints: the L/R arrows have no words of
+        // their own and center on the others' capitals.
+        let hints = super::icon_row::IconRow::new(scaled_px(24.0));
         hints.set_halign(gtk4::Align::End);
         hints.set_margin_top(scaled_px(8.0));
         let family = self.family.get();
@@ -706,7 +708,7 @@ impl Keyboard {
                 Hint::Text(crate::tr!("Cancel")),
             ),
         ] {
-            let item = gtk4::Box::new(gtk4::Orientation::Horizontal, scaled_px(8.0));
+            let item = super::icon_row::IconRow::new(scaled_px(8.0));
             let glyph = gtk4::Image::new();
             glyph.set_pixel_size(scaled_px(28.0));
             glyph.set_valign(gtk4::Align::Center);

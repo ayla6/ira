@@ -7,25 +7,62 @@ use std::sync::{
 pub enum TrayAction {
     Show,
     Hide,
+    ToggleBigPicture,
     Quit,
+}
+
+/// What the menu reflects; shared with the tray thread, which answers
+/// menu queries on its own.
+struct TrayState {
+    visible: AtomicBool,
+    big_picture: AtomicBool,
 }
 
 pub(super) struct IraTray {
     sender: async_channel::Sender<TrayAction>,
     pub(super) icons: Vec<(i32, i32, Vec<u8>)>,
-    visible: Arc<AtomicBool>,
+    state: Arc<TrayState>,
 }
 
 pub struct TrayHandle {
     handle: super::tray_service::Handle,
-    visible: Arc<AtomicBool>,
+    state: Arc<TrayState>,
 }
 
 impl TrayHandle {
     pub fn set_visible(&self, visible: bool) {
-        self.visible.store(visible, Ordering::Relaxed);
-        self.handle.update(visible);
+        self.state.visible.store(visible, Ordering::Relaxed);
+        self.refresh();
     }
+
+    pub fn set_big_picture(&self, big_picture: bool) {
+        self.state.big_picture.store(big_picture, Ordering::Relaxed);
+        self.refresh();
+    }
+
+    fn refresh(&self) {
+        self.handle
+            .update(menu_items(&self.state).map(|(label, _)| label).to_vec());
+    }
+}
+
+/// The menu rows in order; dbusmenu IDs are their 1-based positions.
+fn menu_items(state: &TrayState) -> [(String, TrayAction); 3] {
+    let visibility = if state.visible.load(Ordering::Relaxed) {
+        (crate::tr!("Hide to background"), TrayAction::Hide)
+    } else {
+        (crate::tr!("Show Ira"), TrayAction::Show)
+    };
+    let mode = if state.big_picture.load(Ordering::Relaxed) {
+        crate::tr!("Desktop Mode")
+    } else {
+        crate::tr!("Big Picture Mode")
+    };
+    [
+        visibility,
+        (mode, TrayAction::ToggleBigPicture),
+        (crate::tr!("Quit"), TrayAction::Quit),
+    ]
 }
 
 fn send(sender: &async_channel::Sender<TrayAction>, action: TrayAction) {
@@ -92,9 +129,9 @@ fn icons() -> Vec<(i32, i32, Vec<u8>)> {
 
 pub fn start(sender: async_channel::Sender<TrayAction>) -> Result<TrayHandle, String> {
     let tray = IraTray::new(sender);
-    let visible = tray.visible.clone();
+    let state = tray.state.clone();
     let handle = super::tray_service::start(tray)?;
-    Ok(TrayHandle { handle, visible })
+    Ok(TrayHandle { handle, state })
 }
 
 impl IraTray {
@@ -102,19 +139,17 @@ impl IraTray {
         Self {
             sender,
             icons: icons(),
-            visible: Arc::new(AtomicBool::new(true)),
+            state: Arc::new(TrayState {
+                visible: AtomicBool::new(true),
+                big_picture: AtomicBool::new(false),
+            }),
         }
     }
     pub(super) fn activate(&self, action: TrayAction) {
         send(&self.sender, action);
     }
-    pub(super) fn menu(&self) -> [(String, TrayAction); 2] {
-        let visibility = if self.visible.load(Ordering::Relaxed) {
-            (crate::tr!("Hide to background"), TrayAction::Hide)
-        } else {
-            (crate::tr!("Show Ira"), TrayAction::Show)
-        };
-        [visibility, (crate::tr!("Quit"), TrayAction::Quit)]
+    pub(super) fn menu(&self) -> [(String, TrayAction); 3] {
+        menu_items(&self.state)
     }
 }
 
@@ -134,12 +169,8 @@ mod tests {
     #[test]
     fn test_tray_exposes_monochrome_icon_and_text_only_actions() {
         let (sender, receiver) = async_channel::bounded(8);
-        let tray = IraTray {
-            sender,
-            icons: icons(),
-            visible: Arc::new(AtomicBool::new(true)),
-        };
-        assert_eq!(tray.menu().len(), 2);
+        let tray = IraTray::new(sender);
+        assert_eq!(tray.menu().len(), 3);
         assert_eq!(tray.icons.len(), 3);
         for (width, height, data) in &tray.icons {
             assert_eq!(data.len(), (width * height * 4) as usize);
@@ -151,15 +182,15 @@ mod tests {
             assert!(data.as_chunks::<4>().0.contains(&[255, 255, 255, 255]));
             assert!(data.as_chunks::<4>().0.contains(&[255, 0, 0, 0]));
         }
-        for (item, action) in tray
-            .menu()
-            .into_iter()
-            .zip([TrayAction::Hide, TrayAction::Quit])
-        {
+        for (item, action) in tray.menu().into_iter().zip([
+            TrayAction::Hide,
+            TrayAction::ToggleBigPicture,
+            TrayAction::Quit,
+        ]) {
             tray.activate(item.1);
             assert_eq!(receiver.try_recv().unwrap(), action);
         }
-        tray.visible.store(false, Ordering::Relaxed);
+        tray.state.visible.store(false, Ordering::Relaxed);
         let item = &tray.menu()[0];
         assert_eq!(item.0, crate::tr!("Show Ira"));
         tray.activate(item.1);

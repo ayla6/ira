@@ -126,15 +126,13 @@ fn main() -> glib::ExitCode {
     apply_gamescope_env_defaults();
     ira::ui::init_desktop_identity();
 
-    // Big-picture entry: `--big-picture` or running under Gamescope.
-    // Gamescope never maximizes the window, so fullscreen explicitly.
-    let big_picture = ira::ui::big_picture::is_big_picture();
-    if big_picture {
+    if ira::ui::big_picture::is_big_picture() {
         eprintln!("ira: big picture mode");
-        // Before GTK initializes fontconfig, so the app font is usable in
-        // this same session.
-        ira_widgets::font::install();
     }
+    // Installed in every mode, before GTK initializes fontconfig: the app
+    // can switch into big picture later, and fontconfig only sees fonts
+    // added before Pango builds its font map.
+    ira_widgets::font::install();
 
     let _flush_guard = init_tracing();
     init_critical_backtrace();
@@ -197,10 +195,10 @@ fn main() -> glib::ExitCode {
 
     if let Some(state) = state_holder.borrow().as_ref() {
         ira::ui::stop_tray(state);
-        if !big_picture {
-            if let Err(error) = ira_config::save_window_state(state.borrow().desktop_window) {
-                eprintln!("Failed to save window state: {error}");
-            }
+        // Only the desktop window updates this, so it is safe to save
+        // whichever mode the app ends in.
+        if let Err(error) = ira_config::save_window_state(state.borrow().desktop_window) {
+            eprintln!("Failed to save window state: {error}");
         }
         remove_source(state);
     }

@@ -10,7 +10,8 @@ use super::status::{BottomBar, StatusBar};
 use crate::ui::css::*;
 use crate::ui::state::SharedState;
 use adw::prelude::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 /// Widgets of the big-picture view, kept on `AppState` behind an `Rc` so every
@@ -37,8 +38,8 @@ pub struct BigPictureUi {
     pub(super) disc_picker: super::disc_picker::DiscPicker,
 }
 
-/// Build the big-picture window (fullscreen is applied by main.rs) and take over
-/// the shared state's window reference.
+/// Build the big-picture window, fullscreened before its first present, and
+/// take over the shared state's window reference.
 pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     let window = adw::ApplicationWindow::new(app);
     super::super::desktop_identity::bind(&window);
@@ -50,6 +51,7 @@ pub(crate) fn build_window(state: &SharedState, app: &adw::Application) {
     // every big-picture font to 1px — start from the 1080p reference instead;
     // the first refresh swaps in the real scale.
     crate::ui::css::init_styles(big_picture_scale(state).max(1.0));
+    ira_widgets::font::pin_unhinted(true);
 
     let square_mode = state.borrow().cfg.big_picture_square_capsules;
     let (root, ui) = build_root(state, square_mode);
@@ -190,7 +192,17 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
     let state = state.clone();
     let key = gtk4::EventControllerKey::new();
     key.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    // GDK reports auto-repeat as more presses; a key already down is a
+    // hold, which must behave like a held stick (no edge wraps).
+    let held: Rc<RefCell<HashSet<gdk4::Key>>> = Rc::default();
+    {
+        let held = held.clone();
+        key.connect_key_released(move |_, key, _, _| {
+            held.borrow_mut().remove(&key);
+        });
+    }
     key.connect_key_pressed(move |_, key, _, modifiers| {
+        let fresh = held.borrow_mut().insert(key);
         // While the virtual keyboard shows, physical typing goes straight
         // into it; navigation keys still fall through to the router.
         let keyboard_open = state
@@ -215,17 +227,20 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
             }
         }
         match key {
-            gdk4::Key::Left => route(&state, NavCommand::Left, true),
-            gdk4::Key::Right => route(&state, NavCommand::Right, true),
-            gdk4::Key::Up => route(&state, NavCommand::Up, true),
-            gdk4::Key::Down => route(&state, NavCommand::Down, true),
+            gdk4::Key::Left => route(&state, NavCommand::Left, fresh),
+            gdk4::Key::Right => route(&state, NavCommand::Right, fresh),
+            gdk4::Key::Up => route(&state, NavCommand::Up, fresh),
+            gdk4::Key::Down => route(&state, NavCommand::Down, fresh),
+            // Held Enter or Escape repeats nothing: one launch, one peel.
+            gdk4::Key::Return | gdk4::Key::KP_Enter | gdk4::Key::space | gdk4::Key::Escape
+                if !fresh => {}
             gdk4::Key::Return | gdk4::Key::KP_Enter | gdk4::Key::space => {
                 route(&state, NavCommand::Confirm, true)
             }
             gdk4::Key::Escape => {
                 // Escape peels overlays first: keyboard, then menu, then
-                // the disc picker, then the page. It never quits the app —
-                // the system window controls own that.
+                // the disc picker; with nothing open it opens the Home
+                // menu. It never quits the app by itself.
                 let keyboard_open = state
                     .borrow()
                     .big_picture
@@ -253,8 +268,17 @@ fn wire_keyboard(state: &SharedState, window: &adw::ApplicationWindow) {
                     if let Some(big) = state.borrow().big_picture.clone() {
                         big.disc_picker.close();
                     }
+                } else {
+                    // Nothing to peel: the keyboard's Home button.
+                    route(&state, NavCommand::Home, true);
                 }
             }
+            // The keyboard's B and Start (the virtual keyboard took its
+            // own Backspace above).
+            gdk4::Key::BackSpace if fresh => route(&state, NavCommand::Back, true),
+            gdk4::Key::Menu if fresh => route(&state, NavCommand::Options, true),
+            // The keyboard's Y: New Group on the Groups tiles.
+            gdk4::Key::n | gdk4::Key::N if fresh => route(&state, NavCommand::Quaternary, true),
             gdk4::Key::q if modifiers.contains(gdk4::ModifierType::CONTROL_MASK) => {
                 quit_app(&state)
             }
@@ -294,6 +318,10 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
         if command == NavCommand::Back && engage {
             cancel_running(state);
         }
+        return;
+    }
+    if command == NavCommand::Home {
+        toggle_home_menu(state);
         return;
     }
     // The virtual keyboard swallows navigation while it is open: arrows
@@ -386,7 +414,9 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
             | NavCommand::Secondary
             | NavCommand::Tertiary
             | NavCommand::PrevTab
-            | NavCommand::NextTab => {}
+            | NavCommand::NextTab
+            | NavCommand::Quaternary
+            | NavCommand::Home => {}
         }
         return;
     }
@@ -408,8 +438,11 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
             big.all.on_back(state);
         }
         _ if big.all.in_groups_tiles() => match command {
-            NavCommand::Secondary => big.all.groups_delete_selected(state),
-            NavCommand::Options => big.all.groups_rename_selected(state),
+            NavCommand::Quaternary => big.all.groups_new(state),
+            NavCommand::Secondary => big
+                .game_menu
+                .open(state, super::game_menu::MenuKind::GroupOrder),
+            NavCommand::Options => big.all.groups_settings_selected(state),
             NavCommand::Left => big.all.groups_move(state, -1, 0, engage),
             NavCommand::Right => big.all.groups_move(state, 1, 0, engage),
             NavCommand::Up => big.all.groups_move(state, 0, -1, engage),
@@ -428,9 +461,9 @@ fn route(state: &SharedState, command: NavCommand, engage: bool) {
                 None => big.game_menu.open(state, super::game_menu::MenuKind::Sort),
             }
         }
-        // X opens the sort picker everywhere except the groups tiles,
-        // where it deletes the selected group: Options alone can't
-        // reach sorting once a game has focus.
+        // X opens the sort picker everywhere (the groups tiles get their
+        // own tile order): Options alone can't reach sorting once a game
+        // has focus.
         NavCommand::Secondary => {
             big.game_menu.open(state, super::game_menu::MenuKind::Sort);
         }
@@ -518,8 +551,31 @@ fn route_keyboard(state: &SharedState, command: NavCommand) -> bool {
         NavCommand::Options => big.keyboard.press_ok(state),
         NavCommand::Secondary => big.keyboard.close(state),
         NavCommand::Tertiary => big.keyboard.bump_shift(state),
+        // Routed before the keyboard ever sees it.
+        NavCommand::Home => {}
+        NavCommand::Quaternary => {}
     }
     true
+}
+
+/// The Home button's menu (leave big picture, quit): opens over whatever
+/// is showing — closing the keyboard and disc picker it would sit on —
+/// and a second press closes it.
+fn toggle_home_menu(state: &SharedState) {
+    let Some(big) = state.borrow().big_picture.clone() else {
+        return;
+    };
+    if big.game_menu.is_home_open() {
+        big.game_menu.close();
+        return;
+    }
+    if big.keyboard.is_open() {
+        big.keyboard.close(state);
+    }
+    if big.disc_picker.is_open() {
+        big.disc_picker.close();
+    }
+    big.game_menu.open(state, super::game_menu::MenuKind::Home);
 }
 
 /// The big-picture UI's viewport scale (1.0 = 1920 wide); 0 before the window
@@ -572,8 +628,7 @@ pub(super) fn rename_group(state: &SharedState, group_id: i64, current: &str) {
         current,
         false,
         Box::new(move |state, name| {
-            let db = state.borrow().db.clone();
-            if let Err(e) = ira_db::rename_group(&db, group_id, name) {
+            if let Err(e) = write_group_name(state, group_id, name) {
                 eprintln!("Failed to rename group: {e}");
             }
             finish_group_change(state, group_id);
@@ -581,15 +636,29 @@ pub(super) fn rename_group(state: &SharedState, group_id: i64, current: &str) {
     );
 }
 
-/// Sync the shared groups list and redraw the Groups tiles after a
-/// change, landing the selection on the touched group.
-fn finish_group_change(state: &SharedState, group_id: i64) {
+/// Rename a manual group, or an auto group (negated id) with its rules
+/// kept as they are.
+fn write_group_name(state: &SharedState, group_id: i64, name: &str) -> Result<(), String> {
     let db = state.borrow().db.clone();
-    let groups =
-        super::super::helpers::logged_db_vec("Failed to read groups", ira_db::get_all_groups(&db));
-    state.borrow_mut().groups = groups;
+    if group_id >= 0 {
+        return ira_db::rename_group(&db, group_id, name);
+    }
+    let root = state
+        .borrow()
+        .auto_groups
+        .iter()
+        .find(|g| g.id == group_id)
+        .map(|g| g.root.clone())
+        .ok_or_else(|| format!("auto group {group_id} is gone"))?;
+    let db_id = super::super::auto_groups::to_db_id(group_id);
+    ira_db::update_auto_group(&db, db_id, name, &root)
+}
+
+/// Sync the shared groups and redraw the Groups tiles after a change,
+/// landing the selection on the touched group.
+fn finish_group_change(state: &SharedState, group_id: i64) {
     // Clone out of the borrow: sync_and_focus_group mutably borrows the
-    // state to store the refreshed list, and an if-let keeps its
+    // state to store the refreshed lists, and an if-let keeps its
     // scrutinee borrow for the whole block.
     let big = state.borrow().big_picture.clone();
     if let Some(big) = big {

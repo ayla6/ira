@@ -21,16 +21,35 @@ pub(super) enum MenuKind {
     GroupOrder,
     /// Ask before a group is deleted; carries its id and name.
     ConfirmDelete { id: i64, name: String },
+    /// A group's settings: rename, delete. Manual or auto (negated id).
+    GroupSettings { id: i64, name: String },
+    /// The Home button's app menu: leave big picture, quit.
+    Home,
 }
 
 #[derive(Clone)]
 enum MenuRow {
-    Group { id: i64 },
+    Group {
+        id: i64,
+    },
     NewGroup,
     Sort(ira_models::SortMode),
     GroupOrder(ira_models::GroupOrder),
-    DeleteGroup { id: i64 },
+    DeleteGroup {
+        id: i64,
+    },
+    RenameGroup {
+        id: i64,
+        name: String,
+    },
+    AskDeleteGroup {
+        id: i64,
+        name: String,
+    },
     Cancel,
+    /// Leave big picture for the desktop window.
+    DesktopMode,
+    Quit,
 }
 
 pub(super) struct GameMenu {
@@ -89,6 +108,10 @@ impl GameMenu {
 
     pub(super) fn is_open(&self) -> bool {
         self.root.is_visible()
+    }
+
+    pub(super) fn is_home_open(&self) -> bool {
+        self.is_open() && matches!(self.kind.borrow().as_ref(), Some(MenuKind::Home))
     }
 
     /// Open a menu flavor and lay out its rows. Sort and group-order
@@ -195,8 +218,20 @@ impl GameMenu {
                 }
                 self.close();
             }
+            MenuRow::RenameGroup { id, name } => {
+                self.close();
+                super::view::rename_group(state, id, &name);
+            }
+            MenuRow::AskDeleteGroup { id, name } => {
+                self.open(state, MenuKind::ConfirmDelete { id, name });
+            }
             MenuRow::DeleteGroup { id } => {
-                if let Err(e) = ira_db::delete_group(&db, id) {
+                let result = if id < 0 {
+                    ira_db::delete_auto_group(&db, super::super::auto_groups::to_db_id(id))
+                } else {
+                    ira_db::delete_group(&db, id)
+                };
+                if let Err(e) = result {
                     eprintln!("Failed to delete group: {e}");
                 }
                 if let Some(big) = &big {
@@ -207,6 +242,14 @@ impl GameMenu {
             MenuRow::Cancel => {
                 self.close();
             }
+            MenuRow::DesktopMode => {
+                self.close();
+                crate::ui::mode_switch::switch_to(state, false);
+            }
+            MenuRow::Quit => {
+                self.close();
+                super::view::quit_app(state);
+            }
         }
     }
 
@@ -215,7 +258,7 @@ impl GameMenu {
     pub(super) fn activate_secondary(&self, state: &SharedState) {
         let is_sort = {
             let kind = self.kind.borrow();
-            matches!(kind.as_ref(), Some(MenuKind::Sort))
+            matches!(kind.as_ref(), Some(MenuKind::Sort | MenuKind::GroupOrder))
         };
         if is_sort {
             self.activate(state);
@@ -280,6 +323,27 @@ impl GameMenu {
                     rows.push(MenuRow::GroupOrder(*order));
                 }
                 *self.rows.borrow_mut() = rows;
+            }
+            MenuKind::Home => {
+                let header = ira_widgets::menu::menu_header(&crate::tr!("Ira"));
+                self.panel.append(&header);
+                let rows = vec![MenuRow::DesktopMode, MenuRow::Quit];
+                self.append_row(state, &crate::tr!("Desktop Mode"), 0, false);
+                self.append_row(state, &crate::tr!("Quit Ira"), 1, false);
+                *self.rows.borrow_mut() = rows;
+            }
+            MenuKind::GroupSettings { id, name } => {
+                let header = ira_widgets::menu::menu_header(&name);
+                self.panel.append(&header);
+                self.append_row(state, &crate::tr!("Rename"), 0, false);
+                self.append_row(state, &crate::tr!("Delete"), 1, false);
+                *self.rows.borrow_mut() = vec![
+                    MenuRow::RenameGroup {
+                        id,
+                        name: name.clone(),
+                    },
+                    MenuRow::AskDeleteGroup { id, name },
+                ];
             }
             MenuKind::ConfirmDelete { id, name } => {
                 let header = ira_widgets::menu::menu_header(

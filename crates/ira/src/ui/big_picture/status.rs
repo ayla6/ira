@@ -96,7 +96,7 @@ pub(super) struct StatusBar {
     root: gtk4::Box,
     date: gtk4::Label,
     clock: gtk4::Label,
-    battery: gtk4::Box,
+    battery: super::icon_row::IconRow,
     battery_icon: gtk4::Image,
     battery_label: gtk4::Label,
 }
@@ -117,7 +117,7 @@ impl StatusBar {
         let root = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
         root.add_css_class(CSS_BP_STATUS);
 
-        let battery = gtk4::Box::new(gtk4::Orientation::Horizontal, 5);
+        let battery = super::icon_row::IconRow::new(5);
         let battery_icon = gtk4::Image::from_icon_name("battery-full-symbolic");
         let battery_label = gtk4::Label::new(None);
         battery_label.add_css_class(CSS_BP_BATT);
@@ -178,7 +178,7 @@ impl StatusBar {
 fn refresh_widgets(
     date: &gtk4::Label,
     clock: &gtk4::Label,
-    battery_box: &gtk4::Box,
+    battery_box: &super::icon_row::IconRow,
     battery_icon: &gtk4::Image,
     battery_label: &gtk4::Label,
 ) {
@@ -312,7 +312,7 @@ impl BottomBar {
         let items: Vec<(ira_input::GamepadButton, String)> = self.prompt_items.borrow().clone();
         for (button, label) in items {
             let label = label.as_str();
-            let item = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+            let item = super::icon_row::IconRow::new(8);
             item.set_valign(gtk4::Align::Center);
             let slot = gtk4::Box::new(gtk4::Orientation::Horizontal, 0);
             slot.set_valign(gtk4::Align::Center);

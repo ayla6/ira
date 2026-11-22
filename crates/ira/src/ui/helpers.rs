@@ -12,8 +12,8 @@ use super::game_item::GameItem;
 use super::state::{PendingImage, SgdbAssetsCacheEntry, SharedState};
 
 /// Lock a big-picture label's glyph positions to whole pixels, so stems
-/// never fall between pixels at the scaled font sizes. Hinting itself is
-/// inherited from the system like any other app.
+/// never fall between pixels at the scaled font sizes. Hinting is pinned
+/// display-wide by `ira_widgets::font::pin_unhinted`.
 pub fn crisp_label(label: &gtk4::Label) {
     label.pango_context().set_round_glyph_positions(true);
 }

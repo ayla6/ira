@@ -22,6 +22,10 @@ pub fn start(state: &SharedState) {
                         super::background::hide_to_background(&state);
                     }
                 }
+                TrayAction::ToggleBigPicture => {
+                    let target = !super::big_picture::is_big_picture();
+                    super::mode_switch::switch_to(&state, target);
+                }
                 TrayAction::Quit => {
                     if let Some(application) = application {
                         application.quit();
@@ -38,6 +42,7 @@ pub fn start(state: &SharedState) {
                 if let Some(state) = weak.upgrade() {
                     let visible = is_shown(&state.borrow().window);
                     handle.set_visible(visible);
+                    handle.set_big_picture(super::big_picture::is_big_picture());
                     state.borrow_mut().tray = Some(handle);
                 }
             }

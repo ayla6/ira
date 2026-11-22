@@ -13,7 +13,10 @@ use ira_input::{discover_gamepads_including_virtual, PhysicalGamepad};
 use ira_input::{GamepadAxis, GamepadButton, InputSource};
 use std::collections::HashSet;
 use std::path::Path;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Stick deflection that starts a navigation; releasing below
@@ -54,6 +57,11 @@ pub(super) enum NavCommand {
     Secondary,
     /// The left stick click (L3): a keyboard modifier (one-shot shift).
     Tertiary,
+    /// The Y button: create something on the page (a group on the
+    /// Groups tiles).
+    Quaternary,
+    /// The Guide button: the Home menu (leave big picture, quit).
+    Home,
 }
 
 /// What the bottom rail shows about connected gamepads: the count for the
@@ -227,11 +235,22 @@ impl HoldNav {
 /// Spawn the reader thread and drain its message channel on the main loop.
 /// A fixed poll follows the calibration dialog's pattern; at 30 ms it is
 /// invisible next to the 450 ms repeat delay.
+/// Both stop once the shell is dropped (a switch to the desktop view), so
+/// the reader never outlives the page it drives.
 pub(super) fn start(state: &SharedState) {
+    let Some(shell) = state.borrow().big_picture.as_ref().map(Rc::downgrade) else {
+        return;
+    };
     let (tx, rx) = std::sync::mpsc::channel::<NavMsg>();
     let save_dir = state.borrow().save_dir.clone();
     let nav_state = state.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let reader_stop = stop.clone();
     glib::timeout_add_local(Duration::from_millis(MESSAGE_POLL_MS), move || loop {
+        if shell.upgrade().is_none() {
+            stop.store(true, Ordering::Relaxed);
+            return glib::ControlFlow::Break;
+        }
         match rx.try_recv() {
             Ok(msg) => super::view::handle_msg(&nav_state, msg),
             Err(std::sync::mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
@@ -240,11 +259,11 @@ pub(super) fn start(state: &SharedState) {
     });
     std::thread::Builder::new()
         .name("big-picture-nav".to_string())
-        .spawn(move || reader_loop(tx, save_dir))
+        .spawn(move || reader_loop(tx, save_dir, &reader_stop))
         .expect("spawn big-picture navigation thread");
 }
 
-fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
+fn reader_loop(tx: Sender<NavMsg>, save_dir: String, stop: &AtomicBool) {
     let calibration_path = ira_input::calibration_store_path(&save_dir);
     let mut pads: Vec<PhysicalGamepad> = Vec::new();
     let mut nav = NavState::default();
@@ -255,7 +274,7 @@ fn reader_loop(tx: Sender<NavMsg>, save_dir: String) {
     rescan(&mut pads, &calibration_path);
     pads_ui.after_rescan(&pads);
     let mut last_rescan = started.elapsed().as_millis() as u64;
-    loop {
+    while !stop.load(Ordering::Relaxed) {
         let now_ms = started.elapsed().as_millis() as u64;
         if now_ms.saturating_sub(last_rescan) >= RESCAN_EVERY_MS {
             last_rescan = now_ms;
@@ -370,6 +389,12 @@ fn fold_event(nav: &mut NavState, event: ira_input::InputEvent, tx: &Sender<NavM
         }
         InputSource::Button(GamepadButton::X) if pressed => {
             let _ = tx.send(NavMsg::Nav(NavCommand::Secondary, true));
+        }
+        InputSource::Button(GamepadButton::Y) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::Quaternary, true));
+        }
+        InputSource::Button(GamepadButton::Guide) if pressed => {
+            let _ = tx.send(NavMsg::Nav(NavCommand::Home, true));
         }
         InputSource::Button(GamepadButton::LeftStick) if pressed => {
             let _ = tx.send(NavMsg::Nav(NavCommand::Tertiary, true));

@@ -121,6 +121,7 @@ pub(super) fn activate(
     // it over the game.
     let gamescope = gamescope::is_gamescope_mode();
     ira_widgets::style::install_bp_css(1.0);
+    ira_widgets::font::pin_unhinted(true);
     // Controller glyphs ride the binary's GResource like the app's own
     // icons, so prompts resolve by name on every display.
     if let Some(display) = gtk4::gdk::Display::default() {

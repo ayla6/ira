@@ -78,3 +78,46 @@ pub fn install() {
         }
     }
 }
+
+/// Display-wide font settings the big picture type is pinned to.
+const PINNED_SETTINGS: [&str; 4] = [
+    "gtk-font-rendering",
+    "gtk-xft-hinting",
+    "gtk-xft-hintstyle",
+    "gtk-xft-antialias",
+];
+
+/// Pin (`true`) or release (`false`) unhinted grayscale text on the
+/// default display. The light autohinter shears curved tops and tails off
+/// this font at big-picture sizes (the `@` loses its tail, `a` and `2`
+/// flatten), and GTK's automatic font rendering hints regardless of the
+/// xft settings — only manual rendering with hinting off draws the
+/// outlines whole. Per-label font options cannot do this: GTK overwrites
+/// them whenever it refreshes a widget's Pango context. Releasing hands
+/// every setting back to the desktop.
+pub fn pin_unhinted(pinned: bool) {
+    use gtk4::prelude::ObjectExt;
+    let Some(settings) = gtk4::Settings::default() else {
+        return;
+    };
+    if !pinned {
+        for name in PINNED_SETTINGS {
+            if settings.find_property(name).is_some() {
+                settings.reset_property(name);
+            }
+        }
+        return;
+    }
+    // gtk-font-rendering only exists on GTK 4.16+; older GTK has no
+    // automatic mode and honors the xft settings below directly.
+    if let Some(manual) = settings
+        .find_property("gtk-font-rendering")
+        .and_then(|spec| gtk4::glib::EnumClass::with_type(spec.value_type()))
+        .and_then(|class| class.to_value_by_nick("manual"))
+    {
+        settings.set_property_from_value("gtk-font-rendering", &manual);
+    }
+    settings.set_gtk_xft_hinting(0);
+    settings.set_gtk_xft_hintstyle(Some("hintnone"));
+    settings.set_gtk_xft_antialias(1);
+}

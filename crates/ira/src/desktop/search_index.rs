@@ -83,7 +83,7 @@ pub(crate) fn matching_ids(items: &[SearchItem], terms: &[String]) -> Vec<String
             terms
                 .iter()
                 .all(|term| searchable.contains(term))
-                .then(|| (std::cmp::Reverse(item.last_played), name, item.id))
+                .then_some((std::cmp::Reverse(item.last_played), name, item.id))
         })
         .collect();
     matches.sort();

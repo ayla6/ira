@@ -76,8 +76,8 @@ pub const APP_CSS: &str = "
  listview.navigation-sidebar > row { padding: 0; }
  listview.navigation-sidebar row:selected { background-color: transparent; }
  listview.navigation-sidebar row:selected > box { background-color: alpha(@theme_fg_color, 0.07); border-radius: 9px; }
- listview.navigation-sidebar row:selected > box.playing-game { background-color: alpha(@accent_color, 0.22); }
- .playing-game { color: @accent_color; background-color: alpha(@accent_color, 0.08); border-radius: 9px; }
+ listview.navigation-sidebar row:selected > box.playing-game { background-color: color-mix(in srgb, var(--accent-color) 22%, transparent); }
+ .playing-game { color: var(--accent-color); background-color: color-mix(in srgb, var(--accent-color) 8%, transparent); border-radius: 9px; }
   .sidebar-row-pad-game { padding: 4px 10px 4px 24px; }
   .sidebar-row-pad-header { padding: 4px 10px 4px 4px; }
   .sidebar-sticky-selected { background-color: alpha(@theme_fg_color, 0.07); border-radius: 9px; }
@@ -88,7 +88,7 @@ pub const APP_CSS: &str = "
 /* Match ids read as accent-colored flat buttons: visibly clickable,
    with no underline for any theme to render badly. */
 .mass-match-line { min-height: 34px; }
-.mass-match-id-link { color: @accent_color; }
+.mass-match-id-link { color: var(--accent-color); }
 
 .disc-tile { padding: 12px; }
 .disc-number {
@@ -106,7 +106,7 @@ pub const APP_CSS: &str = "
 }
 .bp-running-title {
     color: white;
-    font-weight: 700;
+    font-weight: 750;
 }
 .bp-running-status {
     color: alpha(white, 0.6);
@@ -124,7 +124,7 @@ pub const APP_CSS: &str = "
     font-weight: normal;
 }
 
-.success-label { color: @accent_color; font-weight: bold; }
+.success-label { color: var(--accent-color); font-weight: bold; }
 
 .app-content-header {
     background: @window_bg_color;
@@ -151,7 +151,7 @@ pub const APP_CSS: &str = "
 }
 .logo-pos-overlay-btn.selected {
     background: rgba(255,255,255,0.15);
-    border-color: @accent_color;
+    border-color: var(--accent-color);
     border-width: 2px;
 }
 
@@ -268,7 +268,7 @@ gridview.game-grid child:focus-within {
     font-weight: 500;
 }
 .command-tile.command-tile-active {
-    box-shadow: inset 0 0 0 2px @accent_color;
+    box-shadow: inset 0 0 0 2px var(--accent-color);
 }
 
 .unmapped-row {
@@ -306,12 +306,12 @@ gridview.game-grid child:focus-within {
     color: alpha(@theme_fg_color, 0.75);
 }
 .session-delete:hover {
-    color: @error_color;
-    background-color: alpha(@error_color, 0.12);
+    color: var(--error-color);
+    background-color: color-mix(in srgb, var(--error-color) 12%, transparent);
 }
 .session-delete:active {
-    color: @error_color;
-    background-color: alpha(@error_color, 0.22);
+    color: var(--error-color);
+    background-color: color-mix(in srgb, var(--error-color) 22%, transparent);
 }
 
 .bp-root .cover-item:hover .game-cover-pic {
@@ -329,7 +329,7 @@ gridview.game-grid child:focus-within {
     transform: none;
     box-shadow: 0 2px 14px 3px rgba(0,0,0,0.4);
 }
-.bp-ring { color: @accent_color; }
+.bp-ring { color: var(--accent-color); }
 /* A connected pad lights its dot green, like a player LED. Dimming for
    empty slots is done per-widget in code; a CSS opacity here would
    multiply into the lit dots and wash the color out. */

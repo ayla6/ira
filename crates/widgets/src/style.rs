@@ -82,9 +82,12 @@ pub fn bp_ring_outset() -> f64 {
 pub fn bp_css(s: f64) -> String {
     format!(
         r#"/* Big-picture text: the bundled font (see font::install). Its sizes
-   live below, scaled with the viewport. */
+   live below, scaled with the viewport. Every weight sits 50 above its
+   nominal value: text renders unhinted (font::pin_unhinted), which
+   draws strokes lighter than the hinted rendering they were chosen for. */
 .bp-root {{
     font-family: "M PLUS 2", sans-serif;
+    font-weight: 450;
 }}
 {}"#,
         big_picture_css(s)
@@ -148,7 +151,7 @@ fn bp_focus_ring(p: &BpPx) -> (String, String) {
         rest = p.pxs(4),
     );
     let ring_on = format!(
-        "outline-color: alpha(@accent_color, 0.5);\n    outline-width: {width};\n    outline-offset: {offset};",
+        "outline-color: color-mix(in srgb, var(--accent-color) 50%, transparent);\n    outline-width: {width};\n    outline-offset: {offset};",
         width = p.pxs(2),
         offset = p.pxs(-2),
     );
@@ -172,16 +175,16 @@ fn bp_css_header(s: f64) -> String {
 }}
 .bp-title {{
     font-size: {title};
-    font-weight: 400;
-    color: @accent_color;
+    font-weight: 450;
+    color: var(--accent-color);
     padding: {clock_pad} 0;
 }}
-.bp-page-title {{ font-size: {page_title}; font-weight: 400; }}
+.bp-page-title {{ font-size: {page_title}; font-weight: 450; }}
 .bp-page-subtitle {{
     font-size: {subtitle};
     color: alpha(@theme_fg_color, 0.55);
 }}
-.bp-running-title {{ font-size: {page_title}; font-weight: 700; }}
+.bp-running-title {{ font-size: {page_title}; font-weight: 750; }}
 .bp-running-status {{ font-size: {subtitle}; }}
 "#,
         status_pad_v = p.px(12),
@@ -209,7 +212,7 @@ fn bp_css_tabs_menu(s: f64) -> String {
     format!(
         r#".bp-tabs toggle,
 .bp-tabs toggle label {{
-    font-weight: normal;
+    font-weight: 450;
 }}
 .bp-tabs {{
     padding: {tabs_group_pad};
@@ -276,7 +279,7 @@ fn bp_css_tabs_menu(s: f64) -> String {
    navigation reads exactly like GTK keyboard navigation. */
 .bp-menu-row-selected {{ {ring_on} }}
 .bp-menu-row-active label {{
-    color: @accent_color;
+    color: var(--accent-color);
 }}
 /* The pointer is parked (a gamepad or the keyboard is driving): hover must
    not keep dressing whatever the parked pointer rests on — covers, group
@@ -335,19 +338,19 @@ fn bp_css_keyboard(s: f64) -> String {
 .bp-key-selected {{ {ring_on} }}
 /* OK is the suggested action: libadwaita's opaque accent button. */
 .bp-key-ok {{
-    background: @accent_bg_color;
+    background: var(--accent-bg-color);
 }}
 .bp-key-ok label {{
-    color: @accent_fg_color;
+    color: var(--accent-fg-color);
 }}
 /* The text caret: a thin accent bar that blinks (opacity from code). */
 .bp-key-caret {{
     min-width: {caret_width};
     border-radius: 9999px;
-    background: @accent_color;
+    background: var(--accent-color);
 }}
 .bp-key-active {{
-    background: alpha(@accent_color, 0.45);
+    background: color-mix(in srgb, var(--accent-color) 45%, transparent);
 }}
 .bp-key-active label {{
     color: @theme_fg_color;
@@ -357,6 +360,7 @@ fn bp_css_keyboard(s: f64) -> String {
 }}
 .bp-key-preview, .bp-keyboard label {{
     font-family: "M PLUS 2", sans-serif;
+    font-weight: 450;
 }}
 .bp-keyboard {{
     border-radius: {kbd_radius} {kbd_radius} 0 0;

@@ -36,6 +36,7 @@ mod mass_match_ra;
 mod mass_match_ss;
 mod message_handler;
 mod message_helpers;
+mod mode_switch;
 mod open_emulator_row;
 mod play_button;
 mod play_button_helpers;
@@ -60,6 +61,7 @@ pub use desktop_identity::{
 };
 mod tray;
 pub use desktop_commands::connect as connect_desktop_commands;
+pub use mode_switch::install as install_mode_switch;
 pub use ra_match_dialog::show_ra_search_dialog;
 pub use tray::{start as start_tray, stop as stop_tray};
 mod game_logo;

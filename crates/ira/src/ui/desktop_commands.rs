@@ -75,6 +75,13 @@ pub fn connect(app: &adw::Application, holder: Rc<RefCell<Option<SharedState>>>)
                     app.activate();
                 }
                 let state = holder.borrow().clone();
+                // A second `--big-picture` launch moves the running app into
+                // big picture; the first one already started there.
+                if options.contains("big-picture") {
+                    if let Some(state) = &state {
+                        super::mode_switch::switch_to(state, true);
+                    }
+                }
                 if let (Some(state), Some(request)) = (state, request) {
                     submit(&state, request);
                 }
